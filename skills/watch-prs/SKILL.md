@@ -467,117 +467,38 @@ duplicate pass or a review nobody requested.
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
 WHO="$CODEX_BOT"
 
-# THE REQUEST IS A SCRIPT. It was eighteen lines here that nothing executed, and
-# what they do is post the comment that — on the manual path — IS the review
-# request. It was also a second, weaker copy of the round-closing request: that
-# one refuses a body carrying a marker the loop honours or a mention it did not
-# write itself, and this one refused neither, so the opening account was the one
-# posting site with no rules. Issues #26, #144.
-#
 #   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
 #     0  posted — the baseline is on stdout, and it is EMPTY on the automatic
 #        path, where the trigger preceded us and there is nothing to capture
 #     1  stopped — nothing was posted
 #
-# WRITE THE ACCOUNT INTO `$REQUEST_FILE` WITH YOUR FILE-WRITING TOOL, not from
-# this shell and NOT into `$SUMMARY_FILE`: one paragraph on what this change does
+# Write the account into `$REQUEST_FILE` with your file-writing tool — not from
+# this shell, and NOT into `$SUMMARY_FILE`: one paragraph on what this change does
 # and what to look at. It is inserted as DATA, so prose quoting a command line is
-# posted rather than executed — but a line reproducing one of the markers the loop
-# reads as a record CREATES that record, because this is posted under your
-# identity, and on the automatic path a quoted `@codex review` queues a second
-# pass over the same head. The script refuses both rather than publishing them.
-#
-# THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE. A
-# heredoc splices it in: an account containing a line that is exactly the
-# delimiter ENDS the heredoc, and whatever follows is parsed by your long-lived
-# shell — and `EOF` is a line this loop's own accounts quote, out of a diff or a
-# finding. Choosing a rarer delimiter narrows that and does not close it, because
-# the body is not known when the delimiter is chosen. And writing the file from
-# here needs a command — `cat`, `printf` — which is a NAME your shell can replace,
-# so the account validated and posted would be the function's text. Your file tool
-# is neither: it does not go through this shell at all. `$REQUEST_FILE` was
-# created empty at setup and the script refuses an empty body, so a write that
-# does not happen stops the request rather than posting nothing as this PR's
-# account.
-#
-# NOTHING HERE IS AN ASSIGNMENT, AND THAT IS THE SHAPE. Written as
-# `PRIOR_REVIEW="$(…)"` — inside the `if` or beside a `; REQ_RC=$?` — the capture
-# is an assignment, and a startup file that has already made either name readonly
-# makes it FAIL: with `errexit` on that ends your shell before any status is read,
-# and without it the `if` is abandoned with NEITHER branch running, so a refused
-# request falls straight through into the wait for a review nobody asked for. A
-# plain command run as a CONDITION has no assignment to fail and is exempt from
-# `errexit`, and its answer goes to a FILE — a path rather than a name, which is
-# how `pr-origin.sh` settled the same question.
-# AND THE CONTINUATION IS THE `then` BRANCH, which is structural too. `exit` is a
-# builtin a startup file can replace with one that RETURNS, so a refusal written
-# as `echo …; exit` prints and carries straight on — into the read-back below, and
-# from there into the wait for a review that was never requested. Ending the arm
-# in `[[ -n "" ]]` makes the LIST report non-zero, which nothing here reads. What
-# does hold is that the work sits inside the branch a refusal does not take.
-# AND THE NAME THAT WILL HOLD IT IS PROVEN ASSIGNABLE FIRST, BEFORE THE MUTATION.
-# The read-back below is a simple command: with `errexit` on and `PRIOR_REVIEW`
-# already readonly, it fails and ends your shell — but by then the request has
-# been POSTED, so the pass is in flight and no watch is ever armed. Nothing after
-# a mutation can undo that; the only place the question can be asked is before it,
-# where the same failure costs a stop and nothing else.
-#
-# AND ASKED IN A SUBSHELL, which is what makes it safe to ask at all. It was two
-# unequal assignments read back here, because one proves nothing against a
-# readonly holding the probe's own value — and both were assignments in YOUR
-# shell, where a failed readonly assignment under `errexit` is FATAL, so the probe
-# ended the session in exactly the state it exists to detect. A subshell inherits
-# the attribute, fails for the same reason, and as a condition is exempt. The
-# value is compared INSIDE it, because a TRANSFORMING attribute — `declare -i
-# PRIOR_REVIEW` — lets the assignment succeed and stores something else, and a
-# status-only probe accepts that: the request would go out and the ordinary empty
-# baseline would come back rewritten. One value is enough, because a readonly
-# pre-seeded with the probe's own value makes the subshell's assignment fail
-# outright and the comparison is never reached. #148.
-# AND THE PROBE IS A CONDITION, WITH THE REQUEST AS ITS SUCCESS ARM. Written
-# as a standalone guard it detects the readonly name and then cannot act on it:
-# `exit` is a builtin your shell can replace with one that RETURNS, and the
-# trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
-# — so execution reached the request and posted it anyway, which is the state
-# these probes exist to prevent. Only containment excludes it.
+# posted rather than executed; a line reproducing one of the markers the loop reads
+# as a record, or an `@codex review` on the automatic path, is refused rather than
+# published. `$REQUEST_FILE` was created empty at setup and an empty body is
+# refused, so a write that does not happen stops the request.
+# THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if { ( PRIOR_REVIEW="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
                     && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
+    # THE REQUEST IS A SCRIPT, AND ITS ANSWER GOES TO A FILE RATHER THAN A NAME.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
         PRIOR_REVIEW="$(<"$PRIOR_FILE")"
-        # AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it
-        # against. `CLAUDE.md` says to prove an assignment by reading the variable
-        # back, and the usual difficulty is that nothing else knows what the value
-        # should have been — a readonly name simply keeps whatever it held. The file
-        # does know. If this name was already readonly the assignment fails and the
-        # two disagree, which is the one case a check on the variable alone cannot
-        # see: the helper SUCCEEDED and the baseline is somebody else's.
+        # THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
             echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
             exit 0
             [[ -n "" ]]
         else
-            # AND EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is
-            # nothing to capture because the trigger preceded us; on the manual path
-            # Codex has usually not reviewed this head at all yet, which is the
-            # ordinary FIRST request — so `review-id` succeeds with an empty value and
-            # a digits-only test would abort after the request had already been
-            # posted. What is refused is a value that is neither shape.
-            #
-            # THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a
-            # validator in a variable is a second name a startup file can seed
-            # readonly, and a seeded pattern accepting a seeded value is a check that
-            # agrees with itself. `case` is a reserved word, so nothing can take its
-            # place either.
-            #
-            # AND THERE ARE TWO SHAPES, BECAUSE THERE ARE TWO CHANNELS. A reviewer's
-            # newest verdict arrives either as a submitted review, whose id is digits,
-            # or as a clean COMMENT on the head — which `pr-review-state.sh` reports
-            # as `comment:<id>` and `pr-watch.sh` accepts as a baseline. A digits-only
-            # test refuses the second AFTER the request has been posted, leaving a
-            # pass in flight that nothing waits for.
+            # EMPTY IS AN ANSWER, THE PATTERN IS A LITERAL, AND THERE ARE TWO SHAPES.
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             case "$PRIOR_REVIEW" in
                 "") ;;
                 comment:)
@@ -598,9 +519,8 @@ then
     else
         echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
         exit 0
-        # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
-        # can shadow, and with both shadowed this branch says nothing and returns 0 —
-        # a failed request indistinguishable from a posted one.
+        # THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         [[ -n "" ]]
     fi
 else
