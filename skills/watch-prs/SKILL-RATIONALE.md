@@ -1293,3 +1293,137 @@ review in flight that nothing is waiting for.
 What is checked is that the record arrived and carries the field at all. An absent
 record means the stage reported nothing, and step 3 would then watch against a
 baseline left over from the previous phase.
+
+## THE MODE IS SET BEFORE ANYTHING IN STEP 8 RUNS, and `codex-only` is not a skip.
+
+`codex-only` means no Copilot review was ever requested, so there is no verdict to
+re-check and no second signoff to record. The stage SAYS so and does nothing,
+which is not the same as being skipped: a stage that is not run leaves no record
+of why, and the next reader cannot tell a deliberate one-reviewer merge from a
+phase somebody forgot.
+
+`$CODEX_SHA` is passed as well as the head being read, because whether the two are
+EQUAL decides which question the stop asks. The fault-tolerance pass is offered
+only where the Copilot phase produced commits — where the two shas are the same,
+Codex has already reviewed exactly what is being merged, and taking a pass there
+costs a revocation, a round and a reopened phase for a verdict that cannot differ.
+A session resuming into that reopened phase reads it as a Copilot phase to run
+again. #55.
+
+## THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL, and the gate below is another question.
+
+`close` posts a signoff, and which repository it posts to comes from the pin the
+setup block exported — not from the current directory.
+
+The merge gate further down still runs from `$REPO_DIR`, and that is not an
+inconsistency: it hands `pr-merge-range.sh` a TREE to inspect, which is a question
+about history rather than about identity, and the pin says nothing about which
+tree is on disk.
+
+## `[[`, A RESERVED WORD, NOT `[` — and the branch ends in one too.
+
+This runs in the driving session's own shell, which is long-lived and where a
+function named `[` can already exist — it shadows the builtin and the `command`
+and `builtin` prefixes alike. One returning success turns a failed close into a
+successful one, and the driver carries on with no signoff recorded and no operator
+stop.
+
+A shadowed `exit` neutralises the abort the same way, so the branch ends with a
+structural sentinel that is non-zero whatever `echo` and `exit` have been replaced
+with. Both halves are needed: the reserved word decides whether the branch is
+ENTERED, and the sentinel decides what it reports once it has been.
+
+## NO STATUS VARIABLE, AND THE CONTINUATION IS THE `then` BRANCH.
+
+THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS. `record` writes a signoff precisely so a later session can read it back, and
+`pr-phase-state.sh` is that reading: it takes the two signoffs and the head,
+selects which stop is being resumed from, and re-validates the record that has to
+still stand — the head must BE the Codex commit before the Copilot phase, and the
+COPILOT commit after it, where the head has advanced through Copilot fixes by
+design.
+
+IT WAS 112 LINES HERE, and nothing executed them: three arms and six refusals,
+every abort exiting 0 so that "the phase is not closed" and "this ran correctly"
+were the same status to anything that read it. Issues #123 and #26.
+
+NO STATUS VARIABLE AT ALL, and that is the point of the shape. Written as
+`if …; then RC=0; else RC=$?; fi` and then a `case "$RC"`, a startup file that had
+already made that name readonly with the value 0 caused BOTH assignments to fail
+while leaving it at 0 — and a helper that returned 1 or 2 was sent through the
+continuation into the merge flow. A failed assignment does not even fire an `||`,
+so there is no status to take; the answer is not to guard the variable but to have
+none. The helper's status is branched on where it is produced.
+
+THE CONTINUATION IS THE `then` BRANCH, AND THAT IS STRUCTURAL TOO. This bash runs
+in YOUR shell, which nothing here controls — `exit` is a builtin a function can
+take the place of, and one that RETURNS instead of exiting leaves a refusal
+falling straight through into whatever came after it. Nothing follows, so there is
+nothing to fall into; and each refusal ENDS in a reserved word, so it reports
+non-zero even with `echo` and `exit` both taken away.
+
+AND IT IS A CONDITION, NOT a simple command whose status is read afterwards. If
+the shell has `errexit` on — this block is pasted into one as often as it is typed
+— a simple command that exits non-zero ends the shell before anything can read its
+status, so the 1/2 distinction is lost at exactly the two statuses it exists for.
+A command run as a CONDITION is exempt.
+
+`$?` in the `else` arm is the CONDITION's, read before anything else can change
+it.
+
+## THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
+
+By the same idiom step 7 uses: `sha` asks for the head alone, so nothing here
+parses a record line.
+
+The status AND the shape, because neither covers the other and this value is what
+every gate below is measured against. A status of 1 with an empty answer is a
+phase that is not closed; a status of 0 carrying something that is not 40 hex
+cannot happen through the helper, and is checked anyway, because a gate pinned to
+an unvalidated value is a gate in name only.
+
+## THE LAST WORD IS A RESERVED ONE, and this branch needs it as much as step 7's.
+
+`echo` and `exit` are builtins a function can shadow, and with both shadowed this
+branch says nothing and returns 0 — a failed read indistinguishable from a resumed
+phase. `[[ … ]]` is a reserved word, so the block ends non-zero whatever was done
+to the builtins.
+
+## RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
+
+THE GATE IS A SCRIPT. It was 291 lines here, pasted into your shell, and nothing
+checked it — which is how it came to contain a construct the bash macOS ships
+cannot PARSE, for fifty review rounds. `scripts/` is covered by the suite, by
+`pr-selfcheck.sh` and — while it is enabled, which #93 owns — by the bash 3.2 CI
+job; a fenced block is covered by none of them. Issue #26.
+
+RUN FROM THE REPOSITORY THIS SESSION STARTED IN. The gate derives its identity and
+its range-check root from the current directory, so a `cd` into another checkout
+between setup and here would point every gate — and the `--admin` merge — at
+whatever PR of that repository shares this number. `$REPO_DIR` was captured in the
+setup block, and everything else in this session already used the identity derived
+there.
+
+AUTO_REVIEW IS PASSED AS AN ARGUMENT rather than read from the environment: a
+value assigned in your shell without `export` reaches a function and not a child
+process, and this one decides whether an in-flight Codex pass may be ignored. A
+silent default there is a merge on a verdict nobody read.
+
+THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
+`$CODEX_SHA` was captured and validated in step 7, when the Codex phase closed.
+Writing it out again here as something to fill in was redundant, and it did not
+work: `<…>` is a REDIRECTION to the shell in argument position AND after an `=`,
+so an unsubstituted placeholder does not reach the gate's own sha check — the
+block fails to parse, which is a different failure in a different place.
+
+REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the stop that closed
+the Codex phase. `codex-only` is not a weaker gate: it drops Copilot's verdict and
+in exchange requires the head to BE the commit Codex signed, because the
+`Review-Phase: copilot` trailers that license a moved head do not exist when there
+was no Copilot phase.
+
+## THE STATUS LEAVES THIS BLOCK, or a blocked merge reports success.
+
+Every arm of the `case` above ends in an `echo`, whose status is 0 — so without
+the final `exit` the block reports success for a blocked, paused or queued merge,
+and whatever runs it next carries on as though the PR had landed. The distinction
+the gate exists to draw survives only if it is passed on.

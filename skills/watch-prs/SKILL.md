@@ -1361,27 +1361,17 @@ end of the Codex phase, for the same reason.
 ```bash
 # ── ONLY WHEN THERE WAS A COPILOT PHASE ────────────────────────────────────
 #
-# Set REVIEWERS to what was decided at the Codex stop, before running any of
-# step 8. `codex-only` means no Copilot review was ever requested, so there is no
-# verdict to re-check and no second signoff to record — the stage says so and
-# does nothing, which is not the same as skipping it.
-#
 # `$CODEX_SHA` is passed as well as the head being read, because whether the two
-# are EQUAL decides which question the stop asks: the fault-tolerance pass is
-# offered only where the Copilot phase produced commits.
+# are EQUAL decides which question the stop asks.
+# THE MODE IS SET BEFORE ANYTHING IN STEP 8 RUNS, and `codex-only` is not a skip.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 REVIEWERS=both   # or `codex-only`
-# THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL. The merge gate below still
-# runs from `$REPO_DIR`, and that is a different question: it hands
-# `pr-merge-range.sh` a tree to inspect, which the pin says nothing about.
+# THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL, and the gate below is another question.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
-# `[[`, A RESERVED WORD, NOT `[`. This runs in the driving session's own shell,
-# which is long-lived and where a function named `[` can already exist — it
-# shadows the builtin and the `command`/`builtin` prefixes alike. One returning
-# success turns a failed close into a successful one, and the driver carries on
-# with no signoff recorded and no operator stop. A shadowed `exit` neutralises the
-# abort the same way, so the branch ends with a structural sentinel that is
-# non-zero whatever `echo` and `exit` have been replaced with.
+# `[[`, A RESERVED WORD, NOT `[` — and the branch ends in one too.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [[ $CLOSE_RC -ne 0 ]]; then
     echo "The Copilot phase did not close and no signoff was recorded. The reason is above; do not retry it blind."
     exit "$CLOSE_RC"
@@ -1421,16 +1411,7 @@ was reached with. This is the recipe that restores them. Run it before step 8, o
 before continuing into the Copilot phase.
 
 ```bash
-# THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS. `record`
-# writes a signoff precisely so a later session can read it back, and this helper
-# is that reading: it takes the two signoffs and the head, selects which stop is
-# being resumed from, and re-validates the record that has to still stand — the
-# head must BE the Codex commit before the Copilot phase, and must be the COPILOT
-# commit after it, where the head has advanced through Copilot fixes by design.
-#
-# IT WAS 112 LINES HERE, and nothing executed them: three arms and six refusals,
-# every abort exiting 0 so that "the phase is not closed" and "this ran correctly"
-# were the same status to anything that read it. Issues #123 and #26.
+# THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS.
 #
 #   pr-phase-state.sh <pr>
 #
@@ -1439,41 +1420,18 @@ before continuing into the Copilot phase.
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
 #
-# NO STATUS VARIABLE AT ALL, and that is the point of the shape below. Written as
-# `if …; then RC=0; else RC=$?; fi` and then a `case "$RC"`, a startup file that
-# had already made that name readonly with the value 0 caused BOTH assignments to
-# fail while leaving it at 0 — and a helper that returned 1 or 2 was sent through
-# the continuation into the merge flow. A failed assignment does not even fire an
-# `||`, so there is no status to take; the answer is not to guard the variable but
-# to have none. The helper's status is branched on where it is produced.
-#
-# THE CONTINUATION IS THE `then` BRANCH, AND THAT IS STRUCTURAL TOO. This bash
-# runs in YOUR shell, which nothing here controls — `exit` is a builtin a function
-# can take the place of, and one that RETURNS instead of exiting leaves a refusal
-# falling straight through into whatever came after it. Nothing follows, so there
-# is nothing to fall into; and each refusal ENDS in a reserved word, so it reports
-# non-zero even with `echo` and `exit` both taken away.
-#
-# AND IT IS A CONDITION, NOT a simple command whose status is read afterwards. If
-# your shell has `errexit` on — this block is pasted into one as often as it is
-# typed — a simple command that exits non-zero ends the shell before anything can
-# read its status, so the 1/2 distinction is lost at exactly the two statuses it
-# exists for. A command run as a CONDITION is exempt.
+# NO STATUS VARIABLE, AND THE CONTINUATION IS THE `then` BRANCH.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
-    # AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha`
-    # asks for the head alone, so nothing here parses a record line. The status
-    # AND the shape are checked, because neither covers the other and this value
-    # is what every gate below is measured against.
+    # THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
     RX_SHA40='^[0-9a-f]{40}$'
     if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
         echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
         exit 0
-        # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a
-        # function can shadow, and with both shadowed this branch says nothing and
-        # returns 0 — a failed read indistinguishable from a resumed phase.
-        # `[[ … ]]` is a reserved word, so the block ends non-zero whatever was
-        # done to the builtins.
+        # THE LAST WORD IS A RESERVED ONE, and this branch needs it as much as step 7's.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         [[ -n "" ]]
     fi
 else
@@ -1492,11 +1450,7 @@ fi
 ### Then: the gate
 
 ```bash
-# THE GATE IS A SCRIPT. It was 291 lines here, pasted into your shell, and
-# nothing checked it — which is how it came to contain a construct the bash macOS
-# ships cannot PARSE, for fifty review rounds. `scripts/` is covered by the suite,
-# by `pr-selfcheck.sh` and — while it is enabled, which #93 owns — by the bash 3.2
-# CI job; a fenced block is covered by none of them. Issue #26.
+# THE GATE IS A SCRIPT.
 #
 #   pr-merge-gate.sh <pr> <codex-sha> <auto-review>
 #
@@ -1507,36 +1461,15 @@ fi
 #                   queue does that, and `gh` reports it as success. The head is
 #                   not on the base branch; the session is not finished
 #
-# CODEX_SHA is the FULL 40-hex head Codex signed off on. In the Copilot phase the
-# head moves past it and Codex is deliberately not re-run, so this — not the
-# current head — is what Codex's verdict is checked against.
+# CODEX_SHA is the FULL 40-hex head Codex signed off on, captured and validated in
+# step 7. In the Copilot phase the head moves past it and Codex is deliberately not
+# re-run, so this — not the current head — is what Codex's verdict is checked
+# against. THERE IS NO PLACEHOLDER TO FILL IN: the value is already in this session.
 #
-# AUTO_REVIEW is passed as an ARGUMENT rather than read from the environment: a
-# value assigned in your shell without `export` reaches a function and not a child
-# process, and this one decides whether an in-flight Codex pass may be ignored. A
-# silent default there is a merge on a verdict nobody read.
-# RUN FROM THE REPOSITORY THIS SESSION STARTED IN. The gate derives its identity
-# and its range-check root from the current directory, so a `cd` into another
-# checkout between setup and here would point every gate — and the `--admin` merge
-# — at whatever PR of that repository shares this number. `$REPO_DIR` was captured
-# in the setup block, and everything else in this session already used the identity
-# derived there.
-# THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
-#
-# `$CODEX_SHA` was captured and validated in step 7, when the Codex phase closed —
-# the full 40-hex head Codex signed off on, read back and re-checked against its
-# clean verdict before the Copilot phase was allowed to start. Writing it out again
-# here as something for you to fill in was redundant, and it did not work: `<…>` is
-# a REDIRECTION to the shell in argument position AND after an `=`, so an
-# unsubstituted placeholder does not reach the gate's own sha check — the block
-# fails to parse, which is a different failure in a different place.
-#
-# The value is already in this session. Use it.
-# REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the stop that closed
-# the Codex phase. `codex-only` is not a weaker gate: it drops Copilot's verdict
-# and in exchange requires the head to BE the commit Codex signed, because the
-# `Review-Phase: copilot` trailers that license a moved head do not exist when
-# there was no Copilot phase.
+# REVIEWERS is `both` unless the operator chose otherwise at the stop that closed
+# the Codex phase.
+# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
 case "$MERGE_RC" in
@@ -1545,10 +1478,8 @@ case "$MERGE_RC" in
     4) echo "NOT merged: the request was accepted but the PR is not MERGED — a merge queue takes the request without landing it. Do not close this out; confirm on the PR." ;;
     *) echo "Not merged. The reason is above; do not retry it blind." ;;
 esac
-# THE STATUS LEAVES THIS BLOCK. Every arm above ends in an `echo`, whose status is
-# 0 — so without this the block reports success for a blocked, paused or queued
-# merge, and whatever runs it next carries on as though the PR had landed. The
-# distinction the gate exists to draw survives only if it is passed on.
+# THE STATUS LEAVES THIS BLOCK, or a blocked merge reports success.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 exit "$MERGE_RC"
 ```
 
