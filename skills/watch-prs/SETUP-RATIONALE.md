@@ -1,60 +1,22 @@
-**Five constraints on this file, because the contract uses `grep` and not a parser.**
+**One constraint on this file: every `## ` line is a claim.**
 
 `test-pr-skill-contract.sh` compares the claims and the headings as exact strings.
-It fails if a `# WHY:` names a claim that is not a heading here, or if a heading
-here is named by no claim, or if either side carries a duplicate. It has no
-Markdown parser, deliberately — an earlier version grew one to tell a real heading
-from a fenced `## example`, and then needed tilde fences, indented fences, info
-strings, HTML comments and their ordering; `CLAUDE.md` records what a text scanner
-of that kind cost this repository once already.
+It fails if a `# WHY:` names a claim that is not a heading here, if a heading here
+is named by no claim, if either side repeats, or if the two totals differ.
 
-So the constructs that would make a `grep` lie are forbidden here rather than
-parsed around, and each is one `grep` with its status taken:
+It has no Markdown parser and no guards on this file's shape, deliberately. Both
+were tried across a dozen review rounds: a parser needed fenced code, tilde
+fences, indented fences, info strings, HTML comments and their ordering, and the
+greps that replaced it then needed HTML blocks, indented headings, a second
+title, and a hash run that is not a heading at all. The next construct was always
+one round away, and `CLAUDE.md` records what a text scanner of that kind cost this
+repository once already.
 
-- **every `## ` line is a claim.** A transcript line that would begin with `## ` is
-  indented by FOUR spaces, which makes it an indented code block rather than a
-  heading — one space would stop it being an ATX heading only up to three, and
-  four is what this file uses for code anyway;
-- **every heading is `## ` followed by text.** `## ` alone reduces to an empty
-  record that command substitution strips, and a bare `##` is a heading the scan
-  never sees — either way a section exists that no claim introduces;
-- **one `# ` title and no other.** A second top-level section would hold content
-  belonging to no claim at all;
-- **no raw HTML.** A comment can wrap a section and a block such as `<div>` can
-  swallow one, and Markdown then renders neither as sections;
-- **no fence.** A section wrapped in one keeps its `## ` line while the whole thing
-  renders as code, so the two transcripts here are INDENTED by four spaces;
-- **no setext underline.** Text followed by `---` is a level-two heading that
-  `^## ` cannot match, so an argument could sit here with no claim at all.
-
-**That list is what has been found, not a proof.** Each entry was a live fail-open
-caught in review, and the one before it looked complete at the time. What holds it
-together is the shape rather than the enumeration: this file is plain prose and
-indented code, and every construct that creates or conceals a heading is refused.
-If a sixth turns up, add it here and to the staged document in the fixture — which
-carries all of them, so a guard cannot be deleted unnoticed merely because this
-file happens not to contain the form it refuses.
-
-# Why setup is shaped the way it is
-
-The argument behind the **Derive identity** block of the `SKILL.md` beside this file,
-one section per claim.
-
-Each section is pointed at from the block by a `# WHY:` line sitting directly under
-the claim it belongs to, naming `$RB_SCRIPTS/../SETUP-RATIONALE.md`.
-
-That path rather than a bare relative one, because the driving shell stays in the
-project being reviewed — `docs/…` there would name that project's documentation.
-And `$RB_SCRIPTS` rather than `$CLAUDE_PLUGIN_ROOT`, because setup has a second
-discovery mode: where the plugin-root variable is unset it finds the newest
-installed copy itself, and a pointer built from the empty variable would read
-`/docs/…`. `RB_SCRIPTS` is set and validated in BOTH modes, which is why this file
-sits beside `SKILL.md` rather than under `docs/`.
-
-**The claim IS the key.** Each heading below is, character for character, the
-comment line the pointer sits under. So a reader greps the claim they just read;
-there is no id to follow, none to mistype, and two pointers cannot be swapped
-without swapping the claims above them, which changes nothing.
+So the check is the bijection and nothing else. **Keep this file plain prose and
+indented code.** A transcript line that would begin with `## ` is indented by four
+spaces; a section hidden inside a comment or a fence, or written with a setext
+underline, will pass the contract and mislead the next reader — which is a way of
+mangling a document rather than a way of drifting, and the diff shows it.
 
 **These are not notes.** `CLAUDE.md` records that *a comment that argues against the
 code beside it is an instruction, and it will be followed*. Each section below is a
