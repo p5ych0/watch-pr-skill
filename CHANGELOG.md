@@ -18,8 +18,8 @@
   at.
 
   The four claims that had been merged under the old rule are split back into
-  twenty-two, one per invariant, each with its own section — the document's
-  pointer count goes from 51 to 69.
+  twenty-three, one per invariant, each with its own section — the document's
+  pointer count goes from 51 to 70.
 
   One of those sections was also WRONG, and splitting is what exposed it: the
   merge gate's `(cd "$REPO_DIR" && …)` was argued as an identity defence, and it is

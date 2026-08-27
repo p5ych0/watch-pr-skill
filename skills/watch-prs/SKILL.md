@@ -484,6 +484,8 @@ WHO="$CODEX_BOT"
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# ONE PROBE VALUE IS ENOUGH, and a second proves nothing the first does not.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.

@@ -1500,14 +1500,23 @@ failure costs a stop and nothing else.
 
 ## THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
 
-It was two unequal assignments read back in YOUR shell, where a failed readonly
-assignment under `errexit` is FATAL — so the probe ended the session in exactly the
-state it exists to detect. A subshell inherits the attribute, fails for the same
-reason, and as a condition is exempt.
+It was assignments read back in YOUR shell, where a failed readonly assignment
+under `errexit` is FATAL — so the probe ended the session in exactly the state it
+exists to detect.
 
-ONE value is enough, because a readonly pre-seeded with the probe's own value makes
-the subshell's assignment fail outright and the comparison is never reached. Two
-proved nothing that one does not. #148.
+A subshell inherits the attribute, fails for the same reason, and as a condition is
+exempt from `errexit`. The failure is reported rather than suffered.
+
+## ONE PROBE VALUE IS ENOUGH, and a second proves nothing the first does not.
+
+The probe used two unequal values, on the reasoning that one proves nothing against
+a readonly holding the probe's own value.
+
+It does. A readonly pre-seeded with the first value makes the subshell's assignment
+FAIL outright, and the comparison after it is never reached — so the case the
+second value was there for is caught before the second value would have been
+written. What it added was another assignment in a shell where a failed one is
+fatal. #148.
 
 ## THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
 
