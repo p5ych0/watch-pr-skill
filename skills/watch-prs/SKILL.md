@@ -1418,7 +1418,7 @@ before continuing into the Copilot phase.
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
 #
-# THE PHASE IS A FACT ON THE PR, AND ITS STATUS IS BRANCHED ON WHERE IT IS PRODUCED.
+# THE PHASE IS A FACT ON THE PR, THE CONTINUATION IS THE `then` BRANCH, AND THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
     # THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
