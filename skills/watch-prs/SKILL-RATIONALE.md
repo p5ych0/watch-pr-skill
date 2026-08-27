@@ -1642,18 +1642,24 @@ branch says nothing and returns 0 — a failed request indistinguishable from a
 posted one, which sends the driver into a wait for a review that was never asked
 for.
 
-## THE ROUND CLOSES THROUGH A SCRIPT, IN TWO STAGES, with the replies between them.
+## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose here.
 
-Both orderings were prose-embedded shell here, doing the same job in different
-ORDERS, and the ordering is the whole content. Nothing executed either, and the
-two drifted apart because a reader had to choose which recipe to copy.
+Two recipes lived in this file, doing the same job in different ORDERS, and the
+ordering is the whole content. Nothing executed either, and a reader had to choose
+which one to copy — which is how the two drifted apart.
 
-The stages are what the irreversibility demands: `gate` pushes and proves the head
-green, the replies are answered against a head that is pushed and green, and `post`
-re-proves that head before it posts the summary and requests the next pass.
-Resolving a thread and posting a summary cannot be taken back — a later comment
-saying "that round did not really close" is a record, not a retraction, and it is
-itself a call that can fail. Issue #26.
+The script takes `$AUTO_REVIEW` and picks the order inside itself, so there is one
+recipe here and two orders there. Issue #26.
+
+## THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
+
+`gate` pushes and proves the head green, and only then are the threads answered —
+so a resolve is a claim that is true when it is made.
+
+Resolve first and a round that then fails to push, or pushes red, has already
+recorded its findings as answered on a commit that never landed. With automatic
+review on it is worse: the pass the push starts reads threads already marked
+resolved, with no summary saying what resolved them.
 
 ## IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
 
@@ -1683,19 +1689,23 @@ answer is a round closed on a mode nobody chose.
 invoked. It says what the value was, in its success record, and this reads it back
 out of that record.
 
-A capture written as an assignment would be one more name a startup file can have
-made readonly, which is the question `pr-request-review.sh`'s baseline settled the
-same way.
+WHAT THAT DOES NOT BUY IS ASSIGNMENT SAFETY, and saying otherwise was wrong: the
+read-back is itself `GATED_HEAD="$( … )"`, so a startup file that has already made
+that name readonly fails it here exactly as it would have failed a direct capture —
+after `gate` has pushed. `pr-request-review.sh`'s baseline avoids that by writing to
+a FILE and proving the read-back against it; this one does not, and the difference
+is that there the assignment precedes the mutation and here it follows one.
 
 ## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 
-The threads are answered against a head that is pushed and green, so a resolve is a
-claim that is true when it is made. Resolving before the push means a round that
-then fails to push, or pushes red, has already recorded its findings as answered on
-a commit that never landed — and a resolved thread cannot be taken back.
+`post` posts the summary and requests the next pass, and both are irreversible: a
+later comment saying "that round did not really close" is a record, not a
+retraction, and it is itself a call that can fail.
 
-With automatic review on it is worse: the pass the push starts reads threads
-already marked resolved, with no summary saying what resolved them.
+Run ahead of the replies, it requests a pass over findings nobody has answered
+while the summary says the round handled them — so the next review re-reports what
+this one was about to fix, and the extra volume reads as regression rather than
+repetition.
 
 ## AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 

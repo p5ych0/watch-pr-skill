@@ -946,7 +946,9 @@ hard-coded answer — one recipe here, two orders there:
 #     about where you are standing. Stop and put it to the operator: a fork PR is
 #     outside what this loop drives, and a redirected `origin` is a configuration
 #     decision that is not the loop's to make.
-# THE ROUND CLOSES THROUGH A SCRIPT, IN TWO STAGES, with the replies between them.
+# THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose here.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
