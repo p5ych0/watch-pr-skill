@@ -58,37 +58,6 @@ defect that was shipped, found and paid for. Before changing a line the block
 guards, read the section its claim names — the shape almost always looks
 gratuitous until you do.
 
-**Three constraints on this file, because the contract uses `grep` and not a parser.**
-
-`test-pr-skill-contract.sh` compares the claims and the headings as exact strings.
-It fails if a `# WHY:` names a claim that is not a heading here, or if a heading
-here is named by no claim, or if either side carries a duplicate. It has no
-Markdown parser, deliberately — an earlier version grew one to tell a real heading
-from a fenced `## example`, and then needed tilde fences, indented fences, info
-strings, HTML comments and their ordering; `CLAUDE.md` records what a text scanner
-of that kind cost this repository once already.
-
-So three things are forbidden here rather than parsed around, and each is a `grep`:
-
-- **every `## ` line is a claim.** A transcript line that would begin with `## ` is
-  indented by one space so it is not a heading;
-- **no HTML comment.** One can wrap a section and hide it from every check while
-  Markdown renders nothing;
-- **every heading is `## ` followed by text.** `## ` alone reduces to an empty
-  record that command substitution strips, and a bare `##` is a heading the scan
-  never sees — either way a section exists that no claim introduces;
-- **no fence.** A section wrapped in one keeps its `## ` line while Markdown
-  renders the whole thing as code, so the two transcripts here are INDENTED by
-  four spaces instead;
-- **no setext underline.** Text followed by `---` is a level-two heading that
-  `^## ` cannot match, so an argument could sit here with no claim at all.
-
-Those are all of them. A heading can be hidden (a comment, a fence), faked
-(setext), or made unmatchable (`## ` alone, a bare `##`), and each is refused by
-one `grep` with its status taken — and by a staged document in the fixture, so a
-guard cannot be deleted unnoticed just because this file happens not to contain
-the form it refuses.
-
 ## THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
 
 THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`

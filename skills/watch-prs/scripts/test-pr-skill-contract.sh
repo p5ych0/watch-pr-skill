@@ -5134,10 +5134,14 @@ if [ -f "$_wy_doc" ]; then
     # second stage, so an unreadable document arrived as "no malformed headings".
     # The lines are captured first and filtered after.
     _wy_hash=""; _wy_hash_rc=0
-    _wy_hash="$(grep -n '^##' "$_wy_doc")" || _wy_hash_rc=$?
+    _wy_hash="$(grep -n '^[[:space:]]\{0,3\}##' "$_wy_doc")" || _wy_hash_rc=$?
     [ "$_wy_hash_rc" -le 1 ] || die "the rationale could not be scanned for headings (rc=$_wy_hash_rc)"
     _wy_mal=""; _wy_mal_rc=0
     _wy_mal="$(grep -v '^[0-9]*:## [^[:space:]]' <<<"$_wy_hash")" || _wy_mal_rc=$?
+    # AN INDENTED ATX HEADING IS ONE TOO: CommonMark allows up to three leading
+    # spaces, and both scans anchor at column zero — so `   ## Orphan` renders as a
+    # section and is invisible to every check. It is caught by the scan above,
+    # which now sees it, and refused by the filter here, which requires column zero.
     [ "$_wy_mal_rc" -le 1 ] || die "the heading lines could not be filtered (rc=$_wy_mal_rc)"
     [ -z "$_wy_hash" ] && _wy_mal=""
     [ -z "$_wy_mal" ] \
@@ -5178,7 +5182,7 @@ if [ -f "$_wy_doc" ]; then
         [ "$n" -eq 0 ] || { printf fence; return 0; }
         n="$(grep -cE '^[[:space:]]{0,3}(=+|-+)[[:space:]]*$' "$f")"  || n=0
         [ "$n" -eq 0 ] || { printf setext; return 0; }
-        n="$(grep -n '^##' "$f" | grep -cv '^[0-9]*:## [^[:space:]]')" || n=0
+        n="$(grep -n '^[[:space:]]\{0,3\}##' "$f" | grep -cv '^[0-9]*:## [^[:space:]]')" || n=0
         [ "$n" -eq 0 ] || { printf malformed; return 0; }
         printf ok
     }
@@ -5188,6 +5192,7 @@ if [ -f "$_wy_doc" ]; then
                     'fence|~~~~\n## A CLAIM.\n~~~~' \
                     'setext|An orphan argument\n---' \
                     'malformed|## ' \
+                    'malformed|   ## An indented heading' \
                     'malformed|##' \
                     'ok|## A CLAIM.\n\nprose'; do
         _wy_want="${_wy_form%%|*}"
