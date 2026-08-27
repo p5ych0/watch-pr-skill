@@ -1736,43 +1736,35 @@ the condition's own, and each refusal ends in a reserved word.
 It is the same shape step 2 uses for the request, and for the same reason: the work
 sits inside the branch a refusal does not take.
 
-## AND THE HEAD IS PROVEN AN OID FROM A FILE THAT IS NOT THE SUMMARY, before the replies.
+## AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
 
-The gate's refusal arms end in a reserved word, which gives the `if` a non-zero
-status — and nothing reads it. What stops a driver whose `exit` has been replaced
-by a function that returns is not the arm it took but the STATE it is left in.
+`gate` refuses an aliased head file BEFORE it clears anything — it has to, or the
+refusal would destroy the account it is protecting — so on that one path the file
+is left holding the summary.
 
-THE GATE'S SUCCESS ARM IS TRUE, and `[[ -n x ]]` rather than `[[ -n "" ]]`. Under
-`errexit` a false statement in a `then` BODY ends the shell — the exemption is for
-a command run as a CONDITION, and this is not one — so the successful path would
-have died after the push and before the replies. `:` would also be true, and is a
-name; a reserved word that is true is both.
+THE IDENTITY IS ASKED FIRST, and the content test is its success arm. A summary
+that IS forty lowercase hex characters, a commit id someone pasted on a line of its
+own, satisfies the content test exactly, and is the one summary that can. `-ef`
+answers what the content cannot, and it answers it about the two paths this session
+chose rather than about what is in them.
 
-AFTER THE `fi`, NOT INSIDE THE SUCCESS ARM. Placed in the success arm it is on the
-one path that does not need it: a refusal takes the `else`, and with `exit`
-returning, control leaves the `if` and reaches the replies having evaluated
-nothing. After the `fi` it is on every path out of the stage, which is what "the
-state decides" has to mean. The replies are the irreversible part, and a resolve
-cannot be taken back.
+ONE DECISION RATHER THAN TWO STATEMENTS. Written as a guard above the content test,
+a shadowed `exit` that returns would walk from the identity refusal straight into
+the arm that accepts.
 
-NON-EMPTY IS NOT ENOUGH, and that is why this is a `case` rather than a `-s`.
-`gate` refuses a head file that IS the summary file, and it refuses BEFORE it
-empties anything — it has to, or the refusal would destroy the account it is
-protecting. So on that one path the file is left holding the summary: non-empty,
-and a `-s` guard passes on it. Asking whether the file holds a COMMIT ID closes
-that, because a summary never does.
+WHERE THE INVARIANT IS ACTUALLY ESTABLISHED is the setup block: the four working
+paths are derived from one directory by DISTINCT literal suffixes and each is read
+back against its own literal, so in the documented flow they cannot be the same
+file. This is defence for a path that allocation already excludes, which is why it
+costs one reserved-word test and no lookup.
 
-AND THE IDENTITY IS ASKED FIRST, because the shape alone is not enough. `gate`
-refuses an aliased head file before it clears anything, so on that path the file
-still holds the summary — and a summary that IS forty lowercase hex characters, a
-commit id someone pasted on a line of its own, satisfies the shape test exactly. It
-is the one summary that can. `-ef` answers the question the shape cannot, and it
-answers it about the two paths this session chose rather than about their contents.
+## AND ITS CONTENT IS PROVEN A COMMIT ID.
 
-The two are ONE decision rather than two statements: the shape test is the identity
-test's success arm. Written as a guard above it, a shadowed `exit` that returns
-would walk from the identity refusal straight into the shape test, which is the
-case that accepts.
+Not merely non-empty. Every refusal other than the aliased one leaves the file
+EMPTY — `gate` empties it before any other refusal can happen, and writes it only
+on success — so an empty file is already the ordinary evidence that no gate
+succeeded. Asking for a commit id also covers the aliased path, where the file
+holds the summary.
 
 A LITERAL PATTERN IN A `case`, not a regex in a variable. A validator held in a
 name is a second name a startup file can seed, and a seeded pattern accepting a
@@ -1780,12 +1772,37 @@ seeded value is a check that agrees with itself; `case` is a reserved word and
 these patterns are in the source. The forty-character test and the hex test are
 separate arms because one glob cannot say both.
 
-Every other refusal leaves the file EMPTY, which this also rejects: `gate` empties
-it before any other refusal can happen, and writes it only on success. The
-emptying is at the top of the stage rather than beside the write because an
-unreadable summary aborts further down, and emptying after that point would leave
-the PREVIOUS round's head behind for exactly the refusals a driver is most likely
-to walk past.
+WHAT IT CANNOT PROVE is that the file holds what `gate` REPORTED. The record and
+the file are two claims and only one of them reaches this shell. A file that was
+written truthfully and then changed by something else would pass; `post` re-proves
+the head against the local HEAD and the PR before it posts, which is where that is
+caught.
+
+## AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
+
+A resolve cannot be taken back. Resolving before the head is proven records this
+round's findings as answered on a commit that may never have landed, and with
+automatic review on the pass the push started reads threads already marked
+resolved with no summary saying what resolved them.
+
+AFTER THE `fi`, NOT INSIDE THE GATE'S SUCCESS ARM. Placed there it is on the one
+path that does not need it: a refusal takes the `else`, and with `exit` replaced by
+a function that returns, control leaves the `if` having evaluated nothing. After
+the `fi` it is on every path out of the stage.
+
+THE GATE'S SUCCESS ARM IS TRUE, and `[[ -n x ]]` rather than `[[ -n "" ]]`. Under
+`errexit` a false statement in a `then` BODY ends the shell — the exemption is for
+a command run as a CONDITION, and this is not one — so the successful path would
+have died after the push and before the replies. `:` would also be true, and is a
+name; a reserved word that is true is both.
+
+WHAT NO SHELL CONSTRUCT HERE CAN DO is make the reply instructions unreachable.
+They are PROSE, in a Markdown document, between two fences — so a driver whose
+`exit` returns can read them whatever the fence above did. That is issue #26, and
+the answer to it is moving this code into `.sh` files rather than another guard.
+What holds meanwhile: every path prints a refusal first, `post` asks the content
+question again and refuses, so no summary is posted and no pass requested, and the
+allocation the paths come from cannot produce the aliased case at all.
 
 ## THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
 

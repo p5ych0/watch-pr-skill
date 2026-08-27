@@ -3790,6 +3790,19 @@ fi
 grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
     && pass "…created with mkdir as the exclusion, at mode 700" \
     || die "the working directory is not created with mkdir -m 700 by path"
+# AND THE FOUR SUFFIXES ARE PAIRWISE DISTINCT, which is where the no-aliasing
+# invariant is actually established. `pr-close-round.sh` refuses a head file that
+# is the summary file, and the driver proves it again before the replies — but
+# both are defence for a path allocation excludes, and only if the literals here
+# really differ. Two names given the same suffix would alias every one of those
+# checks into agreement.
+_rb_sfx="$(grep -oE '^[[:space:]]*(SUMMARY_FILE|REQUEST_FILE|PRIOR_FILE|HEAD_FILE)="\$RB_WORK_DIR/[^"]*"' "$SKILL" \
+    | sed 's/.*\$RB_WORK_DIR\///; s/"$//')" || _rb_sfx=""
+_rb_sfx_n="$(grep -c . <<<"$_rb_sfx")" || _rb_sfx_n=0
+_rb_sfx_u="$(sort -u <<<"$_rb_sfx" | grep -c .)" || _rb_sfx_u=0
+{ [ "$_rb_sfx_n" -eq 4 ] && [ "$_rb_sfx_u" -eq 4 ]; } \
+    && pass "…and the four working-file suffixes are pairwise distinct" \
+    || die "the working-file suffixes are not four distinct names ($_rb_sfx_n found, $_rb_sfx_u distinct): $(tr '\n' ' ' <<<"$_rb_sfx")"
 for _rb_f in SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
     grep -q "^[[:space:]]*$_rb_f=\"\$RB_WORK_DIR/" "$SKILL" \
         && pass "…and \$$_rb_f is derived from it by a literal suffix" \

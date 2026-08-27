@@ -143,6 +143,38 @@ that block is judged against both:
   operator's diagnostics away for the rest of the session, and `set` is a builtin
   a function can shadow.
 
+## The gated head is a file, and it is not the summary
+
+`pr-close-round.sh` closes a round in two stages with the thread replies between
+them, and the head `gate` proved reaches `post` through a FILE both stages are
+given — not through a variable in the driving shell. The capture that carried it
+before was an assignment made **after** the push, and a name a startup file has
+already made readonly fails one silently, since an assignment's status cannot be
+taken. #202.
+
+When reviewing a change here:
+
+- **a captured head is a regression.** `GATED_HEAD="$( … )"`, or any `sed` that
+  lifts the head out of `gate`'s record, puts the assignment back. Both stages
+  take the same path; the value never enters the driving shell;
+- **the head file may not be the summary file.** `gate` reads the summary and then
+  writes the head, so one file serving as both means the head overwrites the
+  account — and `post` then finds a well-formed OID there, passes its non-empty
+  test, and posts a bare SHA as the round summary. Refused by path AND by `-ef`,
+  because neither covers the other;
+- **the driver proves the head before the thread replies**, which are the
+  irreversible part, and it asks the file IDENTITY first: a summary that is forty
+  lowercase hex characters satisfies a content test exactly, and is the one summary
+  that can;
+- **every refusal must leave the file empty.** `gate` empties it before any other
+  refusal can happen, so a stale head from the previous round cannot pass the
+  driver's guard.
+
+**What the driver cannot do is make the reply instructions unreachable.** They are
+prose between two fences, so a shell whose `exit` returns reads them whatever the
+fence above did. That is #26 — the fix is moving the code into `.sh` files — and it
+is not a reason to add another guard here.
+
 ## Claims and their arguments in `SKILL.md`
 
 `SKILL.md`'s bash fences keep a one-line CLAIM beside the code and carry the

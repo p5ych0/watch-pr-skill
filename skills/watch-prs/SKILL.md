@@ -966,7 +966,11 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE STAGE RUNS AS A CONDITION, so a refusal cannot be walked past.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND THE HEAD IS PROVEN AN OID FROM A FILE THAT IS NOT THE SUMMARY, before the replies.
+# AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND ITS CONTENT IS PROVEN A COMMIT ID.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"; then
     [[ -n x ]]    # a reserved word, not `:`, and TRUE — under `errexit` a false
