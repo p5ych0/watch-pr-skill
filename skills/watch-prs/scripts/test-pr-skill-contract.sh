@@ -5027,7 +5027,7 @@ local SKILL="$1"
 local _wy_doc="$2"
 local _wy_all _wy_all_rc _wy_bad_ptr _wy_bp_rc _wy_stale _wy_st_rc
 local _wy_claims _wy_rc _wy_n _wy_sent_rc _wy_float _wy_heads _wy_hrc
-local _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad _wy_c
+local _wy_empty _wy_e_rc _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad _wy_c
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
     #    silently — and every one well formed, inside a bash fence, under a claim,
@@ -5083,25 +5083,40 @@ if [ -f "$_wy_doc" ]; then
         *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
     esac
 
-    # …AND EVERY PAIR ANNOTATES CODE, so it sits ON something rather than floating
-    # in a comment block. What this does not catch is a pair moved from one code
-    # line to ANOTHER inside the fence: the pair is intact and still annotates
+    # …AND EVERY PAIR HAS CODE AFTER IT, before its fence closes. Not IMMEDIATELY
+    # after it, which is what this asked until #198 — and that stricter rule was
+    # the thing forcing claims to be MERGED. A claim sitting above a helper's usage
+    # table has code below the table and none on the next line, so it could carry
+    # no pointer; the only way to give it one was to fold it into the neighbouring
+    # claim, and folding lost a clause three times in three pull requests. The
+    # rationale kept the argument each time, so the bijection stayed green over
+    # exactly the drift it exists to catch.
+    #
+    # SO THE DEPENDENCY IS REMOVED RATHER THAN GUARDED. Pairs may STACK above one
+    # code line, and a usage table may sit between a pair and the code it belongs
+    # to. One claim per invariant is then always available, and nothing has to be
+    # merged to be pointed at.
+    #
+    # WHAT IS STILL CAUGHT is the pair that annotates nothing at all: one with no
+    # code anywhere after it before the fence ends. What is NOT caught is a pair
+    # moved from one code line to another — the pair is intact and still annotates
     # code, it is annotating the wrong code. Catching that means the fixture
     # knowing which line each claim belongs to, which couples the contract to the
-    # block's shape — every legitimate refactor of setup would then fail it. A
-    # relocated claim is visible in the diff as code losing its annotation; a
-    # contract that breaks on every refactor is not. Found once that way, in
-    # review, which is the disposition this assumes.
+    # block's shape, and every legitimate refactor would then fail it. A relocated
+    # claim is visible in the diff as code losing its annotation; a contract that
+    # breaks on every refactor is not. Found once that way, in review, which is the
+    # disposition this assumes.
     _wy_float=0
-    _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; next}
-       f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++
-                     f=0; prev=""; next }
-       f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
+    _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; pend=0; next}
+       f && /^```$/{ if (pend) n++
+                     f=0; prev=""; pend=0; next }
+       f { if (prev ~ /# WHY: \$RB_SCRIPTS/) pend=1
+           if (pend && $0 !~ /^[[:space:]]*#/ && NF > 0) pend=0
            prev=$0 }
-       END{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
+       END{ if (pend) n++; print n+0 }' "$SKILL")" || _wy_float=99
     [ "$_wy_float" -eq 0 ] \
-        && pass "…and every claim and pointer sits on a line of code" \
-        || die "$_wy_float claim/pointer pairs annotate a comment or a blank line rather than code"
+        && pass "…and every claim and pointer has code after it before its fence closes" \
+        || die "$_wy_float claim/pointer pairs annotate nothing; no code follows them in their fence"
 
     # 3. THE HEADINGS, by exact prefix and nothing else: every `## ` line in the
     #    rationale is taken as a claim, and the failure says how to satisfy it.
@@ -5137,6 +5152,26 @@ if [ -f "$_wy_doc" ]; then
     _wy_heads="$(grep '^## ' "$_wy_doc" | sed 's/^## //')" || _wy_hrc=$?
     { [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ]; } \
         || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
+
+    # …AND NO SECTION IS EMPTY. The bijection compares HEADINGS, so a section whose
+    #    argument is deleted while its heading stays passes every check above: the
+    #    claim still has a section, the section still has a claim, and the totals
+    #    still agree. That is the one way an argument can vanish without the
+    #    contract seeing it, and it costs one `awk` with no grammar in it — a
+    #    heading followed by nothing but blank lines before the next heading.
+    #
+    #    IT DOES NOT ASK WHETHER THE ARGUMENT IS STILL COMPLETE. A section that
+    #    loses a paragraph, or a claim that loses a clause, reads as well-formed to
+    #    anything mechanical; that is #198's settled answer and it is stated in the
+    #    rationale's own preamble. This catches the wholesale case only, and says
+    #    so rather than implying more.
+    _wy_empty=""; _wy_e_rc=0
+    _wy_empty="$(awk '/^## /{ if (h != "" && body == 0) print h; h=substr($0,4); body=0; next }
+       h != "" && NF > 0 { body=1 }
+       END{ if (h != "" && body == 0) print h }' "$_wy_doc")" || _wy_e_rc=$?
+    { [ "$_wy_e_rc" -eq 0 ] && [ -z "$_wy_empty" ]; } \
+        && pass "…and no section is a heading with no argument under it" \
+        || die "these sections have no argument under them (rc=$_wy_e_rc): $_wy_empty"
 
     # 4. BIJECTION. No claim twice, no heading twice, every claim a heading, every
     #    heading a claim, and the totals equal. Five string comparisons.

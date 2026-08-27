@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.71] — 2026-08-27
+
+- **A claim could not be pointed at without being merged, and merging lost an
+  invariant three times.** A `# WHY:` pointer had to sit IMMEDIATELY above a line
+  of code, so a claim above a helper's usage table could carry none — and the only
+  way to give it one was to fold it into the neighbouring claim. Each fold kept the
+  strongest clause and dropped the rest: *the continuation is the `then` branch*
+  twice, and the open stage's `revoke, prove, baseline, request` ordering once. The
+  section kept every argument each time, and the contract compares HEADINGS, so
+  nothing mechanical saw it. A reviewer found all three.
+
+  **The rule is removed rather than guarded.** Pairs may STACK above a single line
+  of code, and a usage table may sit between a pair and the code it belongs to; the
+  contract asks only that code follows before the fence closes, which still catches
+  a pair that annotates nothing. Nothing has to be merged in order to be pointed
+  at.
+
+  The four claims that had been merged under the old rule are split back into
+  fifteen, one per invariant, each with its own section. `SKILL-RATIONALE.md` now
+  states which of a fence's three kinds of comment carries a pointer — an
+  instruction does not and is written in sentence case, a short argument in place
+  does not, and a claim does.
+
+  **And a section can no longer be emptied in silence.** The bijection compares
+  headings, so deleting a section's argument while leaving its heading passed every
+  check. One `awk`, no grammar: a heading with nothing but blank lines under it is
+  a failure. It does not ask whether an argument is still complete — that is a
+  judgement, it is the reviewer's, and both reviewer files now say so. Closes #198.
+
 ## [2.0.70] — 2026-08-27
 
 - **Block 2's argument is out of `SKILL.md`.** *Request the review — Codex first*

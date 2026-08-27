@@ -18,6 +18,35 @@ spaces; a section hidden inside a comment or a fence, or written with a setext
 underline, will pass the contract and mislead the next reader — which is a way of
 mangling a document rather than a way of drifting, and the diff shows it.
 
+**Which comments carry a pointer, and which do not.** A bash fence in `SKILL.md` holds three kinds of comment, and only one of them
+belongs here.
+
+- an **instruction** tells the driver what to do — a helper's arguments, its exit
+  codes, how to write an account. It stays in the block and carries no pointer.
+  Write it in sentence case, as an instruction: a capitalised assertion that is
+  really an instruction reads as a claim whose argument has gone missing, and both
+  reviewers have raised one as a finding;
+- an **argument in place** is short enough that the whole of the reasoning fits
+  beside the code. It stays, and carries no pointer. Nothing is gained by moving
+  two lines into a section and pointing at it;
+- a **claim** asserts why the code has its shape while the argument for it lives
+  here. It carries a `# WHY:`, and its section heading is the claim character for
+  character.
+
+**ONE CLAIM PER INVARIANT.** Pairs may STACK above a single line of code, and a
+usage table may sit between a pair and the code it belongs to — the contract asks
+only that code follows before the fence closes. So there is never a reason to fold
+two invariants into one claim, and folding is how three of them were lost, once in
+each of three consecutive pull requests: the claim kept the strongest clause, the
+section kept every argument, and the bijection compares headings, so nothing saw
+it. Each was found by a reviewer reading the merge.
+
+**What the contract does NOT check**, and cannot without becoming the scanner this
+repository has twice paid to delete: whether a claim still says everything its
+section argues, and whether a section still argues everything it used to. A
+heading with no body at all is caught. A claim that has quietly lost a clause is a
+judgement, and it is the reviewer's.
+
 **These are not notes.** `CLAUDE.md` records that *a comment that argues against the
 code beside it is an instruction, and it will be followed*. Each section below is a
 defect that was shipped, found and paid for. Before changing a line the block
@@ -1333,9 +1362,9 @@ structural sentinel that is non-zero whatever `echo` and `exit` have been replac
 with. Both halves are needed: the reserved word decides whether the branch is
 ENTERED, and the sentinel decides what it reports once it has been.
 
-## THE PHASE IS A FACT ON THE PR, THE CONTINUATION IS THE `then` BRANCH, AND THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
+## THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS.
 
-THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS. `record` writes a signoff precisely so a later session can read it back, and
+`record` writes a signoff precisely so a later session can read it back, and
 `pr-phase-state.sh` is that reading: it takes the two signoffs and the head,
 selects which stop is being resumed from, and re-validates the record that has to
 still stand — the head must BE the Codex commit before the Copilot phase, and the
@@ -1346,29 +1375,32 @@ IT WAS 112 LINES HERE, and nothing executed them: three arms and six refusals,
 every abort exiting 0 so that "the phase is not closed" and "this ran correctly"
 were the same status to anything that read it. Issues #123 and #26.
 
-NO STATUS VARIABLE AT ALL, and that is the point of the shape. Written as
-`if …; then RC=0; else RC=$?; fi` and then a `case "$RC"`, a startup file that had
-already made that name readonly with the value 0 caused BOTH assignments to fail
-while leaving it at 0 — and a helper that returned 1 or 2 was sent through the
-continuation into the merge flow. A failed assignment does not even fire an `||`,
-so there is no status to take; the answer is not to guard the variable but to have
-none. The helper's status is branched on where it is produced.
+## THERE IS NO STATUS VARIABLE; THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
 
-THE CONTINUATION IS THE `then` BRANCH, AND THAT IS STRUCTURAL TOO. This bash runs
-in YOUR shell, which nothing here controls — `exit` is a builtin a function can
-take the place of, and one that RETURNS instead of exiting leaves a refusal
-falling straight through into whatever came after it. Nothing follows, so there is
-nothing to fall into; and each refusal ENDS in a reserved word, so it reports
-non-zero even with `echo` and `exit` both taken away.
+Written as `if …; then RC=0; else RC=$?; fi` and then a `case "$RC"`, a startup
+file that had already made that name readonly with the value 0 caused BOTH
+assignments to fail while leaving it at 0 — and a helper that returned 1 or 2 was
+sent through the continuation into the merge flow.
+
+A failed assignment does not even fire an `||`, so there is no status to take. The
+answer is not to guard the variable but to have none.
+
+`$?` in the `else` arm is the CONDITION's, read before anything else can change
+it.
+
+## THE CONTINUATION IS THE `then` BRANCH, and the helper runs as a condition.
+
+This bash runs in YOUR shell, which nothing here controls — `exit` is a builtin a
+function can take the place of, and one that RETURNS instead of exiting leaves a
+refusal falling straight through into whatever came after it. Nothing follows, so
+there is nothing to fall into; and each refusal ENDS in a reserved word, so it
+reports non-zero even with `echo` and `exit` both taken away.
 
 AND IT IS A CONDITION, NOT a simple command whose status is read afterwards. If
 the shell has `errexit` on — this block is pasted into one as often as it is typed
 — a simple command that exits non-zero ends the shell before anything can read its
 status, so the 1/2 distinction is lost at exactly the two statuses it exists for.
 A command run as a CONDITION is exempt.
-
-`$?` in the `else` arm is the CONDITION's, read before anything else can change
-it.
 
 ## THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
 
@@ -1388,38 +1420,44 @@ branch says nothing and returns 0 — a failed read indistinguishable from a res
 phase. `[[ … ]]` is a reserved word, so the block ends non-zero whatever was done
 to the builtins.
 
-## THE GATE IS A SCRIPT, RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
+## THE GATE IS A SCRIPT.
 
-THE GATE IS A SCRIPT. It was 291 lines here, pasted into your shell, and nothing
-checked it — which is how it came to contain a construct the bash macOS ships
-cannot PARSE, for fifty review rounds. `scripts/` is covered by the suite, by
-`pr-selfcheck.sh` and — while it is enabled, which #93 owns — by the bash 3.2 CI
-job; a fenced block is covered by none of them. Issue #26.
+It was 291 lines here, pasted into your shell, and nothing checked it — which is
+how it came to contain a construct the bash macOS ships cannot PARSE, for fifty
+review rounds. `scripts/` is covered by the suite, by `pr-selfcheck.sh` and — while
+it is enabled, which #93 owns — by the bash 3.2 CI job; a fenced block is covered
+by none of them. Issue #26.
 
-RUN FROM THE REPOSITORY THIS SESSION STARTED IN. The gate derives its identity and
-its range-check root from the current directory, so a `cd` into another checkout
-between setup and here would point every gate — and the `--admin` merge — at
-whatever PR of that repository shares this number. `$REPO_DIR` was captured in the
-setup block, and everything else in this session already used the identity derived
-there.
+## RUN FROM THE REPOSITORY THIS SESSION STARTED IN.
 
-AUTO_REVIEW IS PASSED AS AN ARGUMENT rather than read from the environment: a
-value assigned in your shell without `export` reaches a function and not a child
+The gate derives its identity and its range-check root from the current directory,
+so a `cd` into another checkout between setup and here would point every gate —
+and the `--admin` merge — at whatever PR of that repository shares this number.
+
+`$REPO_DIR` was captured in the setup block, and everything else in this session
+already used the identity derived there.
+
+## AUTO_REVIEW IS PASSED AS AN ARGUMENT, not read from the environment.
+
+A value assigned in your shell without `export` reaches a function and not a child
 process, and this one decides whether an in-flight Codex pass may be ignored. A
 silent default there is a merge on a verdict nobody read.
 
-THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
+## THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
+
 `$CODEX_SHA` was captured and validated in step 7, when the Codex phase closed.
 Writing it out again here as something to fill in was redundant, and it did not
 work: `<…>` is a REDIRECTION to the shell in argument position AND after an `=`,
 so an unsubstituted placeholder does not reach the gate's own sha check — the
 block fails to parse, which is a different failure in a different place.
 
-REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the stop that closed
-the Codex phase. `codex-only` is not a weaker gate: it drops Copilot's verdict and
-in exchange requires the head to BE the commit Codex signed, because the
-`Review-Phase: copilot` trailers that license a moved head do not exist when there
-was no Copilot phase.
+## REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE, and `codex-only` is not weaker.
+
+The choice was made at the stop that closed the Codex phase.
+
+`codex-only` drops Copilot's verdict and in exchange requires the head to BE the
+commit Codex signed, because the `Review-Phase: copilot` trailers that license a
+moved head do not exist when there was no Copilot phase.
 
 ## THE STATUS LEAVES THIS BLOCK, or a blocked merge reports success.
 
@@ -1428,20 +1466,24 @@ the final `exit` the block reports success for a blocked, paused or queued merge
 and whatever runs it next carries on as though the PR had landed. The distinction
 the gate exists to draw survives only if it is passed on.
 
-## THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
+## THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION.
 
-BEFORE THE MUTATION, because nothing after one can undo it. The read-back further
-down is a simple command: with `errexit` on and `PRIOR_REVIEW` already readonly it
-fails and ends your shell — but by then the request has been POSTED, so the pass is
-in flight and no watch is ever armed. The only place the question can be asked is
-before the request, where the same failure costs a stop and nothing else.
+Nothing after a mutation can undo it. The read-back further down is a simple
+command: with `errexit` on and `PRIOR_REVIEW` already readonly it fails and ends
+your shell — but by then the request has been POSTED, so the pass is in flight and
+no watch is ever armed.
 
-IN A SUBSHELL, which is what makes it safe to ask at all. It was two unequal
-assignments read back here, because one proves nothing against a readonly holding
-the probe's own value — and both were assignments in YOUR shell, where a failed
-readonly assignment under `errexit` is FATAL, so the probe ended the session in
-exactly the state it exists to detect. A subshell inherits the attribute, fails for
-the same reason, and as a condition is exempt.
+The only place the question can be asked is before the request, where the same
+failure costs a stop and nothing else.
+
+## THE PROBE IS A SUBSHELL, and the value is compared inside it.
+
+A subshell is what makes it safe to ask at all. It was two unequal assignments read
+back here, because one proves nothing against a readonly holding the probe's own
+value — and both were assignments in YOUR shell, where a failed readonly assignment
+under `errexit` is FATAL, so the probe ended the session in exactly the state it
+exists to detect. A subshell inherits the attribute, fails for the same reason, and
+as a condition is exempt.
 
 The value is compared INSIDE it, because a TRANSFORMING attribute — `declare -i
 PRIOR_REVIEW` — lets the assignment succeed and stores something else, and a
@@ -1450,48 +1492,59 @@ baseline would come back rewritten. ONE value is enough, because a readonly
 pre-seeded with the probe's own value makes the subshell's assignment fail outright
 and the comparison is never reached. #148.
 
-AS A CONDITION, WITH THE REQUEST AS ITS SUCCESS ARM. Written as a standalone guard
-the probe detects the readonly name and then cannot act on it: `exit` is a builtin
-your shell can replace with one that RETURNS, and the trailing `[[ -n "" ]]` only
-gives the `if` a false status that nothing consumes — so execution reached the
-request and posted it anyway, which is the state these probes exist to prevent.
+## THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
+
+Written as a standalone guard the probe detects the readonly name and then cannot
+act on it: `exit` is a builtin your shell can replace with one that RETURNS, and
+the trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
+— so execution reached the request and posted it anyway, which is the state these
+probes exist to prevent.
+
 Only containment excludes it.
 
-## THE REQUEST IS A SCRIPT, RUN AS A CONDITION, WITH ITS ANSWER IN A FILE AND THE CONTINUATION IN ITS SUCCESS ARM.
+## THE REQUEST IS A SCRIPT.
 
-THE REQUEST IS A SCRIPT. It was eighteen lines here that nothing executed, and what
-they do is post the comment that — on the manual path — IS the review request. It
-was also a second, weaker copy of the round-closing request: that one refuses a
+It was eighteen lines here that nothing executed, and what they do is post the
+comment that — on the manual path — IS the review request.
+
+It was also a second, weaker copy of the round-closing request: that one refuses a
 body carrying a marker the loop honours or a mention it did not write itself, and
 this one refused neither, so the opening account was the one posting site with no
 rules. Issues #26, #144.
 
-THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE. A heredoc
-splices it in: an account containing a line that is exactly the delimiter ENDS the
-heredoc, and whatever follows is parsed by your long-lived shell — and `EOF` is a
-line this loop's own accounts quote, out of a diff or a finding. Choosing a rarer
-delimiter narrows that and does not close it, because the body is not known when
-the delimiter is chosen. And writing the file from here needs a command — `cat`,
-`printf` — which is a NAME your shell can replace, so the account validated and
-posted would be the function's text. Your file tool is neither: it does not go
-through this shell at all.
+## THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE.
 
-NOTHING HERE IS AN ASSIGNMENT, AND THAT IS THE SHAPE. Written as
-`PRIOR_REVIEW="$(…)"` — inside the `if` or beside a `; REQ_RC=$?` — the capture is
-an assignment, and a startup file that has already made either name readonly makes
-it FAIL: with `errexit` on that ends your shell before any status is read, and
-without it the `if` is abandoned with NEITHER branch running, so a refused request
-falls straight through into the wait for a review nobody asked for. A plain command
-run as a CONDITION has no assignment to fail and is exempt from `errexit`, and its
-answer goes to a FILE — a path rather than a name, which is how `pr-origin.sh`
-settled the same question.
+A heredoc splices it in: an account containing a line that is exactly the delimiter
+ENDS the heredoc, and whatever follows is parsed by your long-lived shell — and
+`EOF` is a line this loop's own accounts quote, out of a diff or a finding.
+Choosing a rarer delimiter narrows that and does not close it, because the body is
+not known when the delimiter is chosen.
 
-AND THE CONTINUATION IS THE `then` BRANCH, which is structural too. `exit` is a
-builtin a startup file can replace with one that RETURNS, so a refusal written as
-`echo …; exit` prints and carries straight on — into the read-back below, and from
-there into the wait for a review that was never requested. Ending the arm in
-`[[ -n "" ]]` makes the LIST report non-zero, which nothing here reads. What does
-hold is that the work sits inside the branch a refusal does not take.
+And writing the file from here needs a command — `cat`, `printf` — which is a NAME
+your shell can replace, so the account validated and posted would be the function's
+text. Your file tool is neither: it does not go through this shell at all.
+
+## NOTHING HERE IS AN ASSIGNMENT, AND THE ANSWER GOES TO A FILE.
+
+Written as `PRIOR_REVIEW="$(…)"` — inside the `if` or beside a `; REQ_RC=$?` — the
+capture is an assignment, and a startup file that has already made either name
+readonly makes it FAIL: with `errexit` on that ends your shell before any status is
+read, and without it the `if` is abandoned with NEITHER branch running, so a
+refused request falls straight through into the wait for a review nobody asked for.
+
+A plain command run as a CONDITION has no assignment to fail and is exempt from
+`errexit`, and its answer goes to a FILE — a path rather than a name, which is how
+`pr-origin.sh` settled the same question.
+
+## THE CONTINUATION IS THE `then` BRANCH HERE TOO.
+
+`exit` is a builtin a startup file can replace with one that RETURNS, so a refusal
+written as `echo …; exit` prints and carries straight on — into the read-back
+below, and from there into the wait for a review that was never requested.
+
+Ending the arm in `[[ -n "" ]]` makes the LIST report non-zero, which nothing here
+reads. What does hold is that the work sits inside the branch a refusal does not
+take.
 
 ## THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
 
