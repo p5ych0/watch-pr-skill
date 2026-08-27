@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.72] — 2026-08-27
+
+- **Block 5's argument is out of `SKILL.md`, and it is the last block.** *Fix, then
+  close the round* was 315 lines carrying 70 of commentary inside its fences. It is
+  291 now, and every executable line in the document is byte-identical — checked
+  mechanically, not by eye. Twelve claims stay beside the code with a `# WHY:` pointer
+  under each; the arguments are twelve new sections in `SKILL-RATIONALE.md`.
+
+  This is the first lift under 2.0.71's rule, and it shows: **nothing had to be
+  merged.** Claims stack above the code they annotate, the two helper interfaces
+  sit between a stack and its code, and one invariant that used to share a claim —
+  the closing record having to be present, and its baseline being allowed to be
+  empty — is two claims because those are two questions.
+
+  The instruction comments in the block are rewritten in sentence case for the same
+  rule: *run `gate` from a checkout on this PR's branch* and *two kinds of refusal,
+  and only one is retryable* tell the driver what to do, so they are not claims, and
+  a capitalised assertion with no pointer reads as a claim whose argument has gone.
+
+  `SKILL.md` goes 81 KB to 79 KB here, and 167 KB to 79 KB across the whole of
+  #194 — roughly 42k tokens read on every invocation down to under 20k. The blocks
+  that remain hold 18 lines of commentary between them and are not worth a change.
+
 ## [2.0.71] — 2026-08-27
 
 - **A claim could not be pointed at without being merged, and merging lost an

@@ -1641,3 +1641,120 @@ the request has been posted, leaving a pass in flight that nothing waits for.
 branch says nothing and returns 0 — a failed request indistinguishable from a
 posted one, which sends the driver into a wait for a review that was never asked
 for.
+
+## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
+
+Two recipes lived in `SKILL.md`, doing the same job in different ORDERS, and the
+ordering is the whole content. Nothing executed either, and a reader had to choose
+which one to copy — which is how the two drifted apart.
+
+There is one recipe in `SKILL.md` now, and the two orders are inside the script,
+where the suite reaches them. Issue #26.
+
+## THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
+
+`gate` pushes and proves the head green, and only then are the threads answered —
+so a resolve is a claim that is true when it is made.
+
+Resolve first and a round that then fails to push, or pushes red, has already
+recorded its findings as answered on a commit that never landed. With automatic
+review on it is worse: the pass the push starts reads threads already marked
+resolved, with no summary saying what resolved them.
+
+## IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
+
+A bare `git push` sends whatever branch the checkout is on, and this stage is given
+a PR NUMBER, not a branch.
+
+A round driven from a checkout left on the default branch — a `cd` or a `checkout`
+that failed, a second worktree holding the PR's branch — pushed `main`: an
+unreviewed commit on the default branch, and the round lost as well, because the
+checks were then awaited on a head the PR did not have. A detached HEAD is refused
+for the same reason. #119.
+
+## `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN.
+
+It was established in step 2 and the script refuses anything but `yes` or `no`, so
+the mode this PR is in picks the order INSIDE the script.
+
+The alternative was two recipes in `SKILL.md` and a reader deciding which to copy,
+which is how the two orderings drifted apart in the first place. A value assigned in your
+shell without `export` also reaches a function and not a child process, so reading
+it from the environment would give the script a silent default — and the default
+answer is a round closed on a mode nobody chose.
+
+## THE GATED HEAD IS CARRIED OUT OF THE CHILD, which cannot assign in this shell.
+
+`gate` runs as a child process, so it cannot set a variable here however it is
+invoked. It says what the value was, in its success record, and this reads it back
+out of that record.
+
+WHAT THAT DOES NOT BUY IS ASSIGNMENT SAFETY, and saying otherwise was wrong: the
+read-back is itself `GATED_HEAD="$( … )"`, so a startup file that has already made
+that name readonly fails it here exactly as it would have failed a direct capture —
+after `gate` has pushed. `pr-request-review.sh`'s baseline avoids that by writing to
+a FILE and proving the read-back against it; this one does not, and the difference
+is that there the assignment precedes the mutation and here it follows one.
+
+## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
+
+`post` posts the summary and requests the next pass, and both are irreversible: a
+later comment saying "that round did not really close" is a record, not a
+retraction, and it is itself a call that can fail.
+
+Run ahead of the replies, it requests a pass over findings nobody has answered
+while the summary says the round handled them — so the next review re-reports what
+this one was about to fix, and the extra volume reads as regression rather than
+repetition.
+
+## AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
+
+Locally and on the PR, because the replies take as long as they take. A commit made
+between the gate and the post leaves the summary describing one commit while the
+reviewer reads another, and the gate's green verdict belongs to the commit the gate
+saw and to no other.
+
+This is a separate question from when the round closes: the ordering says the post
+comes last, and this says the post is still allowed to happen when it gets there.
+
+## THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
+
+The script reads it immediately before it requests the pass, and a child cannot
+assign a variable here — so it says what the value was.
+
+Without this the watch keeps the OLDER baseline, and the terminal review this round
+just handled is newer than it, so it is accepted at once as the answer to a request
+nobody has answered yet.
+
+## THE RECORD HAS TO BE THERE.
+
+An absent record means the stage reported nothing, and step 3 would then watch
+against a baseline left over from the previous round.
+
+## THE BASELINE MAY LEGITIMATELY BE EMPTY, which is a different question.
+
+`pr-review-state.sh review-id` returns nothing when the current head has no review
+yet — which is every round that pushes a new commit, and every Copilot round, since
+a push never triggers one — and `pr-watch.sh` takes an empty baseline as "wait on
+any terminal review", which is exactly right there.
+
+Testing the VALUE for emptiness aborted on all of those, AFTER the summary was
+posted and the pass requested: the watch was never armed, and a retry posts the
+summary and requests the pass a second time.
+
+## THE FIELD IS WHAT IS CHECKED FOR, not what is in it.
+
+A record that lost the field entirely is a malformed answer. A record whose field
+is empty is an answer.
+
+Collapsing the two puts the abort on the ordinary case and lets the malformed one
+through, which is the wrong way round for a value step 3 is about to watch on.
+
+## `prior-review=` IS LAST IN THE RECORD, so everything after it is the value.
+
+`${CLOSED_REC##* prior-review=}` strips through the last occurrence, so the field
+being last is what makes that expansion the whole of the read — with nothing else to
+match and no second field to be confused with.
+
+Anything appended after that field would be swallowed into the baseline, which is
+the same field-order rule the signoff records follow and for the same reason.
