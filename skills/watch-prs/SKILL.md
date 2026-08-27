@@ -482,7 +482,9 @@ WHO="$CODEX_BOT"
 # refused, so a write that does not happen stops the request.
 # THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# THE PROBE IS A SUBSHELL, and the value is compared inside it.
+# THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -492,9 +494,13 @@ if { ( PRIOR_REVIEW="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
 then
     # THE REQUEST IS A SCRIPT.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE REQUEST RUNS AS A CONDITION.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    # NOTHING HERE IS AN ASSIGNMENT, AND THE ANSWER GOES TO A FILE.
+    # NOTHING HERE IS AN ASSIGNMENT.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -1352,7 +1358,9 @@ before continuing into the Copilot phase.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THERE IS NO STATUS VARIABLE; THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# THE CONTINUATION IS THE `then` BRANCH, and the helper runs as a condition.
+# THE CONTINUATION IS THE `then` BRANCH, and nothing follows it.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE HELPER RUNS AS A CONDITION, which is what exempts it from `errexit`.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
     # THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
@@ -1406,7 +1414,9 @@ fi
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE, and `codex-only` is not weaker.
+# REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the Codex stop.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# `codex-only` IS NOT A WEAKER GATE, and requires the head to BE the signed commit.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?

@@ -5270,6 +5270,88 @@ grep -qF 'revoke, prove, baseline, request' "$SKILL" \
     && pass "the open stage's ordering is named beside the call, not only in the rationale" \
     || die "block 7 no longer names the revoke/prove/baseline/request order; a reordering would read as ordinary"
 
+# ── AND THE TWO PLACEMENT BRANCHES ARE STAGED, ACCEPT AND REJECT ─────────────
+#
+# `_wy_contract` ran on the shipped pair and on the accepted-shapes rationale, and
+# both of those PASS — so every branch that REFUSES was unexercised. Measured: the
+# relaxed placement check shipped with its fence-close arm reading only the flag
+# the body rule sets, which the close line never reaches, and a pair whose pointer
+# was the last line of its fence passed. Deleting either half again, or breaking
+# the empty-section scan, would have left this file green.
+#
+# SYNTHETIC PAIRS, NOT COPIES OF THE SHIPPED ONES. Each case is a four-line skill
+# and a two-line rationale, so what it asserts is visible in the case itself rather
+# than depending on what block 8 happens to look like this month. `_wy_contract`
+# is the real one; nothing here re-implements a check.
+_wy_ptr='# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md'
+_wy_case() {   # <label> <expect: pass|fail> <skill-body> <doc-body>
+    local _c_label="$1" _c_expect="$2" _c_skill="$3" _c_doc="$4" _c_dir _c_out
+    _c_dir="$(mktemp_d)" || { die "no scratch directory for the '$_c_label' case"; return 0; }
+    printf '## S\n\n```bash\n%s\n```\n' "$_c_skill" > "$_c_dir/SKILL.md"
+    printf '%s\n' "$_c_doc" > "$_c_dir/doc.md"
+    _c_out="$(_wy_contract "$_c_dir/SKILL.md" "$_c_dir/doc.md" 2>&1)" \
+        || _c_out="FAIL - the case run ended non-zero: $_c_out"
+    case "$_c_out" in
+        *"FAIL - "*) [ "$_c_expect" = fail ] \
+                        && pass "…and $_c_label is refused" \
+                        || die "$_c_label was refused and should not be: $_c_out" ;;
+        *)           [ "$_c_expect" = pass ] \
+                        && pass "…and $_c_label is accepted" \
+                        || die "$_c_label was accepted and should not be" ;;
+    esac
+    rm -rf "$_c_dir"
+}
+
+# ACCEPTED — the two shapes the old rule forbade, which is why it forced merging.
+_wy_case "two claims stacked above one line of code" pass \
+"# CLAIM ONE.
+$_wy_ptr
+# CLAIM TWO.
+$_wy_ptr
+x=1" \
+"## CLAIM ONE.
+
+first argument
+
+## CLAIM TWO.
+
+second argument"
+
+_wy_case "a usage table between a pair and its code" pass \
+"# CLAIM ONE.
+$_wy_ptr
+#   helper.sh <pr>
+#     0  fine
+x=1" \
+"## CLAIM ONE.
+
+first argument"
+
+# REFUSED — a pair that annotates nothing, by each of the two routes into it. The
+# second is the one the first version of the relaxed check passed.
+_wy_case "a pointer followed only by comments before the fence closes" fail \
+"# CLAIM ONE.
+$_wy_ptr
+# a trailing note, and no code after it" \
+"## CLAIM ONE.
+
+first argument"
+
+_wy_case "a pointer that is the last line of its fence" fail \
+"x=1
+# CLAIM ONE.
+$_wy_ptr" \
+"## CLAIM ONE.
+
+first argument"
+
+# REFUSED — a heading whose argument was deleted while the heading stayed.
+_wy_case "a section that is a heading with nothing under it" fail \
+"# CLAIM ONE.
+$_wy_ptr
+x=1" \
+"## CLAIM ONE."
+
 # ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
 #
 # The guards above were removed on the operator's instruction, and a removal has

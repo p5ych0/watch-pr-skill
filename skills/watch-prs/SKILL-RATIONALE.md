@@ -1388,19 +1388,21 @@ answer is not to guard the variable but to have none.
 `$?` in the `else` arm is the CONDITION's, read before anything else can change
 it.
 
-## THE CONTINUATION IS THE `then` BRANCH, and the helper runs as a condition.
+## THE CONTINUATION IS THE `then` BRANCH, and nothing follows it.
 
 This bash runs in YOUR shell, which nothing here controls — `exit` is a builtin a
 function can take the place of, and one that RETURNS instead of exiting leaves a
-refusal falling straight through into whatever came after it. Nothing follows, so
-there is nothing to fall into; and each refusal ENDS in a reserved word, so it
-reports non-zero even with `echo` and `exit` both taken away.
+refusal falling straight through into whatever came after it.
 
-AND IT IS A CONDITION, NOT a simple command whose status is read afterwards. If
-the shell has `errexit` on — this block is pasted into one as often as it is typed
-— a simple command that exits non-zero ends the shell before anything can read its
-status, so the 1/2 distinction is lost at exactly the two statuses it exists for.
-A command run as a CONDITION is exempt.
+Nothing follows, so there is nothing to fall into; and each refusal ENDS in a
+reserved word, so it reports non-zero even with `echo` and `exit` both taken away.
+
+## THE HELPER RUNS AS A CONDITION, which is what exempts it from `errexit`.
+
+Not a simple command whose status is read afterwards. If the shell has `errexit` on
+— this block is pasted into one as often as it is typed — a simple command that
+exits non-zero ends the shell before anything can read its status, so the 1/2
+distinction is lost at exactly the two statuses it exists for.
 
 ## THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
 
@@ -1451,13 +1453,20 @@ work: `<…>` is a REDIRECTION to the shell in argument position AND after an `=
 so an unsubstituted placeholder does not reach the gate's own sha check — the
 block fails to parse, which is a different failure in a different place.
 
-## REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE, and `codex-only` is not weaker.
+## REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the Codex stop.
 
-The choice was made at the stop that closed the Codex phase.
+The choice was made there, at the stop that closed the Codex phase, and this is
+where it is spent. Deciding it here instead would be deciding it twice, in a place
+the operator was never asked.
 
-`codex-only` drops Copilot's verdict and in exchange requires the head to BE the
+## `codex-only` IS NOT A WEAKER GATE, and requires the head to BE the signed commit.
+
+It drops Copilot's verdict and in exchange requires the head to be exactly the
 commit Codex signed, because the `Review-Phase: copilot` trailers that license a
 moved head do not exist when there was no Copilot phase.
+
+So it is narrower rather than looser, and saying so matters: read as a shortcut it
+would be chosen to save a round, which is the one reason it must not be.
 
 ## THE STATUS LEAVES THIS BLOCK, or a blocked merge reports success.
 
@@ -1476,21 +1485,25 @@ no watch is ever armed.
 The only place the question can be asked is before the request, where the same
 failure costs a stop and nothing else.
 
-## THE PROBE IS A SUBSHELL, and the value is compared inside it.
+## THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
 
-A subshell is what makes it safe to ask at all. It was two unequal assignments read
-back here, because one proves nothing against a readonly holding the probe's own
-value — and both were assignments in YOUR shell, where a failed readonly assignment
-under `errexit` is FATAL, so the probe ended the session in exactly the state it
-exists to detect. A subshell inherits the attribute, fails for the same reason, and
-as a condition is exempt.
+It was two unequal assignments read back in YOUR shell, where a failed readonly
+assignment under `errexit` is FATAL — so the probe ended the session in exactly the
+state it exists to detect. A subshell inherits the attribute, fails for the same
+reason, and as a condition is exempt.
 
-The value is compared INSIDE it, because a TRANSFORMING attribute — `declare -i
-PRIOR_REVIEW` — lets the assignment succeed and stores something else, and a
-status-only probe accepts that: the request would go out and the ordinary empty
-baseline would come back rewritten. ONE value is enough, because a readonly
-pre-seeded with the probe's own value makes the subshell's assignment fail outright
-and the comparison is never reached. #148.
+ONE value is enough, because a readonly pre-seeded with the probe's own value makes
+the subshell's assignment fail outright and the comparison is never reached. Two
+proved nothing that one does not. #148.
+
+## THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
+
+A TRANSFORMING attribute — `declare -i PRIOR_REVIEW` — lets the assignment succeed
+and stores something else, and a status-only probe accepts that: the request would
+go out and the ordinary empty baseline would come back rewritten.
+
+The comparison is inside the subshell because that is where the transformed value
+is, and reading it outside would be reading a different shell's variable.
 
 ## THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
 
@@ -1512,6 +1525,18 @@ body carrying a marker the loop honours or a mention it did not write itself, an
 this one refused neither, so the opening account was the one posting site with no
 rules. Issues #26, #144.
 
+## THE REQUEST RUNS AS A CONDITION.
+
+Not as a simple command whose status is read afterwards. This block is pasted into
+a shell with `errexit` on as often as it is typed into one without, and there a
+simple command that exits non-zero ends the shell before any status can be read —
+so the refusal below would never run, and a session would end with no account of
+why. A command run as a CONDITION is exempt.
+
+It is also what makes the success arm mean something: with the request as the
+condition, everything that depends on it having been posted sits inside the branch
+a refusal does not take.
+
 ## THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE.
 
 A heredoc splices it in: an account containing a line that is exactly the delimiter
@@ -1524,7 +1549,7 @@ And writing the file from here needs a command — `cat`, `printf` — which is 
 your shell can replace, so the account validated and posted would be the function's
 text. Your file tool is neither: it does not go through this shell at all.
 
-## NOTHING HERE IS AN ASSIGNMENT, AND THE ANSWER GOES TO A FILE.
+## NOTHING HERE IS AN ASSIGNMENT.
 
 Written as `PRIOR_REVIEW="$(…)"` — inside the `if` or beside a `; REQ_RC=$?` — the
 capture is an assignment, and a startup file that has already made either name
@@ -1532,9 +1557,16 @@ readonly makes it FAIL: with `errexit` on that ends your shell before any status
 read, and without it the `if` is abandoned with NEITHER branch running, so a
 refused request falls straight through into the wait for a review nobody asked for.
 
-A plain command run as a CONDITION has no assignment to fail and is exempt from
-`errexit`, and its answer goes to a FILE — a path rather than a name, which is how
-`pr-origin.sh` settled the same question.
+A failed assignment does not even fire an `||`, so there is no status to take. The
+answer is to have no assignment rather than to guard one.
+
+## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
+
+A name can be made readonly or transforming by a startup file, and both failures
+are invisible at the point of use. A path is neither: the helper writes it, this
+shell reads it back, and the read-back is proved against the file itself.
+
+`pr-origin.sh` settled the same question the same way, and for the same reason.
 
 ## THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 
