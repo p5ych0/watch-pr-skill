@@ -925,11 +925,6 @@ Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
 hard-coded answer — one recipe here, two orders there:
 
 ```bash
-# THE ROUND CLOSES THROUGH A SCRIPT, IN TWO STAGES, with the thread replies
-# between them. Both orderings were prose-embedded shell here, doing the same job
-# in different ORDERS, and the ordering is the whole content. Nothing executed
-# either. Issue #26.
-#
 #   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW"
 #   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD"
 #
@@ -937,33 +932,26 @@ hard-coded answer — one recipe here, two orders there:
 #     1  stopped  — the reason is on stdout; the round is NOT closed
 #     3  paused   — a round boundary. Decide with the operator
 #
-# RUN `gate` FROM A CHECKOUT ON THIS PR'S BRANCH. It pushes, and a push has to go
+# Run `gate` from a checkout on this PR's branch. It pushes, and a push has to go
 # somewhere: it names the ref it may write, proves every push URL of `origin` is
 # the pinned repository, and refuses — having pushed nothing — if any of that does
-# not hold. Every refusal is a 1 with the reason on stdout and the round
-# untouched.
+# not hold. Every refusal is a 1 with the reason on stdout and the round untouched.
 #
-# TWO KINDS OF REFUSAL, AND ONLY ONE IS RETRYABLE:
+# Two kinds of refusal, and only one is retryable:
 #
-#   · THIS CHECKOUT — on another branch, or on a detached HEAD. Move to the
+#   · this checkout — on another branch, or on a detached HEAD. Move to the
 #     worktree holding the PR's branch and run it again. Nothing has happened;
-#   · THIS PR — it is from a FORK, or `origin` pushes somewhere that is not the
+#   · this PR — it is from a FORK, or `origin` pushes somewhere that is not the
 #     pinned repository. Running it again changes nothing, because neither is
-#     about where you are standing. STOP and put it to the operator: a fork PR is
+#     about where you are standing. Stop and put it to the operator: a fork PR is
 #     outside what this loop drives, and a redirected `origin` is a configuration
 #     decision that is not the loop's to make.
-#
-# IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED. A bare `git push` sends
-# whatever branch the checkout is on, and a round driven from a checkout left on
-# `main` — a `cd` or `checkout` that failed, a second worktree holding the branch
-# — pushed the DEFAULT BRANCH: an unreviewed commit on `main`, and the round lost
-# as well, because the checks were then awaited on a head the PR did not have.
-# #119.
-#
-# `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN. It was established in step 2 and the
-# script refuses anything but `yes` or `no`, so the mode this PR is in picks the
-# order INSIDE the script — rather than deciding which of two recipes to copy out
-# of here, which is how the two drifted apart in the first place.
+# THE ROUND CLOSES THROUGH A SCRIPT, IN TWO STAGES, with the replies between them.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 GATE_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" 2>&1)"; GATE_RC=$?
 printf '%s\n' "$GATE_OUT"
 case "$GATE_RC" in
@@ -971,8 +959,8 @@ case "$GATE_RC" in
     3) echo "Stopping here: the operator decides at a round boundary."; exit 3 ;;
     *) echo "The round did not close, and nothing has been resolved or posted. The reason is above; do not retry it blind."; exit "$GATE_RC" ;;
 esac
-# THE GATED HEAD IS CARRIED TO `post`, WHICH RE-PROVES IT. A child cannot assign a
-# variable here, so it says what the value was and this reads it back out.
+# THE GATED HEAD IS CARRIED TO `post`, WHICH RE-PROVES IT.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 GATED_HEAD="$(printf '%s\n' "$GATE_OUT" \
     | sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p')"
 [ -n "$GATED_HEAD" ] \
@@ -984,41 +972,28 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# ONLY NOW IS THE ROUND CLOSED. `post` re-proves that the head is still
-# `$GATED_HEAD`, locally and on the PR, before it posts anything: the replies take
-# as long as they take, and the gate's green verdict belongs to the commit the
-# gate saw and to no other.
+# ONLY NOW IS THE ROUND CLOSED, and `post` re-proves the head before it posts.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD" 2>&1)"; ROUND_RC=$?
 printf '%s\n' "$POST_OUT"
-# THE BASELINE COMES BACK IN THE SUCCESS RECORD. The script reads it immediately
-# before it requests the pass, and step 3's watch needs exactly that value — a
-# child cannot assign a variable here, so it says what the value was. Without
-# this, the watch keeps the OLDER baseline and the terminal review this round just
-# handled is newer than it, so it is accepted at once as the answer to a request
-# nobody has answered yet.
+# THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [ "$ROUND_RC" -eq 0 ]; then
-    # THE RECORD HAS TO BE THERE; THE BASELINE MAY LEGITIMATELY BE EMPTY, and
-    # those are different questions. `pr-review-state.sh review-id` returns
-    # nothing when the current head has no review yet — which is every round that
-    # pushes a new commit, and every Copilot round, since a push never triggers
-    # one — and `pr-watch.sh` takes an empty baseline as "wait on any terminal
-    # review", which is exactly right there.
-    #
-    # Testing the VALUE for emptiness aborted on all of those, AFTER the summary
-    # was posted and the pass requested: the watch was never armed, and a retry
-    # posts the summary and requests the pass a second time.
+    # THE RECORD HAS TO BE THERE.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE BASELINE MAY LEGITIMATELY BE EMPTY, which is a different question.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     CLOSED_REC="$(printf '%s\n' "$POST_OUT" | sed -n '/^PR_ROUND_CLOSED /p' | tail -1)"
     [ -n "$CLOSED_REC" ] \
         || { echo "ABORT: the round reported no closing record; step 3 would watch against a stale baseline."; exit 1; }
-    # THE FIELD IS WHAT IS CHECKED FOR, not what is in it. A record that lost the
-    # field entirely is a malformed answer; a record whose field is empty is an
-    # answer.
+    # THE FIELD IS WHAT IS CHECKED FOR, not what is in it.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     case "$CLOSED_REC" in
         *' prior-review='*) ;;
         *) echo "ABORT: the closing record carries no baseline field; step 3 would watch against a stale one."; exit 1 ;;
     esac
-    # `prior-review=` IS LAST IN THE RECORD, so everything after it is the value —
-    # and an empty value is carried through rather than rejected.
+    # `prior-review=` IS LAST IN THE RECORD, so everything after it is the value.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     PRIOR_REVIEW="${CLOSED_REC##* prior-review=}"
 fi
 case "$ROUND_RC" in
