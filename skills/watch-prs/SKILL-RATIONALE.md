@@ -1642,14 +1642,14 @@ branch says nothing and returns 0 — a failed request indistinguishable from a
 posted one, which sends the driver into a wait for a review that was never asked
 for.
 
-## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose here.
+## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
 
-Two recipes lived in this file, doing the same job in different ORDERS, and the
+Two recipes lived in `SKILL.md`, doing the same job in different ORDERS, and the
 ordering is the whole content. Nothing executed either, and a reader had to choose
 which one to copy — which is how the two drifted apart.
 
-The script takes `$AUTO_REVIEW` and picks the order inside itself, so there is one
-recipe here and two orders there. Issue #26.
+There is one recipe in `SKILL.md` now, and the two orders are inside the script,
+where the suite reaches them. Issue #26.
 
 ## THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
 
@@ -1677,8 +1677,8 @@ for the same reason. #119.
 It was established in step 2 and the script refuses anything but `yes` or `no`, so
 the mode this PR is in picks the order INSIDE the script.
 
-The alternative was two recipes here and a reader deciding which to copy, which is
-how the two orderings drifted apart in the first place. A value assigned in your
+The alternative was two recipes in `SKILL.md` and a reader deciding which to copy,
+which is how the two orderings drifted apart in the first place. A value assigned in your
 shell without `export` also reaches a function and not a child process, so reading
 it from the environment would give the script a silent default — and the default
 answer is a round closed on a mode nobody chose.
