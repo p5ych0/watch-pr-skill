@@ -115,6 +115,33 @@ branch before a bare push is a guard over a call that can still go elsewhere —
 to any helper that posts, merges or deletes: if configuration or the working
 directory can redirect it, the redirect is the finding, not the missing guard.
 
+## Claims and their arguments in `SKILL.md`
+
+`SKILL.md`'s bash fences keep a one-line CLAIM beside the code and carry the
+ARGUMENT in `skills/watch-prs/SKILL-RATIONALE.md`, reached by a `# WHY:` pointer
+directly under the claim. The section heading IS the claim, character for
+character, and `test-pr-skill-contract.sh` proves the bijection: every claim has a
+section, every section has a claim, neither side repeats, the totals agree, and no
+section is a heading with nothing under it.
+
+**What the contract cannot see, and what to check by reading:**
+
+- **a merged claim that has lost a clause.** The bijection compares headings, so a
+  claim naming two invariants where its section argues three is well-formed to
+  everything mechanical. That happened three times in three consecutive pull
+  requests, and a reviewer caught each one. **One claim per invariant** is the
+  rule; pairs may stack above a single line of code, so nothing has to be merged
+  in order to be pointed at;
+- **a capitalised assertion with no `# WHY:` under it.** It reads as a claim whose
+  argument has gone missing. An instruction is written in sentence case; a short
+  argument may stay beside the code with no pointer at all. Which of the three a
+  line is, is a judgement, and it is yours.
+
+Do not ask for a check that decides these. A Markdown parser and then a set of
+`grep`s were both built for the adjacent question and both removed across a dozen
+rounds, and the authoring rules record the 2,200-line scanner this repository paid
+for once already.
+
 ## Reviewing a pull request
 
 ### You review. You do not implement.

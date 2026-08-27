@@ -480,13 +480,33 @@ WHO="$CODEX_BOT"
 # as a record, or an `@codex review` on the automatic path, is refused rather than
 # published. `$REQUEST_FILE` was created empty at setup and an empty body is
 # refused, so a write that does not happen stops the request.
-# THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
+# THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# ONE PROBE VALUE IS ENOUGH, and a second proves nothing the first does not.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if { ( PRIOR_REVIEW="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
                     && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
-    # THE REQUEST IS A SCRIPT, RUN AS A CONDITION, WITH ITS ANSWER IN A FILE AND THE CONTINUATION IN ITS SUCCESS ARM.
+    # THE REQUEST IS A SCRIPT.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE REQUEST RUNS AS A CONDITION.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE BODY NEVER BECOMES SHELL SOURCE, because an account can close a heredoc.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # AND THE FILE IS NOT WRITTEN FROM THIS SHELL, because `cat` and `printf` are names.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # NOTHING HERE IS AN ASSIGNMENT.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
         PRIOR_REVIEW="$(<"$PRIOR_FILE")"
@@ -1338,7 +1358,15 @@ before continuing into the Copilot phase.
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
 #
-# THE PHASE IS A FACT ON THE PR, THE CONTINUATION IS THE `then` BRANCH, AND THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
+# THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# READING IT IS A HELPER, because 112 lines here exited 0 on every refusal.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THERE IS NO STATUS VARIABLE; THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE CONTINUATION IS THE `then` BRANCH, and nothing follows it.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THE HELPER RUNS AS A CONDITION, which is what exempts it from `errexit`.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
     # THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
@@ -1384,7 +1412,17 @@ fi
 #
 # REVIEWERS is `both` unless the operator chose otherwise at the stop that closed
 # the Codex phase.
-# THE GATE IS A SCRIPT, RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
+# THE GATE IS A SCRIPT.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# RUN FROM THE REPOSITORY THIS SESSION STARTED IN.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AUTO_REVIEW IS PASSED AS AN ARGUMENT, not read from the environment.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the Codex stop.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# `codex-only` IS NOT A WEAKER GATE, and requires the head to BE the signed commit.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?

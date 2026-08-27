@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.0.71] — 2026-08-27
+
+- **A claim could not be pointed at without being merged, and merging lost an
+  invariant three times.** A `# WHY:` pointer had to sit IMMEDIATELY above a line
+  of code, so a claim above a helper's usage table could carry none — and the only
+  way to give it one was to fold it into the neighbouring claim. Each fold kept the
+  strongest clause and dropped the rest: *the continuation is the `then` branch*
+  twice, and the open stage's `revoke, prove, baseline, request` ordering once. The
+  section kept every argument each time, and the contract compares HEADINGS, so
+  nothing mechanical saw it. A reviewer found all three.
+
+  **The rule is removed rather than guarded.** Pairs may STACK above a single line
+  of code, and a usage table may sit between a pair and the code it belongs to; the
+  contract asks only that code follows before the fence closes, which still catches
+  a pair that annotates nothing. Nothing has to be merged in order to be pointed
+  at.
+
+  The four claims that had been merged under the old rule are split back into
+  twenty-three, one per invariant, each with its own section — the document's
+  pointer count goes from 51 to 70.
+
+  One of those sections was also WRONG, and splitting is what exposed it: the
+  merge gate's `(cd "$REPO_DIR" && …)` was argued as an identity defence, and it is
+  not one. `rb_identity` prefers the exported `REVIEW_BUS_REMOTE`, so the session
+  pin already settles which repository the gate acts on; the `cd` decides which
+  TREE `pr-merge-range.sh` computes its range over, which is a different thing and
+  the only thing it protects. `SKILL-RATIONALE.md` now
+  states which of a fence's three kinds of comment carries a pointer — an
+  instruction does not and is written in sentence case, a short argument in place
+  does not, and a claim does.
+
+  **And a section can no longer be emptied in silence.** The bijection compares
+  headings, so deleting a section's argument while leaving its heading passed every
+  check. One `awk`, no grammar: a heading with nothing but blank lines under it is
+  a failure. It does not ask whether an argument is still complete — that is a
+  judgement, it is the reviewer's, and both reviewer files now say so.
+
+  **Both new branches are staged, accept and reject.** `_wy_contract` only ever ran
+  on pairs that PASS, so every refusing branch was unexercised — which is how the
+  relaxed check shipped accepting the case it exists for. Six synthetic pairs now
+  put stacked claims and a usage table through it and expect acceptance, and a
+  pointer with no code after it, a pointer as a fence's last line, and an emptied
+  section — at the end of the document and again before another heading, because
+  the scan's two arms are reached by different documents — and expect refusal.
+  Reverting either half of the fence-close condition, or the empty scan's
+  heading-transition arm, turns one of them red. Closes #198.
+
 ## [2.0.70] — 2026-08-27
 
 - **Block 2's argument is out of `SKILL.md`.** *Request the review — Codex first*
