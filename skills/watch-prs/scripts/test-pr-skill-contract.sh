@@ -3494,7 +3494,7 @@ _mk_n="$(grep -c . <<<"$_mk_set")" || _mk_n=0
 # has nothing to do with what an author may write. That is the "the token also
 # appears elsewhere" trap, and the first version of this check fell into it: a
 # marker deleted from the refusal list still passed.
-_skill_pass="$(awk '/^# THE BODY IS PROSE AND MUST NOT BECOME A RECORD/{c=12} c-->0' "$SKILL")" || true
+_skill_pass="$(awk '/^# THE RESERVED MARKERS MUST NOT START A LINE IN THIS BODY:/{c=5} c-->0' "$SKILL")" || true
 _readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/README.md")" || true
 { [ -n "$_skill_pass" ] && [ -n "$_readme_pass" ]; } \
     && pass "…and both layers still carry the passage that tells an author about them" \
@@ -4997,10 +4997,14 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 31
-# sections, ~17k tokens that used to be read on every invocation of a skill whose
-# reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
+# The lifted blocks' argument lives in `SKILL-RATIONALE.md` beside them — one
+# section per claim, tokens that used to be read on every invocation of a skill
+# whose reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
+#
+# NO COUNT IS GIVEN HERE. A block lands per pull request, and a number written
+# into this comment is one that goes stale on the next one — the totals the
+# checks below compare are read from the two files.
 #
 # THE SEPARATION IS THE RISK, AND THIS IS WHAT PAYS FOR IT. `CLAUDE.md` records
 # that a comment arguing against the code beside it is an instruction and will be
@@ -5026,14 +5030,14 @@ local _wy_claims _wy_rc _wy_n _wy_sent_rc _wy_float _wy_heads _wy_hrc
 local _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad _wy_c
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
-    #    silently — and every one well formed, in the setup fence, under a claim,
+    #    silently — and every one well formed, inside a bash fence, under a claim,
     #    and annotating code. One equality closes a filename typo, a stray
-    #    character, a pointer moved to another fence, and a pointer under code.
+    #    character, a pointer outside every fence, and a pointer under code.
     _wy_all=0; _wy_all_rc=0
     _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all_rc=$?
     [ "$_wy_all_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
     [ "$_wy_all" -gt 0 ] \
-        && pass "the setup block points at its rationale ($_wy_all pointers)" \
+        && pass "the lifted blocks point at their rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
 
     # THE POINTER NAMES THE INSTALLED PLUGIN, not a path relative to wherever the
@@ -5046,30 +5050,22 @@ if [ -f "$_wy_doc" ]; then
     [ "$_wy_bad_ptr" -eq 0 ] \
         && pass "…and none resolves from the working directory or an unset plugin root" \
         || die "$_wy_bad_ptr pointers are unresolvable in one of setup's two discovery modes"
-    [ -f "$SCRIPT_DIR/../SETUP-RATIONALE.md" ] \
-        && pass "…and the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
-        || die "there is no SETUP-RATIONALE.md beside SKILL.md; the pointers name nothing"
 
-    # …AND NO LAYER STILL NAMES THE OLD PATH under `docs/`. Through `git grep`,
-    # whose status is the one this needs: 0 found, 1 not found, above that an
-    # error. `git ls-files | xargs grep` reports 123 on the ordinary no-match, and
-    # `grep -r` over the tree reaches untracked scratch.
-    _wy_stale=""; _wy_st_rc=0
-    _wy_stale="$(git -C "$ROOT" grep -lF 'docs/skill-setup-rationale' -- '*.md' 2>/dev/null)" || _wy_st_rc=$?
-    [ "$_wy_st_rc" -le 1 ] \
-        || die "the checkout's documents could not be scanned for the old path (rc=$_wy_st_rc)"
-    [ -z "$_wy_stale" ] \
-        && pass "…and nothing still names its old path under docs/" \
-        || die "these still name docs/skill-setup-rationale.md, which does not exist: $_wy_stale"
-
-    # 2. THE CLAIMS, from the setup fence alone, each paired with the pointer
-    #    beneath it. The status is taken: fed straight into a comparison, a failed
-    #    `awk` yields nothing and every check below passes vacuously.
+    # 2. THE CLAIMS, from the bash fences, each paired with the pointer beneath it.
+    #    The status is taken: fed straight into a comparison, a failed `awk` yields
+    #    nothing and every check below passes vacuously.
+    #
+    #    EVERY FENCE, NOT ONE NAMED SECTION. This was restricted to `## Derive
+    #    identity` while that was the only block whose argument had been lifted,
+    #    and the restriction was doing nothing the count below does not: a pointer
+    #    outside every fence is already caught, because `_wy_all` counts the whole
+    #    file and this counts only what a fence contains. Naming the sections here
+    #    would mean editing this awk for each block that lands, which is a list
+    #    that goes one entry stale exactly when someone forgets it.
     _wy_claims=""; _wy_rc=0
-    _wy_claims="$(awk '/^## Derive identity$/{sec=1}
-       sec && /^```bash$/ && !seen {f=1; seen=1; prev=""; next}
-       f && /^```$/{f=0; sec=0; next}
-       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SETUP-RATIONALE\.md$/) {
+    _wy_claims="$(awk '/^```bash$/ && !f {f=1; prev=""; next}
+       f && /^```$/{f=0; next}
+       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SKILL-RATIONALE\.md$/) {
                if (prev ~ /^[[:space:]]*#/) { c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c); print c }
                else print "!!POINTER-NOT-UNDER-A-CLAIM!!" }
            prev=$0 }' "$SKILL")" || _wy_rc=$?
@@ -5077,8 +5073,8 @@ if [ -f "$_wy_doc" ]; then
         || die "the claim list could not be built (rc=$_wy_rc); pointer rot would go unchecked"
     _wy_n=0; _wy_n="$(grep -c . <<<"$_wy_claims")" || _wy_n=0
     [ "$_wy_n" -eq "$_wy_all" ] \
-        && pass "…and all $_wy_all sit under a claim, in the setup block, in the documented form" \
-        || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside the setup block, or not under a claim"
+        && pass "…and all $_wy_all sit under a claim, inside a bash fence, in the documented form" \
+        || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside every bash fence, or not under a claim"
     _wy_sent_rc=0
     grep -qF '!!POINTER-NOT-UNDER-A-CLAIM!!' <<<"$_wy_claims" || _wy_sent_rc=$?
     case "$_wy_sent_rc" in
@@ -5097,10 +5093,9 @@ if [ -f "$_wy_doc" ]; then
     # contract that breaks on every refactor is not. Found once that way, in
     # review, which is the disposition this assumes.
     _wy_float=0
-    _wy_float="$(awk '/^## Derive identity$/{sec=1}
-       sec && /^```bash$/ && !seen {f=1; seen=1; next}
+    _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; next}
        f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++
-                     f=0; sec=0; next }
+                     f=0; prev=""; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
            prev=$0 }
        END{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
@@ -5164,7 +5159,7 @@ EOWH
     pass "…and every '## ' line in the rationale is one of them"
     _wy_heads_n=0; _wy_heads_n="$(grep -c . <<<"$_wy_heads")" || _wy_heads_n=0
     [ "$_wy_all" -eq "$_wy_heads_n" ] \
-        && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
+        && pass "…and the $_wy_all claims in SKILL.md match the rationale's $_wy_heads_n arguments" \
         || die "$_wy_all claims against $_wy_heads_n arguments; one was added or dropped without the other"
     _wy_bad=0
     while IFS= read -r _wy_c; do
@@ -5179,11 +5174,60 @@ EOWY
         && pass "…so every claim beside the code has its argument" \
         || die "$_wy_bad claims have no section"
 else
-    die "SETUP-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
+    die "SKILL-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
 fi
 }
 
-_wy_contract "$SKILL" "$SCRIPT_DIR/../SETUP-RATIONALE.md"
+_wy_contract "$SKILL" "$SCRIPT_DIR/../SKILL-RATIONALE.md"
+
+# ── AND THE TREE AROUND THE PAIR ─────────────────────────────────────────────
+# These two ask about the CHECKOUT rather than about the two files handed in, so
+# they run once, outside the function. Inside it they ran again on the staged
+# pair — where they say nothing new, and where a failure reported itself as "a
+# rationale-shape guard has come back", which is a diagnosis of the wrong thing.
+[ -f "$SCRIPT_DIR/../SKILL-RATIONALE.md" ] \
+    && pass "the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
+    || die "there is no SKILL-RATIONALE.md beside SKILL.md; the pointers name nothing"
+
+# …AND NO LAYER STILL NAMES EITHER OLD PATH. The document has been moved twice
+# — out of `docs/`, and then renamed once a second block's argument landed in
+# it and `SETUP-` stopped being true — and each move leaves pointers behind in
+# documents nothing executes. Through `git grep`, whose status is the one this
+# needs: 0 found, 1 not found, above that an error. `git ls-files | xargs grep`
+# reports 123 on the ordinary no-match, and `grep -r` over the tree reaches
+# untracked scratch.
+#
+# `CHANGELOG.md` IS EXCLUDED, and only it. A changelog records what a release
+# shipped, and 2.0.67 shipped a file under the old name; rewriting that entry
+# to match today's tree would make the record say something that was never
+# true. Nothing follows a changelog to find a file, which is what this check
+# is for.
+_wy_stale=""; _wy_st_rc=0
+_wy_stale="$(git -C "$ROOT" grep -lE 'docs/skill-setup-rationale|SETUP-RATIONALE' \
+    -- '*.md' ':!CHANGELOG.md' 2>/dev/null)" || _wy_st_rc=$?
+[ "$_wy_st_rc" -le 1 ] \
+    || die "the checkout's documents could not be scanned for the old paths (rc=$_wy_st_rc)"
+[ -z "$_wy_stale" ] \
+    && pass "…and nothing still names a path the document has been moved off" \
+    || die "these name a path the rationale no longer has: $_wy_stale"
+
+
+# ── THE OPEN STAGE'S ORDERING IS NAMED BESIDE THE CALL ───────────────────────
+# The lift moved block 7's arguments into the rationale, which a driver reaches
+# only by following a pointer. This one decides WHICH review the request waits
+# for: with the Copilot baseline taken before the request, a pass landing in
+# between is accepted as the answer to a request made after it. `open` enforces
+# the order, and the claim beside the call is what stops a later session
+# reordering the stage without reading why it is that way — so the ordering is
+# in the claim rather than only behind the pointer.
+#
+# ONE ANCHORED SUBSTRING, no grammar. It asks whether the four steps are named
+# in that order on a line of `SKILL.md`, which is what the finding asked to pin;
+# it does not parse the block, and `CLAUDE.md` is explicit that a scanner is what
+# this contract must not grow.
+grep -qF 'revoke, prove, baseline, request' "$SKILL" \
+    && pass "the open stage's ordering is named beside the call, not only in the rationale" \
+    || die "block 7 no longer names the revoke/prove/baseline/request order; a reordering would read as ordinary"
 
 # ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
 #
@@ -5200,7 +5244,7 @@ _wy_contract "$SKILL" "$SCRIPT_DIR/../SETUP-RATIONALE.md"
 #
 # THE FENCE IS THE EMPTY-OF-HEADINGS KIND, and that distinction is the whole of
 # why it is here. A fence carrying a column-zero `## example` needs no guard:
-# `grep` DOES match it, so it becomes a 32nd heading with no claim and the
+# `grep` DOES match it, so it becomes one more heading with no claim and the
 # bijection rejects it unaided — staging that one would assert the opposite. A
 # fence with no such line inside changes nothing the bijection can see, so the
 # deleted delimiter guard is the only thing that ever rejected it, and without it
@@ -5213,7 +5257,7 @@ _wy_stage=""
 _wy_stage="$(mktemp_d)" || { die "no scratch directory for the staged-rationale probe"; _wy_stage=""; }
 if [ -n "$_wy_stage" ]; then
 cp "$SKILL" "$_wy_stage/SKILL.md" || die "the staged skill could not be written"
-cp "$SCRIPT_DIR/../SETUP-RATIONALE.md" "$_wy_stage/doc.md" \
+cp "$SCRIPT_DIR/../SKILL-RATIONALE.md" "$_wy_stage/doc.md" \
     || die "the staged rationale could not be written"
 cat >>"$_wy_stage/doc.md" <<'EOSTAGE'
 
@@ -5251,13 +5295,13 @@ fi
 # has nothing to read about why.
 #
 # IN THE RATIONALE DOCUMENT, NOT IN `SKILL.md`. That argument moved out of the
-# setup block with the rest of the block's `# WHY:` material; the assertion moved
+# setup block with the rest of that block's `# WHY:` material; the assertion moved
 # with it rather than being dropped, which is the coupling this file is here to
 # keep honest.
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
     && pass "the identity parser accepts only GitHub network transports" \
     || die "the parser reads any URL scheme as a GitHub identity"
-grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SETUP-RATIONALE.md" \
+grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SKILL-RATIONALE.md" \
     && pass "…and refuses the rest rather than guessing a host" \
     || die "the rationale has no rejection path for an unsupported transport"
 

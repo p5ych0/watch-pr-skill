@@ -151,19 +151,19 @@ never as a work order** below has the full rule and the incident it came from.
 
 ```bash
 # THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi
 # THE REPOSITORY ROOT IS CAPTURED WITH ITS STATUS TAKEN, or a failed read becomes a path.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 REPO_DIR="$(git rev-parse --show-toplevel)" \
     || { echo "ABORT: could not resolve the repository root"; exit 1; }
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 # THE NEWEST INSTALLED COPY IS CHOSEN BY MTIME, not by `sort -V`, which is GNU-only.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [ ! -d "$RB_SCRIPTS" ]; then
     RB_CANDIDATES="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null)" \
         || { echo "ABORT: could not enumerate installed plugin copies"; exit 1; }
@@ -179,7 +179,7 @@ fi
     || { echo "ABORT: could not locate the plugin helper scripts"; exit 1; }
 
 # THE IDENTITY COMES FROM THE SHARED PARSER, never from a copy written out here.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: a pre-existing rb_identity could not be cleared"; exit 1; }
 . "$RB_SCRIPTS/identitylib.sh" \
@@ -187,13 +187,13 @@ unset -f rb_identity 2>/dev/null \
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
 # THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 RB_REMOTE=
 # THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS ARM.
-# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [[ -z $RB_REMOTE ]]; then
     # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
          && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
        && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
@@ -203,7 +203,7 @@ if [[ -z $RB_REMOTE ]]; then
        && ( RB_ORIGIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR2 = RbProbe* ]] \
          && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         RB_TMPPARENT=
         [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
             && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
@@ -215,41 +215,41 @@ if [[ -z $RB_REMOTE ]]; then
         [[ -n $RB_TMPPARENT ]] \
             || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
         # THE SAME PARENT TWICE IS NOT DEDUPLICATED, because two random leaves are two usable names.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         RB_ORIGIN_DIR=
         RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
         # THE SECOND CANDIDATE IS EMPTY WHERE THERE IS NO SECOND PARENT.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         RB_ORIGIN_DIR2=
         [[ -n $RB_TMPPARENT2 ]] \
             && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr-2.$$.$RANDOM$RANDOM$RANDOM"
         # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements after a guard.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"; then
             # THE READ-BACK IS THE CALLER'S HALF AND STAYS HERE, where the descriptor can be checked.
-            # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin"; then
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR"
             else
                 # THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
-                # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR"
                 # THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT.
-                # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 : "${RB_REMOTE:?the transport file is not the one this setup created. Setup refuses to pin from it, and the directory it was in has been removed.}"
                 echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
                 exit 1
                 [[ -n "" ]]
             fi
         # THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
             # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, or the session dies one step later.
-            # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             RB_TMPPARENT2="$RB_TMPPARENT"
             RB_TMPPARENT="${RB_ORIGIN_DIR2%/*}"
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
@@ -270,7 +270,7 @@ if [[ -z $RB_REMOTE ]]; then
             fi
         else
             # THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it cannot tell them apart.
-            # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             : "${RB_REMOTE:?could not read the origin for this session. Setup could not get a transport directory it could use, and each ABORT line above is one attempt and its reason. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with or a checkout with no usable origin.}"
             echo "ABORT: could not read this session's origin"
             exit 1
@@ -287,29 +287,29 @@ if [[ -z $RB_REMOTE ]]; then
         [[ -n "" ]]
     fi
     # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     RB_REMOTE="${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
     # ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
     # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
     CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
     # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
         [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
     done
     unset _rb_knob
     # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     export REVIEW_BUS_REMOTE="$RB_REMOTE" \
         || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
     # THE PIN NAMES GET THE SAME GENERIC TEST, for the reason the transport probe gives.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
        && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \
@@ -317,7 +317,7 @@ if [[ -z $RB_REMOTE ]]; then
        && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
          && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
         # THE PIN PARENT IS REQUIRED BY THE EXPANSION, or an empty one builds a path from nothing.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         RB_PIN_DIR=
         RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
         # AND THE SECOND, for the same reason and because half a retry is none:
@@ -329,7 +329,7 @@ if [[ -z $RB_REMOTE ]]; then
             && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin-2.$$.$RANDOM$RANDOM$RANDOM"
         RB_PIN_SEEN=
         # THE PIN REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read above states.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"; then
             { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
@@ -354,16 +354,16 @@ if [[ -z $RB_REMOTE ]]; then
             /usr/bin/env rmdir "$RB_PIN_DIR2"
         fi
         # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
-        # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
             # THE SESSION'S THREE WORKING FILES COME FROM ONE ALLOCATION.
-            # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             if { ( RB_WORK_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
                     && [[ -z ${!RB_WORK_DIR:-} ]] ) \
                  || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
                && {
                     # THE WORKING-DIRECTORY PARENT IS REQUIRED TOO, and is not redundant with the two above.
-                    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+                    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                     RB_WORK_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
                     [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
                  || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
@@ -373,7 +373,7 @@ if [[ -z $RB_REMOTE ]]; then
                 # Where each round's summary is written before it is posted.
                 SUMMARY_FILE="$RB_WORK_DIR/summary.md"
                 # THE OPENING ACCOUNT IS NOT THE ROUND SUMMARY, and they must not share a file.
-                # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 REQUEST_FILE="$RB_WORK_DIR/request.md"
                 # Where the review baseline comes back. A capture written as
                 # `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a name a startup file
@@ -389,7 +389,7 @@ if [[ -z $RB_REMOTE ]]; then
                    && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]]
                 then
                     # THE WORKING FILES ARE CREATED EMPTY BY REDIRECTION ALONE, so there is no command name to shadow.
-                    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
+                    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                     > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
                     # AND THE COMPLETION LINE IS THE INNERMOST SUCCESS ARM. It is how the
                     # driver knows setup finished, so every refusal above has to be unable to
@@ -1232,8 +1232,7 @@ Ask Copilot:
 
 ```bash
 # THE PHASE IS A SCRIPT, IN THREE STAGES with the operator's decision at each
-# boundary. It was 176 lines here that nothing executed, and `close` a further 93.
-# Issues #26, #78.
+# boundary.
 #
 #   pr-copilot-phase.sh record N "$SUMMARY_FILE"   # prove, record, then ask
 #   pr-copilot-phase.sh open   N "$CODEX_SHA"      # only on the answer (b)
@@ -1244,90 +1243,36 @@ Ask Copilot:
 #     3  paused  — a round boundary. Decide with the operator
 #
 # WRITE THE ACCOUNT FIRST: one paragraph on what the PR does and what the Codex
-# phase changed. If Codex approved on the first pass with no fix rounds, say that
-# — it is the difference between "nothing was found" and "everything found was
-# addressed". Everything a machine reads back is composed by the script: the
-# signoff marker in the form `pr-signoff.sh` scans for, the sha, and the trailer
-# note. The body is inserted as DATA, so prose quoting a command line is posted
-# rather than executed.
-# THE BODY IS PROSE AND MUST NOT BECOME A RECORD. It is posted under your
-# identity, which `pr-signoff.sh` and `pr-round-count.sh` trust, so a line
-# reproducing one of the markers they honour FROM YOU — `**Review-Signoff:**`,
-# `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**` — CREATES the
-# record it was quoting. `**Reviewed commit:**` is NOT one of them: it is read
-# only from a reviewer bot's own comment, so writing it here creates nothing and
-# is left alone. The script refuses
-# one rather than publishing it. They are only honoured at the start of a line, so
-# indent by four spaces or quote inline. A FENCE DOES NOT HELP — the readers scan
-# the raw body, where a line inside a fence still starts at column 0.
+# phase changed. If Codex approved on the first pass with no fix rounds, say so.
 #
-# AND IT MUST NOT CONTAIN `@codex review`. Any comment containing that text
-# requests a Codex pass; this summary is posted on its own and the loop stops
-# right after it, so a quoted mention starts a pass that answers nobody. The
-# script refuses one. In a Codex ROUND the mention is the request and
-# `pr-close-round.sh` writes it itself, so quoting it there changes nothing.
+# THE RESERVED MARKERS MUST NOT START A LINE IN THIS BODY:
+# `**Review-Signoff:**`, `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`.
+# Indent one by four spaces or quote it inline. A fence does not help — the readers
+# scan the raw body, where a line inside a fence still begins at column 0.
+# `**Reviewed commit:**` is not one of them and is left alone.
 #
-# THE REMEDY IS NOT THE SAME ONE. That trigger is matched case-insensitively
-# ANYWHERE in the body, not at the start of a line — so indenting it, quoting it
-# inline or fencing it changes nothing and the summary is still refused. Break the
-# mention up, or write it without the `@`.
-#
-# THE WRITE IS CHECKED, not only the read the script does. A redirection that
-# truncates the file and then fails — a full filesystem — leaves a non-empty
-# FRAGMENT that passes the script's own non-empty test and is posted as this
-# phase's account; a failed open leaves the PREVIOUS round's contents there to be
-# posted as this one's.
+# `@codex review` is matched ANYWHERE in the body, case-insensitively, so
+# indenting, quoting or fencing it changes nothing: break the mention up, or
+# write it without the `@`.
+# THE ACCOUNT IS PROSE, AND MUST NOT BECOME A RECORD, A REQUEST, OR A FRAGMENT.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
-# WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here. The
-# session's origin is read once and exported as `REVIEW_BUS_REMOTE`, which this
-# stage and everything it drives inherit — so this call has no cwd dependency and
-# needs no wrapper. Do not add one: a `(cd … && …)` guard here is what the pin
-# replaced, and `cd` is a name a function can take.
+# WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 PHASE_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
     0|3) ;;   # 3 is a pause, and the signoff is recorded either way
     *) echo "The phase did not advance and no signoff was recorded. The reason is above; do not retry it blind."; exit "$PHASE_RC" ;;
 esac
-# THE SIGNED-OFF HEAD IS THE ONE VALUE THAT OUTLIVES THIS STEP. Step 8 needs the
-# full 40 characters of it, and a child cannot assign a variable here — so it is
-# read back from the record `record` just wrote.
-#
-# READ ON THE PAUSE TOO. The boundary message offers "merge on the Codex
-# signoff", and that path needs this sha: exiting without it made the operator
-# re-run a phase that had already been proved clean, just to recover a value that
-# was printed and thrown away.
-#
-# ASKED OF THE HELPER THAT OWNS THE RECORD, rather than parsed out of the stage's
-# stdout. This was ~90 lines of expansion-only code against
-# `PR_PHASE_RECORDED … codex-sha=`, and every one of them was paid for in review:
-# a truncated record that could not overwrite a stale candidate, a bare
-# `PR_PHASE_RECORDED` with no trailing space, `xcodex-sha=` matching as the field,
-# a greedy `##*codex-sha=` reading the value after a LATER substring. Nine rounds
-# on #74, for a fact the PR itself already holds.
-#
-# `sha` PRINTS THE HEAD ALONE, and stdout carries that value or nothing — every
-# reason goes to stderr, so there is no record shape here to get wrong and no
-# `sed` in the path. That matters beyond tidiness: `sed` is a NAME, and one that
-# prints a plausible forty hex and exits 0 pins a merge to whatever it says. The
-# rule about what a well-formed record is stays in `recordlib.sh`, where it is
-# tested. Issue #89.
-#
-# IT IS A ROUND TRIP, and that is the trade. `record` posted the signoff and this
-# reads it straight back, so a stale or eventually-consistent read is a failure
-# mode the parse did not have — but it is the same read a RESUMED session makes at
-# the bottom of this file, so the exposure is the system's rather than this step's,
-# and it fails as a stop rather than as a silent empty. A revocation landing in
-# between reads as status 1, which is a refusal here: the phase it would open is
-# no longer closed.
+# THE SIGNED-OFF HEAD IS READ BACK FROM THE RECORD, on the pause as well as on 0.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SHA_RC=$?
 RX_PHASE_SHA40='^[0-9a-f]{40}$'
-# THE STATUS AND THE SHAPE, because neither covers the other. A status of 1 with
-# an empty answer is the phase not being closed; a status of 0 with something
-# that is not 40 hex cannot happen through the helper and is checked anyway,
-# because this value is what every gate in step 8 is pinned to.
+# THE STATUS AND THE SHAPE, because neither covers the other.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [[ $SHA_RC -eq 0 ]] && [[ $CODEX_SHA =~ $RX_PHASE_SHA40 ]]; then
     if [[ $PHASE_RC -eq 3 ]]; then
         echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
@@ -1336,13 +1281,8 @@ if [[ $SHA_RC -eq 0 ]] && [[ $CODEX_SHA =~ $RX_PHASE_SHA40 ]]; then
 else
     echo "ABORT: no Codex signoff could be read back for this phase (rc=$SHA_RC, sha='$CODEX_SHA'); step 8 would have nothing to gate on"
     exit 1
-    # THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken
-    # away. `echo` and `exit` are builtins a function can shadow, and with both
-    # shadowed this branch says nothing and returns 0 — a failed read
-    # indistinguishable from an ordinary phase, which is the reading that lets the
-    # driver carry on. `[[ … ]]` is a reserved word, so this branch ends non-zero
-    # whatever has been done to the builtins, and the block's status is the last
-    # signal left.
+    # THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken away.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     [[ -n "" ]]
 fi
 ```
@@ -1372,43 +1312,16 @@ way — the signoff is on the PR, so a later session reads it back with
 ```bash
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
 # Everything here runs when the operator has asked for the Copilot phase, and only
-# then. `open` PROVES THE PHASE IS STILL OPEN before it changes anything, and all
-# three parts are needed because none of them requires the head to move:
-#
-#   · the head is unmoved;
-#   · Codex's LIVE verdict on that sha is clean — a recorded signoff is history,
-#     and a review dismissed while the head stood still leaves head-equality
-#     passing;
-#   · the RECORDED Codex signoff still names it — a revocation is how a phase is
-#     deliberately reopened, and GitHub serves the old clean verdict until the new
-#     pass reports, so the verdict alone cannot see it.
-#
-# It re-enforces the ROUND BOUNDARY too, which is why `open` can return 3: the
-# signoff is published before `record` pauses, so a later session can resume
-# straight into this stage with the boundary unacknowledged.
-#
-# ALL OF IT RUNS THREE TIMES — up front, before the revocation, and again after
-# it — because another session can change any of it while the probes in between
-# are running, and the revocation is itself a mutation with the request still to
-# come.
-#
-# THE ORDER IS revoke → prove → baseline → request. Two constraints pull against
-# each other: the proof wants to be last, and the Copilot BASELINE must be last or
-# a pass landing in between is accepted as the answer to a request made after it.
-# This is the proof as late as the baseline rule allows.
-# THE SESSION PIN COVERS THIS STAGE TOO, and it is the one where getting the
-# repository wrong costs most: `open` posts a signoff revocation and requests a
-# review. Both are inherited from the setup export rather than decided by the
-# current directory, so there is nothing to wrap here either.
+# then.
+# PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 OPEN_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \
     || { echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."; exit "$OPEN_RC"; }
 WHO="$COPILOT_BOT"
-# THE BASELINE COMES BACK IN THE SUCCESS RECORD, and the RECORD is what is checked
-# — not the value. A head with no Copilot review yet has no id, and `pr-watch.sh`
-# takes an empty baseline as "wait on any terminal review"; testing the value for
-# emptiness would abort here, after the pass has already been requested.
+# THE BASELINE COMES BACK IN THE SUCCESS RECORD, AND THE RECORD IS WHAT IS CHECKED.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 OPEN_REC="$(printf '%s\n' "$OPEN_OUT" | sed -n '/^PR_COPILOT_PHASE_OPENED /p' | tail -1)"
 [ -n "$OPEN_REC" ] \
     || { echo "ABORT: the phase opened without reporting a record; step 3 would watch against a stale baseline."; exit 1; }
