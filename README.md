@@ -341,8 +341,9 @@ Then:
    **`pr-close-round.sh`**, which holds both orderings so neither has to be
    remembered, and runs in **two stages with your thread replies between them**:
 
-   - `gate <PR> <reviewer> <summary-file> <auto-review>` pushes and proves the
-     head is green, and reports it as `head=…`. **Run it from a checkout on that
+   - `gate <PR> <reviewer> <summary-file> <auto-review> <head-file>` pushes and
+     proves the head is green, reports it as `head=…`, and writes it into
+     `<head-file>` for the other stage. **Run it from a checkout on that
      PR's branch**: it names the ref it may write, proves every push URL of
      `origin` is the repository the session is pinned to, and refuses — pushing
      nothing — if any of that does not hold.
@@ -354,8 +355,14 @@ Then:
      nothing. A fork PR is outside what this loop drives, and where `origin`
      pushes is your configuration to settle, not the loop's;
    - **then** reply to each thread with what changed, react 👍/👎, and resolve it;
-   - `post <PR> <reviewer> <summary-file> <auto-review> <head>` re-proves the head
-     has not moved, posts the summary and requests the next pass.
+   - `post <PR> <reviewer> <summary-file> <auto-review> <head-file>` reads the head
+     back out of the **same file** `gate` was given, re-proves it has not moved,
+     posts the summary and requests the next pass.
+
+     The head travels in a file rather than through a variable because the value
+     is produced *after* `gate` has pushed, and a name the shell has already made
+     readonly cannot be assigned to — silently, since an assignment's status
+     cannot be taken. Passing the head itself in that position is refused by name.
 
    The threads are answered **after** the gate because a resolve cannot be taken
    back: resolving first means a round that then fails to push, or pushes red, has

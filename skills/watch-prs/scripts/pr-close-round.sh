@@ -2,8 +2,12 @@
 # Close a review round: push the fixes, prove the head is green, post the summary
 # and request the next pass.
 #
-#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no>
-#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <gated-head>
+#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no> <head-file>
+#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file>
+#
+# BOTH STAGES TAKE THE SAME <head-file>: `gate` writes the head it proved into it,
+# `post` reads it back. The head itself in that position is the pre-#202 form and
+# is refused by name.
 #
 #   0  gated/closed — `gate`: the head is pushed and green, and the threads may
 #                     now be answered. `post`: the summary is posted and the next

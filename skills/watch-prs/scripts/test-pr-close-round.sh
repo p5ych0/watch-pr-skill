@@ -827,11 +827,19 @@ world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
 # AND THE GATE WRITES WHAT IT REPORTS. The record and the file are two claims, and
 # `post` reads the file — so the fixture proves they agree rather than trusting
 # the record it can see.
+# COMPARED AS WHOLE STRINGS, WITH BOTH PRODUCERS' STATUSES TAKEN. `grep -qF` tests
+# CONTAINMENT, so a `report_gated` that wrote a truncated prefix while reporting
+# the full OID would satisfy it; and an inline `$(cat …)` that fails yields an
+# empty pattern, which matches everything. Both were in the first version of this
+# case.
 world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
-{ [ "${got%%|*}" = 0 ] \
-  && grep -qF "$(cat "$HEADF")" <<<"$(sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' <<<"${got#*|}")"; } \
-    && pass "…and the head the gate reports is the head it wrote to the file" \
-    || die "the gate's record and its head file disagree: record='${got#*|}' file='$(cat "$HEADF")'"
+_hf_rec=""; _hf_file=""; _hf_rc=0
+_hf_rec="$(sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p' <<<"${got#*|}")" || _hf_rc=1
+_hf_file="$(cat "$HEADF")" || _hf_rc=1
+{ [ "${got%%|*}" = 0 ] && [ "$_hf_rc" = 0 ] \
+  && [ -n "$_hf_rec" ] && [ "$_hf_rec" = "$_hf_file" ]; } \
+    && pass "…and the head the gate reports is exactly the head it wrote to the file" \
+    || die "the gate's record and its head file disagree: record='$_hf_rec' file='$_hf_file' rc='${got%%|*}/$_hf_rc'"
 
 # ── A HEAD WITH NO REVIEW YET REPORTS AN EMPTY BASELINE, AND THAT IS AN ANSWER ─
 # `pr-review-state.sh review-id` returns nothing when the current head has no

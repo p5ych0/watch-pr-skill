@@ -30,7 +30,9 @@
 
   `$HEAD_FILE` is the fourth working file, created empty at setup beside the
   summary, the opening account and the review baseline — so a `post` run before any
-  `gate` finds nothing rather than something stale. Closes #202.
+  `gate` finds nothing rather than something stale. The contract now exercises all
+  four names under a hostile shell, which the three that predate this change had
+  never been. Closes #202.
 
 ## [2.0.72] — 2026-08-27
 

@@ -3122,6 +3122,37 @@ _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" 'RB_WORK_DIR=' TMPDIR="$_rb_pb/paren
 grep -qF 'OWNER=acme' <<<"$_rb_out" \
     && pass "…and an ordinary shell reaches the completion line, so the two above are not refusing everything" \
     || die "the RB_WORK_DIR allocation refused an ordinary shell: '$_rb_out'"
+# AND EACH WORKING FILE IS PROVEN THE SAME WAY. The four paths are derived from
+# `$RB_WORK_DIR` by a literal suffix and read back against that literal, which is
+# the only thing standing between a readonly or transforming name and a helper
+# writing through a path this session did not choose. The check above covers the
+# directory; this covers the names hung off it, and it is executed rather than
+# grepped because the abort it reaches is the whole point.
+#
+# `$HEAD_FILE` IS WHY THIS EXISTS. It was added in #202 as the fourth of them, and
+# the coverage enumerated the other three — so the name the gated head now travels
+# through was the one nothing exercised.
+_rb_wf="SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE"
+for _rb_wn in $_rb_wf; do
+    _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "readonly $_rb_wn=/tmp/rb-seeded" \
+        TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
+    # EITHER OUTCOME BY NAME, because there are two routes and the invariant is
+    # what they share. Under `errexit` a failed readonly assignment on a line of
+    # its own ENDS the shell where it stands, with bash's own complaint and before
+    # the read-back that would have named the file — so the named refusal is
+    # reached only where the shell carries on. What must hold in both is that
+    # setup does not complete, which the absence check below is.
+    case "$_rb_out" in
+        *"ABORT: one of SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE and HEAD_FILE is readonly"*)
+            pass "…and a readonly \$$_rb_wn reaches the working-file refusal" ;;
+        *"$_rb_wn: readonly variable"*)
+            pass "…and a readonly \$$_rb_wn ends setup at the assignment itself" ;;
+        *)  die "a readonly $_rb_wn gave neither refusal: '$_rb_out'" ;;
+    esac
+    grep -qF 'OWNER=acme' <<<"$_rb_out" \
+        && die "…but setup still reported completion with $_rb_wn readonly: '$_rb_out'" \
+        || pass "…and setup's completion line is not reached ($_rb_wn)"
+done
 rm -rf "$_rb_pb" 2>/dev/null || true
 fi
 # AND THE REQUEST IS THE PROBES' SUCCESS ARM, not a statement after them. Written
@@ -3727,7 +3758,7 @@ fi
 grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
     && pass "…created with mkdir as the exclusion, at mode 700" \
     || die "the working directory is not created with mkdir -m 700 by path"
-for _rb_f in SUMMARY_FILE REQUEST_FILE PRIOR_FILE; do
+for _rb_f in SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
     grep -q "^[[:space:]]*$_rb_f=\"\$RB_WORK_DIR/" "$SKILL" \
         && pass "…and \$$_rb_f is derived from it by a literal suffix" \
         || die "\$$_rb_f is not derived from the single working directory"
