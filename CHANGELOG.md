@@ -9,7 +9,7 @@
 
   That commentary is the argument for why setup has the shape it has — each
   paragraph a defect that was shipped, found and paid for. It now lives in
-  `SETUP-RATIONALE.md` beside it, thirty sections, reached from the block by
+  `SETUP-RATIONALE.md` beside it, thirty-one sections, reached from the block by
   a `# WHY:` line naming `$RB_SCRIPTS/../SETUP-RATIONALE.md`. Not a bare relative
   path, because the driving shell stays in the project under review and `docs/…`
   there names that project's documentation; and not `$CLAUDE_PLUGIN_ROOT`, which
@@ -36,6 +36,16 @@
   rot that goes unnoticed, because nothing reading the skill would reach it — or if
   a pointer drifts off the claim it belongs to. One assertion moved with the prose
   it was reading rather than being dropped.
+
+  What it does **not** check is the rationale's own Markdown shape. A parser and
+  then a set of `grep`s forbidding the constructs that make a `grep` lie were both
+  built and both removed: each attracted the next construct without converging, and
+  `CLAUDE.md` records what a scanner of that kind cost this repository once already.
+  So `SETUP-RATIONALE.md` asks for plain prose and four-space-indented transcripts
+  rather than enumerating what is forbidden, and the contract is the bijection and
+  nothing else — exact string comparison, no grammar anywhere. What that gives up
+  is a document edited so a heading is hidden or faked, which is visible in a diff
+  as the mangling it is, and is not the drift the split risks.
 
   Closes #192 for this block. The remaining blocks hold ~7k tokens between them and
   are not touched here.

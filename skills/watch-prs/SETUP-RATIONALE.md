@@ -35,7 +35,7 @@ so the trace of `cmd` is assigned to `X` along with its output. Measured:
     hello]
 
 Every substitution in this block is affected — the repository root, the plugin
-discovery, the `mktemp`, the `type -t` probe — so it is one property of the
+discovery, the `type -t` probe — so it is one property of the
 block rather than a defect in any line. The validations below then reject the
 corrupted values and setup aborts, which fails closed but ends a session that
 had nothing wrong with it. Issue #92.
@@ -196,10 +196,17 @@ leaving it to be discovered.
 
 THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 
-Same rule as every probe here: the status is taken. This path is handed to
-`pr-merge-range.sh`, which inspects history in it to decide whether every commit
-since the reviewed SHA is a review fix — so a directory retained from a failed
-probe is a merge decision made about the wrong tree.
+`identitylib.sh` is the ONE definition of which repository this checkout is, and
+it lives in `$RB_SCRIPTS`. Setup cannot source it — cannot answer the question
+every later stage is addressed by — until that directory is known, so the
+discovery has to come before the identity rather than after it. `pr-origin.sh`,
+which reads origin where this shell's names cannot reach, is in the same
+directory and has the same ordering.
+
+That is also why the value is derived from `$CLAUDE_PLUGIN_ROOT` and validated
+rather than assumed: everything below it either sources a library from here or
+executes one, so a wrong directory here is not a wrong path, it is the whole
+loop running somebody else's helpers.
 
 ## THE REPOSITORY ROOT IS CAPTURED WITH ITS STATUS TAKEN, or a failed read becomes a path.
 

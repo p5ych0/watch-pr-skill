@@ -4997,7 +4997,7 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 30
+# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 31
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
 # reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
@@ -5008,18 +5008,22 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # whose argument has gone leaves the next session deleting a shape for looking
 # gratuitous.
 #
-# EXACT STRING COMPARISON, AND NO MARKDOWN PARSER. An earlier shape grew one: to
-# tell a real `## ` heading from a fenced `## example` it tracked fenced code,
-# then tilde fences, indented fences, info strings, HTML comments, the ordering
-# between comments and fences, `## ` and then bare `##`. Every rule attracted the
-# next construct — the shape `CLAUDE.md` names, and the 2,200-line scanner it
-# cost the repository once already.
-#
-# SO THE AMBIGUITY IS FORBIDDEN RATHER THAN PARSED. Every line of the rationale
-# that begins with `## ` must be a claim. A transcript that wants one indents it
-# by a space, and the failure below says so. That is a constraint on one
-# document, checkable with `grep`, in place of a parser nobody verifies.
-_wy_doc="$SCRIPT_DIR/../SETUP-RATIONALE.md"
+# SO WHAT IS CHECKED IS THE BIJECTION, by exact string comparison and nothing
+# else: every claim beside the code has a section, every section has a claim,
+# neither side repeats, and the totals agree. The rationale's own Markdown shape
+# is NOT checked — see the note further down for what that gives up and why two
+# answers to it were removed rather than extended.
+# THE CHECK IS A FUNCTION SO A STAGED PAIR CAN BE PUT THROUGH THE REAL ONE. It
+# takes the two paths and nothing else; the caller below runs it on the shipped
+# files, and then on a staged rationale carrying the shapes this deliberately no
+# longer rejects. Both go through the same code, which is the only way the second
+# run says anything about the first.
+_wy_contract() {
+local SKILL="$1"
+local _wy_doc="$2"
+local _wy_all _wy_all_rc _wy_bad_ptr _wy_bp_rc _wy_stale _wy_st_rc
+local _wy_claims _wy_rc _wy_n _wy_sent_rc _wy_float _wy_heads _wy_hrc
+local _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad _wy_c
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
     #    silently — and every one well formed, in the setup fence, under a claim,
@@ -5104,15 +5108,9 @@ if [ -f "$_wy_doc" ]; then
         && pass "…and every claim and pointer sits on a line of code" \
         || die "$_wy_float claim/pointer pairs annotate a comment or a blank line rather than code"
 
-    # 3. THE HEADINGS, by exact prefix and nothing else. Every `## ` line in the
-    #    rationale is a claim — that is the constraint replacing the parser, and
-    #    the failure says how to satisfy it.
-    # …AND THE TWO CONSTRUCTS THAT WOULD MAKE A `grep` LIE ARE FORBIDDEN, which is
-    # how the parser-free design stays honest.
+    # 3. THE HEADINGS, by exact prefix and nothing else: every `## ` line in the
+    #    rationale is taken as a claim, and the failure says how to satisfy it.
     #
-    # AN HTML COMMENT HIDES A SECTION: wrapping one in `<!-- -->` leaves its `## `
-    # line matched, so every check passes while Markdown renders nothing. The
-    # document has no use for them, so it may not contain one.
     # WHAT THE RATIONALE'S OWN SHAPE IS NOT CHECKED FOR, AND WHY IT STOPPED BEING.
     #
     # The heading list below comes from `grep '^## '`, and Markdown can make that
@@ -5159,7 +5157,7 @@ if [ -f "$_wy_doc" ]; then
     while IFS= read -r _wy_h; do
         [ -n "$_wy_h" ] || continue
         grep -qxF "$_wy_h" <<<"$_wy_claims" \
-            || die "the rationale has a '## ' line that no claim matches: '$_wy_h'. Every one must be a claim; indent a transcript line by a space so it is not a heading."
+            || die "the rationale has a '## ' line that no claim matches: '$_wy_h'. Every one must be a claim; indent a transcript line by four spaces so it is not a heading."
     done <<EOWH
 $_wy_heads
 EOWH
@@ -5182,6 +5180,59 @@ EOWY
         || die "$_wy_bad claims have no section"
 else
     die "SETUP-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
+fi
+}
+
+_wy_contract "$SKILL" "$SCRIPT_DIR/../SETUP-RATIONALE.md"
+
+# ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
+#
+# The guards above were removed on the operator's instruction, and a removal has
+# no witness: the shipped rationale carries none of the forms they rejected, so
+# re-adding any one of them would leave this file green while the decision above
+# had been reversed.
+#
+# So a STAGED rationale carries all four, and the contract must ACCEPT it. It is
+# the shipped document plus an HTML comment, a heading indented to column three,
+# a setext-underlined heading and a bare `##` — chosen because none of them
+# changes what `grep '^## '` matches, so the bijection is untouched and the only
+# thing that can reject this pair is a guard that came back.
+#
+# A FENCED `## example` IS NOT AMONG THEM, deliberately: `grep` DOES match it, so
+# it becomes a 32nd heading with no claim and the bijection rejects it on its own.
+# That one never needed a guard, and staging it here would assert the opposite.
+#
+# The staged run's own `ok` lines are captured rather than printed — it is one
+# assertion, not a second copy of the suite — and `die` sets a flag rather than
+# exiting, so what is looked for is a `FAIL - ` line in what it wrote.
+_wy_stage=""
+_wy_stage="$(mktemp_d)" || { die "no scratch directory for the staged-rationale probe"; _wy_stage=""; }
+if [ -n "$_wy_stage" ]; then
+cp "$SKILL" "$_wy_stage/SKILL.md" || die "the staged skill could not be written"
+cp "$SCRIPT_DIR/../SETUP-RATIONALE.md" "$_wy_stage/doc.md" \
+    || die "the staged rationale could not be written"
+cat >>"$_wy_stage/doc.md" <<'EOSTAGE'
+
+<!-- an HTML comment, which one removed guard rejected outright -->
+
+  ## a heading at column three, which `^## ` does not match
+
+A setext heading, which has no hash run at all
+---
+
+##
+EOSTAGE
+_wy_staged=""
+_wy_staged="$(_wy_contract "$_wy_stage/SKILL.md" "$_wy_stage/doc.md" 2>&1)" \
+    || _wy_staged="FAIL - the staged run ended non-zero: $_wy_staged"
+case "$_wy_staged" in
+    *"FAIL - "*) die "a rationale-shape guard has come back; the staged pair was rejected: $_wy_staged" ;;
+    *)           pass "…and a rationale using the accepted shapes still passes, so the removal holds" ;;
+esac
+# …and the tree is given back. Safe unquoted-free only because `mktemp_d` is the
+# definition of a path that was actually created, and the `if` above is what
+# stops this running on an empty one.
+rm -rf "$_wy_stage"
 fi
 
 # ── the identity parser rejects transports that reach no GitHub server ─────
