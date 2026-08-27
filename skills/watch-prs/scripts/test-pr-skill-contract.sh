@@ -3184,6 +3184,21 @@ for _rb_wn in $_rb_wf; do
     grep -qF 'OWNER=acme' <<<"$_rb_out" \
         && die "…but setup still reported completion with $_rb_wn readonly: '$_rb_out'" \
         || pass "…and setup's completion line is not reached ($_rb_wn)"
+    # AND THE TRANSFORMING CASE, which is the one the read-back exists for. A
+    # `readonly` fails AT the assignment; `declare -u` lets it SUCCEED and stores
+    # something else, so the only thing standing between that and a helper writing
+    # through a path this session did not choose is the literal comparison below.
+    # Gated on bash 4, like the other `declare -u`/`-l` cases in this file.
+    if [ "$_rb_has_l" = yes ]; then
+        _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "declare -u $_rb_wn=x" \
+            TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
+        grep -q "^ABORT: one of SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE and HEAD_FILE is readonly" <<<"$_rb_out" \
+            && pass "…and a transforming \$$_rb_wn is refused by the read-back" \
+            || die "a transforming $_rb_wn gave '$_rb_out'"
+        grep -qF 'OWNER=acme' <<<"$_rb_out" \
+            && die "…but setup still reported completion with $_rb_wn transforming: '$_rb_out'" \
+            || pass "…and setup's completion line is not reached ($_rb_wn transforming)"
+    fi
 done
 rm -rf "$_rb_pb" 2>/dev/null || true
 fi

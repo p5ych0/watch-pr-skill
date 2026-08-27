@@ -33,8 +33,10 @@
   all four names under a hostile shell, which the three that predate this change had
   never been.
 
-  **A gate empties it before any other refusal can happen**, so every refusal leaves
-  it empty rather than holding the previous round's head — and the driver's `post`
+  **A gate empties it before any other refusal can happen**, so every refusal but one
+  leaves it empty rather than holding the previous round's head — the alias refusal
+  below has to stay ahead of the truncation, since truncating a head file that IS
+  the summary destroys the account — and the driver's `post`
   step proves the file holds a commit id **after every outcome of the gate and before
   the thread replies**, which is the boundary that matters — a guard after them stops
   `post` and not the irreversible resolve, and one inside the gate's success arm is

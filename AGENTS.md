@@ -138,9 +138,12 @@ When reviewing a change here:
   irreversible part, and it asks the file IDENTITY first: a summary that is forty
   lowercase hex characters satisfies a content test exactly, and is the one summary
   that can;
-- **every refusal must leave the file empty.** `gate` empties it before any other
-  refusal can happen, so a stale head from the previous round cannot pass the
-  driver's guard.
+- **every NON-ALIAS refusal must leave the file empty.** `gate` empties it before
+  any other refusal can happen, so a stale head from the previous round cannot pass
+  the driver's guard. The alias refusal is the exception and must stay ahead of the
+  truncation — truncating a head file that IS the summary destroys the account —
+  which is why the driver asks the identity first. Do not ask for the truncation to
+  move above the alias check.
 
 **What the driver cannot do is make the reply instructions unreachable.** They are
 prose between two fences, so a shell whose `exit` returns reads them whatever the
