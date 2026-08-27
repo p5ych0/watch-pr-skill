@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.70] — 2026-08-27
+
+- **Block 2's argument is out of `SKILL.md`.** *Request the review — Codex first*
+  was 169 lines carrying 104 of commentary. It is 89 now, and every executable line
+  in the document is byte-identical — checked mechanically, not by eye. Five claims
+  stay beside the code with a `# WHY:` pointer under each; the arguments are five
+  new sections in `SKILL-RATIONALE.md`.
+
+  The operative content stayed in the block: the helper's interface and its two
+  statuses, and how to write the account — with your file-writing tool, into
+  `$REQUEST_FILE` and not `$SUMMARY_FILE`, one paragraph, refused if it carries a
+  record marker or an `@codex review` on the automatic path. What moved is the
+  argument for why: the heredoc that an account can close, `cat` and `printf` being
+  names, the readonly-and-transforming probe and why it is a subshell run as a
+  condition, and the two baseline shapes.
+
+  **No claim-shaped line was left without a pointer.** The account instruction is
+  written as an instruction rather than as an assertion, which is the distinction
+  #198 is about — a line that reads as a claim but carries no `# WHY:` is invisible
+  to the bijection.
+
+  `SKILL.md` is 79 KB, from 167 KB when this series began — under 20k tokens
+  against ~42k. Block 5 remains (#194).
+
 ## [2.0.69] — 2026-08-27
 
 - **Block 8's argument is out of `SKILL.md`.** *Merge gate* was 208 lines carrying
