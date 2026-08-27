@@ -865,6 +865,28 @@ _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$
     && pass "…and a gate that cannot bootstrap leaves no stale head either" \
     || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
 
+# AND A FILE NAMED AFTER AN OID IN THE CURRENT DIRECTORY IS NOT TOUCHED. The
+# pre-#202 form puts the head itself in that position, and the bootstrap clear runs
+# before anything can recognise it — so the slash is what tells a path from an OID
+# there. Without it this call would truncate an unrelated file and only then refuse.
+world; printf 'do not touch me\n' > "$TMP/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+got="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 2>&1)"; _oid_rc=$?
+{ [ "$_oid_rc" = 1 ] && grep -qF 'the head FILE, not the head itself' <<<"$got" \
+    && [ -s "$TMP/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]; } \
+    && pass "…and an existing file named after an OID is refused, not truncated" \
+    || die "the OID-named file case gave rc=$_oid_rc out='$got' content='$(cat "$TMP/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" 2>/dev/null)'"
+# AND A HEAD FILE THAT CANNOT BE EMPTIED STOPS THE STAGE, rather than leaving the
+# previous round's OID for a bootstrap refusal to hand on.
+world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+chmod 400 "$HEADF"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
+chmod 600 "$HEADF"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'cannot be emptied' <<<"${got#*|}"; } \
+    && pass "…and a head file that cannot be emptied stops the stage" \
+    || die "an untruncatable head file gave '${got}'"
+
 # AND THE ALIAS REFUSAL IS THE EXCEPTION, deliberately: truncating a head file that
 # IS the summary destroys the account. The summary must survive it.
 world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/summary.md")"

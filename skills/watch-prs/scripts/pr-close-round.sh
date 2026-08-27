@@ -120,23 +120,30 @@ set -uo pipefail
 # loaded yet and none is needed. It is deliberately BEFORE `shift`, so `$1` is the
 # stage and `$6` is the head file.
 #
-# ONLY A FILE THAT ALREADY EXISTS, which is what lets this ask no question about
-# the VALUE. The pre-#202 form puts the head itself in that position, and a shape
-# test here would be a second copy of the rule `recordlib.sh` owns — `sha_reason`
-# is not loaded yet, so there would be no way to ask it. `-e` answers the same
-# question from the other side: an OID is not a path that exists, so the old form
-# creates nothing and is refused by name further down, where the library is there.
+# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test
+# here would be a second copy of the rule `recordlib.sh` owns — `sha_reason` is not
+# loaded yet, so there would be no way to ask it — and the pre-#202 form puts the
+# head ITSELF in that position. A commit id contains no `/`, and every head file
+# this loop names is a path under the session's working directory, so the slash
+# tells the two apart without knowing what an OID looks like. Without it, a file
+# named after a sha in the current directory would be truncated by a call that is
+# about to be refused for passing the old form.
 #
 # AND NOT THE SUMMARY, because truncating a head file that IS the summary destroys
 # the account this stage is about to post. That refusal is below too, and this must
 # not commit the damage it exists to prevent.
 #
-# IT DOES NOT REFUSE, and that is not an oversight. The authoritative emptying
-# further down takes its status and aborts; this one only makes sure that what a
-# bootstrap refusal leaves behind is not a head somebody could act on.
-if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] \
+# AND THE TRUNCATION'S STATUS IS TAKEN. A head file that cannot be truncated — its
+# permissions changed, its filesystem gone read-only — keeps the PREVIOUS round's
+# OID, and a bootstrap refusal after that leaves exactly the state this block
+# exists to prevent. Refusing here is safe in a way it is not further down: nothing
+# has been loaded, nothing pushed, nothing posted.
+if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
-    > "${6}" 2>/dev/null
+    > "${6}" || {
+        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept."
+        exit 1
+    }
 fi
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
