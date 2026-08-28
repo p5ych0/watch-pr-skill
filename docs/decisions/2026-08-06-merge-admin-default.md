@@ -178,7 +178,8 @@ Concretely, the combination worth having is:
 
 - **required status checks** — on;
 - **require conversation resolution before merging** — on;
-- **required approvals** — zero, but only where no account can supply one;
+- **required approvals** — zero only where the branch receives nothing but
+  same-credential pull requests; see below;
 - **do not allow bypassing the above settings** — on (or an equivalent
   non-bypassable ruleset, or a `gh` credential without bypass permission).
 
@@ -209,12 +210,24 @@ strict mode it becomes atomic — closing the case where a thread is opened afte
 the final client-side probe. Recommending checks only would have pointed operators
 at a weaker configuration than the one they can actually run.
 
-Required approvals stay at zero **where no account can supply one** — the
-same-credential pull request this record is about, which is exactly what the
-accepted trade-off turns on. Where an approval IS satisfiable, on a team
-repository or a pull request authored by another account, keep the requirement:
-setting it to zero there drops a real protection to buy a merge path that already
-works. The gate draws that line itself: `--admin` is
+Required approvals is a BRANCH setting and the right answer differs per pull
+request, which GitHub gives no way to express: it applies the rule to every PR
+targeting the branch, with no author condition.
+
+On a same-credential pull request no account can supply the approval — Codex and
+Copilot are GitHub Apps whose reviews do not count, and GitHub refuses a
+self-approval — so requiring one removes the merge path rather than tightening it,
+which is exactly what the accepted trade-off turns on. On a pull request authored
+by a different account the operator can supply it, so the requirement costs nothing
+and is real protection.
+
+**On a branch that receives both, keep the requirement and vary the MODE.**
+`REVIEW_MERGE_STRICT` is per invocation rather than per branch, so the
+different-author pull requests can run strict where the approval is satisfiable
+and the operator's own fall back to this record's default. Zero is right only where
+the branch receives nothing but same-credential pull requests; on a mixed branch it
+drops the protection from every bot and team PR to buy a merge path those already
+have. The gate draws that line itself: `--admin` is
 permitted to bypass a missing approval, and the unresolved-thread refusal above it
 means it is never reached with a thread open.
 
