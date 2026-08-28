@@ -15,7 +15,7 @@ deliberately, and every gate it checks runs client-side. **Two things are accept
 here and nothing else**: the bypass itself, and the race between the last probe
 and the merge.
 
-## The bounds that are in force
+## The bounds that are in force before the merge
 
 `pr-merge-gate.sh` does all of these before it merges:
 
@@ -23,15 +23,32 @@ and the merge.
   and fails closed on a lookup that printed something and then failed;
 - pins the merge to that OID with `--match-head-commit`, which is what makes the
   comparison atomic: GitHub refuses the merge unless the PR head still matches, so
-  there is no client-side re-read to race and none is performed. Every gate below
-  is evaluated against that snapshot;
-- probes the reviewer's state and verdict against that head through
+  there is no client-side re-read to race and none is performed;
+- probes the reviewer's state and verdict **against that head** through
   `pr-review-state.sh`, so a `blocked`, dismissed or body-only
   `CHANGES_REQUESTED` review is seen rather than walked past;
-- reads the PR state back **after** the merge command and reports status 4 rather
-  than `merged` when the PR is not `MERGED` — because a merge queue accepts the
-  request without landing it and `gh` calls that success;
+- refuses while any review thread is unresolved, paginated;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
+
+**Not every probe is bound to that head**, and the difference matters here more
+than it would elsewhere. The review-state probe takes the OID; the required-checks
+probe does not — `pr-ci-state.sh` is called without `--head`, so it answers about
+the pull request rather than about a commit. On an A → B → A force-push during the
+gate it can accept B's checks while `--match-head-commit A` then merges A. That is
+recorded as #212 and is a defect rather than something this record waives.
+
+## What is confirmed after the merge
+
+This is not a bound on the bypass and does not constrain it: by the time it runs,
+the merge command has already been issued.
+
+- the PR state is read back **after** `gh pr merge`, and a PR that is not `MERGED`
+  is reported as status 4 rather than `merged` — because a merge queue accepts the
+  request without landing it and `gh` calls that success.
+
+What it buys is that the driver does not act on a merge that did not happen. What
+it cannot do is stop the merge, which is why it is listed apart from the gates
+above.
 
 ## The limitation, stated plainly
 
@@ -126,17 +143,24 @@ Concretely, the combination worth having is:
 - **do not allow bypassing the above settings** — on (or an equivalent
   non-bypassable ruleset, or a `gh` credential without bypass permission).
 
-That last one is not optional decoration. GitHub's protected-branch rules do
-**not** apply to administrators or roles with bypass permission unless bypassing
-is explicitly disallowed — and in the solo-maintainer case this record is about,
-the operator *is* the administrator. Omitting `--admin` from the command therefore
-does not make these gates binding by itself: the credential can still merge a pull
-request whose requirements are unmet. Without this setting, strict mode changes
-which flag is passed and nothing about what GitHub enforces.
+**The last one decides whether strict mode binds at all.** GitHub's
+protected-branch rules do **not** apply to administrators or roles with bypass
+permission unless bypassing is explicitly disallowed — and in the solo-maintainer
+case this record is about, the operator *is* the administrator. Omitting `--admin`
+from the command therefore does not make any of these gates binding by itself: the
+credential can still merge a pull request whose requirements are unmet. Without
+this setting, strict mode changes which flag is passed and nothing about what
+GitHub enforces.
 
-Conversation resolution belongs in the list. The workflow already satisfies it:
-`pr-merge-gate.sh` paginates every review thread and refuses while any is
-unresolved, before it reaches the merge. So enabling the
+**Conversation resolution decides something narrower**: whether unresolved threads
+are one of the protections GitHub enforces at all. With bypass disallowed and this
+off, strict mode still enforces the required status checks — it is not inert. What
+is missing is the thread gate becoming server-side and atomic, which is the case
+below.
+
+Conversation resolution belongs in the list even so. The workflow already
+satisfies it: `pr-merge-gate.sh` paginates every review thread and refuses while
+any is unresolved, before it reaches the merge. So enabling the
 corresponding protection costs nothing the loop was not already doing, and in
 strict mode it becomes atomic — closing the case where a thread is opened after
 the final client-side probe. Recommending checks only would have pointed operators
