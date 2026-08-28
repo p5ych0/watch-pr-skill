@@ -1433,9 +1433,13 @@ to the builtins.
 
 It was 291 lines here, pasted into your shell, and nothing checked it — which is
 how it came to contain a construct the bash macOS ships cannot PARSE, for fifty
-review rounds. `scripts/` is covered by the suite, by `pr-selfcheck.sh` and — while
-it is enabled, which #93 owns — by the bash 3.2 CI job; a fenced block is covered
-by none of them. Issue #26.
+review rounds. `scripts/` is covered by the suite, by `pr-selfcheck.sh` and by the
+bash 3.2 CI job; a fenced block is covered by neither job.
+
+What covers what is left in the document is `test-pr-skill-contract.sh`, which
+lifts and EXECUTES these blocks rather than reading them — the parse defect above
+would be caught there today. #26 measured whether the rest could move too and
+answered no: what remains has to run in the operator's shell.
 
 ## RUN FROM THE REPOSITORY THIS SESSION STARTED IN.
 
