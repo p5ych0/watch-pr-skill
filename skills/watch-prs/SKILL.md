@@ -1427,7 +1427,7 @@ fi
 ### Then: the gate
 
 ```bash
-#   pr-merge-gate.sh <pr> <codex-sha> <auto-review>
+#   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> <reviewers: both|codex-only>
 #
 #     0  merged   — the head it names is on the base branch
 #     1  blocked  — a gate refused; the reason is on stdout

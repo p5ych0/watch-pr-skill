@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.74] — 2026-08-28
+
+- **`SKILL.md`'s merge-gate signature named three arguments while the call passed
+  four.** The usage comment read `pr-merge-gate.sh <pr> <codex-sha> <auto-review>`
+  and the invocation two dozen lines below it passed `"$REVIEWERS"` as well, so a
+  driver reading the signature alone would have called the gate with three — leaving
+  it on its default reviewers mode rather than the one the operator chose at the
+  Codex stop.
+
+  `codex-only` is not a weaker gate: it drops Copilot's verdict and in exchange
+  requires the head to BE the commit Codex signed, because the `Review-Phase:
+  copilot` trailers that license a moved head do not exist when there was no Copilot
+  phase. Falling back to the default silently is therefore a gate the operator did
+  not choose in either direction.
+
+  The line names both values now, matching `pr-merge-gate.sh`'s own header, and the
+  contract asserts it — the block already explained the semantics further down, so
+  this is the signature catching up with the rest of its own documentation. Closes
+  #197.
+
 ## [2.0.73] — 2026-08-27
 
 - **The gated head travelled through an assignment made after the push.** Closing a
