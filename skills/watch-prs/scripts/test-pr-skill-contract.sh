@@ -4299,7 +4299,9 @@ if [ -d "$ROOT/docs/decisions" ]; then
                'atomic with the merge' \
                'match-head-commit' \
                'review-state probe' \
-               'both check gates are bracketed by that head' \
+               'all-checks gate is addressed by that head' \
+               'required-checks gate is' \
+               'bracketed by it' \
                'blocked' \
                'dismissed review' \
                'body-only' \

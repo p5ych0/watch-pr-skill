@@ -149,6 +149,7 @@ def pages_or_error:
     if length == 0 then error("no pages")
     elif any(.[]; type != "array") then error("non-array page")
     else . end;
+
 '
 
 # The SAME rule, for shell rather than jq. `pr-watch.sh` does not read the API —

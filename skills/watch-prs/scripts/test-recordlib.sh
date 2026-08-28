@@ -839,5 +839,6 @@ done
     && pass "…with every field cleared" \
     || die "a failed snapshot parse left values behind (id='$RB_SNAP_ID')"
 
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

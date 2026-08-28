@@ -31,8 +31,8 @@ and the merge.
 - proves every commit between those two heads is a Copilot fix, which is what
   licenses the delta;
 - checks that every check on that head is green, not only the required ones,
-  through `pr-ci-gate.sh` — which delegates to the same bracket as the next item,
-  so it is bracketed rather than bound too;
+  through `pr-ci-gate.sh` — addressed by the commit, so that answer is about the
+  merge target;
 - brackets the required-checks read with a head confirmation on each side, through
   `pr-ci-state.sh --head`, and reports `stale` if the head moved;
 - refuses while any review thread is unresolved, paginated — a PR-level question,
@@ -40,16 +40,21 @@ and the merge.
   did;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**BOTH check gates are bracketed rather than bound**, and they are the gates that
-take the OID without being bound by it — the all-checks one reaches `gh pr checks`
-through `pr-ci-gate.sh` and the required-checks one directly, and it is the same
-endpoint with the same bracket. The reviewer verdicts and the reviewed range ARE
-commit-addressed — though the Codex verdict is asked about the head Codex signed
-rather than the merge head, with the range gate licensing the delta — and the
-thread and round-boundary gates do not take an OID at all. `gh pr checks` takes a PR number, has no
-commit selector, and its answer carries no OID — the same is true of the
-all-checks gate, which reaches that endpoint through `pr-ci-gate.sh` — so the two
-confirmations catch a
+**The required-checks gate is bracketed rather than bound, and it is now the only
+one.** It reaches `gh pr checks --required`, which is addressed by pull request;
+the all-checks gate reads the merge target's own check runs and commit statuses,
+and the reviewer verdicts and the reviewed range are commit-addressed too — though
+the Codex verdict is asked about the head Codex signed rather than the merge head,
+with the range gate licensing the delta. The thread and round-boundary gates do not
+take an OID at all.
+
+**That bracket IS a merge-safety question, and an argument that it was not has
+been refuted.** The all-checks gate is not a superset of what a branch requires: it
+reads the checks that EXIST on the merge target, and a required context which has
+not reported has neither a check run nor a commit status. So it can answer green
+while a requirement is unmet, and a stale required answer about another commit then
+approves the merge. `gh pr checks` takes a PR number, has no
+commit selector, and its answer carries no OID — so the two confirmations catch a
 head that moved and stayed moved, which is the ordinary case, and cannot see an
 A → B → A whose **both moves complete between them**: the first confirmation sees
 A, so the move away is after it; the second sees A, so the return is before it.
@@ -66,15 +71,24 @@ merge — a window that spans the checks request rather than being contained by 
 and nobody
 has measured it. Do not widen this record to cover it.
 
-**Strict mode closes the required half of it and not the other.** With
-`REVIEW_MERGE_STRICT=1` on a repository whose required checks are non-bypassable —
-configured, and with bypassing disallowed or the credential lacking that
-permission — GitHub evaluates those itself at merge time, server-side and
-commit-bound. The all-checks gate also weighs OPTIONAL checks, which GitHub never
-enforces at all, so a failing optional check on the merged commit accepted because
-the other's were green survives strict mode. And strict mode without the
-non-bypassable part only stops passing `--admin`, which is the same condition the
-strict-mode list below turns on.
+**Nor is it closable from the client.** The read that would bind the required set
+needs administrator access and denies with a 404 indistinguishable from "not
+protected", so refusing whenever it cannot be read would refuse on every repository
+this loop does not administer — the gate that never opens rather than one that
+fails closed. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is what closes
+it, because GitHub then evaluates the required checks itself at merge time.
+
+**Strict mode is what closes it.** With `REVIEW_MERGE_STRICT=1` on a repository
+whose required checks are non-bypassable — configured, and with bypassing
+disallowed or the credential lacking that permission — GitHub evaluates those
+itself at merge time, server-side and addressed by the commit it is merging. Strict
+mode without the non-bypassable part only stops passing `--admin`, which is the
+same condition the strict-mode list below turns on.
+
+**The optional checks need nothing from GitHub**, which was not true until the
+all-checks gate was bound to the merge target: GitHub never enforces an optional
+check, and that gate now reads the merged commit's own, so a failing optional check
+on it is caught by the gate rather than surviving into the merge.
 
 ## What is confirmed after the merge
 

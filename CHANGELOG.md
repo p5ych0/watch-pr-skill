@@ -1,5 +1,61 @@
 # Changelog
 
+## [2.0.78] — 2026-08-28
+
+- **The all-checks gate now asks about the commit it is merging.** `gh pr checks` is
+  addressed by pull request and its answer carries no OID, so #212's `--head` could
+  only BRACKET the read: an A → B → A whose both moves land between the two head
+  confirmations was invisible, and the gate could accept B's checks for a merge of
+  A. `pr-ci-state.sh` reads the commit's own `statusCheckRollup` instead when it is
+  asked the all-checks question with a head, so the answer is about that commit and
+  nothing else. The confirmations either side stay, and now only report whether the
+  head has since moved.
+
+  **One rollup rather than two paginated REST reads.** `commits/<oid>/check-runs`
+  and `commits/<oid>/status` are addressed by the commit too, and reading them was
+  the first shape of this change; assembling them here is what did not work.
+  `--paginate` requests pages sequentially and is not a snapshot, so a rerun
+  landing between two of them lets a record repeat, or be REPLACED by one carrying
+  a fresh id while `total_count` holds — and the second is invisible to any rule
+  about the pages themselves, because every page is individually well-formed.
+  Nothing available makes two reads atomic. GitHub computes the rollup over both
+  sources in one response addressed by the OID, so there are no pages to reconcile
+  and no fold to get wrong.
+
+  Measured against the live API rather than assumed: a `cli/cli` commit with
+  thirteen check runs and no legacy statuses reports SUCCESS, and a
+  `pandas-dev/pandas` commit with one failed run, six still in progress and a
+  passing legacy status reports FAILURE — the server's precedence agreeing with
+  this file's own contract, that a failed check decides while others are still
+  running. `EXPECTED` is treated as pending, being the state of a required context
+  that has not reported; a null rollup is `none`, and a null `object` is an ERROR,
+  because a commit the repository does not have would otherwise arrive as "no
+  checks are configured" for the CI gate to accept.
+
+  **The required-checks question keeps the bracketed query, because the read that
+  would replace it does not exist for an ordinary token.** Measured for #214:
+  classic branch protection needs admin and denies with a **404 indistinguishable
+  from "not protected"** — so a loop that cannot read it cannot tell "nothing is
+  required" from "I am not allowed to know" — while the ruleset endpoints are
+  readable without admin and do not see classic protection at all. The intersection
+  that issue proposed cannot be computed, and cannot fail honestly.
+
+  **What that does NOT do is close #214**, and an argument that it did was refuted
+  in review. The all-checks question is not a superset of the required one: it reads
+  the checks that EXIST on the merge target, and a required context which has not
+  reported is either absent from the rollup or `EXPECTED` in it — so a green answer
+  is not proof that a requirement is met, and a stale required answer about another
+  commit then approves the merge. What binding buys is narrower and real: a check
+  that DID report on the merge target can no longer be masked by another commit's.
+
+  **Nor is failing closed the answer.** "Refuse unless the required set can be
+  bound" refuses on every repository this loop does not administer, which is the
+  gate that never opens rather than one that fails closed. `REVIEW_MERGE_STRICT=1`
+  on non-bypassable protection is what closes it, and every layer now says so
+  rather than claiming the gate covers it.
+
+  #214 stays open, with the measurement recorded on it.
+
 ## [2.0.77] — 2026-08-28
 
 - **The merge gate's required-checks probe asked about the pull request, not about

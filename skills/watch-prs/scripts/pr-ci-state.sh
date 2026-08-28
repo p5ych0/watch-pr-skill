@@ -167,14 +167,17 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 if [ -n "$WANT_HEAD" ]; then
-    # THE CHECKS ARE ASKED ABOUT A PR, NOT A COMMIT. `gh pr checks` takes a PR
-    # number and answers about whatever the API currently calls its head — and
-    # for a moment after a push that is still the PREVIOUS head. A green answer
-    # then describes the commit from the round before, which is the last round's
-    # answer to this round's question and reads as permission to close.
+    # THE HEAD IS CONFIRMED FIRST, and what that is worth depends on which
+    # question follows. `--required` goes to `gh pr checks`, which takes a PR
+    # number and answers about whatever the API currently calls its head — for a
+    # moment after a push that is still the PREVIOUS head, so a green answer
+    # describes the commit from the round before, which is the last round's answer
+    # to this round's question and reads as permission to close. There this
+    # confirmation is half of a bracket. The all-checks question is addressed by
+    # the commit, so there it only reports whether the head has since moved.
     #
-    # So the head is confirmed first, and a mismatch is its own verdict rather
-    # than an error: the caller's correct response is to wait, not to stop.
+    # A MISMATCH IS ITS OWN VERDICT either way, rather than an error: the caller's
+    # correct response is to wait, not to stop.
     _reason="$(sha_reason "$WANT_HEAD")" || {
         echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$WANT_HEAD" >&2; exit 2; }
     _left_head="$(rb_left)" || {
@@ -225,6 +228,95 @@ checks_msg_is_none_configured() {
     return 1
 }
 
+# ── THE COMMIT-ADDRESSED READ, for the all-checks question ─────────────────
+#
+# `gh pr checks` is addressed by PULL REQUEST and its answer carries no OID, so
+# bracketing it with head confirmations narrows when a head can move and never
+# binds the answer to a commit. These two endpoints ARE addressed by a commit:
+# what they return is about the OID in the path and nothing else.
+#
+# ONLY FOR THE ALL-CHECKS QUESTION. `--required` needs to know which contexts
+# branch protection requires, and that read is not available: classic protection
+# needs admin and denies with a 404 indistinguishable from "not protected", while
+# the ruleset endpoints are readable without admin but do not see classic
+# protection at all. Measured on #214. So `--required` keeps the bracketed PR-
+# addressed query, and this one answers the question that needs no such read.
+#
+# IT IS NOT A SUPERSET OF WHAT IS REQUIRED, and an earlier version of this comment
+# claimed it was. These endpoints report the checks that EXIST on the commit; a
+# required context that has not reported has neither a check run nor a status, so
+# this answer can be green while a requirement is unmet. What binding buys is that
+# a check which DID report on the merge target cannot be masked by another
+# commit's — not that the required set is covered. #214 stays open for that.
+#
+# BOTH SOURCES, because `gh pr checks` merges them and dropping one would make
+# this laxer than what it replaces: check runs from the Checks API, and the legacy
+# commit statuses that older integrations still post. `statusCheckRollup` is over
+# BOTH — measured, a `cli/cli` commit with thirteen check runs and no statuses
+# reports SUCCESS, and a `pandas-dev/pandas` commit with one failed run, six still
+# in progress and a passing legacy status reports FAILURE.
+#
+# ONE ROLLUP RATHER THAN TWO PAGINATED READS, and that is what closes a class this
+# pull request spent four rounds inside. The REST reads had to be assembled here:
+# `--paginate` requests pages sequentially and is not a snapshot, so a rerun
+# landing between two of them lets a record repeat, or be REPLACED by one with a
+# fresh id while the count holds — and the second of those is invisible to any
+# rule about the pages themselves, because every page is individually well-formed.
+# Nothing available can make two REST reads atomic, so each guard bought one
+# interleaving and left the next. GitHub computes this rollup itself, over both
+# sources, in one response addressed by the OID: there are no pages to reconcile
+# and no fold to get wrong. `prefer removing the dependency over guarding it`.
+#
+# THE PRECEDENCE IS THE SERVER`S TOO, and it agrees with this file`s contract: the
+# pandas commit above has a failed run and six unfinished ones and reports FAILURE,
+# which is "at least one is still running AND NONE HAS FAILED" read the way the
+# bucket parse below reads it.
+#
+# `EXPECTED` IS PENDING. It is the state of a context branch protection requires
+# that has not reported, so it is precisely the case where the answer is not in
+# yet — and it is not green. An unrecognised state is malformed, for the reason
+# `recordlib.sh` records.
+#
+# A NULL ROLLUP IS `none` AND A NULL OBJECT IS AN ERROR. They arrive the same way,
+# with status 0 and no message: a commit that has no checks at all answers
+# `statusCheckRollup: null`, and an OID this repository does not have answers
+# `object: null` — measured, both. Reading the second as `none` would hand the CI
+# gate "no checks are configured" for a commit nobody could find.
+commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
+    local oid="$1" _left _out
+    _left="$(rb_left)" || return 2
+    # `-f`, NOT `-F`. `--field` performs magic conversion, so a value that looks
+    # like a number is sent as a JSON number — and both of these variables are
+    # declared `String!`, so a repository named `123` is rejected by the server and
+    # this helper reports the round unreadable for that repository alone. An OID of
+    # forty digits is the same trap on the other variable. `--raw-field` sends the
+    # string that was measured, which is the only shape any of the three can have.
+    _out="$(run_limited "$_left" gh api graphql --hostname "$HOST" \
+        -f query='query($o:String!,$r:String!,$oid:GitObjectID!){repository(owner:$o,name:$r){object(oid:$oid){... on Commit{statusCheckRollup{state}}}}}' \
+        -f o="$OWNER" -f r="$REPO" -f oid="$oid" 2>/dev/null)" || return 2
+    # THE WHOLE PATH IS WALKED WITH `has`, not with `//`. A default swallows the
+    # difference between a field that is absent because the body is an error and
+    # one that is null because there is nothing to report, and those are opposite
+    # answers here.
+    printf '%s' "$_out" | jq -r '
+        if type != "object" or (has("errors")) then "malformed"
+        elif (.data | type) != "object" then "malformed"
+        elif (.data.repository | type) != "object" then "malformed"
+        elif (.data.repository | has("object") | not) then "malformed"
+        elif (.data.repository.object | type) != "object" then "malformed"
+        elif (.data.repository.object | has("statusCheckRollup") | not) then "malformed"
+        elif .data.repository.object.statusCheckRollup == null then "none"
+        elif (.data.repository.object.statusCheckRollup | type) != "object" then "malformed"
+        elif (.data.repository.object.statusCheckRollup.state | type) != "string" then "malformed"
+        else ( .data.repository.object.statusCheckRollup.state
+               | if IN("FAILURE","ERROR") then "failed"
+                 elif IN("PENDING","EXPECTED") then "pending"
+                 elif . == "SUCCESS" then "green"
+                 else "malformed" end )
+        end' 2>/dev/null || return 2
+    return 0
+}
+
 ERRF="$(mktemp 2>/dev/null)" || {
     echo "PR_CI_STATE pr=$PR status=error reason=no_scratch_file" >&2; exit 2; }
 # THE CONTAINER IS VALIDATED BEFORE anything is concluded from it. `all(.[]; …)`
@@ -237,6 +329,20 @@ ERRF="$(mktemp 2>/dev/null)" || {
 # that reached `dismissed` through a catch-all and drove a review loop. See
 # recordlib.sh.
 RC=0
+# THE COMMIT-ADDRESSED PATH IS TAKEN WHERE IT CAN ANSWER, which is the all-checks
+# question with a head to ask about. `--required` cannot use it — see the note on
+# `commit_checks_verdict` — and neither can a call with no `--head`, because there
+# is no commit to address.
+if [ -n "$WANT_HEAD" ] && [ -z "$REQUIRED" ]; then
+    OUT="$(commit_checks_verdict "$WANT_HEAD")" || RC=$?
+    MSG=""
+    if [ "$RC" -ne 0 ]; then
+        echo "PR_CI_STATE pr=$PR status=error reason=commit_checks_unreadable rc=$RC head=$WANT_HEAD" >&2
+        rm -f "$ERRF" 2>/dev/null
+        exit 2
+    fi
+    rm -f "$ERRF" 2>/dev/null
+else
 _left_checks="$(rb_left)" || {
     echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
 OUT="$(run_limited "$_left_checks" gh pr checks "$PR" --repo "$HOST/$OWNER/$REPO" $REQUIRED --json bucket \
@@ -254,6 +360,7 @@ MSG="$(cat "$ERRF" 2>/dev/null)"; MSG_RC=$?
 rm -f "$ERRF" 2>/dev/null
 [ "$MSG_RC" -eq 0 ] || {
     echo "PR_CI_STATE pr=$PR status=error reason=diagnostic_unreadable rc=$MSG_RC" >&2; exit 2; }
+fi
 
 # `gh pr checks` exits non-zero when a check FAILED as well as when it is pending
 # or absent, so the status alone does not classify anything — the parsed value
@@ -264,17 +371,15 @@ rm -f "$ERRF" 2>/dev/null
 # loop, a head that had almost finished earning its grace hands that grace to a
 # different commit, whose own checks have not been registered yet.
 #
-# So the head is read once more and must still be the one asked about. WHAT THIS IS
-# NOT is a binding of the response to a commit: the request is addressed by PR
-# number and the answer carries no OID, so a head that moves away and BACK between
-# the two confirmations is invisible to both, and the checks read describes the
-# commit that was there in between. Nothing here can close that, because `gh pr
-# checks` has no commit selector to pin.
+# So the head is read once more and must still be the one asked about.
 #
-# What it does close is the head that moves and STAYS moved, which is the ordinary
-# case: a push during the request is reported as `stale`, which the caller waits on
-# and which resets the grace. #214 is the commit-addressed query that would make
-# this a binding rather than a bracket.
+# WHICH OF THE TWO QUESTIONS THIS IS DECIDES WHAT THE BRACKET IS WORTH. The
+# all-checks question is answered by `commit_checks_verdict`, addressed by the OID
+# in its path, so its answer is BOUND to the commit and this confirmation only
+# reports whether the head has since moved. The `--required` question still goes
+# through `gh pr checks`, which has no commit selector, so there the confirmations
+# are a BRACKET: they catch a head that moves and stays moved, and an A → B → A
+# whose both moves land between them is invisible to both. #214.
 if [ -n "$WANT_HEAD" ]; then
     _left_after="$(rb_left)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
@@ -307,6 +412,16 @@ case "$OUT" in
         echo "PR_CI_STATE pr=$PR status=green";   exit 0 ;;
     failed)  echo "PR_CI_STATE pr=$PR status=failed";  exit 1 ;;
     pending) echo "PR_CI_STATE pr=$PR status=pending"; exit 3 ;;
+    # `none` REACHES HERE AS A VALUE on the commit-addressed path, where this
+    # script does the classifying and can say so directly. On the PR-addressed
+    # path it arrives as a MESSAGE and a status, below, because that is the only
+    # way `gh pr checks` reports it.
+    none)
+        [ "$RC" -eq 0 ] || {
+            echo "PR_CI_STATE pr=$PR status=error reason=none_from_failed_probe rc=$RC" >&2
+            exit 2
+        }
+        echo "PR_CI_STATE pr=$PR status=none"; exit 4 ;;
 esac
 # AND THE STATUS HAS TO BE THE ONE THAT MEANS IT. `gh` reports "nothing to
 # report" by exiting 1 with that message on stderr; a probe that printed the

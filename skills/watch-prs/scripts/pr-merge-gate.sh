@@ -33,15 +33,16 @@
 #       about differs. (1) and (2) are COMMIT-ADDRESSED but not all about THIS
 #       commit: (1) asks each reviewer about the head THAT reviewer judged, which
 #       for Codex is `$CODEX_SHA` where the Copilot phase moved past it, and (2) is
-#       what licenses the delta. (3b) and (4) are BRACKETED — both take the merge
-#       head and both reach `gh pr checks`, which is addressed by PULL REQUEST, so
-#       the head is confirmed either side of a response that carries none; see the
-#       note at (4) and #214. (3) and (4b) are PR-level and always were
+#       what licenses the delta. (3b) is COMMIT-ADDRESSED too since #214: it reads
+#       the check runs and commit statuses of the merge target itself. (4) is the
+#       one that is only BRACKETED — `gh pr checks --required` is addressed by PULL
+#       REQUEST, so the head is confirmed either side of a response that carries
+#       none; see the note there. (3) and (4b) are PR-level and always were
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
-#  (3b) every check on the head is green, not only the required ones — through
-#       `pr-ci-gate.sh`, which delegates to the same bracket (4) uses
+#  (3b) every check on the merge target is green, not only the required ones —
+#       through `pr-ci-gate.sh`, and addressed by the commit
 #   (4) the required checks satisfy branch protection — BRACKETED by the head
 #       rather than bound to it; see the note at that gate and #214
 #  (4b) the round boundary has not been reached
@@ -631,10 +632,11 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # non-required check still counts.
 #
 # In the default mode the merge below uses `--admin`, which bypasses branch
-# protection, so this probe and (3b) are what stand between a failed read and an
-# unchecked merge — (3b) reads the checks unfiltered, so the required ones are
-# among what it sees, and both have to be satisfied — which is why anything that is not an explicit green or an
-# explicit "nothing configured" blocks.
+# protection, so this probe is the only one that asks whether branch protection is
+# SATISFIED — which is why anything that is not an explicit green or an explicit
+# "nothing configured" blocks. (3b) reads the checks unfiltered, so a required
+# check that REPORTED is among what it sees; one that has not reported is not, and
+# that is the hole this probe's bracket leaves open. See the note there and #214.
 #
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
 # non-zero when the branch has no required checks at all, not because anything
@@ -646,9 +648,9 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # AND IT IS BRACKETED BY `$HEAD_OID`. `gh pr checks`
 # takes a PR NUMBER and answers about whatever the API currently calls its head —
 # there is no commit selector — so without `--head` this asks a question about the
-# pull request with nothing tying the answer to the commit being merged. (3b)
-# reaches the same endpoint through `pr-ci-gate.sh` and carries the same bracket;
-# (1) and (2) are the gates that are genuinely commit-addressed.
+# pull request with nothing tying the answer to the commit being merged. (3b) does
+# not share that any more: since #214 it reads the check runs and commit statuses
+# of the merge target directly, which needs no knowledge of what is REQUIRED.
 #
 # A → B → A IS THE CASE, AND IT ALWAYS TAKES BOTH MOVES. One force-push away is
 # refused by `--match-head-commit`, which requires the head to still BE the OID it
@@ -668,13 +670,31 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # by PR number and the answer carries no OID, so an A → B → A fitting inside the
 # bracket still reads B's checks and sees A twice. That residue is #214.
 #
-# STRICT MODE CLOSES THE REQUIRED HALF AND NOT THE OTHER. With
-# `REVIEW_MERGE_STRICT=1` on a repository whose required checks are NON-BYPASSABLE
-# — configured, and with bypassing disallowed or the credential lacking that
-# permission — GitHub evaluates those itself at merge time. (3b) considers OPTIONAL
-# checks as well, and GitHub never enforces those, so a failing optional check on A
-# accepted because B's were green survives strict mode. Strict mode alone, without
-# the non-bypassable part, only stops passing `--admin`.
+# (3b) DOES NOT COVER THIS, AND THE ARGUMENT THAT IT DID WAS WRONG. It reads the
+# checks that EXIST on the merge target, which is not a superset of the checks a
+# branch REQUIRES: a required context that has not reported on A has no check run
+# and no commit status, so (3b) sees only what did report and can answer green.
+# The stale required answer then approves B and A merges without its required
+# context ever running. Refuted in review, and the residue it leaves is a
+# merge-safety hole rather than a reporting inaccuracy. #214.
+#
+# FAILING CLOSED HERE IS NOT THE ANSWER. "Refuse unless the required set can be
+# bound" refuses on every repository where the read needs admin — which is every
+# repository this loop does not administer — and that is the gate that never opens
+# rather than one that fails closed, the shape this file already carries a comment
+# about. What closes it is `REVIEW_MERGE_STRICT=1` on non-bypassable protection,
+# where GitHub evaluates the required checks itself at merge time.
+#
+# STRICT MODE IS WHAT CLOSES IT. With `REVIEW_MERGE_STRICT=1` on a repository whose
+# required checks are NON-BYPASSABLE — configured, and with bypassing disallowed or
+# the credential lacking that permission — GitHub evaluates those itself at merge
+# time, addressed by the commit it is merging. Strict mode alone, without the
+# non-bypassable part, only stops passing `--admin`.
+#
+# THE OPTIONAL CHECKS NEED NOTHING FROM GITHUB, which was not true before this
+# gate's sibling was bound: GitHub never enforces an optional check, and (3b) now
+# reads the merge target`s own, so a failing optional check on the commit being
+# merged is caught here rather than surviving into it.
 #
 # 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
 # the PR head is not the one this gate resolved — reported from EITHER
@@ -707,8 +727,9 @@ esac
 
 # (5) Merge, PINNED to `$HEAD_OID` — the merge target, not a head every gate above
 # shares. Codex is checked against `$CODEX_EFFECTIVE_SHA` where the Copilot phase
-# moved past it, the two check gates only BRACKET their reads with `$HEAD_OID`,
-# and the thread and round probes are PR-level; see the synopsis at the top.
+# moved past it, (3b) reads the merge target's own checks, (4) only BRACKETS its
+# read with `$HEAD_OID`, and the thread and round probes are PR-level; see the
+# synopsis at the top.
 #
 # `--admin` by default, and that is a deliberate trade rather than an oversight.
 #

@@ -494,26 +494,33 @@ Then:
    asked about the head *that reviewer judged* — Copilot's is the head being
    merged; Codex's is the head Codex signed, which the Copilot phase may have moved
    past — and the **reviewed-range** gate is what licenses that delta, by proving
-   every commit between them is a Copilot fix. The **two check gates are bracketed**
-   by the merge head rather than bound to it (below), and **unresolved threads and
-   the round boundary are questions about the pull request**.
+   every commit between them is a Copilot fix. The **all-checks gate is asked about
+   the merge target too**, while the **required-checks gate is only bracketed** by
+   it (below), and **unresolved threads and the round boundary are questions about
+   the pull request**.
 
-   **What "bracketed" means.** `gh pr checks` is addressed by pull request and has
-   no commit selector, and both check gates reach it — so each confirms the head on
-   either side of its read and refuses if it moved, which catches a push that lands
-   and stays. What neither can do is tie the answer to a commit, so a force-push
-   away *and back* whose both moves fall between those two confirmations would be
-   read as green for a commit that is not the one merged.
+   **What "bracketed" means, and which gate it is.** The all-checks gate reads the
+   check runs and commit statuses *of the merge target*, so its answer is about that
+   commit. The required-checks gate cannot: `gh pr checks --required` is addressed
+   by pull request and has no commit selector, and the read that would say which
+   contexts are required is not available to an ordinary token — classic branch
+   protection needs administrator access and denies with a 404 that looks exactly
+   like "not protected". So that gate confirms the head either side of its read,
+   which catches a push that lands and stays, and a force-push away *and back*
+   whose both moves fall between those two confirmations is invisible to it.
 
-   That residue is tracked as issue #214, and it is not covered by the `--admin`
-   trade-off recorded in `docs/decisions/`. **`REVIEW_MERGE_STRICT=1` closes the
-   required half of it and not the other**: on a repository whose required checks
-   are non-bypassable — configured, and with bypassing disallowed or the credential
-   lacking that permission — GitHub evaluates those itself at merge time. The
-   all-checks gate also weighs *optional* checks, which GitHub never enforces, so a
-   failing optional check accepted because the other commit's were green survives
-   strict mode. And strict mode without the non-bypassable part only stops passing
-   `--admin`.
+   **The all-checks gate does not cover that**, and it is worth being plain about
+   why: it reads the checks that *exist* on the merge target, which is not the set a
+   branch *requires*. A required context that has not reported has nothing to read,
+   so that gate can be green while the requirement is unmet.
+
+   **On the default `--admin` path this is a real hole**, tracked as issue #214 and
+   not covered by the trade-off recorded in `docs/decisions/`. Refusing whenever the
+   required set cannot be read would refuse on every repository you do not
+   administer, so what closes it is **`REVIEW_MERGE_STRICT=1` on non-bypassable
+   protection** — configured, and with bypassing disallowed or the credential
+   lacking that permission — where GitHub evaluates the required checks itself at
+   merge time. That is the strongest reason in this README to configure it.
 
 ## Automatic review (opt-in per repo)
 
