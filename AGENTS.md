@@ -147,8 +147,14 @@ When reviewing a change here:
 
 **What the driver cannot do is make the reply instructions unreachable.** They are
 prose between two fences, so a shell whose `exit` returns reads them whatever the
-fence above did. That is #26 — the fix is moving the code into `.sh` files — and it
-is not a reason to add another guard here.
+fence above did. That is a limit of the driving-shell design, not a deferred
+refactor: #26 measured whether this code could move into `.sh` files and answered
+no — the setup block exports into the operator's shell and a child cannot export
+into its parent, and the read-backs exist to catch a readonly name or a nameref
+defeating the driver's own assignment, which the helper process cannot observe. Do
+not raise "this should move into a script" here, and do not treat the residue as a
+reason to add another guard: two were built for it and both were removed for
+costing more than they closed.
 
 ## Claims and their arguments in `SKILL.md`
 
