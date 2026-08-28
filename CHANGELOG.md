@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.75] — 2026-08-28
+
+- **The rationale pointed at a refactor that had already been examined and
+  rejected.** 2.0.73 described what stops a driver whose `exit` returns and ended
+  "it closes when this code lives in a `.sh` file, and not before", naming #26 as
+  the answer. #26 says the opposite and was closed on those grounds: the setup
+  block exports `REVIEW_BUS_REMOTE` into the operator's shell and a child cannot
+  export into its parent, and the read-backs exist to catch a readonly name or a
+  nameref defeating the driver's own assignment — moving them into a helper would
+  move them to the one process that cannot observe the failure.
+
+  `CLAUDE.md` records that a comment arguing against the code beside it is an
+  instruction and will be followed, which is why this is a defect rather than a
+  stale reference: a session reading it was being sent to attempt work that had been
+  measured and ruled out.
+
+  It now says what is true — the reply instructions are prose between two fences,
+  no shell construct reaches prose, and the code producing them has to run where the
+  values land, so this is a limit of the driving-shell design rather than a deferred
+  task. What holds instead was already listed and is unchanged. Closes #205.
+
 ## [2.0.74] — 2026-08-28
 
 - **`SKILL.md`'s merge-gate signature named three arguments while the call passed

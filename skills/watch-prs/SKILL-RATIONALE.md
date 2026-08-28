@@ -1824,18 +1824,26 @@ merely silent, it has damaged the shell it was protecting.
 
 SO THE SCRATCH NAME IS GONE. A defence against a shadowable name that introduces a
 seedable name is not a defence, and the second attempt was worse than the first.
-The residue is the same one #26 names: in a shell with `echo` shadowed and `exit`
-returning, the arm is taken, nothing is printed, and control reaches the prose. It
-closes when this code lives in a `.sh` file, and not before.
+The residue is: in a shell with `echo` shadowed and `exit` returning, the arm is
+taken, nothing is printed, and control reaches the prose.
 
 WHAT NO SHELL CONSTRUCT HERE CAN DO is make the reply instructions unreachable.
 They are PROSE, in a Markdown document, between two fences — so a driver whose
-`exit` returns can read them whatever the fence above did. That is issue #26, and
-the answer to it is moving this code into `.sh` files rather than another guard.
-What holds meanwhile: every path takes a refusal arm and prints it unless `echo`
-has been shadowed, `post` asks the content question again and refuses, so no
-summary is posted and no pass requested, and the allocation the paths come from
-cannot produce the aliased case at all.
+`exit` returns can read them whatever the fence above did.
+
+AND THAT IS A LIMIT OF THE DESIGN RATHER THAN A DEFERRED TASK. #26 asked whether
+this code could move into `.sh` files and answered no, twice over: the setup block
+exports `REVIEW_BUS_REMOTE` into the driving shell and a child cannot export into
+its parent, and this step's own read-back exists to catch a readonly name or a
+nameref defeating the driver's assignment — moving it into the helper would move it
+to the one process that cannot observe the failure. The glue has to run where the
+values land.
+
+So there is no refactor waiting to close this, and a comment saying there is would
+be read as an instruction to attempt one. What holds instead: every path takes a
+refusal arm and prints it unless `echo` has been shadowed, `post` asks the content
+question again and refuses, so no summary is posted and no pass requested, and the
+allocation the paths come from cannot produce the aliased case at all.
 
 ## THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
 
