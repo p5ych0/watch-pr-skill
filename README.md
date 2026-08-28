@@ -488,20 +488,19 @@ Then:
    not read — which is neither of the first two, because reading it as "no
    signoff" repeats a phase and reading it as a signoff skips a review nobody did.
 6. **Merge gate.** On a clean signoff from both reviewers the skill resolves the
-   head once and re-checks everything against it — both verdicts, the reviewed
-   range, unresolved threads, required checks — then merges pinned to that head
-   with `--match-head-commit`, so a push landing mid-gate is rejected rather than
-   merged unreviewed.
+   head once and runs every gate before merging pinned to that head with
+   `--match-head-commit`, so a push landing mid-gate is rejected rather than merged
+   unreviewed. The gates are not all about the same thing: **both verdicts and the
+   reviewed range are asked about that commit**, the **two check gates are
+   bracketed** by it (below), and **unresolved threads and the round boundary are
+   questions about the pull request**.
 
-   **The two check gates are the exception, and they are bracketed rather than
-   bound.** `gh pr checks` is addressed by pull request and has no commit selector,
-   and both the all-checks and the required-checks gate reach it — so each confirms
-   the head on either side of its read and refuses if it moved, which catches a
-   push that lands and stays. What neither can do is tie the answer to a commit, so
-   a force-push away *and back* whose both moves fall between those two
-   confirmations would be read as green for a commit that is not the one merged.
-   The reviewer verdicts and the reviewed range are commit-addressed; unresolved
-   threads and the round boundary are questions about the pull request.
+   **What "bracketed" means.** `gh pr checks` is addressed by pull request and has
+   no commit selector, and both check gates reach it — so each confirms the head on
+   either side of its read and refuses if it moved, which catches a push that lands
+   and stays. What neither can do is tie the answer to a commit, so a force-push
+   away *and back* whose both moves fall between those two confirmations would be
+   read as green for a commit that is not the one merged.
 
    That residue is tracked as issue #214, and it is not covered by the `--admin`
    trade-off recorded in `docs/decisions/`. **`REVIEW_MERGE_STRICT=1` closes the
