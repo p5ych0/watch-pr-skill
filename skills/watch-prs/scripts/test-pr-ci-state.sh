@@ -202,7 +202,7 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | ra
     # classifies rather than the stub; a value starting with `{` is passed through
     # verbatim, which is how the malformed shapes below are staged.
     case "$2" in
-        '{'*)    printf '%s\n' "$2" > "$TMP/gh.gql" ;;
+        '{'*|'['*) printf '%s\n' "$2" > "$TMP/gh.gql" ;;
         green)   printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"SUCCESS"}}}}}\n' > "$TMP/gh.gql" ;;
         failed)  printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"FAILURE"}}}}}\n' > "$TMP/gh.gql" ;;
         pending) printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"PENDING"}}}}}\n' > "$TMP/gh.gql" ;;
@@ -404,9 +404,16 @@ for _bad in \
     '[]' ; do
     mkgh_head "$WANT" "$_bad"
     got="$(run 7 --head "$WANT")"
-    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
-        && pass "…and a body that answers nothing is an error" \
+    # THE CLASSIFIER NAMED IT, rather than jq dying on the way. Both come out as
+    # status 2, so asserting the status alone would pass against a walk that
+    # crashed on a shape it does not handle — and a crash is one refactor away
+    # from being caught and read as something benign.
+    { [ "${got%%|*}" = 2 ] && grep -qF 'out=malformed' <<<"${got#*|}"; } \
+        && pass "…and a body that answers nothing is refused by name" \
         || die "'$_bad' was read as an answer: '$got'"
+    grep -qE 'status=(none|green)' <<<"${got#*|}" \
+        && die "…and a verdict was emitted beside the refusal: '$got'" \
+        || pass "…with no verdict beside the refusal"
 done
 
 # ── A GREEN ANSWER FROM A FAILED REQUEST IS NOT GREEN ──────────────────────
