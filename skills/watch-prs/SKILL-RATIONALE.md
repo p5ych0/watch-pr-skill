@@ -1434,12 +1434,16 @@ to the builtins.
 It was 291 lines here, pasted into your shell, and nothing checked it — which is
 how it came to contain a construct the bash macOS ships cannot PARSE, for fifty
 review rounds. `scripts/` is covered by the suite, by `pr-selfcheck.sh` and by the
-bash 3.2 CI job; a fenced block is covered by neither job.
+bash 3.2 CI job; a fenced block is not a file any of them has.
 
-What covers what is left in the document is `test-pr-skill-contract.sh`, which
-lifts and EXECUTES these blocks rather than reading them — the parse defect above
-would be caught there today. #26 measured whether the rest could move too and
-answered no: what remains has to run in the operator's shell.
+COVERAGE FALLS BY LIFT, NOT BY FILE. What reaches what is left in the document is
+`test-pr-skill-contract.sh`, which LIFTS AND EXECUTES the blocks it knows about
+rather than reading them — and both CI jobs run it, so those blocks are parsed and
+run on bash 3.2 too. The parse defect above would be caught there today. A block
+nothing lifts has none of that.
+
+#26 measured whether the rest could move into `scripts/` instead and answered no:
+what remains has to run in the operator's shell.
 
 ## RUN FROM THE REPOSITORY THIS SESSION STARTED IN.
 
