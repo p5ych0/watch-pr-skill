@@ -638,7 +638,9 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # AND IT IS BRACKETED BY `$HEAD_OID`. `gh pr checks`
 # takes a PR NUMBER and answers about whatever the API currently calls its head —
 # there is no commit selector — so without `--head` this asks a question about the
-# pull request while every gate around it asks about a commit.
+# pull request with nothing tying the answer to the commit being merged. (3b)
+# reaches the same endpoint through `pr-ci-gate.sh` and carries the same bracket;
+# (1) and (2) are the gates that are genuinely commit-addressed.
 #
 # A → B → A IS THE CASE, AND IT ALWAYS TAKES BOTH MOVES. One force-push away is
 # refused by `--match-head-commit`, which requires the head to still BE the OID it

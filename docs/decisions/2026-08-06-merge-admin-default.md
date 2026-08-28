@@ -29,19 +29,24 @@ and the merge.
   `CHANGES_REQUESTED` review is seen rather than walked past — the reviewed-range
   check takes the OID too;
 - checks that every check on that head is green, not only the required ones,
-  through `pr-ci-gate.sh`, which takes the OID;
+  through `pr-ci-gate.sh` — which delegates to the same bracket as the next item,
+  so it is bracketed rather than bound too;
 - brackets the required-checks read with a head confirmation on each side, through
-  `pr-ci-state.sh --head`, and reports `stale` if the head moved. **This one is
-  bracketed rather than bound**; see below;
+  `pr-ci-state.sh --head`, and reports `stale` if the head moved;
 - refuses while any review thread is unresolved, paginated — a PR-level question,
   as is the round-boundary check beside it: neither takes the OID, and neither ever
   did;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**The required-checks probe is bracketed rather than bound, and it is the one gate
-that takes the OID without being bound by it.** The thread and round-boundary
-gates do not take it at all and are PR-level by nature. `gh pr checks` takes a PR number, has no
-commit selector, and its answer carries no OID — so the two confirmations catch a
+**BOTH check gates are bracketed rather than bound**, and they are the gates that
+take the OID without being bound by it — the all-checks one reaches `gh pr checks`
+through `pr-ci-gate.sh` and the required-checks one directly, and it is the same
+endpoint with the same bracket. The reviewer verdicts and the reviewed range ARE
+commit-addressed; the thread and round-boundary gates do not take the OID at all
+and are PR-level by nature. `gh pr checks` takes a PR number, has no
+commit selector, and its answer carries no OID — the same is true of the
+all-checks gate, which reaches that endpoint through `pr-ci-gate.sh` — so the two
+confirmations catch a
 head that moved and stayed moved, which is the ordinary case, and cannot see an
 A → B → A whose **both moves complete between them**: the first confirmation sees
 A, so the move away is after it; the second sees A, so the return is before it.

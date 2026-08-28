@@ -17,9 +17,10 @@
   merge.
 
   It passes `--head` now, so the helper confirms the head before and after the
-  checks read; this was the one caller that did not. Of the gates, `(1)`, `(2)` and
-  `(3b)` take the OID as an argument, `(4)` brackets its request with it, and the
-  thread and round-boundary checks are PR-level and always were. Its `stale` status is handled
+  checks read; this was the one caller that did not. Of the gates, `(1)` and `(2)`
+  are commit-addressed, `(3b)` and `(4)` both take the OID and both reach
+  `gh pr checks`, so both are bracketed rather than bound, and the thread and
+  round-boundary checks are PR-level and always were. Its `stale` status is handled
   by name rather than by the catch-all, because 5 means the head moved and the
   answer is to re-run the gate, not to investigate a broken probe.
 

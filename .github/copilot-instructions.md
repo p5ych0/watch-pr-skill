@@ -540,7 +540,8 @@ waived:
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
-- the **required-checks probe is bracketed by that head** with `--head`, because
+- **both check gates are bracketed by that head** with `--head` — the all-checks
+  one through `pr-ci-gate.sh` and the required-checks one directly — because
   `gh pr checks` takes a PR number and has no commit selector. The unsafe case is
   always A → B → A — one move away is refused by `--match-head-commit`, so it takes
   a RETURN — and what the bracket changes is where that pair has to fit: BOTH moves
