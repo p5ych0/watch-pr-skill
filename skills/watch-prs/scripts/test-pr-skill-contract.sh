@@ -4287,8 +4287,14 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # SEMANTIC TOKENS, NOT STYLISTIC ONES: each names a condition rather than a
     # turn of phrase, so rewording the prose around them does not fail the case
     # while removing the condition does.
-    for _bd in 're-read and compared immediately before merging' \
-               'full 40-hex SHA' \
+    #
+    # `re-read and compared immediately before merging` WAS ONE OF THESE AND IS
+    # NOT ANY MORE, because the gate does not do it: the head is resolved ONCE and
+    # the merge is pinned to that OID with `--match-head-commit`, which is what
+    # makes the comparison atomic. Asserting a bound the code does not have taught
+    # a reviewer to accept the waiver on the strength of a check that is not there.
+    # The atomicity token below is the one that carries this.
+    for _bd in 'full 40-hex SHA' \
                '7-character prefix' \
                'atomic with the merge' \
                'match-head-commit' \
@@ -4296,6 +4302,8 @@ if [ -d "$ROOT/docs/decisions" ]; then
                'blocked' \
                'dismissed review' \
                'body-only' \
+               'read back after the merge command' \
+               'reported as queued rather than merged' \
                'REVIEW_MERGE_STRICT=1' \
                'exported, not merely assigned' \
                'requires a merge queue' \

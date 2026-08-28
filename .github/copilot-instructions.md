@@ -533,14 +533,17 @@ follow the pointer.** The bypass is accepted only while ALL of these hold, so a
 change that removes any one of them is a finding even though the bypass itself is
 waived:
 
-- the head is re-read and compared immediately before merging;
-- that comparison uses the **full 40-hex SHA**, never a 7-character prefix — a
+- the head is resolved as the **full 40-hex SHA**, never a 7-character prefix — a
   commit sharing seven hex characters is constructible, and that is not a race
   with a window but a match at any time;
 - the comparison is **atomic with the merge**, through `--match-head-commit`, so
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
+- the PR state is **read back after the merge command**, and a PR that is not
+  `MERGED` is reported as queued rather than merged — `gh` calls adding to a merge
+  queue success, and reporting that as a merge tells the driver work is finished
+  while the head is not on the base branch;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
 

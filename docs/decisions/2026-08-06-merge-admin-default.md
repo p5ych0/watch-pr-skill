@@ -19,10 +19,12 @@ and the merge.
 
 `pr-merge-gate.sh` does all of these before it merges:
 
-- re-reads the head immediately before merging and refuses when it no longer
-  matches — compared as the **full 40-hex OID**, not an abbreviation;
-- pins the merge to that OID with `--match-head-commit`, so the comparison is part
-  of the merge rather than a check a push can land between;
+- resolves the head ONCE, as the **full 40-hex OID** rather than an abbreviation,
+  and fails closed on a lookup that printed something and then failed;
+- pins the merge to that OID with `--match-head-commit`, which is what makes the
+  comparison atomic: GitHub refuses the merge unless the PR head still matches, so
+  there is no client-side re-read to race and none is performed. Every gate below
+  is evaluated against that snapshot;
 - probes the reviewer's state and verdict against that head through
   `pr-review-state.sh`, so a `blocked`, dismissed or body-only
   `CHANGES_REQUESTED` review is seen rather than walked past;
@@ -133,8 +135,8 @@ request whose requirements are unmet. Without this setting, strict mode changes
 which flag is passed and nothing about what GitHub enforces.
 
 Conversation resolution belongs in the list. The workflow already satisfies it:
-`SKILL.md` makes zero unresolved threads a hard rule and the merge gate paginates
-every review thread and refuses while any is unresolved. So enabling the
+`pr-merge-gate.sh` paginates every review thread and refuses while any is
+unresolved, before it reaches the merge. So enabling the
 corresponding protection costs nothing the loop was not already doing, and in
 strict mode it becomes atomic — closing the case where a thread is opened after
 the final client-side probe. Recommending checks only would have pointed operators
@@ -142,13 +144,15 @@ at a weaker configuration than the one they can actually run.
 
 Required approvals stay at zero because that is the single condition this plugin's
 reviewers cannot satisfy for a same-credential PR, and it is exactly what the
-accepted trade-off is about. `SKILL.md` already draws that line itself: `--admin`
-is permitted to bypass a missing approval, and explicitly **must not** be used to
-bypass required conversation resolution.
+accepted trade-off is about. The gate draws that line itself: `--admin` is
+permitted to bypass a missing approval, and the unresolved-thread refusal above it
+means it is never reached with a thread open.
 
-`README.md` documents `REVIEW_MERGE_STRICT` and this configuration under its own
-heading, so the list above is a description of what to configure and the README is
-where an operator is told how.
+`README.md` documents the variable itself under its own heading. **It does not yet
+carry this four-part configuration**, and the two parts an operator is most likely
+to miss — conversation resolution, and disallowing bypass — are the two that decide
+whether strict mode enforces anything at all. Until the README carries it, the list
+above is the only place it is written down. Recorded as #211.
 
 ## For reviewers
 
