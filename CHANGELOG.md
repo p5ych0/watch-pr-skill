@@ -19,19 +19,28 @@
   readable without admin and do not see classic protection at all. The intersection
   that issue proposed cannot be computed, and cannot fail honestly.
 
-  **It does not need to be.** The all-checks question is a superset of the required
-  one, so a green answer about the merge target entails its required checks are
-  green, and a stale `--required` answer can only be more permissive than a gate
-  that has already refused. What remains is that gate reporting about the wrong
-  commit — a defect, not a merge that skipped a check — and every layer says which
-  gate is which.
+  **What that does NOT do is close #214**, and an argument that it did was refuted
+  in review. The all-checks question is not a superset of the required one: it reads
+  the checks that EXIST on the merge target, and a required context which has not
+  reported has neither a check run nor a commit status — so it can answer green
+  while a requirement is unmet, and a stale required answer about another commit
+  then approves the merge. What binding buys is narrower and real: a check that DID
+  report on the merge target can no longer be masked by another commit's.
+
+  **Nor is failing closed the answer.** "Refuse unless the required set can be
+  bound" refuses on every repository this loop does not administer, which is the
+  gate that never opens rather than one that fails closed. `REVIEW_MERGE_STRICT=1`
+  on non-bypassable protection is what closes it, and every layer now says so
+  rather than claiming the gate covers it.
 
   Two details the measurement turned up, both fail-open traps: `commits/<oid>/status`
   reports `state: "pending"` with an EMPTY `statuses` array when a commit has none,
   so the summary is read past in favour of the array; and `check-runs` pages as an
   OBJECT, which `pages_or_error` refuses — `recordlib.sh` gained
   `object_pages_or_error` beside it rather than letting a `.[][]` walk an error
-  body's values. Closes #214.
+  body's values.
+
+  #214 stays open, with the measurement recorded on it.
 
 ## [2.0.77] — 2026-08-28
 

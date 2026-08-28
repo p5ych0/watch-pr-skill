@@ -239,11 +239,12 @@ checks_msg_is_none_configured() {
 # protection at all. Measured on #214. So `--required` keeps the bracketed PR-
 # addressed query, and this one answers the question that needs no such read.
 #
-# WHICH IS ENOUGH, because this question is a SUPERSET of the other. If every
-# check on the merge target is green then every required check on it is, so a
-# stale `--required` answer can only be more permissive than a gate that has
-# already refused. It stops being a merge-safety question and becomes a reporting
-# one.
+# IT IS NOT A SUPERSET OF WHAT IS REQUIRED, and an earlier version of this comment
+# claimed it was. These endpoints report the checks that EXIST on the commit; a
+# required context that has not reported has neither a check run nor a status, so
+# this answer can be green while a requirement is unmet. What binding buys is that
+# a check which DID report on the merge target cannot be masked by another
+# commit's — not that the required set is covered. #214 stays open for that.
 #
 # BOTH SOURCES, because `gh pr checks` merges them and dropping one would make
 # this laxer than what it replaces: check runs from the Checks API, and the legacy

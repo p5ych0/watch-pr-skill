@@ -669,11 +669,20 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # by PR number and the answer carries no OID, so an A → B → A fitting inside the
 # bracket still reads B's checks and sees A twice. That residue is #214.
 #
-# AND (3b) IS WHAT KEEPS THIS SAFE. It asks whether EVERY check on the merge
-# target is green, which is a superset of the required ones — so a stale answer
-# here can only be more permissive than a gate that has already refused a red
-# merge target. What #214 leaves is a reporting inaccuracy in this gate rather
-# than a merge that skipped a check.
+# (3b) DOES NOT COVER THIS, AND THE ARGUMENT THAT IT DID WAS WRONG. It reads the
+# checks that EXIST on the merge target, which is not a superset of the checks a
+# branch REQUIRES: a required context that has not reported on A has no check run
+# and no commit status, so (3b) sees only what did report and can answer green.
+# The stale required answer then approves B and A merges without its required
+# context ever running. Refuted in review, and the residue it leaves is a
+# merge-safety hole rather than a reporting inaccuracy. #214.
+#
+# FAILING CLOSED HERE IS NOT THE ANSWER. "Refuse unless the required set can be
+# bound" refuses on every repository where the read needs admin — which is every
+# repository this loop does not administer — and that is the gate that never opens
+# rather than one that fails closed, the shape this file already carries a comment
+# about. What closes it is `REVIEW_MERGE_STRICT=1` on non-bypassable protection,
+# where GitHub evaluates the required checks itself at merge time.
 #
 # STRICT MODE CLOSES THE REQUIRED HALF AND NOT THE OTHER. With
 # `REVIEW_MERGE_STRICT=1` on a repository whose required checks are NON-BYPASSABLE

@@ -48,11 +48,12 @@ the Codex verdict is asked about the head Codex signed rather than the merge hea
 with the range gate licensing the delta. The thread and round-boundary gates do not
 take an OID at all.
 
-**And that bracket is no longer a merge-safety question.** The all-checks gate asks
-a SUPERSET of it about the merge target, so a stale required answer can only be
-more permissive than a gate that has already refused a red target. What is left is
-this gate reporting about the wrong commit, which is a defect and not a merge that
-skipped a check. `gh pr checks` takes a PR number, has no
+**That bracket IS a merge-safety question, and an argument that it was not has
+been refuted.** The all-checks gate is not a superset of what a branch requires: it
+reads the checks that EXIST on the merge target, and a required context which has
+not reported has neither a check run nor a commit status. So it can answer green
+while a requirement is unmet, and a stale required answer about another commit then
+approves the merge. `gh pr checks` takes a PR number, has no
 commit selector, and its answer carries no OID — so the two confirmations catch a
 head that moved and stayed moved, which is the ordinary case, and cannot see an
 A → B → A whose **both moves complete between them**: the first confirmation sees
@@ -70,13 +71,21 @@ merge — a window that spans the checks request rather than being contained by 
 and nobody
 has measured it. Do not widen this record to cover it.
 
+**Nor is it closable from the client.** The read that would bind the required set
+needs administrator access and denies with a 404 indistinguishable from "not
+protected", so refusing whenever it cannot be read would refuse on every repository
+this loop does not administer — the gate that never opens rather than one that
+fails closed. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is what closes
+it, because GitHub then evaluates the required checks itself at merge time.
+
 **Strict mode closes the required half of it and not the other.** With
 `REVIEW_MERGE_STRICT=1` on a repository whose required checks are non-bypassable —
 configured, and with bypassing disallowed or the credential lacking that
 permission — GitHub evaluates those itself at merge time, server-side and
 commit-bound. The all-checks gate also weighs OPTIONAL checks, which GitHub never
-enforces at all, so a failing optional check on the merged commit accepted because
-the other's were green survives strict mode. And strict mode without the
+enforces at all — though since #214 that gate reads the merge target's own checks,
+so an optional failure ON THE MERGED COMMIT is caught by the gate itself rather
+than needing GitHub to enforce it. And strict mode without the
 non-bypassable part only stops passing `--admin`, which is the same condition the
 strict-mode list below turns on.
 

@@ -195,9 +195,18 @@ OTHER=fedcba9876543210fedcba9876543210fedcba98
 # confirmation and the checks call can be replayed. A stub that answered the same
 # head twice could never distinguish "verified before the request" from "bound to
 # the request", which is the whole difference the second read exists to make.
-mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict>
+mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict> [legacy state]
     printf '%s\n' "$1" > "$TMP/heads"
-    printf '%s' "$2" > "$TMP/gh.out"
+    # `norun` gives the commit NO check runs, so a verdict can only come from the
+    # legacy statuses — which is what makes those cases prove that source is read.
+    case "$2" in
+        norun) printf '{"total_count":0,"check_runs":[]}\n' > "$TMP/gh.out" ;;
+        *)     printf '%s' "$2" > "$TMP/gh.out" ;;
+    esac
+    case "${3-}" in
+        "") printf '{"state":"pending","statuses":[]}\n' > "$TMP/gh.sts" ;;
+        *)  printf '{"state":"%s","statuses":[{"context":"legacy","state":"%s"}]}\n' "$3" "$3" > "$TMP/gh.sts" ;;
+    esac
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
@@ -209,6 +218,7 @@ case "\$*" in
         # is what classifies rather than the stub.
         v="\$(cat "$TMP/gh.out")"
         case "\$v" in
+            '{'*) printf '%s\n' "\$v" ;;
             green)   printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n' ;;
             failed)  printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"failure"}]}\n' ;;
             pending) printf '{"total_count":1,"check_runs":[{"name":"a","status":"in_progress","conclusion":null}]}\n' ;;
@@ -216,7 +226,11 @@ case "\$*" in
             *)       printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"%s"}]}\n' "\$v" ;;
         esac ;;
     *"/status"*)
-        printf '{"state":"pending","statuses":[]}\n' ;;
+        # THE LEGACY STATUSES ARE STAGEABLE TOO. Answering an empty array always
+        # would leave every verdict below supplied by the check runs, so a
+        # regression that ignored this source, or read it as green, would keep
+        # this suite green while a broken commit merged.
+        cat "$TMP/gh.sts" ;;
     *)
         case "\$2" in
             view)
@@ -281,9 +295,16 @@ grep -qE '^pr checks|^checks' "$TMP/args" \
 # endpoints do not see classic protection at all. Measured on #214.
 mkgh_head "$WANT" green; : > "$TMP/args"
 run 7 --head "$WANT" --required >/dev/null
-grep -qF 'check-runs' "$TMP/args" \
-    && die "--required used the commit read, which cannot answer it: $(cat "$TMP/args")" \
-    || pass "…while --required keeps the PR-addressed query, which is the only one that filters"
+# THE POSITIVE ASSERTION AS WELL AS THE ABSENCE. "It did not call check-runs" is
+# also true of an implementation that called the commit `/status` endpoint, which
+# cannot identify a required context either — so what the call WAS is asserted,
+# with the repository it was pinned to.
+grep -q "pr checks 7 --repo github.com/acme/widget --required" "$TMP/args" \
+    && pass "…while --required asks `gh pr checks --required`, pinned to the repository" \
+    || die "--required did not use the PR-addressed query: $(cat "$TMP/args")"
+grep -qE "commits/$WANT/(check-runs|status)" "$TMP/args" \
+    && die "--required used a commit endpoint, which cannot answer it: $(cat "$TMP/args")" \
+    || pass "…and neither commit endpoint, since neither knows what is required"
 
 # EVERY VERDICT COMES THROUGH THE HELPER'S OWN CLASSIFIER on this path, so the
 # stub returns the endpoint's real shape and the jq below is what decides.
@@ -302,6 +323,36 @@ got="$(run 7 --head "$WANT")"
 [ "${got%%|*}" = 2 ] \
     && pass "…and a conclusion outside the known set is unreadable, not green" \
     || die "an unknown conclusion gave '$got'"
+
+# ── THE LEGACY COMMIT STATUSES DECIDE TOO ──────────────────────────────────
+# `gh pr checks` merges check runs and the older commit statuses, so a
+# commit-addressed replacement that read only the first would be LAXER than what
+# it replaces: an integration that still posts statuses would go unseen. These
+# cases give the commit no check runs at all, so the verdict can only come from
+# the legacy source.
+for _lv in success:0:green pending:3:pending failure:1:failed error:1:failed; do
+    _st="${_lv%%:*}"; _r="${_lv#*:}"; _rc="${_r%%:*}"; _want="${_r#*:}"
+    mkgh_head "$WANT" norun "$_st"
+    got="$(run 7 --head "$WANT")"
+    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_want" <<<"${got#*|}"; } \
+        && pass "…and a legacy '$_st' status alone is $_want" \
+        || die "a legacy $_st status gave '$got'"
+done
+# AND THE WORSE SOURCE WINS. A green set of check runs beside a failing legacy
+# status is a failing commit, and precedence going the other way is the direction
+# that opens the gate.
+mkgh_head "$WANT" green failure
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "…and a failing legacy status beats green check runs" \
+    || die "the mixed-source precedence gave '$got'"
+# …AND `pending` BEATS GREEN THE SAME WAY, which is the case a wrong precedence
+# would turn into a merge rather than a wait.
+mkgh_head "$WANT" green pending
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and a pending legacy status beats green check runs" \
+    || die "the mixed pending precedence gave '$got'"
 # …AND A PUSH LANDING DURING THE CHECKS REQUEST IS CAUGHT. Confirming the head only
 # BEFORE the request leaves a window: the answer then describes a commit nobody
 # verified, and in the round loop a head that had almost finished earning its grace

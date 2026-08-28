@@ -841,3 +841,39 @@ done
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
+
+# ── object_pages_or_error refuses what pages_or_error cannot see ───────────
+# `/commits/{oid}/check-runs` and `/commits/{oid}/status` page as OBJECTS with the
+# records under a named key, so `pages_or_error` — which requires every page to be
+# an array — refuses them outright and a caller reaching for `.[][]` instead would
+# iterate an error body's VALUES. Every refusal this rule adds is exercised here,
+# because a parser that fails open is the shape this library exists to prevent.
+_ope() {   # _ope <jq input> ; prints "rc|out"
+    local out rc=0
+    out="$(printf '%s' "$1" | jq -c -s "$RECORDLIB_JQ"'object_pages_or_error("check_runs") | [ .[].check_runs[] ] | length' 2>&1)" || rc=$?
+    printf '%s|%s' "$rc" "$out"
+}
+for _c in 'zero pages::' \
+          'a non-object page:[1,2]:' \
+          'a page lacking the key:{"total_count":0}:' \
+          'a non-array under the key:{"check_runs":{"a":1}}:' \
+          'a string under the key:{"check_runs":"none"}:'; do
+    _lbl="${_c%%:*}"; _rest="${_c#*:}"; _in="${_rest%%:*}"
+    _got="$(_ope "$_in")"
+    [ "${_got%%|*}" != 0 ] \
+        && pass "object_pages_or_error refuses $_lbl" \
+        || die "$_lbl was accepted: '$_got'"
+done
+# …AND ACCEPTS THE REAL SHAPE, so the refusals above are not refusing everything.
+_got="$(_ope '{"total_count":1,"check_runs":[{"name":"a"}]}')"
+{ [ "${_got%%|*}" = 0 ] && [ "${_got#*|}" = 1 ]; } \
+    && pass "…and accepts a well-formed page, counting its records" \
+    || die "a valid object page was refused: '$_got'"
+# …AND TWO PAGES ARE BOTH READ, which is the whole reason the rule takes pages
+# rather than one response: a paginated read that only counted the first page
+# would under-report a commit with more than a hundred check runs.
+_got="$(_ope '{"check_runs":[{"n":1}]}
+{"check_runs":[{"n":2},{"n":3}]}')"
+{ [ "${_got%%|*}" = 0 ] && [ "${_got#*|}" = 3 ]; } \
+    && pass "…and reads every page, not only the first" \
+    || die "pagination was not followed: '$_got'"
