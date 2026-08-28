@@ -709,23 +709,35 @@ case_is 1 "required-checks probe failed" "…and an unreadable probe blocks"
 # unreadable blocked every repository without it, permanently.
 world; printf '4' > "$STUB_DIR/pr-ci-state.rc"
 case_is 0 "merged" "a repository with no required checks still merges"
-# THE PROBE IS PINNED TO THE HEAD THE MERGE IS PINNED TO. `gh pr checks` takes a
+# THE PROBE IS BRACKETED BY THE HEAD THE MERGE IS PINNED TO. `gh pr checks` takes a
 # PR number and has no commit selector, so without `--head` this gate asks about
-# the pull request while everything around it asks about a commit — and on an
-# A → B → A force-push it accepts B's checks while `--match-head-commit A` merges
-# A. #212.
-world; case_is 0 "merged" "a clean merge still merges, with the probe pinned"
+# the pull request while everything around it asks about a commit, and a single
+# force-push away merges A on B's checks. #212.
+#
+# BRACKETED, NOT BOUND, AND THIS CASE ASSERTS ONLY THE ARGUMENT. What `--head`
+# gets the helper to do is confirm the head on each side of the checks read, which
+# catches a head that MOVED AND STAYED MOVED. It cannot bind a PR-addressed
+# response to a commit, so an A → B → A completing between those two confirmations
+# is invisible — that race is #214 and is NOT covered here. A case claiming
+# otherwise would be worse than none, because it would read as coverage.
+#
+# AND THE HELPER IS A STUB HERE, which is the second reason this asserts the
+# argument rather than the behaviour: there is nothing between the stub's reads to
+# drive, so a staged A → B → A would be asserting the stub. The helper's own
+# before-and-after logic is `test-pr-ci-state.sh`'s subject.
+world; case_is 0 "merged" "a clean merge still merges, with the probe bracketed"
 _ci_args="$(grep '^pr-ci-state.sh ' "$TMP/calls" | tail -1)" || _ci_args=""
 case "$_ci_args" in
-    *"--head $HEAD40"*) pass "…and the required-checks probe is pinned to the merged head" ;;
-    *) die "the required-checks probe is not pinned to the head (called as '$_ci_args')" ;;
+    *"--head $HEAD40"*) pass "…and the required-checks probe is called with the merged head" ;;
+    *) die "the required-checks probe is not given the head (called as '$_ci_args')" ;;
 esac
-# AND `stale` IS ITS OWN ANSWER. The helper reports 5 when the head moved, which
-# is not a failed probe: the caller re-runs the gate rather than investigating a
-# broken read, and the catch-all would have told them the wrong thing.
+# AND `stale` IS ITS OWN ANSWER. The helper reports 5 when the head moved AND
+# STAYED MOVED, which is not a failed probe: the caller re-runs the gate rather
+# than investigating a broken read, and the catch-all would have told them the
+# wrong thing.
 world; printf '5' > "$STUB_DIR/pr-ci-state.rc"
 case_is 1 "the head moved while the required checks were read" \
-    "a head that moved during the checks blocks, and says so"
+    "a head that moved and stayed moved during the checks blocks, and says so"
 
 # ── (4b) the round boundary is a PAUSE, not a refusal ──────────────────────
 world; printf '3' > "$STUB_DIR/pr-round-count.rc"

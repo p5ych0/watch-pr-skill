@@ -27,14 +27,15 @@
 #
 # WHAT IT DECIDES, in order, each one able to stop the merge on its own:
 #
-#   (0) the head is resolved ONCE, and everything below is pinned to it
+#   (0) the head is resolved ONCE, and everything below is addressed by it
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
 #  (3b) every check on the head is green, not only the required ones
-#   (4) the required checks satisfy branch protection
+#   (4) the required checks satisfy branch protection — BRACKETED by the head
+#       rather than bound to it; see the note at that gate and #214
 #  (4b) the round boundary has not been reached
-#   (5) merge, pinned to the head every gate above was evaluated against
+#   (5) merge, pinned to that head by `--match-head-commit`
 #
 # THE PAUSE IS NOT A REFUSAL, and that is why it has its own status. A caller that
 # cannot tell 3 from 1 either treats an operator decision as a failure or treats a

@@ -258,7 +258,7 @@ rm -f "$ERRF" 2>/dev/null
 # `gh pr checks` exits non-zero when a check FAILED as well as when it is pending
 # or absent, so the status alone does not classify anything — the parsed value
 # does, and the status only matters where there is no value to trust.
-# THE RESPONSE IS BOUND TO THE HEAD, not merely preceded by a check of it. The
+# THE READ IS BRACKETED BY THE HEAD, not merely preceded by a check of it. The
 # confirmation above and the checks call are two requests, and a push landing
 # between them means the answer describes a commit nobody verified — in the round
 # loop, a head that had almost finished earning its grace hands that grace to a
