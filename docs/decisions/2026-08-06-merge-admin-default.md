@@ -3,73 +3,52 @@
 **Date:** 2026-08-06
 **Status:** accepted
 **Decided by:** the repository operator, during review of PR #10
+**Revised:** 2026-08-28 — rewritten as a description of the gate as it is. It was
+framed throughout as before-and-after PR #10, which has since merged (`b7e61f3`,
+the v2 commit that created this tree), so every "after #10" bound below is simply
+in force. The decision is unchanged; only the framing was stale. #208.
 
-## Update, 2026-08-28: PR #10 has landed
+## What this record is authority for
 
-This record was written **during** review of PR #10 and is framed throughout as
-before-and-after that pull request: "on the base ref today" against "after #10".
+The merge gate merges with `--admin` by default, which bypasses branch protection
+deliberately, and every gate it checks runs client-side. **Two things are accepted
+here and nothing else**: the bypass itself, and the race between the last probe
+and the merge.
 
-**#10 merged** — `b7e61f3`, the v2 commit that created the current tree. So every
-"after #10" entry below is the state of the tree now, and the sentence further
-down telling you to read the bounds "as reasoning behind the default, not as
-protections in force" is **no longer true**. They are in force:
-`pr-merge-gate.sh` compares the full 40-hex head, merges with
-`--match-head-commit`, probes the reviewer's state and verdict against that head
-through `pr-review-state.sh`, and honours `REVIEW_MERGE_STRICT=1`.
+## The bounds that are in force before the merge
 
-**What this record accepts is unchanged**: the `--admin` default itself, which
-bypasses branch protection deliberately, and the race around the client-side
-probes — the window between the last probe and the merge, in which a review can be
-submitted or dismissed or a check can fail without the head moving. Both are
-argued below and both still stand.
+`pr-merge-gate.sh` does all of these before it merges:
 
-What is no longer an exposure is the third thing this section used to name: an
-unbounded gap where no review-state probe existed at all.
+- resolves the head ONCE, as the **full 40-hex OID** rather than an abbreviation,
+  and fails closed on a lookup that printed something and then failed;
+- pins the merge to that OID with `--match-head-commit`, which is what makes the
+  comparison atomic: GitHub refuses the merge unless the PR head still matches, so
+  there is no client-side re-read to race and none is performed;
+- probes the reviewer's state and verdict **against that head** through
+  `pr-review-state.sh`, so a `blocked`, dismissed or body-only
+  `CHANGES_REQUESTED` review is seen rather than walked past;
+- refuses while any review thread is unresolved, paginated;
+- honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-The decision — `--admin` as the default — is unchanged too, which is why this
-record is still `accepted` rather than superseded. Its before-and-after framing,
-and its reference to a v1 watcher script that v2 deleted, are stale prose recorded
-in #208.
+**Not every probe is bound to that head**, and the difference matters here more
+than it would elsewhere. The review-state probe takes the OID; the required-checks
+probe does not — `pr-ci-state.sh` is called without `--head`, so it answers about
+the pull request rather than about a commit. On an A → B → A force-push during the
+gate it can accept B's checks while `--match-head-commit A` then merges A. That is
+recorded as #212 and is a defect rather than something this record waives.
 
-## Read this first: which merge path it describes
+## What is confirmed after the merge
 
-This record accepts a trade-off in the merge gate. It distinguishes two exposures
-that were of different kinds when it was written; read it with the update above.
+This is not a bound on the bypass and does not constrain it: by the time it runs,
+the merge command has already been issued.
 
-| Bound | On the base ref today | After #10 |
-| --- | --- | --- |
-| The head is re-read and compared immediately before merging | present | present |
-| That comparison uses the **full** 40-hex SHA | **absent** (7-char prefix) | present |
-| That comparison is **atomic** with the merge (`--match-head-commit`) | **absent** | present |
-| A review-state probe (`blocked` / dismissed / body-only `CHANGES_REQUESTED`) | **absent** | present |
-| `REVIEW_MERGE_STRICT=1` to drop `--admin` entirely | **absent** | present |
+- the PR state is read back **after** `gh pr merge`, and a PR that is not `MERGED`
+  is reported as status 4 rather than `merged` — because a merge queue accepts the
+  request without landing it and `gh` calls that success.
 
-### The head exposure is two separate things
-
-**A race.** The base ref *does* re-read `headRefOid` immediately before merging
-and refuses when it no longer matches. A push is therefore caught unless it lands
-between that check and the `gh pr merge` call a few lines later — a TOCTOU race
-with a small window, not an unbounded gap. `--match-head-commit`, which #10 adds,
-closes it by making the comparison part of the merge itself.
-
-**A prefix-only comparison, which is not a race at all.** `MERGE_SHA` is a
-seven-character abbreviation and the check compares `${HEAD_OID:0:7}` against it,
-so a commit constructed to share those seven hex characters matches whenever it
-is pushed — before the check, not merely between it and the merge. No timing
-window bounds that one, and `--admin` then merges it. #10 compares the full
-40-hex SHA and pins the merge to it; until then this is a missing bound in its
-own right, listed separately above because calling it part of the race would
-understate it.
-
-### The review-state exposure is a missing gate
-
-There is no probe for `blocked`, dismissed, or body-only `CHANGES_REQUESTED` on
-the base ref at all. A changes-requested review that has stood for hours passes
-the client-side gate and is then bypassed by `--admin`. That is not a race, and
-no window bounds it. #10 adds the probe.
-
-**Until #10 lands, read the bounds below as reasoning behind the default, not as
-protections in force.**
+What it buys is that the driver does not act on a merge that did not happen. What
+it cannot do is stop the merge, which is why it is listed apart from the gates
+above.
 
 ## The limitation, stated plainly
 
@@ -77,12 +56,12 @@ protections in force.**
 request does not meet GitHub's requirements. It therefore discards GitHub's own
 evaluation of the mutable conditions at merge time.
 
-With #10's gates in place, every check runs client-side against data fetched a
-moment earlier, and `--match-head-commit` proves only that the head has not
-moved. That leaves a window between the last probe and the merge in which a
-review can be submitted or dismissed, a body-only `CHANGES_REQUESTED` can arrive,
-or a check can fail — none of which changes the head, and none of which `--admin`
-lets GitHub act on.
+With those gates in place, every check runs client-side against data fetched a
+moment earlier, and `--match-head-commit` proves only that the head has not moved.
+That leaves a window between the last probe and the merge in which a review can be
+submitted or dismissed, a body-only `CHANGES_REQUESTED` can arrive, or a check can
+fail — none of which changes the head, and none of which `--admin` lets GitHub act
+on.
 
 **That race is real and is accepted.** It is not an oversight, and a reviewer
 raising it is raising something true.
@@ -92,14 +71,16 @@ raising it is raising something true.
 Branch protection normally requires an approving review **from another account**.
 
 For the case this plugin is built around — a solo maintainer opening a pull
-request and reviewing it through the same `gh` credential — no available review
-satisfies that. GitHub refuses a self-approval, which is why the watcher on this
-branch attempts `APPROVE` and falls back to `COMMENT`
-(`skills/watch-prs/scripts/review-bus-codex-watcher.sh`). Where an approval is
-genuinely required, dropping `--admin` does not tighten the gate; it removes the
-merge path entirely, on every pull request. A tool whose happy path cannot
-complete is a worse failure than a seconds-wide race in a repository where nobody
-else is reviewing.
+request and driving it through their own `gh` credential — no available review
+satisfies that, for two separate reasons. **Neither reviewer is another account in
+the sense the rule means**: Codex and Copilot are GitHub Apps, and their reviews do
+not count towards required approvals. **And the operator cannot supply one
+either**: GitHub refuses a self-approval on your own pull request.
+
+Where an approval is genuinely required, dropping `--admin` therefore does not
+tighten the gate; it removes the merge path entirely, on every pull request. A tool
+whose happy path cannot complete is a worse failure than a seconds-wide race in a
+repository where nobody else is reviewing.
 
 **That rationale holds only where an approval is actually required.** It is
 narrower than it first appears, and narrower than the default it justifies:
@@ -109,43 +90,43 @@ narrower than it first appears, and narrower than the default it justifies:
 - On a branch configured as this record recommends — checks and conversation
   resolution on, **required approvals zero** — there is no missing approval, so a
   normal merge is available once those conditions pass. `--admin` is unnecessary
-  there, and an operator who has configured it should set
-  `REVIEW_MERGE_STRICT=1`.
+  there, and an operator who has configured it should set `REVIEW_MERGE_STRICT=1`.
 - The default earns its keep only where an approval **is** required and the
   reviewing credential cannot supply one.
 
 So the default is the **permissive** fallback, not a safe one. The distinction
-matters: it is chosen so the happy path completes on a repository whose
-protection is unknown, and "unknown" includes configurations it silently bypasses
-— a required merge queue is skipped outright, and any protection the credential
-can bypass is ignored. Calling that safe would be the same overstatement this
-record has already had to remove elsewhere.
+matters: it is chosen so the happy path completes on a repository whose protection
+is unknown, and "unknown" includes configurations it silently bypasses — a
+required merge queue is skipped outright, and any protection the credential can
+bypass is ignored. Calling that safe would be the same overstatement this record
+has already had to remove elsewhere.
 
 **Where the configuration is unknown, strict mode is the safer choice**, at the
 cost of a merge that may be refused until the operator looks at the rules. The
 default is the right one only where the protection is known and known to require
-an approval the reviewing credential cannot give. If your rules are ones this
-loop can satisfy, strict mode is better and this record is not an argument
-against it.
+an approval the reviewing credential cannot give. If your rules are ones this loop
+can satisfy, strict mode is better and this record is not an argument against it.
 
-**This rationale is narrower than "every PR".** Where the pull request is
-authored by a *different* account from the one `gh` is authenticated as — a
-dependency bot, or a worker running as a separate maintainer — that `APPROVE`
-succeeds and can satisfy a one-approval rule, so a normal merge is available and
+**This rationale is narrower than "every PR".** Where the pull request is authored
+by a *different* account from the one `gh` is authenticated as — a dependency bot,
+or a worker running as a separate maintainer — the operator's own approval is
+available and can satisfy a one-approval rule, so a normal merge works and
 `--admin` is not buying anything. Prefer `REVIEW_MERGE_STRICT=1` for those
-repositories once it exists.
+repositories.
 
-## What bounds it — once #10 has landed
+## What bounds it
 
-- The window is between the final probe and the merge call — seconds, on a PR
-  the operator is actively driving.
+- The window is between the final probe and the merge call — seconds, on a PR the
+  operator is actively driving.
 - Every gate this plugin checks client-side fails closed. That is not the same as
-  every condition GitHub can enforce: notably there is **no merge-queue probe**
-  anywhere in this repository, and `gh pr merge --admin` bypasses a required
-  merge queue outright rather than racing it. **This record does not cover
-  repositories whose base branch requires a merge queue** — there the exposure is
-  not a seconds-wide window but a skipped queue, and `REVIEW_MERGE_STRICT=1` is
-  the only supported setting.
+  every condition GitHub can enforce: there is **no merge-queue probe before the
+  merge**, and `gh pr merge --admin` bypasses a required queue outright rather
+  than racing it. What the gate does have is the read-back afterwards, so a queued
+  PR is reported as queued rather than as merged — which stops the driver acting
+  on a merge that did not happen, and does not stop the bypass. **This record does
+  not cover repositories whose base branch requires a merge queue**: there the
+  exposure is a skipped queue rather than a seconds-wide window, and
+  `REVIEW_MERGE_STRICT=1` is the only supported setting.
 - `REVIEW_MERGE_STRICT=1` drops `--admin` — which closes a race only where the
   repository's protections are configured *and* non-bypassable; see below.
 
@@ -162,55 +143,57 @@ Concretely, the combination worth having is:
 - **do not allow bypassing the above settings** — on (or an equivalent
   non-bypassable ruleset, or a `gh` credential without bypass permission).
 
-That last one is not optional decoration. GitHub's protected-branch rules do
-**not** apply to administrators or roles with bypass permission unless bypassing
-is explicitly disallowed — and in the solo-maintainer case this record is about,
-the operator *is* the administrator. Omitting `--admin` from the command
-therefore does not make these gates binding by itself: the credential can still
-merge a pull request whose requirements are unmet. Without this setting, strict
-mode changes which flag is passed and nothing about what GitHub enforces.
+**The last one decides whether strict mode binds at all.** GitHub's
+protected-branch rules do **not** apply to administrators or roles with bypass
+permission unless bypassing is explicitly disallowed — and in the solo-maintainer
+case this record is about, the operator *is* the administrator. Omitting `--admin`
+from the command therefore does not make any of these gates binding by itself: the
+credential can still merge a pull request whose requirements are unmet. Without
+this setting, strict mode changes which flag is passed and nothing about what
+GitHub enforces.
 
-Conversation resolution belongs in the list. The workflow already satisfies it:
-the base contract makes zero unresolved threads a hard rule and its merge block
-paginates every review thread and refuses while any is unresolved. So enabling
-the corresponding protection costs nothing the loop was not already doing, and
-in strict mode it becomes atomic — closing the case where a thread is opened
-after the final client-side probe. Recommending checks only would have pointed
-operators at a weaker configuration than the one they can actually run.
+**Conversation resolution decides something narrower**: whether unresolved threads
+are one of the protections GitHub enforces at all. With bypass disallowed and this
+off, strict mode still enforces the required status checks — it is not inert. What
+is missing is the thread gate becoming server-side and atomic, which is the case
+below.
 
-Required approvals stay at zero because that is the single condition this
-plugin's reviewers cannot satisfy for a same-credential PR, and it is exactly
-what the accepted trade-off is about. The base contract already draws that line
-itself: `--admin` is permitted to bypass a missing approval, and explicitly
-**must not** be used to bypass `required_review_thread_resolution`.
+Conversation resolution belongs in the list even so. The workflow already
+satisfies it: `pr-merge-gate.sh` paginates every review thread and refuses while
+any is unresolved, before it reaches the merge. So enabling the
+corresponding protection costs nothing the loop was not already doing, and in
+strict mode it becomes atomic — closing the case where a thread is opened after
+the final client-side probe. Recommending checks only would have pointed operators
+at a weaker configuration than the one they can actually run.
 
-**No user-facing instructions for setting this up exist in this repository yet**;
-they belong with the `REVIEW_MERGE_STRICT` implementation and arrive with #10.
-Until then, treat the list above as a description of what to configure, not a
-pointer to instructions.
+Required approvals stay at zero because that is the single condition this plugin's
+reviewers cannot satisfy for a same-credential PR, and it is exactly what the
+accepted trade-off is about. The gate draws that line itself: `--admin` is
+permitted to bypass a missing approval, and the unresolved-thread refusal above it
+means it is never reached with a thread open.
 
-**Which of those already hold here.** The first does: the base ref re-reads the
-head immediately before merging, so the window really is the seconds between that
-check and the merge call — that is the race described at the top, and saying
-otherwise would contradict this record's own classification. The second does not:
-the client-side gate set is incomplete on this branch, missing the review-state
-probe and comparing only a seven-character prefix. The third does not either —
-`REVIEW_MERGE_STRICT` is **not implemented here**, and setting it changes
-nothing.
+`README.md` documents the variable itself under its own heading. **It does not yet
+carry this four-part configuration**, and the two parts an operator is most likely
+to miss are the two doing the work described above: disallowing bypass, which
+decides whether any configured protection binds the credential at all, and
+conversation resolution, which decides whether unresolved threads are one of those
+protections. Until the README carries it, the list above is the only place it is
+written down. Recorded as #211.
 
 ## For reviewers
 
-This file is the base-ref authority for the accepted trade-off. The rule it
-relies on — that only a base-ref authority can waive a finding, and that an
-underweighted cost should be raised as a **non-blocking note** — is in
-`.review-bus.md` on the base ref. (`AGENTS.md` deliberately does not carry review
-policy and says so; PR #10 moves that policy into `AGENTS.md`, at which point this
-citation should follow it.)
+This file is the base-ref authority for the accepted trade-off. The rule it relies
+on — that only a base-ref authority can waive a finding, and that an underweighted
+cost should be raised as a **non-blocking note** — is in `AGENTS.md` on the base
+ref, and in `.github/copilot-instructions.md` for the reviewer that follows no
+pointers.
 
-It is not authority for anything else. The prefix-only head comparison, its
-non-atomicity, and the absent review-state probe on the current base ref are
-defects, not accepted limitations — #10 fixes all three, and a reviewer should
-keep reporting them anywhere else they appear.
+**It is authority for two things and no others**: merging with `--admin` by
+default, and the race between the final client-side probe and the merge. It is not
+authority for a weaker head comparison, a missing review-state probe, a merge
+reported without reading the PR state back, or anything else that resembles them —
+those were real defects, they were fixed, and a reviewer should keep reporting
+them anywhere they appear.
 
 If the reasoning above stops holding — for example if GitHub gains a way for an
 app review to satisfy required approvals — reopen it.

@@ -4287,8 +4287,14 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # SEMANTIC TOKENS, NOT STYLISTIC ONES: each names a condition rather than a
     # turn of phrase, so rewording the prose around them does not fail the case
     # while removing the condition does.
-    for _bd in 're-read and compared immediately before merging' \
-               'full 40-hex SHA' \
+    #
+    # `re-read and compared immediately before merging` WAS ONE OF THESE AND IS
+    # NOT ANY MORE, because the gate does not do it: the head is resolved ONCE and
+    # the merge is pinned to that OID with `--match-head-commit`, which is what
+    # makes the comparison atomic. Asserting a bound the code does not have taught
+    # a reviewer to accept the waiver on the strength of a check that is not there.
+    # The atomicity token below is the one that carries this.
+    for _bd in 'full 40-hex SHA' \
                '7-character prefix' \
                'atomic with the merge' \
                'match-head-commit' \
@@ -4303,6 +4309,18 @@ if [ -d "$ROOT/docs/decisions" ]; then
         grep -qF "$_bd" "$ROOT/.github/copilot-instructions.md" \
             && pass "copilot-instructions.md states the '$_bd' bound on the --admin waiver" \
             || die "the --admin bounds are deferred to a record Copilot cannot read: '$_bd' is missing"
+    done
+    # AND THE POST-MERGE CONFIRMATION, ASSERTED SEPARATELY BECAUSE IT IS NOT A
+    # BOUND. It runs after `gh pr merge` has been issued, so it cannot justify the
+    # bypass — but removing it is still a finding, because the driver then acts on
+    # a merge that did not happen. Listing it with the bounds taught a reviewer to
+    # count a reporting safeguard as a reason the merge was allowed.
+    for _pm in 'NOT a bound' \
+               'read back after the merge command' \
+               'reported as queued rather than merged'; do
+        grep -qF "$_pm" "$ROOT/.github/copilot-instructions.md" \
+            && pass "…and states '$_pm' as a post-merge confirmation rather than a bound" \
+            || die "the post-merge confirmation is missing from copilot-instructions.md: '$_pm'"
     done
     # …AND A PROBE THAT ERRORS IS NOT AN INACTIVE RECORD. `grep -q … || continue`
     # treats rc 2 — unreadable, vanished between the `-f` and the read — exactly

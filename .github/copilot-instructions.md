@@ -533,8 +533,7 @@ follow the pointer.** The bypass is accepted only while ALL of these hold, so a
 change that removes any one of them is a finding even though the bypass itself is
 waived:
 
-- the head is re-read and compared immediately before merging;
-- that comparison uses the **full 40-hex SHA**, never a 7-character prefix — a
+- the head is resolved as the **full 40-hex SHA**, never a 7-character prefix — a
   commit sharing seven hex characters is constructible, and that is not a race
   with a window but a match at any time;
 - the comparison is **atomic with the merge**, through `--match-head-commit`, so
@@ -543,6 +542,14 @@ waived:
   `CHANGES_REQUESTED`;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
+
+**And one thing that is NOT a bound, listed so it is not counted as one.** The PR
+state is **read back after the merge command**, and a PR that is not `MERGED` is
+reported as queued rather than merged — `gh` calls adding to a merge queue success,
+and reporting that as a merge tells the driver work is finished while the head is
+not on the base branch. Removing it is still a finding, because the driver then
+acts on a merge that did not happen. It cannot justify the bypass: by the time it
+runs, the merge has been issued.
 
 **And the waiver does not cover a base branch that requires a merge queue.**
 There is no merge-queue probe anywhere in this plugin, and `gh pr merge --admin`
