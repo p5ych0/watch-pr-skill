@@ -27,7 +27,10 @@
 #
 # WHAT IT DECIDES, in order, each one able to stop the merge on its own:
 #
-#   (0) the head is resolved ONCE, and everything below is addressed by it
+#   (0) the head is resolved ONCE, and it is the merge target every gate is about
+#       — the reviewer probes take it as an argument, the checks probe only
+#       BRACKETS its request with it, and the thread and round probes are
+#       PR-level. See (4) and #214
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
