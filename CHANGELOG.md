@@ -56,12 +56,28 @@
   would look for a check suite whose app id is `-1`, find none, and report
   `pending` for ever on a context that had passed.
 
+  **Every record sharing a required name is evaluated**, not the first one found. A
+  name can arrive as a check run and as a legacy status at once, and GitHub requires
+  all of them; taking the first match let whichever the rollup happened to list
+  first decide, so a passing record could answer for a failing one.
+
+  **Both sources are read twice and everything is unioned.** The branch read and the
+  rules read are not one snapshot, so a requirement can MOVE between them: add the
+  context to classic protection after the branch read, remove it from the ruleset
+  before the rules read, and neither body carries it though it was required
+  throughout. The union is monotone, which is why this is a second read rather than
+  a comparison — unioning cannot lose a requirement, and the cost of a stale one is
+  that the gate reports it pending for a run and the operator re-runs.
+
   **A ruleset rule this cannot evaluate stops the merge** rather than being dropped.
   `workflows`, `code_scanning` and `required_deployments` gate a merge on something
   that is not a status context, so ignoring them would leave the branch reading as
   requiring only what its `required_status_checks` rules name — this issue's own
   shape one level down. The list the helper carries is of rule types that cannot
-  name a check, so a type nobody has read yet refuses instead of passing.
+  name a check, so a type nobody has read yet refuses instead of passing. The type
+  is named on the error line, filtered to what a rule type can contain: refusing
+  without saying which rule caused it leaves the operator with a merge that will not
+  proceed until they change something they cannot see.
 
   **The base branch name is encoded rather than restricted.** `#`, `%` and a space
   all need encoding in a URL path and are all legal in a git ref, so refusing them

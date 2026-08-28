@@ -216,6 +216,7 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | ra
     printf '{"protected":false}\n' > "$TMP/gh.branch"
     printf '[]\n' > "$TMP/gh.rules"
     printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}}\n' > "$TMP/gh.ctx"
+    rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/branch.n" "$TMP/rules.n"
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
@@ -227,10 +228,20 @@ case "\$*" in
     *rules/branches*)
         # BEFORE the plain branch pattern, which is a prefix of this one.
         if [ -f "$TMP/gh.rules.fail" ]; then cat "$TMP/gh.rules"; exit 1; fi
-        cat "$TMP/gh.rules"; exit 0 ;;
+        # EACH READ CAN BE ANSWERED DIFFERENTLY, which is how a rule migrating
+        # BETWEEN two reads is staged. \`gh.rules.2\` answers the second call.
+        n=1
+        if [ -f "$TMP/rules.n" ]; then n="\$(cat "$TMP/rules.n")"; n=\$((n + 1)); fi
+        printf '%s' "\$n" > "$TMP/rules.n"
+        if [ -f "$TMP/gh.rules.\$n" ]; then cat "$TMP/gh.rules.\$n"; else cat "$TMP/gh.rules"; fi
+        exit 0 ;;
     *branches/*)
         if [ -f "$TMP/gh.branch.fail" ]; then cat "$TMP/gh.branch"; exit 1; fi
-        cat "$TMP/gh.branch"; exit 0 ;;
+        n=1
+        if [ -f "$TMP/branch.n" ]; then n="\$(cat "$TMP/branch.n")"; n=\$((n + 1)); fi
+        printf '%s' "\$n" > "$TMP/branch.n"
+        if [ -f "$TMP/gh.branch.\$n" ]; then cat "$TMP/gh.branch.\$n"; else cat "$TMP/gh.branch"; fi
+        exit 0 ;;
     *"contexts(first"*)
         # The REQUIRED rollup, which asks for the contexts; the all-checks one
         # below asks only for the state, and the two must not answer each other.
@@ -634,6 +645,84 @@ for _bad in '{"protected":true,"protection":{"required_status_checks":{"checks":
         || die "a malformed check identity was accepted: '$got'"
 done
 
+# ── EVERY RECORD SHARING A REQUIRED NAME IS EVALUATED ──────────────────────
+# A name can arrive as a check run AND as a legacy status — an integration posting
+# both, or two apps using the same name where the requirement is unbound — and
+# GitHub requires all of them. Taking the first match let whichever the rollup
+# happened to list first decide, so a passing record answered for a failing one.
+# BOTH ORDERS, because the defect is exactly an order dependence.
+_pair_run='{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}'
+_pair_bad='{"__typename":"StatusContext","context":"build","state":"FAILURE"}'
+for _order in "[$_pair_run,$_pair_bad]" "[$_pair_bad,$_pair_run]"; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' "$_order"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+        && pass "a failing record sharing the required name decides, whichever is listed first" \
+        || die "a passing record answered for a failing one: '$got'"
+done
+# …AND PENDING TOO, since a second record still running is a requirement not met.
+_pair_pend='{"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"app":{"databaseId":7}}}'
+for _order in "[$_pair_run,$_pair_pend]" "[$_pair_pend,$_pair_run]"; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' "$_order"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+        && pass "…and one still running is pending, whichever is listed first" \
+        || die "a passing record answered for an unfinished one: '$got'"
+done
+
+# ── A REQUIREMENT THAT MOVES BETWEEN THE TWO READS IS NOT LOST ─────────────
+# The branch read and the rules read are not one snapshot. Add the context to
+# classic protection after the branch read and remove it from the ruleset before
+# the rules read, and neither body carries it though it was required throughout —
+# an empty required set, which is a merge with nothing asserted. Both sources are
+# read twice and everything is unioned, so a requirement present at any of the four
+# instants is honoured.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' '[]' '[]'
+# The first branch read has no classic requirement and the first rules read has
+# already lost the ruleset one; the SECOND branch read is where the migration
+# lands.
+printf '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}\n' > "$TMP/gh.branch.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.branch.2"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "a requirement that appears only on the second read is still required" \
+    || die "a migrating requirement was lost: '$got'"
+# …AND THE SAME FROM THE RULESET SIDE.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' '[]' '[]'
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build"}]}}]\n' > "$TMP/gh.rules.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.rules.2"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…whichever source it appears in" \
+    || die "a migrating ruleset requirement was lost: '$got'"
+# …AND A REQUIREMENT THAT WAS THERE FIRST IS NOT DROPPED BY A LATER EMPTY READ,
+# which is the same union read from the other end.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' '[]'
+printf '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}\n' > "$TMP/gh.branch.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.branch.2"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and one that vanishes between the reads is still required for this run" \
+    || die "a vanishing requirement was dropped: '$got'"
+# …AND BOTH SOURCES REALLY ARE READ TWICE, so the union above is not resting on a
+# single read that happened to be right.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+: > "$TMP/args"
+run 7 --head "$WANT" --required >/dev/null
+[ "$(grep -cF 'repos/acme/widget/branches/main' "$TMP/args")" = 2 ] \
+    && pass "…because the branch object is read twice" \
+    || die "the branch was not read twice: $(cat "$TMP/args")"
+[ "$(grep -cF 'repos/acme/widget/rules/branches/main' "$TMP/args")" = 2 ] \
+    && pass "…and so are its rules" \
+    || die "the rules were not read twice: $(cat "$TMP/args")"
+
 # ── A RULE THIS CANNOT EVALUATE IS NOT A RULE WITH NO CONTEXTS ─────────────
 # A ruleset can gate a merge on something that is not a status context. Dropping
 # those leaves the branch reading as requiring only what its `required_status_checks`
@@ -647,7 +736,25 @@ for _rt in workflows code_scanning required_deployments future_rule_nobody_has_r
     { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
         && pass "a '$_rt' rule is unsupported, not an empty requirement" \
         || die "a '$_rt' rule was dropped: '$got'"
+    # …AND THE TYPE IS ON THE LINE. Refusing without naming it leaves the operator
+    # told the required checks are unreadable and nothing else, on a merge that
+    # will not proceed until they change something they cannot see.
+    grep -qF "rule=$_rt" <<<"${got#*|}" \
+        && pass "…and the diagnostic names '$_rt'" \
+        || die "the unsupported rule type was swallowed: '$got'"
 done
+# THE NAME IS FILTERED, not passed through: it comes out of an API body and lands
+# on a line other programs parse.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
+    '[{"type":"work flows\nPR_CI_STATE pr=7 status=green","parameters":{}}]' '[]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 2 ] && grep -qF 'rule=workflowsPR_CI_STATEpr7statusgreen' <<<"${got#*|}"; } \
+    && pass "…with everything a rule type cannot contain removed" \
+    || die "an unfiltered rule type reached the line: '$got'"
+grep -qE '^PR_CI_STATE pr=7 status=green' <<<"${got#*|}" \
+    && die "a forged line was emitted from a rule type: '$got'" \
+    || pass "…so a rule type cannot forge a line of its own"
 # …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. `cli/cli` carries
 # `copilot_code_review` today, and refusing there would be a gate that never opens.
 for _rt in deletion non_fast_forward pull_request copilot_code_review merge_queue required_signatures branch_name_pattern; do

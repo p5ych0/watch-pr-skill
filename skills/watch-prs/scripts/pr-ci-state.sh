@@ -341,6 +341,12 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # so they are named as unsupported and the merge stops; `REVIEW_MERGE_STRICT=1` is
 # where GitHub evaluates them itself.
 #
+# AND THE TYPE IS NAMED, which is the only thing that makes refusing actionable.
+# jq writes it to `$ERRF` rather than to `/dev/null`, and the caller lifts it onto
+# the error line as `rule=<type>`, filtered to the characters a rule type can have
+# — the text is a message from a body this script did not write, and it lands in a
+# line other programs parse.
+#
 # THE LIST IS OF WHAT IS IRRELEVANT, not of what blocks, so an unrecognised type
 # refuses. A rule type GitHub adds tomorrow is one nobody here has read, and the
 # two directions are not symmetrical: refusing names the type in the diagnostic and
@@ -432,7 +438,7 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                   else error("a rule type this cannot evaluate: " + .type)
                   end ] ) as $ruleset
           | ( $classic + $ruleset | unique )
-        end' 2>/dev/null || return 2
+        end' 2>"$ERRF" || return 2
     return 0
 }
 
@@ -443,6 +449,12 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
 # still refused rather than truncated — a required context on the second page
 # would read as one that has not reported, and this loop would wait for a check
 # that had already passed.
+#
+# EVERY RECORD SHARING THE NAME IS EVALUATED, not the first one found. A name can
+# arrive as a check run AND as a legacy status — an integration posting both, or two
+# apps using the same name where the requirement is unbound — and GitHub requires
+# all of them. Taking the first match meant whichever the rollup happened to list
+# first decided, so a passing record could answer for a failing one.
 #
 # A REQUIRED CONTEXT THAT IS NOT THERE IS PENDING, not missing. That is what
 # `EXPECTED` means on the other side of the same question: the requirement stands
@@ -469,8 +481,29 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
 # not yet answered. An UNBOUND one — `app_id` null, which is what `cli/cli` carries
 # on all three of its contexts — is met by either kind, as GitHub does it.
 required_checks_verdict() {   # <oid> <base> ; prints green|failed|pending|none|malformed
-    local oid="$1" base="$2" _left _req _out
+    local oid="$1" base="$2" _left _req _req2 _out
+    # BOTH SOURCES ARE READ TWICE AND EVERYTHING IS UNIONED, because the two reads
+    # are not one snapshot and a requirement can MOVE between them. Add the context
+    # to classic protection after the branch read, remove it from the ruleset before
+    # the rules read, and neither body carries it though it was required throughout
+    # — an empty required set, which is a merge with nothing asserted.
+    #
+    # THE UNION IS MONOTONE, which is why this is a second read rather than a
+    # comparison. Refusing on a changed pair blocks the merge on any benign edit and
+    # still has to decide what a third answer means; unioning cannot LOSE a
+    # requirement, and the cost of a stale one is that the gate reports it pending
+    # for this run and the operator re-runs. Over-requiring for one run is the safe
+    # direction; under-requiring is the merge.
+    #
+    # TWO CALLS, NOT A LOOP INSIDE, so the reads interleave classic, rules, classic,
+    # rules. A requirement that dodged every sample would have to be in the ruleset
+    # at both classic reads and in classic at both ruleset reads, which is three
+    # migrations inside one gate run.
     _req="$(required_contexts "$base")" || return 2
+    _req2="$(required_contexts "$base")" || return 2
+    _req="$(printf '%s\n%s\n' "$_req" "$_req2" | jq -c -s '
+        if length != 2 or any(.[]; type != "array") then error("two arrays are expected")
+        else (.[0] + .[1] | unique) end' 2>/dev/null)" || return 2
     case "$_req" in
         '[]') printf '%s\n' none; return 0 ;;
         '['*) ;;
@@ -501,23 +534,27 @@ required_checks_verdict() {   # <oid> <base> ; prints green|failed|pending|none|
                          | select((.name // .context) == $want.context)
                          | select($want.app == null
                                   or (.__typename == "CheckRun"
-                                      and (.checkSuite.app.databaseId == $want.app))) ]
-                       | first ) as $c
-                   | if $c == null then "pending"
-                     elif $c.__typename == "CheckRun" then
-                       if ($c.status | type) != "string" then "malformed"
-                       elif $c.status != "COMPLETED" then "pending"
-                       elif ($c.conclusion | type) != "string" then "malformed"
-                       elif $c.conclusion | IN("FAILURE","CANCELLED","TIMED_OUT","ACTION_REQUIRED","STARTUP_FAILURE","STALE") then "failed"
-                       elif $c.conclusion | IN("SUCCESS","NEUTRAL","SKIPPED") then "green"
-                       else "malformed" end
-                     elif $c.__typename == "StatusContext" then
-                       if ($c.state | type) != "string" then "malformed"
-                       elif $c.state | IN("FAILURE","ERROR") then "failed"
-                       elif $c.state | IN("PENDING","EXPECTED") then "pending"
-                       elif $c.state == "SUCCESS" then "green"
-                       else "malformed" end
-                     else "malformed" end ] as $v
+                                      and (.checkSuite.app.databaseId == $want.app))) ] ) as $cs
+                   | ( [ $cs[]
+                         | if .__typename == "CheckRun" then
+                             if (.status | type) != "string" then "malformed"
+                             elif .status != "COMPLETED" then "pending"
+                             elif (.conclusion | type) != "string" then "malformed"
+                             elif .conclusion | IN("FAILURE","CANCELLED","TIMED_OUT","ACTION_REQUIRED","STARTUP_FAILURE","STALE") then "failed"
+                             elif .conclusion | IN("SUCCESS","NEUTRAL","SKIPPED") then "green"
+                             else "malformed" end
+                           elif .__typename == "StatusContext" then
+                             if (.state | type) != "string" then "malformed"
+                             elif .state | IN("FAILURE","ERROR") then "failed"
+                             elif .state | IN("PENDING","EXPECTED") then "pending"
+                             elif .state == "SUCCESS" then "green"
+                             else "malformed" end
+                           else "malformed" end ] ) as $each
+                   | if ($each | length) == 0 then "pending"
+                     elif any($each[]; . == "malformed") then "malformed"
+                     elif any($each[]; . == "failed") then "failed"
+                     elif any($each[]; . == "pending") then "pending"
+                     else "green" end ] as $v
               | if any($v[]; . == "malformed") then "malformed"
                 elif any($v[]; . == "failed") then "failed"
                 elif any($v[]; . == "pending") then "pending"
@@ -587,7 +624,20 @@ elif [ -n "$WANT_HEAD" ]; then
     OUT="$(required_checks_verdict "$WANT_HEAD" "$BASE_ENC")" || RC=$?
     MSG=""
     if [ "$RC" -ne 0 ]; then
-        echo "PR_CI_STATE pr=$PR status=error reason=required_checks_unreadable rc=$RC head=$WANT_HEAD" >&2
+        # THE UNSUPPORTED RULE TYPE IS LIFTED ONTO THE LINE. Without it the operator
+        # is told the required checks are unreadable and nothing else, on a merge
+        # that will never proceed until they change something they cannot see. The
+        # value is filtered to what a rule type can contain rather than trusted:
+        # it comes out of an API body, and this line is parsed.
+        REQ_DETAIL=""
+        REQ_MSG="$(cat "$ERRF" 2>/dev/null)" || REQ_MSG=""
+        case "$REQ_MSG" in
+            *"a rule type this cannot evaluate: "*)
+                REQ_DETAIL="${REQ_MSG##*a rule type this cannot evaluate: }"
+                REQ_DETAIL="${REQ_DETAIL//[!A-Za-z0-9_-]/}"
+                [ -n "$REQ_DETAIL" ] && REQ_DETAIL=" rule=$REQ_DETAIL" ;;
+        esac
+        echo "PR_CI_STATE pr=$PR status=error reason=required_checks_unreadable rc=$RC head=$WANT_HEAD$REQ_DETAIL" >&2
         rm -f "$ERRF" 2>/dev/null
         exit 2
     fi
