@@ -45,6 +45,12 @@ for h in pr-review-state.sh pr-merge-range.sh pr-ci-gate.sh pr-ci-state.sh pr-ro
     cat > "$GATEDIR/$h" <<STUB
 #!/usr/bin/env bash
 printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$STUB_CALLS"
+# EACH ARGUMENT ON ITS OWN LINE, prefixed with the helper, for the reason the
+# \`gh\` stub does it: \`"\$*"\` joins them, so \`--required --head <oid>\` passed as
+# ONE argument looks identical to two — and the real parser refuses that with
+# status 2, blocking every merge, while a substring assertion on the joined form
+# stays green.
+for _a in "\$@"; do printf '%s\t%s\n' "\$(basename "\$0")" "\$_a"; done >> "\$STUB_ARGV"
 _n="\$(basename "\$0" .sh)"
 _out="\$STUB_DIR/\${_n}.out"; _rc="\$STUB_DIR/\${_n}.rc"
 # THE ARGUMENTS SELECT THE ANSWER where a case needs two different ones from the
@@ -726,18 +732,34 @@ case_is 0 "merged" "a repository with no required checks still merges"
 # drive, so a staged A → B → A would be asserting the stub. The helper's own
 # before-and-after logic is `test-pr-ci-state.sh`'s subject.
 world; case_is 0 "merged" "a clean merge still merges, with the probe bracketed"
-_ci_args="$(grep '^pr-ci-state.sh ' "$TMP/calls" | tail -1)" || _ci_args=""
-case "$_ci_args" in
-    *"--head $HEAD40"*) pass "…and the required-checks probe is called with the merged head" ;;
-    *) die "the required-checks probe is not given the head (called as '$_ci_args')" ;;
-esac
+# ARGUMENT BOUNDARIES, NOT A SUBSTRING. `--required --head <oid>` passed as one
+# argument joins to the same text, and the real parser refuses it with status 2 —
+# so the assertion reads the per-argument log and requires `--head` and the OID to
+# be two separate words, in that order.
+_ci_argv="$(awk -F'\t' '$1=="pr-ci-state.sh"{print $2}' "$TMP/argv")" || _ci_argv=""
+_ci_idx=0; _ci_found=no; _ci_prev=""
+while IFS= read -r _ci_a; do
+    [ -n "$_ci_a" ] || continue
+    if [ "$_ci_prev" = "--head" ] && [ "$_ci_a" = "$HEAD40" ]; then _ci_found=yes; fi
+    _ci_prev="$_ci_a"; _ci_idx=$((_ci_idx + 1))
+done <<EOCIA
+$_ci_argv
+EOCIA
+{ [ "$_ci_found" = yes ] && [ "$_ci_idx" -gt 0 ]; } \
+    && pass "…and the required-checks probe is given --head and the merged head as separate arguments" \
+    || die "the required-checks probe is not given the head as its own argument (argv: $(tr '\n' ' ' <<<"$_ci_argv"))"
 # AND `stale` IS ITS OWN ANSWER. The helper reports 5 when the head moved AND
 # STAYED MOVED, which is not a failed probe: the caller re-runs the gate rather
 # than investigating a broken read, and the catch-all would have told them the
 # wrong thing.
+#
+# THE MESSAGE NAMES THE MISMATCH, NOT THE MOMENT, and this case asserts that. The
+# helper can report 5 from EITHER confirmation — the one before the checks read,
+# where the checks were never requested, or the one after — so "while the required
+# checks were read" was true of one arm and wrong about the other.
 world; printf '5' > "$STUB_DIR/pr-ci-state.rc"
-case_is 1 "the head moved while the required checks were read" \
-    "a head that moved and stayed moved during the checks blocks, and says so"
+case_is 1 "the PR head no longer matches the gated head" \
+    "a head that moved and stayed moved blocks, naming the mismatch not the moment"
 
 # ── (4b) the round boundary is a PAUSE, not a refusal ──────────────────────
 world; printf '3' > "$STUB_DIR/pr-round-count.rc"

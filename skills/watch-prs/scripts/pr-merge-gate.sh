@@ -632,35 +632,43 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # never opens, and it was found by trying to merge rather than by reading the
 # code. The helper distinguishes the two and reports 4 for it.
 #
-# AND IT IS PINNED TO `$HEAD_OID`, LIKE EVERY OTHER PROBE HERE. `gh pr checks`
+# AND IT IS BRACKETED BY `$HEAD_OID`. `gh pr checks`
 # takes a PR NUMBER and answers about whatever the API currently calls its head —
 # there is no commit selector — so without `--head` this asks a question about the
 # pull request while every gate around it asks about a commit.
 #
-# A → B → A IS WHY THAT MATTERS. The head is resolved once as A; a force-push
-# moves it to B and B's required checks go green; this probe reads them; the head
-# is forced back to A; and `--match-head-commit A` then merges A on B's result.
-# `--match-head-commit` did its job — the head IS A — and the checks gate answered
-# about a commit nobody merged. #212.
+# A → B → A IS THE CASE, AND IT ALWAYS TAKES BOTH MOVES. One force-push away is
+# refused by `--match-head-commit`, which requires the head to still BE the OID it
+# is given — so the danger is a return: the head goes to B, B's required checks go
+# green, this probe reads them, the head comes back to A, and the merge succeeds on
+# B's result about a commit nobody merged. #212.
 #
-# WHAT `--head` BUYS, AND WHAT IT DOES NOT. The helper confirms the head before AND
-# after the checks read, so a head that MOVED AND STAYED MOVED is caught and
-# reported as `stale`. It does not BIND the response to a commit, and cannot: the
-# request is addressed by PR number and the answer carries no OID, so an A → B → A
-# that completes between the two confirmations still reads B's checks and sees A
-# twice. That residue is #214, and on the strict path it does not arise at all —
-# GitHub evaluates the required checks itself at merge time.
+# WHAT `--head` BUYS IS WHEN THE RETURN HAS TO LAND, not how many pushes it takes.
+# Unbracketed, the read could be answered at any point and the return could arrive
+# any time before the merge — through the thread pagination and the round-count
+# probe below. Bracketed, the helper confirms the head on each side of the read, so
+# a head that MOVED AND STAYED MOVED is `stale`, and the return has to complete
+# inside those two confirmations.
+#
+# IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
+# by PR number and the answer carries no OID, so an A → B → A completing inside the
+# bracket still reads B's checks and sees A twice. That residue is #214, and on the
+# strict path it does not arise at all — GitHub evaluates the required checks
+# itself at merge time.
 #
 # 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
-# the head moved, and the caller's correct response is to re-run the gate against
-# what is there now — which is a different instruction from "the probe failed".
+# the PR head is not the one this gate resolved — reported from EITHER
+# confirmation, so the checks may not have been read at all — and the caller's
+# correct response is to re-run the gate against what is there now, which is a
+# different instruction from "the probe failed". The message names the mismatch
+# rather than the moment, because the moment differs between the two arms.
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required --head "$HEAD_OID"; CHECKS_RC=$?
 case "$CHECKS_RC" in
     0) ;;
     4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
     1) echo "merge blocked: a required check is not green"; exit 1 ;;
     3) echo "merge blocked: the required checks have not finished"; exit 1 ;;
-    5) echo "merge blocked: the head moved while the required checks were read; re-run the gate for the head that is there now"; exit 1 ;;
+    5) echo "merge blocked: the PR head no longer matches the gated head, so the required-checks answer is about another commit; re-run the gate for the head that is there now"; exit 1 ;;
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
 esac
 

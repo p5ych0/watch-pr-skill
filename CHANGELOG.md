@@ -8,12 +8,13 @@
   `--head`, and `gh pr checks` has no commit selector, so it answered about
   whatever the API currently called the PR's head.
 
-  **A → B → A is the case.** The gate resolves the head as A; a force-push moves it
-  to B and B's required checks go green; the probe reads them; the head is forced
-  back to A; and `gh pr merge --match-head-commit A` succeeds, because the head IS
-  A. `--match-head-commit` did its job and the checks gate answered about a commit
-  nobody merged — on the default path, where `--admin` means the probe is the only
-  thing standing between a stale answer and an administrator merge.
+  **A → B → A is the case, and it always takes the return.** One move away is
+  refused by `--match-head-commit`, which requires the head to still BE the OID it
+  is given. The danger is coming back: the head goes to B, B's required checks go
+  green, the probe reads them, the head returns to A, and the merge succeeds on B's
+  result about a commit nobody merged — on the default path, where `--admin` means
+  the probe is the only thing standing between a stale answer and an administrator
+  merge.
 
   It passes `--head` now, so the helper confirms the head before and after the
   checks read; this was the one caller that did not. Its `stale` status is handled
@@ -22,9 +23,10 @@
 
   **That is a bracket and not a binding**, and the change says so everywhere rather
   than claiming more. `gh pr checks` is addressed by PR number and its answer
-  carries no OID, so the two confirmations catch a head that moved and stayed
-  moved — the ordinary case, and the whole of what a single force-push could do
-  before — and cannot see an A → B → A that completes between them. Binding it
+  carries no OID, so the two confirmations catch a head that moved and stayed moved
+  and cannot see an A → B → A that completes between them. What they change is WHEN
+  the return has to land: inside the bracket, rather than any time between the
+  checks read and the merge. Binding it
   needs a commit-addressed query plus the required-contexts read to go with it,
   which is #214. On the strict path the residue does not arise: GitHub evaluates
   the required checks itself.
