@@ -62,12 +62,19 @@ ruleset's contexts come from `repos/{o}/{r}/rules/branches/{b}`, and the require
 set is the union: `home-assistant/core` requires eight contexts through a ruleset
 with `protection.enabled` false, `cli/cli` the other way round.
 
-**What that leaves for this record.** Nothing about the required set — it is bound.
-What is still bounded rather than closed is the `--admin` bypass itself, below,
-and two smaller things named where the code is: protection changed between the
-required-set read and the merge, which is a race GitHub has too because protection
-is a property of a branch rather than of a commit, and the "require branches to be
-up to date" policy, which is not read.
+**What that leaves for this record**, and the distinction matters. What is bound is
+the EVALUATION: which contexts the base branch requires is now checked against the
+merge target's own rollup, so the answer is about the commit being merged. The
+required SET is not bound and cannot be — branch protection is a property of a
+branch rather than of a commit, so a rule changed after the read is a race GitHub
+has too, and saying otherwise would be exactly the overstatement this record has
+had to remove elsewhere. What the loop does about it is read both sources twice and
+union everything, which cannot lose a requirement; what it cannot do is freeze the
+branch.
+
+Still bounded rather than closed, then: the `--admin` bypass itself, below; that
+mutable required set; and the "require branches to be up to date" policy, which is
+not read at all.
 
 **Strict mode is what closes it.** With `REVIEW_MERGE_STRICT=1` on a repository
 whose required checks are non-bypassable — configured, and with bypassing

@@ -715,25 +715,21 @@ case_is 1 "required-checks probe failed" "…and an unreadable probe blocks"
 # unreadable blocked every repository without it, permanently.
 world; printf '4' > "$STUB_DIR/pr-ci-state.rc"
 case_is 0 "merged" "a repository with no required checks still merges"
-# THE PROBE IS BRACKETED BY THE HEAD THE MERGE IS PINNED TO. `gh pr checks` takes a
-# PR number and has no commit selector, so without `--head` this gate asks about
-# the pull request with nothing tying the answer to the commit being merged. The unsafe case
-# is always A → B → A — one move away is refused by `--match-head-commit` — and
-# unbracketed the return could land any time before the merge. #212.
+# THE PROBE IS GIVEN THE HEAD THE MERGE IS PINNED TO, and since #214 that binds it.
+# The helper reads what the BASE BRANCH requires and asks the merge target's own
+# rollup whether those contexts passed on it, so the answer is about the commit
+# being merged. Without `--head` there is no commit to address and it falls back to
+# `gh pr checks`, which takes a PR number and has no commit selector — the shape
+# #212 could only bracket, where an A → B → A whose both moves land between the two
+# head confirmations was invisible.
 #
-# BRACKETED, NOT BOUND, AND THIS CASE ASSERTS ONLY THE ARGUMENT. What `--head`
-# gets the helper to do is confirm the head on each side of the checks read, which
-# catches a head that MOVED AND STAYED MOVED. It cannot bind a PR-addressed
-# response to a commit, so an A → B → A whose BOTH MOVES complete between the two
-# confirmations is invisible: the first sees A, so A → B is after it; the second
-# sees A, so B → A is before it. That race is #214 and is NOT covered here. A case
-# claiming otherwise would be worse than none, because it would read as coverage.
-#
-# AND THE HELPER IS A STUB HERE, which is the second reason this asserts the
-# argument rather than the behaviour: there is nothing between the stub's reads to
-# drive, so a staged A → B → A would be asserting the stub. The helper's own
-# before-and-after logic is `test-pr-ci-state.sh`'s subject.
-world; case_is 0 "merged" "a clean merge still merges, with the probe bracketed"
+# THIS CASE ASSERTS ONLY THE ARGUMENT, and that is the whole of what it can assert:
+# the helper is a STUB here, so there is nothing between its reads to drive and a
+# staged A → B → A would be asserting the stub. The binding itself — the required
+# set, the rollup, the head and base confirmations either side — is
+# `test-pr-ci-state.sh`'s subject. A case claiming otherwise would be worse than
+# none, because it would read as coverage.
+world; case_is 0 "merged" "a clean merge still merges, with the probe given the head"
 # ARGUMENT BOUNDARIES, NOT A SUBSTRING. `--required --head <oid>` passed as one
 # argument joins to the same text, and the real parser refuses it with status 2 —
 # so the assertion reads the per-argument log and requires `--head` and the OID to

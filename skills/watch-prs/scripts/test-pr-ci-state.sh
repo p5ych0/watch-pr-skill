@@ -736,7 +736,7 @@ run 7 --head "$WANT" --required >/dev/null
 # those leaves the branch reading as requiring only what its `required_status_checks`
 # rules name — an enforcement rule arriving as an empty required set, which is this
 # issue's own shape one level down.
-for _rt in workflows code_scanning required_deployments merge_queue future_rule_nobody_has_read; do
+for _rt in workflows required_workflow_status_checks code_scanning secret_scanning license_compliance_scanning required_deployments merge_queue future_rule_nobody_has_read; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
         '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
@@ -757,14 +757,20 @@ done
 # record says that waiver does not cover a base branch requiring one. Under
 # `REVIEW_MERGE_STRICT=1` GitHub enforces the queue itself, so there it is skipped
 # like any other rule that names no check.
-mkgh_head "$WANT" green
-mkgh_required '{"protected":false}' '[{"type":"merge_queue","parameters":{}}]' '[]'
-_mq_rc=0
-_mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
-    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
-{ [ "$_mq_rc" = 4 ] && grep -qF 'status=none' <<<"$_mq_out"; } \
-    && pass "…while under strict mode a merge-queue rule is GitHub's to enforce" \
-    || die "a merge-queue rule blocked strict mode: rc=$_mq_rc '$_mq_out'"
+# …AND UNDER STRICT MODE THERE IS NOTHING TO REFUSE, for any of them. `--admin`
+# discards whatever GitHub would have enforced, so a rule this cannot evaluate is a
+# rule NOBODY evaluates; without it GitHub evaluates every rule itself at merge
+# time, and refusing there blocks a merge that would have been checked properly.
+for _rt in merge_queue workflows code_scanning required_deployments future_rule_nobody_has_read; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
+    _mq_rc=0
+    _mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
+    { [ "$_mq_rc" = 4 ] && grep -qF 'status=none' <<<"$_mq_out"; } \
+        && pass "…while under strict mode a '$_rt' rule is GitHub's to enforce" \
+        || die "a '$_rt' rule blocked strict mode: rc=$_mq_rc '$_mq_out'"
+done
 
 # THE NAME IS FILTERED, not passed through: it comes out of an API body and lands
 # on a line other programs parse.
@@ -780,7 +786,7 @@ grep -qE '^PR_CI_STATE pr=7 status=green' <<<"${got#*|}" \
     || pass "…so a rule type cannot forge a line of its own"
 # …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. `cli/cli` carries
 # `copilot_code_review` today, and refusing there would be a gate that never opens.
-for _rt in deletion non_fast_forward pull_request copilot_code_review required_signatures branch_name_pattern; do
+for _rt in deletion non_fast_forward pull_request copilot_code_review required_signatures branch_name_pattern lock_branch tag authorization max_ref_updates workflow_updates required_review_thread_resolution max_file_path_length; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
     got="$(run 7 --head "$WANT" --required)"
