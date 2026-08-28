@@ -278,15 +278,39 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
           elif any(.[]; .conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale")) then "failed"
           elif all(.[]; .conclusion | IN("success","neutral","skipped")) then "green"
           else "malformed" end' 2>/dev/null)" || return 2
+    # THE NEWEST EVENT PER CONTEXT, not every event. The combined-status endpoint
+    # keeps the whole history: a context that reported `failure` and then `success`
+    # on the same commit appears TWICE, and folding over all of them leaves the
+    # commit failed forever — a rerun that went green could never reopen the round
+    # or the merge gate. Only the latest event for a context is its current state.
+    #
+    # A TIE THAT DISAGREES IS MALFORMED. `created_at` is second-resolution and the
+    # pages come back separately, so two events for one context at the same instant
+    # cannot be ordered, and picking one is a guess about whether the commit is
+    # green. Where they agree there is nothing to guess, which is why the newest
+    # set is reduced with `unique` and only a set of more than one refuses.
+    # `context` and `created_at` are validated for the same reason the state is:
+    # this fold cannot group or order without them.
     _v_sts="$(printf '%s' "$_sts" | jq -r -s "$RECORDLIB_JQ"'
         object_pages_or_error("statuses")
         | [ .[].statuses[] ]
         | if length == 0 then "none"
-          elif any(.[]; type != "object" or (.state | type) != "string") then "malformed"
-          elif any(.[]; .state | IN("failure","error")) then "failed"
-          elif any(.[]; .state == "pending") then "pending"
-          elif all(.[]; .state == "success") then "green"
-          else "malformed" end' 2>/dev/null)" || return 2
+          elif any(.[]; type != "object"
+                        or (.state | type) != "string"
+                        or (.context | type) != "string"
+                        or (.created_at | type) != "string") then "malformed"
+          else ( group_by(.context)
+                 | map( (max_by(.created_at).created_at) as $t
+                        | map(select(.created_at == $t))
+                        | (map(.state) | unique) ) ) as $cur
+            | if any($cur[]; length != 1) then "malformed"
+              else ($cur | map(.[0])) as $st
+                | if any($st[]; IN("failure","error")) then "failed"
+                  elif any($st[]; . == "pending") then "pending"
+                  elif all($st[]; . == "success") then "green"
+                  else "malformed" end
+              end
+          end' 2>/dev/null)" || return 2
     # WORST-FIRST, and `none` only where BOTH said it. The tokens are disjoint, so
     # a substring test over the pair is the whole of the precedence.
     case "$_v_runs/$_v_sts" in

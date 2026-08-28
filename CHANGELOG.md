@@ -33,12 +33,18 @@
   on non-bypassable protection is what closes it, and every layer now says so
   rather than claiming the gate covers it.
 
-  Two details the measurement turned up, both fail-open traps: `commits/<oid>/status`
+  Three details the measurement turned up: `commits/<oid>/status`
   reports `state: "pending"` with an EMPTY `statuses` array when a commit has none,
   so the summary is read past in favour of the array; and `check-runs` pages as an
   OBJECT, which `pages_or_error` refuses — `recordlib.sh` gained
   `object_pages_or_error` beside it rather than letting a `.[][]` walk an error
-  body's values.
+  body's values. Both are fail-open. The third is a gate that could not RECOVER:
+  that endpoint keeps every event a context ever posted for a commit, so a context
+  that reported `failure` and then `success` appears twice, and folding over all of
+  them leaves the commit failed forever — a rerun that went green would never
+  reopen the round or the merge gate. Only the newest event for a context is its
+  state; two at the same second that disagree are unreadable, since `created_at` is
+  second-resolution and choosing one is a guess about whether the commit is green.
 
   #214 stays open, with the measurement recorded on it.
 
