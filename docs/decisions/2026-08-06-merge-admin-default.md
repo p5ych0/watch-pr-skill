@@ -178,18 +178,22 @@ Concretely, the combination worth having is:
 
 - **required status checks** — on;
 - **require conversation resolution before merging** — on;
-- **required approvals** — zero;
+- **required approvals** — zero, but only where no account can supply one;
 - **do not allow bypassing the above settings** — on (or an equivalent
   non-bypassable ruleset, or a `gh` credential without bypass permission).
 
-**The last one decides whether strict mode binds at all.** GitHub's
+**The last one is what makes the enforcement atomic, and it is not what makes
+strict mode do anything at all.** Dropping `--admin` already refuses a merge whose
+requirements are unmet when GitHub evaluates it — that is the flag's whole purpose
+— so strict mode tightens the gate on any branch with rules configured.
+
+What bypassing being disallowed adds is that GitHub's evaluation BINDS. Its
 protected-branch rules do **not** apply to administrators or roles with bypass
-permission unless bypassing is explicitly disallowed — and in the solo-maintainer
-case this record is about, the operator *is* the administrator. Omitting `--admin`
-from the command therefore does not make any of these gates binding by itself: the
-credential can still merge a pull request whose requirements are unmet. Without
-this setting, strict mode changes which flag is passed and nothing about what
-GitHub enforces.
+permission unless bypassing is explicitly disallowed, and in the solo-maintainer
+case this record is about the operator *is* the administrator — so without it the
+credential can still merge past rules that were unmet, and nothing closes the
+window between the last client-side probe and the merge. That window is the race
+this record accepts, and this setting is the only thing that closes it.
 
 **Conversation resolution decides something narrower**: whether unresolved threads
 are one of the protections GitHub enforces at all. With bypass disallowed and this
@@ -205,9 +209,12 @@ strict mode it becomes atomic — closing the case where a thread is opened afte
 the final client-side probe. Recommending checks only would have pointed operators
 at a weaker configuration than the one they can actually run.
 
-Required approvals stay at zero because that is the single condition this plugin's
-reviewers cannot satisfy for a same-credential PR, and it is exactly what the
-accepted trade-off is about. The gate draws that line itself: `--admin` is
+Required approvals stay at zero **where no account can supply one** — the
+same-credential pull request this record is about, which is exactly what the
+accepted trade-off turns on. Where an approval IS satisfiable, on a team
+repository or a pull request authored by another account, keep the requirement:
+setting it to zero there drops a real protection to buy a merge path that already
+works. The gate draws that line itself: `--admin` is
 permitted to bypass a missing approval, and the unresolved-thread refusal above it
 means it is never reached with a thread open.
 

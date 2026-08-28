@@ -642,17 +642,24 @@ turning any of them on:
 | --- | --- |
 | Required status checks | on |
 | Require conversation resolution before merging | on |
-| Required approvals | **zero** |
+| Required approvals | **zero**, but only where no account can supply one |
 | Do not allow bypassing the above settings | **on** |
 
-**The last one decides whether strict mode binds at all.** GitHub's
+**Dropping `--admin` already tightens things on its own.** That flag exists to
+"merge a pull request that does not meet requirements", so without it `gh pr merge`
+refuses when a requirement is unmet at the moment GitHub evaluates it — on any
+branch with rules configured, bypassable or not. If you cannot change the branch
+settings, strict mode is still worth having.
+
+**What disallowing bypass adds is the atomic guarantee.** GitHub's
 protected-branch rules do *not* apply to administrators, or to anyone with bypass
 permission, unless bypassing is explicitly disallowed — and in the solo-maintainer
-case this plugin is built around, you *are* the administrator. So without it,
-`REVIEW_MERGE_STRICT=1` changes which flag is passed to `gh` and **nothing about
-what GitHub enforces**: the same credential still merges a pull request whose
-requirements are unmet. An equivalent non-bypassable ruleset does the same job, as
-does driving the loop with a credential that has no bypass permission.
+case this plugin is built around, you *are* the administrator. Without it, the
+credential can still merge past rules that were unmet, and nothing closes the
+window between this plugin's last client-side probe and the merge itself. With it,
+GitHub is the one enforcing, at merge time. An equivalent non-bypassable ruleset
+does the same job, as does driving the loop with a credential that has no bypass
+permission.
 
 **Conversation resolution decides something narrower**: whether unresolved threads
 are one of the protections GitHub enforces. With bypass disallowed and this off,
@@ -660,11 +667,19 @@ strict mode still enforces the required checks — it is not inert; what is miss
 is the thread gate becoming server-side and atomic. It costs nothing to turn on,
 because the loop already refuses to merge while any thread is unresolved.
 
-**Required approvals stay at zero** because that is the one condition this
-plugin's reviewers cannot satisfy on a same-credential pull request: Codex and
-Copilot are GitHub Apps and their reviews do not count towards it, and GitHub
-refuses a self-approval. Requiring one removes the merge path rather than
-tightening it, which is the whole reason `--admin` is the default.
+**Required approvals stay at zero only where no account can supply one** — the
+solo maintainer opening a pull request and driving it through their own
+credential. There, Codex and Copilot are GitHub Apps whose reviews do not count
+towards it and GitHub refuses a self-approval, so requiring an approval removes the
+merge path rather than tightening it; that is the whole reason `--admin` is the
+default.
+
+**Where an approval IS satisfiable, keep it.** On a team repository another
+maintainer can give it, and on a pull request authored by a different account — a
+dependency bot, or a worker running as a separate maintainer — you can give it
+yourself. Setting the requirement to zero there drops a real human-review
+protection to buy a merge path you already have, and those are exactly the
+repositories where `REVIEW_MERGE_STRICT=1` is the recommendation.
 
 ### Watching without prompts
 
