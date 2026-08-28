@@ -36,10 +36,12 @@ and the merge.
 gate here that is not about a commit.** `gh pr checks` takes a PR number, has no
 commit selector, and its answer carries no OID — so the two confirmations catch a
 head that moved and stayed moved, which is the ordinary case, and cannot see an
-A → B → A that completes between them. The unsafe case is always the return:
-`--match-head-commit` refuses a head that simply moved away. Until #212 there was
-no bracket at all, so that return could land any time between the checks read and
-the merge; now it has to land inside the bracket.
+A → B → A whose **both moves complete between them**: the first confirmation sees
+A, so the move away is after it; the second sees A, so the return is before it.
+The unsafe case is always that pair — `--match-head-commit` refuses a head that
+simply moved away. Until #212 there was no bracket at all, so the two moves could
+straddle everything between the checks read and the merge; now they have to fit
+inside the bracket.
 
 **That residue is #214 and is NOT waived by this record.** It is a race of the same
 family as the one below, and it is not the same race: it needs two force-pushes

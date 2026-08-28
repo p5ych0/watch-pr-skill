@@ -643,15 +643,16 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # green, this probe reads them, the head comes back to A, and the merge succeeds on
 # B's result about a commit nobody merged. #212.
 #
-# WHAT `--head` BUYS IS WHEN THE RETURN HAS TO LAND, not how many pushes it takes.
+# WHAT `--head` BUYS IS WHEN THE MOVES HAVE TO LAND, not how many it takes.
 # Unbracketed, the read could be answered at any point and the return could arrive
 # any time before the merge — through the thread pagination and the round-count
 # probe below. Bracketed, the helper confirms the head on each side of the read, so
-# a head that MOVED AND STAYED MOVED is `stale`, and the return has to complete
-# inside those two confirmations.
+# a head that MOVED AND STAYED MOVED is `stale` and BOTH moves must fit between the
+# two confirmations: the first sees A, so A → B is after it; the second sees A, so
+# B → A is before it.
 #
 # IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
-# by PR number and the answer carries no OID, so an A → B → A completing inside the
+# by PR number and the answer carries no OID, so an A → B → A fitting inside the
 # bracket still reads B's checks and sees A twice. That residue is #214, and on the
 # strict path it does not arise at all — GitHub evaluates the required checks
 # itself at merge time.
@@ -660,15 +661,16 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # the PR head is not the one this gate resolved — reported from EITHER
 # confirmation, so the checks may not have been read at all — and the caller's
 # correct response is to re-run the gate against what is there now, which is a
-# different instruction from "the probe failed". The message names the mismatch
-# rather than the moment, because the moment differs between the two arms.
+# different instruction from "the probe failed". The message names the mismatch and
+# nothing else: from the first confirmation the checks were never requested, so any
+# clause about what the checks answer describes is false on that arm.
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required --head "$HEAD_OID"; CHECKS_RC=$?
 case "$CHECKS_RC" in
     0) ;;
     4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
     1) echo "merge blocked: a required check is not green"; exit 1 ;;
     3) echo "merge blocked: the required checks have not finished"; exit 1 ;;
-    5) echo "merge blocked: the PR head no longer matches the gated head, so the required-checks answer is about another commit; re-run the gate for the head that is there now"; exit 1 ;;
+    5) echo "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now"; exit 1 ;;
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
 esac
 

@@ -24,9 +24,10 @@
   **That is a bracket and not a binding**, and the change says so everywhere rather
   than claiming more. `gh pr checks` is addressed by PR number and its answer
   carries no OID, so the two confirmations catch a head that moved and stayed moved
-  and cannot see an A → B → A that completes between them. What they change is WHEN
-  the return has to land: inside the bracket, rather than any time between the
-  checks read and the merge. Binding it
+  and cannot see an A → B → A whose both moves complete between them — the first
+  sees A, so the move away is after it; the second sees A, so the return is before
+  it. What they change is where those two moves have to fit: inside the bracket,
+  rather than straddling everything between the checks read and the merge. Binding it
   needs a commit-addressed query plus the required-contexts read to go with it,
   which is #214. On the strict path the residue does not arise: GitHub evaluates
   the required checks itself.

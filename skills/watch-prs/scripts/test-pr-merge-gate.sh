@@ -717,15 +717,17 @@ world; printf '4' > "$STUB_DIR/pr-ci-state.rc"
 case_is 0 "merged" "a repository with no required checks still merges"
 # THE PROBE IS BRACKETED BY THE HEAD THE MERGE IS PINNED TO. `gh pr checks` takes a
 # PR number and has no commit selector, so without `--head` this gate asks about
-# the pull request while everything around it asks about a commit, and a single
-# force-push away merges A on B's checks. #212.
+# the pull request while everything around it asks about a commit. The unsafe case
+# is always A → B → A — one move away is refused by `--match-head-commit` — and
+# unbracketed the return could land any time before the merge. #212.
 #
 # BRACKETED, NOT BOUND, AND THIS CASE ASSERTS ONLY THE ARGUMENT. What `--head`
 # gets the helper to do is confirm the head on each side of the checks read, which
 # catches a head that MOVED AND STAYED MOVED. It cannot bind a PR-addressed
-# response to a commit, so an A → B → A completing between those two confirmations
-# is invisible — that race is #214 and is NOT covered here. A case claiming
-# otherwise would be worse than none, because it would read as coverage.
+# response to a commit, so an A → B → A whose BOTH MOVES complete between the two
+# confirmations is invisible: the first sees A, so A → B is after it; the second
+# sees A, so B → A is before it. That race is #214 and is NOT covered here. A case
+# claiming otherwise would be worse than none, because it would read as coverage.
 #
 # AND THE HELPER IS A STUB HERE, which is the second reason this asserts the
 # argument rather than the behaviour: there is nothing between the stub's reads to
@@ -753,12 +755,13 @@ EOCIA
 # than investigating a broken read, and the catch-all would have told them the
 # wrong thing.
 #
-# THE MESSAGE NAMES THE MISMATCH, NOT THE MOMENT, and this case asserts that. The
-# helper can report 5 from EITHER confirmation — the one before the checks read,
-# where the checks were never requested, or the one after — so "while the required
-# checks were read" was true of one arm and wrong about the other.
+# THE MESSAGE NAMES THE MISMATCH, NOT THE MOMENT, and this case asserts the WHOLE
+# of it rather than an opening substring. The helper can report 5 from EITHER
+# confirmation — the one before the checks read, where the checks were never
+# requested at all, or the one after — so any suffix describing a checks answer is
+# false on one of the two arms, and a case matching only the opening cannot see it.
 world; printf '5' > "$STUB_DIR/pr-ci-state.rc"
-case_is 1 "the PR head no longer matches the gated head" \
+case_is 1 "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now" \
     "a head that moved and stayed moved blocks, naming the mismatch not the moment"
 
 # ── (4b) the round boundary is a PAUSE, not a refusal ──────────────────────
