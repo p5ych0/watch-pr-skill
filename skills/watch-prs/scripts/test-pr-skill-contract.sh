@@ -4935,6 +4935,13 @@ grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' <<<"$merge_blk" \
 # ASSERTED WHERE `merge_blk` EXISTS. Written higher up the file it ran against an
 # unset variable — `-u` was not in force for it, so it silently compared nothing
 # and reported the gate untold.
+# AND THE SIGNATURE LINE MATCHES THE CALL. The usage comment said three arguments
+# while the call passed four, so a driver reading the signature alone would have
+# left `pr-merge-gate.sh` on its default reviewers mode rather than the one the
+# operator chose at the Codex stop. #197.
+grep -qF 'pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> <reviewers: both|codex-only>' "$SKILL" \
+    && pass "…and the documented signature names the reviewers argument the call passes" \
+    || die "SKILL.md's merge-gate usage line does not name every argument the call passes"
 grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW" "\$REVIEWERS"' <<<"$merge_blk" \
     && pass "…which the gate is actually told" \
     || die "the merge gate is never told which reviewers this merge rests on"
