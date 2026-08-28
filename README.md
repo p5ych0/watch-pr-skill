@@ -635,6 +635,37 @@ human approval. GitHub then evaluates reviews, checks and conversations itself,
 atomically, which is the only place that race can genuinely be closed. If it
 refuses, the merge does not happen and you decide what to do.
 
+**Four settings make it worth having**, and it is worth reading why before
+turning any of them on:
+
+| Setting | Value |
+| --- | --- |
+| Required status checks | on |
+| Require conversation resolution before merging | on |
+| Required approvals | **zero** |
+| Do not allow bypassing the above settings | **on** |
+
+**The last one decides whether strict mode binds at all.** GitHub's
+protected-branch rules do *not* apply to administrators, or to anyone with bypass
+permission, unless bypassing is explicitly disallowed — and in the solo-maintainer
+case this plugin is built around, you *are* the administrator. So without it,
+`REVIEW_MERGE_STRICT=1` changes which flag is passed to `gh` and **nothing about
+what GitHub enforces**: the same credential still merges a pull request whose
+requirements are unmet. An equivalent non-bypassable ruleset does the same job, as
+does driving the loop with a credential that has no bypass permission.
+
+**Conversation resolution decides something narrower**: whether unresolved threads
+are one of the protections GitHub enforces. With bypass disallowed and this off,
+strict mode still enforces the required checks — it is not inert; what is missing
+is the thread gate becoming server-side and atomic. It costs nothing to turn on,
+because the loop already refuses to merge while any thread is unresolved.
+
+**Required approvals stay at zero** because that is the one condition this
+plugin's reviewers cannot satisfy on a same-credential pull request: Codex and
+Copilot are GitHub Apps and their reviews do not count towards it, and GitHub
+refuses a self-approval. Requiring one removes the merge path rather than
+tightening it, which is the whole reason `--admin` is the default.
+
 ### Watching without prompts
 
 The whole point of `pr-watch.sh` is that you do not sit and poll, so the driver
