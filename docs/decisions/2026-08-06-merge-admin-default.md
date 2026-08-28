@@ -33,8 +33,9 @@ and the merge.
 - checks that every check on that head is green, not only the required ones,
   through `pr-ci-gate.sh` — addressed by the commit, so that answer is about the
   merge target;
-- brackets the required-checks read with a head confirmation on each side, through
-  `pr-ci-state.sh --head`, and reports `stale` if the head moved;
+- reads what the base branch requires and asks the merge target's own rollup
+  whether those contexts passed on it, through `pr-ci-state.sh --required --head`,
+  and reports `stale` if the head moved;
 - refuses while any review thread is unresolved, paginated — a PR-level question,
   as is the round-boundary check beside it: neither takes the OID, and neither ever
   did;

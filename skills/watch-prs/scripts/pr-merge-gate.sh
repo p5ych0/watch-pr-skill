@@ -1,8 +1,7 @@
 #!/usr/bin/env -S bash -p
 # The merge decision: every gate, evaluated immediately before merging, and the
 # merge pinned to one head. What each gate is ABOUT differs — see the synopsis
-# below, which says which are commit-addressed, which are bracketed and which are
-# PR-level.
+# below, which says which are commit-addressed and which are PR-level.
 #
 #   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> [reviewers: both|codex-only]
 #

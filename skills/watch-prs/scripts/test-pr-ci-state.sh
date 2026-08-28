@@ -588,6 +588,32 @@ for _n in '{"__typename":"CheckRun","name":"any","status":"COMPLETED","conclusio
         && pass "…while an unbound requirement is met whichever kind reports it" \
         || die "an unbound requirement was not met: '$got'"
 done
+# `-1` IS THE WILDCARD, NOT AN APP. GitHub writes `app_id: -1` where the
+# requirement explicitly allows any app to provide the check, so keeping it as a
+# binding would look for a check suite whose app id is `-1`, find none, and report
+# `pending` for ever — a required context that has passed, on a gate that cannot
+# open.
+# THE TWO SOURCES ARE WRITTEN OUT rather than packed into one string. A
+# `branch:rules` table split on the first colon truncates every JSON body at its
+# first key, and the cases then pass because jq could not parse them.
+_w1_branch='{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":-1,"context":"build"}]}}}'
+_w1_rules='[]'
+_w2_branch='{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}'
+_w2_rules='[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build","integration_id":-1}]}}]'
+_w_run='[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+for _w in 1 2; do
+    eval '_b="$_w'"$_w"'_branch"; _r="$_w'"$_w"'_rules"'
+    printf '%s' "$_b" | jq -e . >/dev/null 2>&1 \
+        && pass "…and the -1 case $_w reaches the rule as the JSON it looks like" \
+        || die "the -1 case $_w input is not parseable: $_b"
+    mkgh_head "$WANT" green
+    mkgh_required "$_b" "$_r" "$_w_run"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+        && pass "…and -1 is the wildcard, met by whichever app reported" \
+        || die "-1 was read as an app binding: '$got'"
+done
+
 # A RULESET BINDING IS THE SAME RULE by another name.
 mkgh_head "$WANT" green
 mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \

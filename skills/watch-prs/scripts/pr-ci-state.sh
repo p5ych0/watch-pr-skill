@@ -167,14 +167,13 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 if [ -n "$WANT_HEAD" ]; then
-    # THE HEAD IS CONFIRMED FIRST, and what that is worth depends on which
-    # question follows. `--required` goes to `gh pr checks`, which takes a PR
-    # number and answers about whatever the API currently calls its head — for a
-    # moment after a push that is still the PREVIOUS head, so a green answer
-    # describes the commit from the round before, which is the last round's answer
-    # to this round's question and reads as permission to close. There this
-    # confirmation is half of a bracket. The all-checks question is addressed by
-    # the commit, so there it only reports whether the head has since moved.
+    # THE HEAD IS CONFIRMED FIRST, and since #214 that confirmation means the same
+    # thing for both questions: each is answered by a rollup addressed by this OID,
+    # so the answer is bound and the confirmation only reports whether the head has
+    # since moved. It used to be half of a bracket for `--required`, which went to
+    # `gh pr checks` — a PR-addressed read whose answer carries no OID, so for a
+    # moment after a push it described the commit from the round before and read as
+    # permission to close.
     #
     # A MISMATCH IS ITS OWN VERDICT either way, rather than an error: the caller's
     # correct response is to wait, not to stop.
@@ -244,7 +243,8 @@ checks_msg_is_none_configured() {
 # required context that has not reported has neither a check run nor a status, so
 # this answer can be green while a requirement is unmet. What binding buys is that
 # a check which DID report on the merge target cannot be masked by another
-# commit's — not that the required set is covered. #214 stays open for that.
+# commit's — not that the required set is covered. That set is read separately,
+# by `required_contexts` below, which is what closed #214.
 #
 # BOTH SOURCES, because `gh pr checks` merges them and dropping one would make
 # this laxer than what it replaces: check runs from the Checks API, and the legacy
@@ -396,7 +396,8 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                       then error("a classic check has no context")
                       elif (.app_id | type) | IN("number","null") | not
                       then error("a classic app_id is not a number")
-                      else {context: .context, app: .app_id} end ]
+                      else {context: .context,
+                            app: (if .app_id == -1 then null else .app_id end)} end ]
                 elif ($b.protection.required_status_checks.contexts | type) != "array"
                   then error("the classic contexts are not an array")
                 elif any($b.protection.required_status_checks.contexts[]; type != "string")
@@ -416,7 +417,9 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                               then error("a ruleset context is not a string")
                               elif (.integration_id | type) | IN("number","null") | not
                               then error("a ruleset integration_id is not a number")
-                              else {context: .context, app: .integration_id} end
+                              else {context: .context,
+                                    app: (if .integration_id == -1 then null
+                                          else .integration_id end)} end
                        end
                   elif .type | IN(
                       "creation","update","deletion","non_fast_forward",
@@ -451,6 +454,14 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
 # a passing run of the same name from ANOTHER app satisfy this gate, which on the
 # default `--admin` path is the merge. So a bound requirement is matched on the
 # app too, read from the run`s own check suite.
+#
+# `-1` IS NOT AN APP, IT IS THE WILDCARD. GitHub writes `app_id: -1` where the
+# requirement explicitly allows ANY app to provide the check, so keeping it as a
+# binding would look for a check suite whose app id is `-1`, find none, and report
+# `pending` for ever — a required context that has passed, on a gate that cannot
+# open. It is normalised to the unbound representation on both sources: no app id
+# is negative, so where the value is not the wildcard it is one nothing can match
+# and refusing to merge is still the right direction.
 #
 # A BOUND REQUIREMENT CANNOT BE MET BY A LEGACY STATUS, and that is a refusal
 # rather than an omission: a `StatusContext` carries a creator, not the app id the

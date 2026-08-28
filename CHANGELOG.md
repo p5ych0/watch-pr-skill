@@ -51,7 +51,10 @@
   alone would let a passing run of the same name from another app open the gate. A
   bound requirement is also not met by a legacy status, which carries a creator
   rather than the app id the requirement names; an unbound one is met by either
-  kind, as GitHub does it.
+  kind, as GitHub does it. `app_id: -1` is the wildcard GitHub writes where any app
+  may provide the check, so it is normalised to unbound — kept as a binding it
+  would look for a check suite whose app id is `-1`, find none, and report
+  `pending` for ever on a context that had passed.
 
   **A ruleset rule this cannot evaluate stops the merge** rather than being dropped.
   `workflows`, `code_scanning` and `required_deployments` gate a merge on something
