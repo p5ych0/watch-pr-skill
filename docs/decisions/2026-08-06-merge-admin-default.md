@@ -178,8 +178,7 @@ Concretely, the combination worth having is:
 
 - **required status checks** — on;
 - **require conversation resolution before merging** — on;
-- **required approvals** — zero only where the branch receives nothing but
-  same-credential pull requests; see below;
+- **required approvals** — zero only where no eligible approver exists; see below;
 - **do not allow bypassing the above settings** — on (or an equivalent
   non-bypassable ruleset, or a `gh` credential without bypass permission).
 
@@ -210,24 +209,22 @@ strict mode it becomes atomic — closing the case where a thread is opened afte
 the final client-side probe. Recommending checks only would have pointed operators
 at a weaker configuration than the one they can actually run.
 
-Required approvals is a BRANCH setting and the right answer differs per pull
-request, which GitHub gives no way to express: it applies the rule to every PR
-targeting the branch, with no author condition.
+Required approvals is a BRANCH setting, applied to every PR targeting the branch
+with no author condition. What decides the right value is not who authored a pull
+request but whether ANYONE CAN APPROVE IT.
 
-On a same-credential pull request no account can supply the approval — Codex and
-Copilot are GitHub Apps whose reviews do not count, and GitHub refuses a
-self-approval — so requiring one removes the merge path rather than tightening it,
-which is exactly what the accepted trade-off turns on. On a pull request authored
-by a different account the operator can supply it, so the requirement costs nothing
-and is real protection.
+Codex and Copilot are GitHub Apps whose reviews do not count, and GitHub refuses a
+self-approval — so the requirement is unsatisfiable only where there is no other
+eligible approver at all. That is the case this record is about, and it is what the
+accepted trade-off turns on. Where another maintainer exists they can approve the
+operator's pull requests too, so the requirement costs a wait rather than the merge
+path.
 
-**On a branch that receives both, keep the requirement and vary the MODE.**
-`REVIEW_MERGE_STRICT` is per invocation rather than per branch, so the
-different-author pull requests can run strict where the approval is satisfiable
-and the operator's own fall back to this record's default. Zero is right only where
-the branch receives nothing but same-credential pull requests; on a mixed branch it
-drops the protection from every bot and team PR to buy a merge path those already
-have. The gate draws that line itself: `--admin` is
+**Where the requirement stays but some pull requests cannot satisfy it, vary the
+MODE.** `REVIEW_MERGE_STRICT` is per invocation rather than per branch, so those
+that can get an approval run strict and the rest fall back to this record's
+default. Zero is right only on a repository with no eligible approver; setting it
+where one exists throws away real human review. The gate draws that line itself: `--admin` is
 permitted to bypass a missing approval, and the unresolved-thread refusal above it
 means it is never reached with a thread open.
 

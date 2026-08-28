@@ -642,7 +642,7 @@ turning any of them on:
 | --- | --- |
 | Required status checks | on |
 | Require conversation resolution before merging | on |
-| Required approvals | **zero** only on a branch that receives nothing but same-credential PRs — see below |
+| Required approvals | **zero** only where no eligible approver exists — see below |
 | Do not allow bypassing the above settings | **on** |
 
 **Dropping `--admin` already tightens things on its own.** That flag exists to
@@ -667,30 +667,29 @@ strict mode still enforces the required checks — it is not inert; what is miss
 is the thread gate becoming server-side and atomic. It costs nothing to turn on,
 because the loop already refuses to merge while any thread is unresolved.
 
-**Required approvals is the one to think about, because it is a branch setting and
-the answer differs per pull request.** GitHub applies it to every PR targeting the
-branch; you cannot vary it by author.
+**Required approvals is the one to think about.** It is a branch setting — GitHub
+applies it to every PR targeting the branch, with no author condition — and what
+decides the right value is not who authored a pull request but **whether anyone
+can approve it**.
 
-- On a same-credential pull request no account can supply the approval. Codex and
-  Copilot are GitHub Apps whose reviews do not count towards it, and GitHub
-  refuses a self-approval — so a required approval removes the merge path rather
-  than tightening it. That is the whole reason `--admin` is the default.
-- On a pull request authored by a *different* account — a dependency bot, another
-  maintainer, a worker — you can supply it yourself, so the requirement costs
-  nothing and is real protection.
+Codex and Copilot are GitHub Apps whose reviews do not count towards required
+approvals, and GitHub refuses a self-approval. So a required approval is
+unsatisfiable only when there is **no other eligible approver at all** — a
+genuinely solo repository. There it removes the merge path rather than tightening
+it, which is the whole reason `--admin` is the default.
 
-**On a branch that receives both, keep the approval requirement and vary the
-mode instead.** `REVIEW_MERGE_STRICT` is per invocation, not per branch: leave the
-approval at one, run the different-author pull requests with
-`REVIEW_MERGE_STRICT=1` where you can satisfy it, and let your own fall back to
-the `--admin` default — which is exactly the trade-off recorded in
+**If another maintainer can approve, keep the requirement.** They can approve your
+pull requests as well as anyone else's, so it costs a wait rather than the merge
+path, and it is real human review that zero throws away.
+
+**Where the requirement stays but some pull requests cannot satisfy it**, vary the
+mode rather than the branch: `REVIEW_MERGE_STRICT` is per invocation, so run the
+pull requests whose approval you *can* get with `REVIEW_MERGE_STRICT=1` and let
+the rest fall back to the `--admin` default — the trade-off recorded in
 `docs/decisions/`, applied only where it is needed.
 
-Set required approvals to **zero** only where the branch receives nothing but
-same-credential pull requests. Doing it on a mixed branch drops the human-review
-protection from every bot and team PR to buy a merge path you already have for
-those; requiring one and using strict mode everywhere blocks your own. Branch
-protection has no author condition, so anything finer than this is a separate
+Set required approvals to **zero** only on a repository where no eligible approver
+exists. Branch protection has no author condition, so anything finer is a separate
 policy check of your own.
 
 ### Watching without prompts
