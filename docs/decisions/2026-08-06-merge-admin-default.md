@@ -4,12 +4,37 @@
 **Status:** accepted
 **Decided by:** the repository operator, during review of PR #10
 
+## Update, 2026-08-28: PR #10 has landed
+
+This record was written **during** review of PR #10 and is framed throughout as
+before-and-after that pull request: "on the base ref today" against "after #10".
+
+**#10 merged** — `b7e61f3`, the v2 commit that created the current tree. So every
+"after #10" entry below is the state of the tree now, and the sentence further
+down telling you to read the bounds "as reasoning behind the default, not as
+protections in force" is **no longer true**. They are in force:
+`pr-merge-gate.sh` compares the full 40-hex head, merges with
+`--match-head-commit`, probes the reviewer's state and verdict against that head
+through `pr-review-state.sh`, and honours `REVIEW_MERGE_STRICT=1`.
+
+**What this record accepts is unchanged**: the `--admin` default itself, which
+bypasses branch protection deliberately, and the race around the client-side
+probes — the window between the last probe and the merge, in which a review can be
+submitted or dismissed or a check can fail without the head moving. Both are
+argued below and both still stand.
+
+What is no longer an exposure is the third thing this section used to name: an
+unbounded gap where no review-state probe existed at all.
+
+The decision — `--admin` as the default — is unchanged too, which is why this
+record is still `accepted` rather than superseded. Its before-and-after framing,
+and its reference to a v1 watcher script that v2 deleted, are stale prose recorded
+in #208.
+
 ## Read this first: which merge path it describes
 
-This record accepts a trade-off in the merge gate. Part of what bounds that
-trade-off arrives with PR #10 and is **not on this branch yet**, and the two
-exposures on the current base ref are of different kinds. An operator who
-conflates them would draw the wrong conclusion about both.
+This record accepts a trade-off in the merge gate. It distinguishes two exposures
+that were of different kinds when it was written; read it with the update above.
 
 | Bound | On the base ref today | After #10 |
 | --- | --- | --- |

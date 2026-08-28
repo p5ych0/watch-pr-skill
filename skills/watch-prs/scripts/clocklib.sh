@@ -38,7 +38,10 @@
 # is not an answer either: `CLAUDE.md` records that a function shadows the
 # `command` prefix too. The recorded answer is a guarded re-exec with `BASH_ENV`
 # and `ENV` removed, which `pr-selfcheck.sh` does and no other helper does; that
-# is issue #69, and it belongs to the callers rather than here.
+# was scoped on #69 and belongs to the callers rather than here: it is a
+# startup-semantics change to two installed scripts, with failure modes of its own
+# — argument and stdin preservation, exit-status transparency, and the marker
+# inheritance `pr-selfcheck.sh` got wrong once already.
 
 # ONE FUNCTION, BECAUSE `rb_load` CAN ONLY CLEAR ONE NAME. This was three —
 # `rb_now_s`, `rb_clock_start`, `rb_elapsed` — and the loader clears and verifies

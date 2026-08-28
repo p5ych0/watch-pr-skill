@@ -1,5 +1,51 @@
 # Changelog
 
+## [2.0.76] — 2026-08-28
+
+- **Five more citations described closed work as pending, and the worst was in
+  `CLAUDE.md`.** 2.0.75 corrected three files that pointed at a refactor #26 had
+  examined and rejected; an audit of every issue reference outside this changelog —
+  346 of them, all resolving to issues that exist — found the same class again.
+
+  Four came out of the audit and the fifth came out of the review of it: the
+  contract fixture said the `macos-shell` job "does not" run while #93 stands, which
+  a phrasing-based filter missed because it does not read like a deferral. The
+  lesson is in the filter rather than in the file — an audit that greps for how a
+  thing is usually said finds the citations that are usually said that way.
+
+  `CLAUDE.md` still said `SKILL.md`'s bash "is not covered by any of it" and that
+  "the fix is to move the code into `.sh` files". Both are false: #26 closed on the
+  finding that the code cannot move, and `test-pr-skill-contract.sh` lifts and
+  EXECUTES those blocks against readonly names, namerefs, `declare -i/-l/-u`, a
+  shadowed `exit`, a neutralised `echo`, an interactive shell and a forged helper —
+  in BOTH CI jobs, so on bash 3.2 as well. That is the authoring source, so it is
+  the worst place for it.
+
+  The replacement says the boundary falls **by lift, not by file**: neither job
+  reaches the document, both run whatever the contract extracts, and a block nothing
+  lifts has no coverage at all. Saying "covered by neither job" would have been the
+  same defect pointing the other way.
+
+  `SKILL-RATIONALE.md` carried the same coverage claim and a conditional owned by
+  #93, which is closed and whose CI job is enabled. `clocklib.sh` described a
+  startup-semantics change as issue #69's open business when #69 was closed by a
+  scoping note. And `CLAUDE.md` described lifting a block per pull request as
+  ongoing, which #194 finished.
+
+  The fixture's job reference is corrected differently from the others, because the
+  underlying fact changed twice: #93 restored the job, and the operator has since
+  disabled the whole `tests` workflow. It now says the classes stay a reviewer's
+  because a workflow can be turned off, which is true in both states.
+
+  What is not a defect is the other ~340: past tense about a closed issue reads
+  correctly, and one accepted-limit record says outright that a reader should not
+  conclude its issue is open. Present tense about pending work is what this fixes.
+
+  The `--admin` decision record got a dated update saying PR #10 landed and which
+  bounds are in force, because it was telling readers they were not. Its wider
+  before-and-after framing, and its citation of a v1 watcher script v2 deleted, are
+  #208. Closes #207.
+
 ## [2.0.75] — 2026-08-28
 
 - **The rationale pointed at a refactor that had already been examined and
