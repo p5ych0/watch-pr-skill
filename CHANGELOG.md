@@ -45,6 +45,10 @@
   reopen the round or the merge gate. Only the newest event for a context is its
   state; two at the same second that disagree are unreadable, since `created_at` is
   second-resolution and choosing one is a guess about whether the commit is green.
+  That ordering is LEXICAL, so the time is held to canonical UTC rather than to
+  being a string — `zzzz` sorts after every real timestamp, and a `success` event
+  carrying one would outrank the `failure` that really is newest. `check-runs`
+  needs none of it: that endpoint filters to `latest` by default.
 
   #214 stays open, with the measurement recorded on it.
 

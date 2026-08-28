@@ -427,6 +427,19 @@ rm -f "$TMP/gh.sts.raw"
     && pass "…while two agreeing events at one instant are read, not refused" \
     || die "an agreeing tie was refused: '$got'"
 
+# …AND A TIME THAT IS NOT ONE CANNOT ORDER ANYTHING. The ordering is LEXICAL, so a
+# junk `created_at` sorts after every real timestamp: a `success` carrying one would
+# outrank the `failure` that really is newest and report the commit green.
+for _junk in 'zzzz' '2026-01-01T00:00:00zzzz' '2026-01-01 00:00:00'; do
+    mkgh_head "$WANT" norun
+    printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"2026-01-01T00:05:00Z"},{"context":"ci","state":"success","created_at":"%s"}]}\n' "$_junk" > "$TMP/gh.sts.raw"
+    got="$(run 7 --head "$WANT")"
+    rm -f "$TMP/gh.sts.raw"
+    [ "${got%%|*}" = 2 ] \
+        && pass "…and a junk timestamp is unreadable rather than authoritative" \
+        || die "'$_junk' outranked a real timestamp: '$got'"
+done
+
 # …AND A CONTEXT WITH NO NAME OR NO TIME CANNOT BE GROUPED OR ORDERED, so it is
 # malformed rather than folded in as if it were one more event.
 for _bad in '{"context":"ci","state":"success"}' '{"state":"success","created_at":"2026-01-01T00:00:00Z"}'; do

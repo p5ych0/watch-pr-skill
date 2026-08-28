@@ -278,7 +278,10 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
           elif any(.[]; .conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale")) then "failed"
           elif all(.[]; .conclusion | IN("success","neutral","skipped")) then "green"
           else "malformed" end' 2>/dev/null)" || return 2
-    # THE NEWEST EVENT PER CONTEXT, not every event. The combined-status endpoint
+    # THE NEWEST EVENT PER CONTEXT, not every event — a rule the check-run fold
+    # above does NOT need, and the asymmetry is the endpoint's rather than ours:
+    # `check-runs` filters to `latest` by default, so a re-run replaces what it
+    # re-ran and there is nothing superseded to order. The combined-status endpoint
     # keeps the whole history: a context that reported `failure` and then `success`
     # on the same commit appears TWICE, and folding over all of them leaves the
     # commit failed forever — a rerun that went green could never reopen the round
@@ -290,7 +293,11 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
     # green. Where they agree there is nothing to guess, which is why the newest
     # set is reduced with `unique` and only a set of more than one refuses.
     # `context` and `created_at` are validated for the same reason the state is:
-    # this fold cannot group or order without them.
+    # this fold cannot group or order without them. The time is held to
+    # `canonical_utc` rather than to being a string, because the ordering is
+    # LEXICAL — a value like `zzzz` sorts after every real timestamp, so a junk
+    # `created_at` on a `success` event would outrank the `failure` that really is
+    # newest and report the commit green.
     _v_sts="$(printf '%s' "$_sts" | jq -r -s "$RECORDLIB_JQ"'
         object_pages_or_error("statuses")
         | [ .[].statuses[] ]
@@ -298,7 +305,7 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
           elif any(.[]; type != "object"
                         or (.state | type) != "string"
                         or (.context | type) != "string"
-                        or (.created_at | type) != "string") then "malformed"
+                        or (.created_at | canonical_utc | not)) then "malformed"
           else ( group_by(.context)
                  | map( (max_by(.created_at).created_at) as $t
                         | map(select(.created_at == $t))
