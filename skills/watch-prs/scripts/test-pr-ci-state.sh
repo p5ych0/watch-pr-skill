@@ -213,6 +213,14 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict> [l
 printf '%s\n' "\$*" >> "$TMP/args"
 case "\$*" in
     *check-runs*)
+        # A COMPLETE-LOOKING PAGE AND THEN A FAILURE is the case the guards on
+        # those two reads exist for: command substitution keeps what a command
+        # printed before it died, so a green page from a failed fetch would be
+        # classified as green without them.
+        if [ -f "$TMP/gh.runs.fail" ]; then
+            printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n'
+            exit 1
+        fi
         # THE COMMIT-ADDRESSED READ. The verdict file names a bucket; this turns it
         # into the page shape the endpoint really returns, so the helper's own jq
         # is what classifies rather than the stub.
@@ -226,6 +234,10 @@ case "\$*" in
             *)       printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"%s"}]}\n' "\$v" ;;
         esac ;;
     *"/status"*)
+        if [ -f "$TMP/gh.sts.fail" ]; then
+            printf '{"state":"success","statuses":[{"context":"legacy","state":"success"}]}\n'
+            exit 1
+        fi
         # THE LEGACY STATUSES ARE STAGEABLE TOO. Answering an empty array always
         # would leave every verdict below supplied by the check runs, so a
         # regression that ignored this source, or read it as green, would keep
@@ -323,6 +335,21 @@ got="$(run 7 --head "$WANT")"
 [ "${got%%|*}" = 2 ] \
     && pass "…and a conclusion outside the known set is unreadable, not green" \
     || die "an unknown conclusion gave '$got'"
+
+# ── A GREEN PAGE FROM A FAILED FETCH IS NOT GREEN ──────────────────────────
+# `gh` can print a complete, valid page and then exit non-zero because the request
+# failed part-way, and command substitution keeps what it printed. Both reads take
+# their status for that reason, and without the cases below deleting either guard
+# leaves this suite green while a failed fetch opens the merge gate.
+for _wf in runs sts; do
+    mkgh_head "$WANT" green
+    : > "$TMP/gh.$_wf.fail"
+    got="$(run 7 --head "$WANT")"
+    rm -f "$TMP/gh.$_wf.fail"
+    { [ "${got%%|*}" = 2 ] && grep -qF 'status=error' <<<"${got#*|}"; } \
+        && pass "…and a green page from a failed $_wf fetch is an error, not green" \
+        || die "a failed $_wf fetch that printed green gave '$got'"
+done
 
 # ── THE LEGACY COMMIT STATUSES DECIDE TOO ──────────────────────────────────
 # `gh pr checks` merges check runs and the older commit statuses, so a

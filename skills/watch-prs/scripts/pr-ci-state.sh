@@ -167,14 +167,17 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 if [ -n "$WANT_HEAD" ]; then
-    # THE CHECKS ARE ASKED ABOUT A PR, NOT A COMMIT. `gh pr checks` takes a PR
-    # number and answers about whatever the API currently calls its head — and
-    # for a moment after a push that is still the PREVIOUS head. A green answer
-    # then describes the commit from the round before, which is the last round's
-    # answer to this round's question and reads as permission to close.
+    # THE HEAD IS CONFIRMED FIRST, and what that is worth depends on which
+    # question follows. `--required` goes to `gh pr checks`, which takes a PR
+    # number and answers about whatever the API currently calls its head — for a
+    # moment after a push that is still the PREVIOUS head, so a green answer
+    # describes the commit from the round before, which is the last round's answer
+    # to this round's question and reads as permission to close. There this
+    # confirmation is half of a bracket. The all-checks question is addressed by
+    # the commit, so there it only reports whether the head has since moved.
     #
-    # So the head is confirmed first, and a mismatch is its own verdict rather
-    # than an error: the caller's correct response is to wait, not to stop.
+    # A MISMATCH IS ITS OWN VERDICT either way, rather than an error: the caller's
+    # correct response is to wait, not to stop.
     _reason="$(sha_reason "$WANT_HEAD")" || {
         echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$WANT_HEAD" >&2; exit 2; }
     _left_head="$(rb_left)" || {
