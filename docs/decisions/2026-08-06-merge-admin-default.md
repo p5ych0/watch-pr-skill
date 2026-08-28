@@ -63,12 +63,15 @@ merge — a window that spans the checks request rather than being contained by 
 and nobody
 has measured it. Do not widen this record to cover it.
 
-It does not arise with `REVIEW_MERGE_STRICT=1` **on a repository whose required
-checks are non-bypassable** — configured, and with bypassing disallowed or the
-credential lacking that permission — because GitHub then evaluates them itself at
-merge time, server-side and commit-bound. Strict mode alone only stops passing
-`--admin`; where the account can bypass anyway it changes nothing GitHub enforces,
-which is the same condition the strict-mode list below turns on.
+**Strict mode closes the required half of it and not the other.** With
+`REVIEW_MERGE_STRICT=1` on a repository whose required checks are non-bypassable —
+configured, and with bypassing disallowed or the credential lacking that
+permission — GitHub evaluates those itself at merge time, server-side and
+commit-bound. The all-checks gate also weighs OPTIONAL checks, which GitHub never
+enforces at all, so a failing optional check on the merged commit accepted because
+the other's were green survives strict mode. And strict mode without the
+non-bypassable part only stops passing `--admin`, which is the same condition the
+strict-mode list below turns on.
 
 ## What is confirmed after the merge
 

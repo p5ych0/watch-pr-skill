@@ -15,8 +15,10 @@
   is given. The danger is coming back: the head goes to B, B's required checks go
   green, the probe reads them, the head returns to A, and the merge succeeds on B's
   result about a commit nobody merged — on the default path, where `--admin` means
-  the probe is the only thing standing between a stale answer and an administrator
-  merge.
+  that probe and the all-checks gate beside it are what stand between a stale
+  answer and an administrator merge — the all-checks one reads the checks
+  unfiltered, so the required ones are among what it sees, and both have to be
+  satisfied.
 
   It passes `--head` now, so the helper confirms the head before and after the
   checks read; this was the one caller that did not. Of the gates, `(1)` and `(2)`
@@ -35,10 +37,11 @@
   confirmations — a window that still spans the checks request — rather than
   straddling everything between the checks read and the merge. Binding it
   needs a commit-addressed query plus the required-contexts read to go with it,
-  which is #214. It does not arise with `REVIEW_MERGE_STRICT=1` on a repository
-  whose required checks are non-bypassable — configured, and with bypassing
-  disallowed or the credential lacking that permission — because GitHub then
-  evaluates them itself. Strict mode alone only stops passing `--admin`.
+  which is #214. `REVIEW_MERGE_STRICT=1` closes the required half of it and not the
+  other: on a repository whose required checks are non-bypassable GitHub evaluates
+  those itself, while the all-checks gate also weighs optional ones, which GitHub
+  never enforces. Strict mode without the non-bypassable part only stops passing
+  `--admin`.
 
   Both the fixture cases were proved by reverting: dropping `--head` reports the
   call as unpinned, and dropping the `5` arm reports the wrong instruction.

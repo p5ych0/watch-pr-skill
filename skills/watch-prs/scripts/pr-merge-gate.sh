@@ -624,8 +624,9 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # non-required check still counts.
 #
 # In the default mode the merge below uses `--admin`, which bypasses branch
-# protection, so this probe is the only thing standing between a failed read and
-# an unchecked merge — which is why anything that is not an explicit green or an
+# protection, so this probe and (3b) are what stand between a failed read and an
+# unchecked merge — (3b) reads the checks unfiltered, so the required ones are
+# among what it sees, and both have to be satisfied — which is why anything that is not an explicit green or an
 # explicit "nothing configured" blocks.
 #
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
@@ -658,12 +659,15 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 #
 # IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
 # by PR number and the answer carries no OID, so an A → B → A fitting inside the
-# bracket still reads B's checks and sees A twice. That residue is #214. It does not
-# arise with `REVIEW_MERGE_STRICT=1` on a repository whose required checks are
-# NON-BYPASSABLE — configured, and with bypassing disallowed or the credential
-# lacking that permission — because GitHub then evaluates them itself at merge
-# time. Strict mode alone only stops passing `--admin`; where the account can
-# bypass anyway it changes nothing GitHub enforces.
+# bracket still reads B's checks and sees A twice. That residue is #214.
+#
+# STRICT MODE CLOSES THE REQUIRED HALF AND NOT THE OTHER. With
+# `REVIEW_MERGE_STRICT=1` on a repository whose required checks are NON-BYPASSABLE
+# — configured, and with bypassing disallowed or the credential lacking that
+# permission — GitHub evaluates those itself at merge time. (3b) considers OPTIONAL
+# checks as well, and GitHub never enforces those, so a failing optional check on A
+# accepted because B's were green survives strict mode. Strict mode alone, without
+# the non-bypassable part, only stops passing `--admin`.
 #
 # 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
 # the PR head is not the one this gate resolved — reported from EITHER

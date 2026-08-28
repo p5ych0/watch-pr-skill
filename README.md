@@ -501,9 +501,17 @@ Then:
    a force-push away *and back* whose both moves fall between those two
    confirmations would be read as green for a commit that is not the one merged.
    The reviewer verdicts and the reviewed range are commit-addressed; unresolved
-   threads and the round boundary are questions about the pull request. That residue is tracked as issue #214. It does not
-   arise with `REVIEW_MERGE_STRICT=1` **on a repository whose required checks are non-bypassable** — configured, and with bypassing disallowed or the credential lacking that permission — because GitHub then evaluates them itself at merge time. Strict mode alone only stops passing `--admin`; where the account can bypass anyway, it changes nothing GitHub enforces. It is not covered by the `--admin` trade-off recorded in
-   `docs/decisions/`.
+   threads and the round boundary are questions about the pull request.
+
+   That residue is tracked as issue #214, and it is not covered by the `--admin`
+   trade-off recorded in `docs/decisions/`. **`REVIEW_MERGE_STRICT=1` closes the
+   required half of it and not the other**: on a repository whose required checks
+   are non-bypassable — configured, and with bypassing disallowed or the credential
+   lacking that permission — GitHub evaluates those itself at merge time. The
+   all-checks gate also weighs *optional* checks, which GitHub never enforces, so a
+   failing optional check accepted because the other commit's were green survives
+   strict mode. And strict mode without the non-bypassable part only stops passing
+   `--admin`.
 
 ## Automatic review (opt-in per repo)
 
