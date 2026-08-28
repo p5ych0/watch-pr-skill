@@ -15,19 +15,29 @@
   nobody merged — on the default path, where `--admin` means the probe is the only
   thing standing between a stale answer and an administrator merge.
 
-  It is pinned now. The helper already confirmed the head before and after the
-  checks read whenever it was given one; this was the one caller that did not use
-  it. Its `stale` status is handled by name rather than by the catch-all, because 5
-  means the head moved and the answer is to re-run the gate, not to investigate a
-  broken probe.
+  It passes `--head` now, so the helper confirms the head before and after the
+  checks read; this was the one caller that did not. Its `stale` status is handled
+  by name rather than by the catch-all, because 5 means the head moved and the
+  answer is to re-run the gate, not to investigate a broken probe.
+
+  **That is a bracket and not a binding**, and the change says so everywhere rather
+  than claiming more. `gh pr checks` is addressed by PR number and its answer
+  carries no OID, so the two confirmations catch a head that moved and stayed
+  moved — the ordinary case, and the whole of what a single force-push could do
+  before — and cannot see an A → B → A that completes between them. Binding it
+  needs a commit-addressed query plus the required-contexts read to go with it,
+  which is #214. On the strict path the residue does not arise: GitHub evaluates
+  the required checks itself.
 
   Both the fixture cases were proved by reverting: dropping `--head` reports the
   call as unpinned, and dropping the `5` arm reports the wrong instruction.
 
-  The `--admin` decision record listed this as the one probe not bound to the head;
-  it now says every probe is, and `.github/copilot-instructions.md` carries the
-  pinning as a bound on the waiver so the reviewer that follows no pointers can
-  flag its removal. Closes #212.
+  The `--admin` decision record listed this as the one probe not bound to the head.
+  It now says what the bracket is, and that the remaining race is **not** waived by
+  it — that race needs two force-pushes inside one request rather than one push
+  before a merge, and nobody has measured it. `.github/copilot-instructions.md`
+  carries the bracket as a bound on the waiver, with a contract token, so the
+  reviewer that follows no pointers can flag its removal. Closes #212.
 
 ## [2.0.76] — 2026-08-28
 

@@ -264,10 +264,17 @@ rm -f "$ERRF" 2>/dev/null
 # loop, a head that had almost finished earning its grace hands that grace to a
 # different commit, whose own checks have not been registered yet.
 #
-# So the head is read once more and must still be the one asked about. This cannot
-# close the window entirely — a push can always land after the last read — but it
-# bounds it to the moment rather than to the whole checks request, and any movement
-# is reported as `stale`, which the caller waits on and which resets the grace.
+# So the head is read once more and must still be the one asked about. WHAT THIS IS
+# NOT is a binding of the response to a commit: the request is addressed by PR
+# number and the answer carries no OID, so a head that moves away and BACK between
+# the two confirmations is invisible to both, and the checks read describes the
+# commit that was there in between. Nothing here can close that, because `gh pr
+# checks` has no commit selector to pin.
+#
+# What it does close is the head that moves and STAYS moved, which is the ordinary
+# case: a push during the request is reported as `stale`, which the caller waits on
+# and which resets the grace. #214 is the commit-addressed query that would make
+# this a binding rather than a bracket.
 if [ -n "$WANT_HEAD" ]; then
     _left_after="$(rb_left)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }

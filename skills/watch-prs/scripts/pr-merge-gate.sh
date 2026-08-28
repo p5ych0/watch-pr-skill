@@ -640,9 +640,15 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # moves it to B and B's required checks go green; this probe reads them; the head
 # is forced back to A; and `--match-head-commit A` then merges A on B's result.
 # `--match-head-commit` did its job — the head IS A — and the checks gate answered
-# about a commit nobody merged. The helper confirms the head before AND after the
-# checks read when it is given one, so the window shrinks to the moment rather
-# than spanning the request. #212.
+# about a commit nobody merged. #212.
+#
+# WHAT `--head` BUYS, AND WHAT IT DOES NOT. The helper confirms the head before AND
+# after the checks read, so a head that MOVED AND STAYED MOVED is caught and
+# reported as `stale`. It does not BIND the response to a commit, and cannot: the
+# request is addressed by PR number and the answer carries no OID, so an A → B → A
+# that completes between the two confirmations still reads B's checks and sees A
+# twice. That residue is #214, and on the strict path it does not arise at all —
+# GitHub evaluates the required checks itself at merge time.
 #
 # 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
 # the head moved, and the caller's correct response is to re-run the gate against

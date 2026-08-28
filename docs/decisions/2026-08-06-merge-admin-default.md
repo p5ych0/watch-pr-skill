@@ -27,17 +27,24 @@ and the merge.
 - probes the reviewer's state and verdict **against that head** through
   `pr-review-state.sh`, so a `blocked`, dismissed or body-only
   `CHANGES_REQUESTED` review is seen rather than walked past;
-- probes the required checks **against that head** through `pr-ci-state.sh
-  --head`, which confirms the head before and after the checks read and reports
-  `stale` if it moved;
+- brackets the required-checks read with a head confirmation on each side, through
+  `pr-ci-state.sh --head`, and reports `stale` if the head moved;
 - refuses while any review thread is unresolved, paginated;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**Every probe is bound to that head**, and that is load-bearing rather than tidy.
-`gh pr checks` takes a PR number and has no commit selector, so an unpinned checks
-probe answers about the pull request while everything around it asks about a
-commit: on an A → B → A force-push it would accept B's checks while
-`--match-head-commit A` merged A. That was true here until #212.
+**The required-checks probe is bracketed rather than bound, and that is the one
+gate here that is not about a commit.** `gh pr checks` takes a PR number, has no
+commit selector, and its answer carries no OID — so the two confirmations catch a
+head that moved and stayed moved, which is the ordinary case, and cannot see an
+A → B → A that completes between them. Until #212 there was no bracket at all and
+a single force-push away sufficed.
+
+**That residue is #214 and is NOT waived by this record.** It is a race of the same
+family as the one below, and it is not the same race: it needs two force-pushes
+inside one request rather than one push in the seconds before a merge, and nobody
+has measured it. Do not widen this record to cover it. On the strict path it does
+not arise — GitHub evaluates the required checks itself, server-side and
+commit-bound.
 
 ## What is confirmed after the merge
 

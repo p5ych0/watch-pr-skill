@@ -540,10 +540,12 @@ waived:
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
-- the **required-checks probe is pinned to that head** with `--head`, because
+- the **required-checks probe is bracketed by that head** with `--head`, because
   `gh pr checks` takes a PR number and has no commit selector — unpinned it
-  answers about the pull request, and an A → B → A force-push then merges A on
-  B's checks;
+  answers about the pull request, and a single force-push then merges A on B's
+  checks. The bracket catches a head that moved and stayed moved; it cannot bind
+  the answer to a commit, and that residue is #214 rather than something this
+  waiver covers;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
 
