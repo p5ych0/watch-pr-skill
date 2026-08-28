@@ -245,6 +245,11 @@ case "\$*" in
             printf '{"state":"success","statuses":[{"context":"legacy","state":"success"}]}\n'
             exit 1
         fi
+        if [ -f "$TMP/gh.sts.page2" ]; then
+            printf '{"state":"success","statuses":[{"context":"a","state":"success"}]}\n'
+            cat "$TMP/gh.sts.page2"
+            exit 0
+        fi
         # THE LEGACY STATUSES ARE STAGEABLE TOO. Answering an empty array always
         # would leave every verdict below supplied by the check runs, so a
         # regression that ignored this source, or read it as green, would keep
@@ -323,6 +328,18 @@ rm -f "$TMP/gh.runs.page2"
 { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
     && pass "…and a failure on a LATER page is what the verdict reports" \
     || die "a failing second page did not decide: '$got'"
+# …AND THE SAME FOR THE LEGACY STATUSES, which page separately. Every other case
+# here gives that endpoint one page, so a fold that inspected only the first
+# object would keep the suite green while a failing context on a later page went
+# unread — and `gh api --paginate` emits each page as its own document, so parsing
+# every one of them is a different property from requesting them.
+mkgh_head "$WANT" norun
+printf '{"state":"failure","statuses":[{"context":"b","state":"failure"}]}\n' > "$TMP/gh.sts.page2"
+got="$(run 7 --head "$WANT")"
+rm -f "$TMP/gh.sts.page2"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "…and a failing legacy status on a LATER page decides too" \
+    || die "a failing second status page did not decide: '$got'"
 grep -qE '^pr checks|^checks' "$TMP/args" \
     && die "the PR-addressed query is still used for the all-checks question" \
     || pass "…and the PR-addressed query is not used for it at all"
