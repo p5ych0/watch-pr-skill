@@ -26,8 +26,9 @@
   carries no OID, so the two confirmations catch a head that moved and stayed moved
   and cannot see an A → B → A whose both moves complete between them — the first
   sees A, so the move away is after it; the second sees A, so the return is before
-  it. What they change is where those two moves have to fit: inside the bracket,
-  rather than straddling everything between the checks read and the merge. Binding it
+  it. What they change is where those two moves have to fall: between the two head
+  confirmations — a window that still spans the checks request — rather than
+  straddling everything between the checks read and the merge. Binding it
   needs a commit-addressed query plus the required-contexts read to go with it,
   which is #214. On the strict path the residue does not arise: GitHub evaluates
   the required checks itself.
@@ -37,8 +38,9 @@
 
   The `--admin` decision record listed this as the one probe not bound to the head.
   It now says what the bracket is, and that the remaining race is **not** waived by
-  it — that race needs two force-pushes inside one request rather than one push
-  before a merge, and nobody has measured it. `.github/copilot-instructions.md`
+  it — that race needs two force-pushes between the two head confirmations, a
+  window that spans the checks request rather than being contained by it, rather
+  than one push before a merge, and nobody has measured it. `.github/copilot-instructions.md`
   carries the bracket as a bound on the waiver, with a contract token, so the
   reviewer that follows no pointers can flag its removal. Closes #212.
 

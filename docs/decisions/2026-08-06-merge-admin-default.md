@@ -40,12 +40,15 @@ A → B → A whose **both moves complete between them**: the first confirmation
 A, so the move away is after it; the second sees A, so the return is before it.
 The unsafe case is always that pair — `--match-head-commit` refuses a head that
 simply moved away. Until #212 there was no bracket at all, so the two moves could
-straddle everything between the checks read and the merge; now they have to fit
-inside the bracket.
+straddle everything between the checks read and the merge; now they have to fall
+between the two head confirmations — a window that still SPANS the checks request
+rather than being contained by it.
 
 **That residue is #214 and is NOT waived by this record.** It is a race of the same
 family as the one below, and it is not the same race: it needs two force-pushes
-inside one request rather than one push in the seconds before a merge, and nobody
+between the two head confirmations rather than one push in the seconds before a
+merge — a window that spans the checks request rather than being contained by it —
+and nobody
 has measured it. Do not widen this record to cover it. On the strict path it does
 not arise — GitHub evaluates the required checks itself, server-side and
 commit-bound.
