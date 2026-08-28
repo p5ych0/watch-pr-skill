@@ -251,80 +251,63 @@ checks_msg_is_none_configured() {
 #
 # BOTH SOURCES, because `gh pr checks` merges them and dropping one would make
 # this laxer than what it replaces: check runs from the Checks API, and the legacy
-# commit statuses that older integrations still post.
+# commit statuses that older integrations still post. `statusCheckRollup` is over
+# BOTH — measured, a `cli/cli` commit with thirteen check runs and no statuses
+# reports SUCCESS, and a `pandas-dev/pandas` commit with one failed run, six still
+# in progress and a passing legacy status reports FAILURE.
 #
-# AND `.statuses` RATHER THAN `.state` for the legacy read. That endpoint reports
-# `state: "pending"` with an EMPTY `statuses` array when a commit has none — so
-# taking the summary would make every commit without legacy statuses pending
-# forever, which is a gate that never opens rather than one that fails closed.
+# ONE ROLLUP RATHER THAN TWO PAGINATED READS, and that is what closes a class this
+# pull request spent four rounds inside. The REST reads had to be assembled here:
+# `--paginate` requests pages sequentially and is not a snapshot, so a rerun
+# landing between two of them lets a record repeat, or be REPLACED by one with a
+# fresh id while the count holds — and the second of those is invisible to any
+# rule about the pages themselves, because every page is individually well-formed.
+# Nothing available can make two REST reads atomic, so each guard bought one
+# interleaving and left the next. GitHub computes this rollup itself, over both
+# sources, in one response addressed by the OID: there are no pages to reconcile
+# and no fold to get wrong. `prefer removing the dependency over guarding it`.
+#
+# THE PRECEDENCE IS THE SERVER`S TOO, and it agrees with this file`s contract: the
+# pandas commit above has a failed run and six unfinished ones and reports FAILURE,
+# which is "at least one is still running AND NONE HAS FAILED" read the way the
+# bucket parse below reads it.
+#
+# `EXPECTED` IS PENDING. It is the state of a context branch protection requires
+# that has not reported, so it is precisely the case where the answer is not in
+# yet — and it is not green. An unrecognised state is malformed, for the reason
+# `recordlib.sh` records.
+#
+# A NULL ROLLUP IS `none` AND A NULL OBJECT IS AN ERROR. They arrive the same way,
+# with status 0 and no message: a commit that has no checks at all answers
+# `statusCheckRollup: null`, and an OID this repository does not have answers
+# `object: null` — measured, both. Reading the second as `none` would hand the CI
+# gate "no checks are configured" for a commit nobody could find.
 commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
-    local oid="$1" _left _runs _sts _v_runs _v_sts
+    local oid="$1" _left _out
     _left="$(rb_left)" || return 2
-    _runs="$(run_limited "$_left" gh api --hostname "$HOST" \
-        "repos/$OWNER/$REPO/commits/$oid/check-runs" --paginate 2>/dev/null)" || return 2
-    _left="$(rb_left)" || return 2
-    _sts="$(run_limited "$_left" gh api --hostname "$HOST" \
-        "repos/$OWNER/$REPO/commits/$oid/status" --paginate 2>/dev/null)" || return 2
-    # AN UNRECOGNISED CONCLUSION IS MALFORMED, not benign — the same rule the
-    # bucket parse below follows, and for the reason `recordlib.sh` records: a
-    # value outside the known set must not fall through a catch-all into green.
-    #
-    # FAILED BEATS PENDING, which is this file`s stated contract — status 3 is "at
-    # least one is still running AND NONE HAS FAILED" — and what the bucket parse
-    # below has always done. Asking `is anything unfinished` first inverted it for
-    # the commit-addressed read alone: a head with one red run and one still going
-    # answered `pending`, so the round gate went on polling a commit that was
-    # already decided, to its timeout. A conclusion is only read where the run
-    # reported one, because an unfinished run carries `conclusion: null` and would
-    # otherwise be the malformed case rather than the pending one.
-    _v_runs="$(printf '%s' "$_runs" | jq -r -s "$RECORDLIB_JQ"'
-        object_pages_or_error("check_runs")
-        | [ .[].check_runs[] ]
-        | if length == 0 then "none"
-          elif any(.[]; type != "object" or (.status | type) != "string") then "malformed"
-          elif any(.[]; .status == "completed" and (.conclusion | type) != "string") then "malformed"
-          elif any(.[]; .status == "completed"
-                        and (.conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale"))) then "failed"
-          elif any(.[]; .status != "completed") then "pending"
-          elif all(.[]; .conclusion | IN("success","neutral","skipped")) then "green"
-          else "malformed" end' 2>/dev/null)" || return 2
-    # NO ORDERING, because there is nothing to order. Two rounds of this pull
-    # request built a newest-per-context fold here, and the premise was wrong:
-    # MEASURED against the live API, `commits/<oid>/status` — the COMBINED status —
-    # already returns one event per context, the newest. On pandas-dev/pandas
-    # 91ce25ac the combined view holds a single `pre-commit.ci - push` at 14:40:31Z
-    # and `commits/<oid>/statuses`, the plural endpoint this does NOT call, holds
-    # that one plus two earlier `pending`s. The check-run read above needs no
-    # ordering either, and `filter` is why: it defaults to `latest`. That half is
-    # DOCUMENTED rather than measured — no commit among the 32 scanned had a re-run,
-    # so `filter=all` and `filter=latest` returned the same count on every one.
-    #
-    # AND THE ORDERING WAS THE ONLY FAIL-OPEN PATH. `created_at` is compared
-    # lexically, so a value that merely sorts late — junk, or a shaped-but-impossible
-    # instant no regex rejects — won `max_by` and reported a commit GREEN whose real
-    # newest event had failed. Without it a duplicate that somehow arrived reads
-    # `failed` and the gate stays shut, which is the direction this file is for.
-    # Guarding the ordering meant a calendar validator in jq; removing the ordering
-    # means neither.
-    _v_sts="$(printf '%s' "$_sts" | jq -r -s "$RECORDLIB_JQ"'
-        object_pages_or_error("statuses")
-        | [ .[].statuses[] ]
-        | if length == 0 then "none"
-          elif any(.[]; type != "object" or (.state | type) != "string") then "malformed"
-          elif any(.[]; .state | IN("failure","error")) then "failed"
-          elif any(.[]; .state == "pending") then "pending"
-          elif all(.[]; .state == "success") then "green"
-          else "malformed" end' 2>/dev/null)" || return 2
-    # WORST-FIRST, and `none` only where BOTH said it. The tokens are disjoint, so
-    # a substring test over the pair is the whole of the precedence.
-    case "$_v_runs/$_v_sts" in
-        *malformed*) printf '%s\n' malformed ;;
-        *failed*)    printf '%s\n' failed ;;
-        *pending*)   printf '%s\n' pending ;;
-        *green*)     printf '%s\n' green ;;
-        none/none)   printf '%s\n' none ;;
-        *)           printf '%s\n' malformed ;;
-    esac
+    _out="$(run_limited "$_left" gh api graphql --hostname "$HOST" \
+        -f query='query($o:String!,$r:String!,$oid:GitObjectID!){repository(owner:$o,name:$r){object(oid:$oid){... on Commit{statusCheckRollup{state}}}}}' \
+        -F o="$OWNER" -F r="$REPO" -F oid="$oid" 2>/dev/null)" || return 2
+    # THE WHOLE PATH IS WALKED WITH `has`, not with `//`. A default swallows the
+    # difference between a field that is absent because the body is an error and
+    # one that is null because there is nothing to report, and those are opposite
+    # answers here.
+    printf '%s' "$_out" | jq -r '
+        if type != "object" or (has("errors")) then "malformed"
+        elif (.data | type) != "object" then "malformed"
+        elif (.data.repository | type) != "object" then "malformed"
+        elif (.data.repository | has("object") | not) then "malformed"
+        elif (.data.repository.object | type) != "object" then "malformed"
+        elif (.data.repository.object | has("statusCheckRollup") | not) then "malformed"
+        elif .data.repository.object.statusCheckRollup == null then "none"
+        elif (.data.repository.object.statusCheckRollup | type) != "object" then "malformed"
+        elif (.data.repository.object.statusCheckRollup.state | type) != "string" then "malformed"
+        else ( .data.repository.object.statusCheckRollup.state
+               | if IN("FAILURE","ERROR") then "failed"
+                 elif IN("PENDING","EXPECTED") then "pending"
+                 elif . == "SUCCESS" then "green"
+                 else "malformed" end )
+        end' 2>/dev/null || return 2
     return 0
 }
 

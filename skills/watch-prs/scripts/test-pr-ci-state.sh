@@ -195,70 +195,35 @@ OTHER=fedcba9876543210fedcba9876543210fedcba98
 # confirmation and the checks call can be replayed. A stub that answered the same
 # head twice could never distinguish "verified before the request" from "bound to
 # the request", which is the whole difference the second read exists to make.
-mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict> [legacy state]
+mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | raw JSON>
     printf '%s\n' "$1" > "$TMP/heads"
-    # `norun` gives the commit NO check runs, so a verdict can only come from the
-    # legacy statuses — which is what makes those cases prove that source is read.
+    # THE ROLLUP IS WHAT THE COMMIT-ADDRESSED PATH READS. A bucket name is turned
+    # into the response GitHub really sends, so the helper's own jq is what
+    # classifies rather than the stub; a value starting with `{` is passed through
+    # verbatim, which is how the malformed shapes below are staged.
     case "$2" in
-        norun) printf '{"total_count":0,"check_runs":[]}\n' > "$TMP/gh.out" ;;
-        *)     printf '%s' "$2" > "$TMP/gh.out" ;;
-    esac
-    case "${3-}" in
-        "") printf '{"total_count":0,"state":"pending","statuses":[]}\n' > "$TMP/gh.sts" ;;
-        *)  printf '{"total_count":1,"state":"%s","statuses":[{"id":1,"context":"legacy","state":"%s","created_at":"2026-01-01T00:00:00Z"}]}\n' "$3" "$3" > "$TMP/gh.sts" ;;
+        '{'*)    printf '%s\n' "$2" > "$TMP/gh.gql" ;;
+        green)   printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"SUCCESS"}}}}}\n' > "$TMP/gh.gql" ;;
+        failed)  printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"FAILURE"}}}}}\n' > "$TMP/gh.gql" ;;
+        pending) printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"PENDING"}}}}}\n' > "$TMP/gh.gql" ;;
+        none)    printf '{"data":{"repository":{"object":{"statusCheckRollup":null}}}}\n' > "$TMP/gh.gql" ;;
+        *)       printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"%s"}}}}}\n' "$2" > "$TMP/gh.gql" ;;
     esac
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$TMP/args"
 case "\$*" in
-    *check-runs*)
-        # A COMPLETE-LOOKING PAGE AND THEN A FAILURE is the case the guards on
-        # those two reads exist for: command substitution keeps what a command
-        # printed before it died, so a green page from a failed fetch would be
-        # classified as green without them.
-        if [ -f "$TMP/gh.runs.fail" ]; then
-            printf '{"total_count":1,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"success"}]}\n'
+    *graphql*)
+        # A COMPLETE-LOOKING ANSWER AND THEN A FAILURE is the case the guard on
+        # this read exists for: command substitution keeps what a command printed
+        # before it died, so a green body from a failed request would be classified
+        # as green without it.
+        cat "$TMP/gh.gql"
+        if [ -f "$TMP/gh.gql.fail" ]; then
             exit 1
         fi
-        # THE COMMIT-ADDRESSED READ. The verdict file names a bucket; this turns it
-        # into the page shape the endpoint really returns, so the helper's own jq
-        # is what classifies rather than the stub.
-        v="\$(cat "$TMP/gh.out")"
-        # `gh api --paginate` concatenates the pages it fetched; the stub does
-        # the same, so a helper that parses only the first is visible here.
-        if [ -f "$TMP/gh.runs.page2" ]; then
-            printf '{"total_count":2,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"success"}]}\n'
-            cat "$TMP/gh.runs.page2"
-            exit 0
-        fi
-        case "\$v" in
-            '{'*) printf '%s\n' "\$v" ;;
-            green)   printf '{"total_count":1,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"success"}]}\n' ;;
-            failed)  printf '{"total_count":1,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"failure"}]}\n' ;;
-            pending) printf '{"total_count":1,"check_runs":[{"id":1,"name":"a","status":"in_progress","conclusion":null}]}\n' ;;
-            none)    printf '{"total_count":0,"check_runs":[]}\n' ;;
-            *)       printf '{"total_count":1,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"%s"}]}\n' "\$v" ;;
-        esac ;;
-    *"/status"*)
-        if [ -f "$TMP/gh.sts.fail" ]; then
-            printf '{"total_count":1,"state":"success","statuses":[{"id":1,"context":"legacy","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n'
-            exit 1
-        fi
-        if [ -f "$TMP/gh.sts.raw" ]; then
-            cat "$TMP/gh.sts.raw"
-            exit 0
-        fi
-        if [ -f "$TMP/gh.sts.page2" ]; then
-            printf '{"total_count":2,"state":"success","statuses":[{"id":1,"context":"a","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n'
-            cat "$TMP/gh.sts.page2"
-            exit 0
-        fi
-        # THE LEGACY STATUSES ARE STAGEABLE TOO. Answering an empty array always
-        # would leave every verdict below supplied by the check runs, so a
-        # regression that ignored this source, or read it as green, would keep
-        # this suite green while a broken commit merged.
-        cat "$TMP/gh.sts" ;;
+        exit 0 ;;
     *)
         case "\$2" in
             view)
@@ -297,8 +262,8 @@ grep -qE 'checks|check-runs' "$TMP/args" \
 # `gh pr checks` takes a PR number and has no commit selector, so bracketing it
 # with head confirmations narrows WHEN a head can move and never binds the answer
 # to a commit: an A → B → A completing between the two reads is invisible to both.
-# These endpoints are addressed by the OID in their path, so the answer is about
-# that commit and nothing else. #214.
+# The rollup is addressed by the OID it is asked for, so the answer is about that
+# commit and nothing else. #214.
 #
 # THE ARGUMENT IS ASSERTED, not the verdict alone: a regression to `gh pr checks`
 # would still answer green here, and the whole point is WHICH question was asked.
@@ -307,225 +272,121 @@ got="$(run 7 --head "$WANT")"
 { [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
     && pass "the all-checks question is answered for a matching head" \
     || die "the commit-addressed read did not report green ('$got')"
-grep -qF "commits/$WANT/check-runs" "$TMP/args" \
-    && pass "…by asking the CHECK RUNS of that commit, not the checks of the PR" \
-    || die "the all-checks read is not addressed by the commit: $(cat "$TMP/args")"
-grep -qF "commits/$WANT/status" "$TMP/args" \
-    && pass "…and the legacy commit statuses too, which the PR query also merges" \
-    || die "the legacy commit statuses were not read: $(cat "$TMP/args")"
-# BOTH PAGINATED, and asserted rather than assumed. A commit can carry hundreds of
-# check runs — 294 on one commit of `cli/cli` when this was measured — so a read
-# that stops at the first page classifies a subset, and the record that would have
-# blocked the merge may be on the second.
-grep -qE "commits/$WANT/check-runs .*--paginate" "$TMP/args" \
-    && pass "…and the check-runs read is paginated" \
-    || die "the check-runs read is not paginated: $(cat "$TMP/args")"
-grep -qE "commits/$WANT/status .*--paginate" "$TMP/args" \
-    && pass "…and so is the commit-status read" \
-    || die "the commit-status read is not paginated: $(cat "$TMP/args")"
-# …AND A WORSE VERDICT ON A LATER PAGE DECIDES. Asserting the flag alone would
-# pass against a helper that requested every page and parsed only the first.
-mkgh_head "$WANT" green; : > "$TMP/gh.runs.page2"
-printf '{"total_count":2,"check_runs":[{"id":2,"name":"b","status":"completed","conclusion":"failure"}]}\n' > "$TMP/gh.runs.page2"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.runs.page2"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
-    && pass "…and a failure on a LATER page is what the verdict reports" \
-    || die "a failing second page did not decide: '$got'"
-# …AND THE SAME FOR THE LEGACY STATUSES, which page separately. Every other case
-# here gives that endpoint one page, so a fold that inspected only the first
-# object would keep the suite green while a failing context on a later page went
-# unread — and `gh api --paginate` emits each page as its own document, so parsing
-# every one of them is a different property from requesting them.
-mkgh_head "$WANT" norun
-printf '{"total_count":2,"state":"failure","statuses":[{"id":2,"context":"b","state":"failure","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.page2"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.page2"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
-    && pass "…and a failing legacy status on a LATER page decides too" \
-    || die "a failing second status page did not decide: '$got'"
+grep -qF "statusCheckRollup" "$TMP/args" \
+    && pass "…by asking the rollup of that commit rather than the checks of the PR" \
+    || die "the all-checks read is not the rollup: $(cat "$TMP/args")"
+grep -qF "oid=$WANT" "$TMP/args" \
+    && pass "…for the OID it was pinned to" \
+    || die "the rollup was not addressed by the commit: $(cat "$TMP/args")"
+# …AND IT IS ONE READ. The two REST endpoints it replaces had to be reconciled
+# here, and `--paginate` is not a snapshot: a rerun landing between two pages lets
+# a record repeat, or be replaced by one with a fresh id while the count holds.
+# Nothing available makes two reads atomic, so a helper that still made them would
+# still have that class however well each page validated.
+grep -qE 'commits/[0-9a-f]+/(check-runs|status)' "$TMP/args" \
+    && die "a paginated commit endpoint is still read: $(cat "$TMP/args")" \
+    || pass "…and neither paginated commit endpoint is read at all"
 grep -qE '^pr checks|^checks' "$TMP/args" \
     && die "the PR-addressed query is still used for the all-checks question" \
-    || pass "…and the PR-addressed query is not used for it at all"
+    || pass "…nor the PR-addressed query"
 
-# `--required` KEEPS THE PR-ADDRESSED QUERY, because the commit endpoints cannot
-# say which contexts branch protection requires: classic protection needs admin
-# and denies with a 404 indistinguishable from "not protected", and the ruleset
-# endpoints do not see classic protection at all. Measured on #214.
+# `--required` KEEPS THE PR-ADDRESSED QUERY, because neither the rollup nor the
+# commit endpoints can say which contexts branch protection requires: classic
+# protection needs admin and denies with a 404 indistinguishable from "not
+# protected", and the ruleset endpoints do not see classic protection at all.
+# Measured on #214.
 mkgh_head "$WANT" green; : > "$TMP/args"
 run 7 --head "$WANT" --required >/dev/null
-# THE POSITIVE ASSERTION AS WELL AS THE ABSENCE. "It did not call check-runs" is
-# also true of an implementation that called the commit `/status` endpoint, which
-# cannot identify a required context either — so what the call WAS is asserted,
-# with the repository it was pinned to.
+# THE POSITIVE ASSERTION AS WELL AS THE ABSENCE. "It did not ask for the rollup" is
+# also true of an implementation that called a commit endpoint, which cannot
+# identify a required context either — so what the call WAS is asserted, with the
+# repository it was pinned to.
 grep -q "pr checks 7 --repo github.com/acme/widget --required" "$TMP/args" \
     && pass "…while --required asks the PR-addressed query, pinned to the repository" \
     || die "--required did not use the PR-addressed query: $(cat "$TMP/args")"
-grep -qE "commits/$WANT/(check-runs|status)" "$TMP/args" \
-    && die "--required used a commit endpoint, which cannot answer it: $(cat "$TMP/args")" \
-    || pass "…and neither commit endpoint, since neither knows what is required"
+grep -qF 'statusCheckRollup' "$TMP/args" \
+    && die "--required used the rollup, which cannot answer it: $(cat "$TMP/args")" \
+    || pass "…and not the rollup, which does not know what is required"
 
-# EVERY VERDICT COMES THROUGH THE HELPER'S OWN CLASSIFIER on this path, so the
-# stub returns the endpoint's real shape and the jq below is what decides.
-for _cv in failed:1:failed pending:3:pending none:4:none; do
-    _want="${_cv%%:*}"; _rest="${_cv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
-    mkgh_head "$WANT" "$_want"
+# EVERY VERDICT COMES THROUGH THE HELPER'S OWN CLASSIFIER on this path, so the stub
+# returns the response GitHub really sends and the jq is what decides. The states
+# are the `StatusState` enum, read from the schema rather than assumed.
+for _cv in FAILURE:1:failed ERROR:1:failed PENDING:3:pending EXPECTED:3:pending SUCCESS:0:green; do
+    _state="${_cv%%:*}"; _rest="${_cv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
+    mkgh_head "$WANT" "$_state"
     got="$(run 7 --head "$WANT")"
     { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_st" <<<"${got#*|}"; } \
-        && pass "…and a $_want check run is $_st" \
-        || die "a $_want check run gave '$got'"
+        && pass "…and a $_state rollup is $_st" \
+        || die "a $_state rollup gave '$got'"
 done
-# AN UNRECOGNISED CONCLUSION IS MALFORMED, not benign — the rule `recordlib.sh`
-# records, applied to the value this path parses itself.
-mkgh_head "$WANT" surprising
+# `EXPECTED` IS PENDING RATHER THAN GREEN, and that is the one above whose direction
+# matters most: it is the state of a context branch protection requires that has not
+# reported, so reading it as green would merge on a check that never ran.
+mkgh_head "$WANT" EXPECTED
+got="$(run 7 --head "$WANT")"
+grep -qF 'status=green' <<<"${got#*|}" \
+    && die "an unreported required context was read as green: '$got'" \
+    || pass "…and never green, since that context has not reported"
+# AN UNRECOGNISED STATE IS MALFORMED, not benign — the rule `recordlib.sh` records,
+# applied to the value this path parses itself.
+mkgh_head "$WANT" SURPRISING
 got="$(run 7 --head "$WANT")"
 [ "${got%%|*}" = 2 ] \
-    && pass "…and a conclusion outside the known set is unreadable, not green" \
-    || die "an unknown conclusion gave '$got'"
+    && pass "…and a state outside the enum is unreadable, not green" \
+    || die "an unknown rollup state gave '$got'"
 
-# ── A DUPLICATED CONTEXT IS REFUSED IN THE SAFE DIRECTION ─────────────────
-# `commits/<oid>/status` is the COMBINED status and returns one event per context,
-# the newest — measured against the live API, where pandas-dev/pandas 91ce25ac
-# shows a single `pre-commit.ci - push` there and three in `commits/<oid>/statuses`,
-# the plural endpoint this does not call. So a context appearing twice is not a
-# state this endpoint produces. What is asserted is the DIRECTION taken if one ever
-# did: the fold reads the failure and the gate stays SHUT. An ordering that picked
-# the newest instead would have to compare `created_at` lexically, and that was the
-# one path by which a value sorting late — junk, or a shaped-but-impossible instant
-# — could report a commit green whose newest event had failed.
-mkgh_head "$WANT" norun
-printf '{"total_count":2,"state":"success","statuses":[{"id":1,"context":"ci","state":"failure","created_at":"2026-01-01T00:00:00Z"},{"id":2,"context":"ci","state":"success","created_at":"2026-01-01T00:05:00Z"}]}\n' > "$TMP/gh.sts.raw"
+# ── A NULL ROLLUP IS `none`; A NULL OBJECT IS AN ERROR ─────────────────────
+# They arrive the same way, with status 0 and no message: a commit with no checks
+# at all answers `statusCheckRollup: null`, and an OID this repository does not
+# have answers `object: null`. Both were measured against the live API. Reading the
+# second as `none` would hand the CI gate "no checks are configured" for a commit
+# nobody could find, which is a failed lookup arriving as a benign verdict.
+mkgh_head "$WANT" none
 got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.raw"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
-    && pass "a context this endpoint cannot duplicate is read closed, not green" \
-    || die "a duplicated context did not fail closed: '$got'"
-# …AND THE VERDICT DOES NOT DEPEND ON THE TIMES AT ALL, so no value carried in one
-# can decide it. Nothing here orders, and nothing here needs a calendar.
-mkgh_head "$WANT" norun
-printf '{"total_count":2,"state":"success","statuses":[{"id":1,"context":"ci","state":"failure","created_at":"9999-99-99T99:99:99Z"},{"id":2,"context":"ci","state":"success","created_at":"zzzz"}]}\n' > "$TMP/gh.sts.raw"
+{ [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
+    && pass "a commit with no checks at all is none" \
+    || die "a null rollup gave '$got'"
+mkgh_head "$WANT" '{"data":{"repository":{"object":null}}}'
 got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.raw"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
-    && pass "…and a timestamp that sorts late decides nothing, whatever it says" \
-    || die "a timestamp reached the verdict: '$got'"
-
-# ── A RED RUN DECIDES WHILE ANOTHER IS STILL GOING ─────────────────────────
-# Status 3 means "at least one is still running and NONE HAS FAILED", and the
-# bucket parse for the PR-addressed read has always ordered it that way. Asking
-# `is anything unfinished` first would invert it here alone, and the cost is not
-# cosmetic: the round gate waits on `pending`, so a head already decided red would
-# be polled to the deadline.
-mkgh_head "$WANT" '{"total_count":2,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"failure"},{"id":2,"name":"b","status":"in_progress","conclusion":null}]}'
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
-    && pass "a failed run decides while another is still in progress" \
-    || die "a red head was reported as pending: '$got'"
-# …AND AN UNFINISHED RUN IS STILL PENDING where nothing has failed, so the
-# reordering did not simply move every mixed answer into `failed`.
-mkgh_head "$WANT" '{"total_count":2,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"success"},{"id":2,"name":"b","status":"in_progress","conclusion":null}]}'
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
-    && pass "…and an unfinished run beside a passing one is still pending" \
-    || die "a still-running head did not report pending: '$got'"
-# …AND AN UNFINISHED RUN IS NOT MALFORMED. It carries `conclusion: null`, so a
-# conclusion check that did not exempt it would refuse every commit mid-run.
-grep -qF 'reason=' <<<"${got#*|}" \
-    && die "an in-progress run was read as malformed: '$got'" \
-    || pass "…without its null conclusion being read as malformed"
-
-# ── A RECORD REPEATED ACROSS PAGES IS UNREADABLE ───────────────────────────
-# `--paginate` requests the pages one after another, so a rerun landing between two
-# of them REORDERS the result: a shifted offset returns a record already seen and
-# skips the one that moved past it. The total still matches, so the count rule
-# above cannot see it — and what was dropped can be the failing run while what
-# repeated is a passing one, which is `green` on a red commit. Both endpoint
-# shapes, because each is read by its own call.
-mkgh_head "$WANT" green
-printf '{"total_count":2,"check_runs":[{"id":1,"name":"a","status":"completed","conclusion":"success"}]}\n' > "$TMP/gh.runs.page2"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.runs.page2"
-{ [ "${got%%|*}" = 2 ] && grep -qF 'commit_checks_unreadable' <<<"${got#*|}"; } \
-    && pass "a check run repeated across pages is unreadable, not green" \
-    || die "a repeated check run was read as an answer: '$got'"
-grep -qF 'status=green' <<<"${got#*|}" \
-    && die "…and it emitted green anyway: '$got'" \
-    || pass "…without green being emitted beside the refusal"
-mkgh_head "$WANT" norun
-printf '{"total_count":2,"state":"success","statuses":[{"id":1,"context":"a","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.page2"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.page2"
-{ [ "${got%%|*}" = 2 ] && grep -qF 'commit_checks_unreadable' <<<"${got#*|}"; } \
-    && pass "…and so is a status repeated across pages" \
-    || die "a repeated status was read as an answer: '$got'"
-
-# ── A BODY THAT CLAIMS RECORDS IT DOES NOT CARRY IS UNREADABLE ─────────────
-# Both endpoints report `total_count`, and `none` is the verdict a truncated read
-# lands on: the CI gate accepts it as "no checks are configured" and the round
-# closes with nothing asserted. So a page whose count disagrees with its own
-# records has to be an error rather than a benign answer — asserted through BOTH
-# endpoint shapes, since each is read by its own call and only one of them was
-# object-paged before this branch existed.
-mkgh_head "$WANT" '{"total_count":1,"check_runs":[]}'
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 2 ] && grep -qF 'commit_checks_unreadable' <<<"${got#*|}"; } \
-    && pass "a check-runs body claiming a record it does not carry is unreadable" \
-    || die "a truncated check-runs body was read as an answer: '$got'"
+{ [ "${got%%|*}" = 2 ] && grep -qF 'status=error' <<<"${got#*|}"; } \
+    && pass "…while a commit the repository does not have is an error" \
+    || die "an unknown commit was read as an answer: '$got'"
 grep -qF 'status=none' <<<"${got#*|}" \
     && die "…and it emitted the benign verdict anyway: '$got'" \
-    || pass "…and did not emit \`none\` beside the refusal"
-mkgh_head "$WANT" norun
-printf '{"total_count":1,"state":"success","statuses":[]}\n' > "$TMP/gh.sts.raw"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.raw"
-{ [ "${got%%|*}" = 2 ] && grep -qF 'commit_checks_unreadable' <<<"${got#*|}"; } \
-    && pass "…and so is a statuses body claiming one" \
-    || die "a truncated statuses body was read as an answer: '$got'"
-
-# ── A GREEN PAGE FROM A FAILED FETCH IS NOT GREEN ──────────────────────────
-# `gh` can print a complete, valid page and then exit non-zero because the request
-# failed part-way, and command substitution keeps what it printed. Both reads take
-# their status for that reason, and without the cases below deleting either guard
-# leaves this suite green while a failed fetch opens the merge gate.
-for _wf in runs sts; do
-    mkgh_head "$WANT" green
-    : > "$TMP/gh.$_wf.fail"
+    || pass "…and did not emit the benign verdict beside the refusal"
+# …AND EVERY OTHER SHAPE THAT IS NOT AN ANSWER. A GraphQL error body arrives with
+# HTTP 200, and a truncated one parses; each of these would otherwise walk a path
+# that is absent and come out as the benign verdict.
+for _bad in \
+    '{"errors":[{"message":"Something went wrong"}],"data":null}' \
+    '{"data":null}' \
+    '{"data":{}}' \
+    '{"data":{"repository":null}}' \
+    '{"data":{"repository":{}}}' \
+    '{"data":{"repository":{"object":{}}}}' \
+    '{"data":{"repository":{"object":{"statusCheckRollup":{}}}}}' \
+    '{"data":{"repository":{"object":{"statusCheckRollup":{"state":null}}}}}' \
+    '[]' ; do
+    mkgh_head "$WANT" "$_bad"
     got="$(run 7 --head "$WANT")"
-    rm -f "$TMP/gh.$_wf.fail"
-    { [ "${got%%|*}" = 2 ] && grep -qF 'status=error' <<<"${got#*|}"; } \
-        && pass "…and a green page from a failed $_wf fetch is an error, not green" \
-        || die "a failed $_wf fetch that printed green gave '$got'"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and a body that answers nothing is an error" \
+        || die "'$_bad' was read as an answer: '$got'"
 done
 
-# ── THE LEGACY COMMIT STATUSES DECIDE TOO ──────────────────────────────────
-# `gh pr checks` merges check runs and the older commit statuses, so a
-# commit-addressed replacement that read only the first would be LAXER than what
-# it replaces: an integration that still posts statuses would go unseen. These
-# cases give the commit no check runs at all, so the verdict can only come from
-# the legacy source.
-for _lv in success:0:green pending:3:pending failure:1:failed error:1:failed; do
-    _st="${_lv%%:*}"; _r="${_lv#*:}"; _rc="${_r%%:*}"; _want="${_r#*:}"
-    mkgh_head "$WANT" norun "$_st"
-    got="$(run 7 --head "$WANT")"
-    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_want" <<<"${got#*|}"; } \
-        && pass "…and a legacy '$_st' status alone is $_want" \
-        || die "a legacy $_st status gave '$got'"
-done
-# AND THE WORSE SOURCE WINS. A green set of check runs beside a failing legacy
-# status is a failing commit, and precedence going the other way is the direction
-# that opens the gate.
-mkgh_head "$WANT" green failure
+# ── A GREEN ANSWER FROM A FAILED REQUEST IS NOT GREEN ──────────────────────
+# `gh` can print a complete, valid body and then exit non-zero because the request
+# failed part-way, and command substitution keeps what it printed. The read takes
+# its status for that reason, and without this case deleting that guard leaves the
+# suite green while a failed fetch opens the merge gate.
+mkgh_head "$WANT" green
+: > "$TMP/gh.gql.fail"
 got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
-    && pass "…and a failing legacy status beats green check runs" \
-    || die "the mixed-source precedence gave '$got'"
-# …AND `pending` BEATS GREEN THE SAME WAY, which is the case a wrong precedence
-# would turn into a merge rather than a wait.
-mkgh_head "$WANT" green pending
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
-    && pass "…and a pending legacy status beats green check runs" \
-    || die "the mixed pending precedence gave '$got'"
+rm -f "$TMP/gh.gql.fail"
+{ [ "${got%%|*}" = 2 ] && grep -qF 'status=error' <<<"${got#*|}"; } \
+    && pass "…and a green body from a failed request is an error, not green" \
+    || die "a failed request that printed green gave '$got'"
+
 # …AND A PUSH LANDING DURING THE CHECKS REQUEST IS CAUGHT. Confirming the head only
 # BEFORE the request leaves a window: the answer then describes a commit nobody
 # verified, and in the round loop a head that had almost finished earning its grace
@@ -693,23 +554,6 @@ sd_out="$(run_limited 8 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=6 \
 { [ "$sd_rc" -ne 124 ] && [ "$sd_rc" -ne 0 ]; } \
     && pass "a slow probe followed by a hung one still finishes inside one deadline" \
     || die "the per-call limit outlasted the helper's own budget (rc=$sd_rc)"
-
-# …AND THE SECOND COMMIT READ IS INSIDE IT TOO. The case above hangs on the FIRST
-# request after the head lookup, so it never reaches the legacy-status call and
-# the `rb_left` refresh between the two commit reads went uncovered: a check-runs
-# request that succeeds slowly and a status request that then stalls would reuse
-# the earlier allowance and outlast the caller's whole bound.
-#
-# The stub answers the head, answers check-runs slowly, and hangs on `/status`.
-printf '#!/usr/bin/env bash\ncase "$*" in\n  *check-runs*) sleep 3; printf %%s "{\"total_count\":1,\"check_runs\":[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"success\"}]}"; exit 0 ;;\n  *"/status"*) sleep 300 ;;\n  *) printf "0123456789abcdef0123456789abcdef01234567\\n"; exit 0 ;;\nesac\n' > "$TMP/bin/gh"
-chmod +x "$TMP/bin/gh"
-sd2_rc=0
-sd2_out="$(run_limited 8 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=6 \
-    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 \
-    --head 0123456789abcdef0123456789abcdef01234567 2>&1)" || sd2_rc=$?
-{ [ "$sd2_rc" -ne 124 ] && [ "$sd2_rc" -ne 0 ]; } \
-    && pass "…and a slow check-runs read followed by a hung status read stays inside it" \
-    || die "the legacy-status call was granted a fresh allowance (rc=$sd2_rc out='$sd2_out')"
 
 # ── an exhausted deadline is refused, not renewed ──────────────────────────
 # Clamping a non-positive remainder up to one second granted a fresh allowance to

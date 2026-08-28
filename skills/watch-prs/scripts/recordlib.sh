@@ -150,45 +150,6 @@ def pages_or_error:
     elif any(.[]; type != "array") then error("non-array page")
     else . end;
 
-# THE SAME RULE FOR THE ENDPOINTS THAT PAGE AS OBJECTS. `/commits/{oid}/check-runs`
-# and `/commits/{oid}/status` return an OBJECT per page with the records under a
-# named key, so `pages_or_error` — which requires every page to be an array —
-# refuses them, and reaching for `.[][]` instead would iterate an error body`s
-# VALUES exactly as it did before that rule existed. The key is named rather than
-# assumed, because a page that came back without it is a fetch that told us
-# nothing and must not read as an empty list of checks.
-# AND THE BODY SAYS HOW MANY RECORDS THERE ARE, so a read that lost some can be
-# caught rather than believed. Both endpoints carry `total_count`; MEASURED, it is
-# the grand total repeated identically on every page — 302 on each of the four
-# pages of a `cli/cli` commit whose arrays hold 100, 100, 100 and 2, and 6 on each
-# page of a `scipy/scipy` combined status read two at a time. So a body claiming
-# records while carrying none, or a `--paginate` that stopped early, disagrees with
-# its own count. Unchecked, `{"total_count":1,"check_runs":[]}` reads as `none`,
-# which the CI gate accepts as "no checks are configured" — a truncated fetch
-# arriving as a benign verdict, which is the one outcome this rule exists to stop.
-# Pages disagreeing with EACH OTHER is refused too: that is a body from a different
-# read, and taking either one is a guess.
-#
-# AND THE COUNT ALONE IS NOT ENOUGH, because `--paginate` is not a snapshot. It
-# requests the pages one after another, so a rerun landing between two of them
-# REORDERS the result: an offset that has shifted returns a record already seen and
-# skips the one that moved past it. The total still matches, and what was dropped
-# can be the failing run while what repeated is a passing one — `green` on a red
-# commit, which is the direction nothing else here would catch. Records are
-# therefore identified rather than counted: every one carries a numeric `id` — both
-# endpoints supply it — and an id seen twice means the read is inconsistent and
-# says nothing about the commit.
-def object_pages_or_error($k):
-    if length == 0 then error("no pages")
-    elif any(.[]; type != "object") then error("non-object page")
-    elif any(.[]; has($k) | not) then error("page lacks " + $k)
-    elif any(.[]; .[$k] | type != "array") then error($k + " is not an array")
-    elif any(.[]; .total_count | type != "number") then error("total_count is not a number")
-    elif ([ .[].total_count ] | unique | length) != 1 then error("total_count differs across pages")
-    elif .[0].total_count != ([ .[][$k][] ] | length) then error("total_count disagrees with the records")
-    elif any(.[][$k][]; type != "object" or (.id | type) != "number") then error("a record has no numeric id")
-    elif ([ .[][$k][].id ] | unique | length) != ([ .[][$k][] ] | length) then error("a record is repeated across pages")
-    else . end;
 '
 
 # The SAME rule, for shell rather than jq. `pr-watch.sh` does not read the API —

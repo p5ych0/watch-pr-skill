@@ -6,10 +6,31 @@
   addressed by pull request and its answer carries no OID, so #212's `--head` could
   only BRACKET the read: an A → B → A whose both moves land between the two head
   confirmations was invisible, and the gate could accept B's checks for a merge of
-  A. `pr-ci-state.sh` reads `commits/<oid>/check-runs` and `commits/<oid>/status`
-  instead when it is asked the all-checks question with a head, so the answer is
-  about that commit and nothing else. The confirmations either side stay, and now
-  only report whether the head has since moved.
+  A. `pr-ci-state.sh` reads the commit's own `statusCheckRollup` instead when it is
+  asked the all-checks question with a head, so the answer is about that commit and
+  nothing else. The confirmations either side stay, and now only report whether the
+  head has since moved.
+
+  **One rollup rather than two paginated REST reads.** `commits/<oid>/check-runs`
+  and `commits/<oid>/status` are addressed by the commit too, and reading them was
+  the first shape of this change; assembling them here is what did not work.
+  `--paginate` requests pages sequentially and is not a snapshot, so a rerun
+  landing between two of them lets a record repeat, or be REPLACED by one carrying
+  a fresh id while `total_count` holds — and the second is invisible to any rule
+  about the pages themselves, because every page is individually well-formed.
+  Nothing available makes two reads atomic. GitHub computes the rollup over both
+  sources in one response addressed by the OID, so there are no pages to reconcile
+  and no fold to get wrong.
+
+  Measured against the live API rather than assumed: a `cli/cli` commit with
+  thirteen check runs and no legacy statuses reports SUCCESS, and a
+  `pandas-dev/pandas` commit with one failed run, six still in progress and a
+  passing legacy status reports FAILURE — the server's precedence agreeing with
+  this file's own contract, that a failed check decides while others are still
+  running. `EXPECTED` is treated as pending, being the state of a required context
+  that has not reported; a null rollup is `none`, and a null `object` is an ERROR,
+  because a commit the repository does not have would otherwise arrive as "no
+  checks are configured" for the CI gate to accept.
 
   **The required-checks question keeps the bracketed query, because the read that
   would replace it does not exist for an ordinary token.** Measured for #214:
@@ -22,58 +43,16 @@
   **What that does NOT do is close #214**, and an argument that it did was refuted
   in review. The all-checks question is not a superset of the required one: it reads
   the checks that EXIST on the merge target, and a required context which has not
-  reported has neither a check run nor a commit status — so it can answer green
-  while a requirement is unmet, and a stale required answer about another commit
-  then approves the merge. What binding buys is narrower and real: a check that DID
-  report on the merge target can no longer be masked by another commit's.
+  reported is either absent from the rollup or `EXPECTED` in it — so a green answer
+  is not proof that a requirement is met, and a stale required answer about another
+  commit then approves the merge. What binding buys is narrower and real: a check
+  that DID report on the merge target can no longer be masked by another commit's.
 
   **Nor is failing closed the answer.** "Refuse unless the required set can be
   bound" refuses on every repository this loop does not administer, which is the
   gate that never opens rather than one that fails closed. `REVIEW_MERGE_STRICT=1`
   on non-bypassable protection is what closes it, and every layer now says so
   rather than claiming the gate covers it.
-
-  Three details the measurement turned up, all fail-open traps: `commits/<oid>/status`
-  reports `state: "pending"` with an EMPTY `statuses` array when a commit has none,
-  so the summary is read past in favour of the array; and `check-runs` pages as an
-  OBJECT, which `pages_or_error` refuses — `recordlib.sh` gained
-  `object_pages_or_error` beside it rather than letting a `.[][]` walk an error
-  body's values. And both bodies report `total_count`, which is checked against the
-  records actually accumulated: unchecked, `{"total_count":1,"check_runs":[]}`
-  classifies as `none`, which the CI gate accepts as "no checks are configured" —
-  a truncated read arriving as a benign verdict. Measured across pages, the count
-  is the grand total repeated identically on every one, so pages that disagree with
-  each other are refused too. The count alone is not enough, because `--paginate`
-  requests the pages one after another and is not a snapshot: a rerun landing
-  between two of them shifts the offset, so a record already seen comes back and
-  the one that moved past it is skipped. The total still matches, and what was
-  dropped can be the failing run while what repeated is a passing one — `green` on
-  a red commit. Records are identified rather than counted: every one carries a
-  numeric `id`, and an id seen twice means the read says nothing about the commit.
-
-  **And a failed run decides while another is still going.** Status 3 is documented
-  as "at least one is still running and none has failed", and the PR-addressed
-  bucket parse has always ordered it that way; the commit-addressed fold asked
-  whether anything was unfinished first, so a head with one red run and one still
-  in progress answered `pending` and the round gate polled a decided commit to its
-  timeout.
-
-  **Neither read orders anything, and that is measured rather than assumed.** Two
-  review rounds built a newest-per-context fold over the statuses on the premise
-  that the endpoint retains every event a context ever posted; it does not.
-  `commits/<oid>/status` is the COMBINED status and returns one event per context,
-  the newest — on pandas-dev/pandas 91ce25ac it holds a single
-  `pre-commit.ci - push` where `commits/<oid>/statuses`, the plural endpoint this
-  loop does not call, holds that one and two earlier `pending`s. The check-run read
-  is the same shape for a documented reason: `filter` defaults to `latest`.
-
-  The fold was removed again because it was the only FAIL-OPEN path in either read.
-  `created_at` is compared lexically, so a value that merely sorts late — junk, or a
-  shaped-but-impossible instant that no regex rejects — won the ordering and would
-  have reported a commit green whose newest event had failed. Without it a
-  duplicated context reads `failed` and the gate stays shut, which is the direction
-  this file is for; the fixtures now assert that direction, and that no timestamp
-  reaches the verdict at all.
 
   #214 stays open, with the measurement recorded on it.
 
