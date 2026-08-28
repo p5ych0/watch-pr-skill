@@ -487,11 +487,22 @@ Then:
    stands, 1 with the reason for one that does not, and 2 for an answer it could
    not read — which is neither of the first two, because reading it as "no
    signoff" repeats a phase and reading it as a signoff skips a review nobody did.
-6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
-   everything against the *current* head — both verdicts, the reviewed range,
-   unresolved threads, required checks — and merges pinned to that head with
-   `--match-head-commit`, so a push landing mid-gate is rejected rather than
+6. **Merge gate.** On a clean signoff from both reviewers the skill resolves the
+   head once and re-checks everything against it — both verdicts, the reviewed
+   range, unresolved threads, required checks — then merges pinned to that head
+   with `--match-head-commit`, so a push landing mid-gate is rejected rather than
    merged unreviewed.
+
+   **The required-checks probe is the one exception, and it is bracketed rather
+   than bound.** `gh pr checks` is addressed by pull request and has no commit
+   selector, so the gate confirms the head on each side of that read and refuses
+   if it moved — which catches a push that lands and stays. What it cannot do is
+   tie the answer to a commit, so a force-push away *and back* whose both moves
+   fall between those two confirmations would be read as green for a commit that
+   is not the one merged. That residue is tracked as issue #214, it does not arise
+   with `REVIEW_MERGE_STRICT=1` — GitHub evaluates the required checks itself —
+   and it is not covered by the `--admin` trade-off recorded in
+   `docs/decisions/`.
 
 ## Automatic review (opt-in per repo)
 

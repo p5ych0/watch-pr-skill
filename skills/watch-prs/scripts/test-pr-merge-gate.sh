@@ -755,13 +755,15 @@ EOCIA
 # than investigating a broken read, and the catch-all would have told them the
 # wrong thing.
 #
-# THE MESSAGE NAMES THE MISMATCH, NOT THE MOMENT, and this case asserts the WHOLE
-# of it rather than an opening substring. The helper can report 5 from EITHER
+# THE MESSAGE NAMES THE MISMATCH, NOT THE MOMENT, and this case uses `case_line`,
+# which compares the line ENTIRE. `case_is` is a substring match, so a suffix
+# APPENDED to the end satisfies it — which is the same shape as the defect being
+# guarded against, and the reason `case_line` exists. The helper can report 5 from EITHER
 # confirmation — the one before the checks read, where the checks were never
 # requested at all, or the one after — so any suffix describing a checks answer is
 # false on one of the two arms, and a case matching only the opening cannot see it.
 world; printf '5' > "$STUB_DIR/pr-ci-state.rc"
-case_is 1 "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now" \
+case_line 1 "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now" \
     "a head that moved and stayed moved blocks, naming the mismatch not the moment"
 
 # ── (4b) the round boundary is a PAUSE, not a refusal ──────────────────────
