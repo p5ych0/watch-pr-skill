@@ -845,6 +845,13 @@ done
 # an array — refuses them outright and a caller reaching for `.[][]` instead would
 # iterate an error body's VALUES. Every refusal this rule adds is exercised here,
 # because a parser that fails open is the shape this library exists to prevent.
+#
+# `total_count` is among them because the body says how many records there are, so
+# a read that lost some can be caught rather than believed:
+# `{"total_count":1,"check_runs":[]}` classifies as `none`, which the CI gate
+# accepts as "no checks are configured" — a truncated fetch arriving as a benign
+# verdict. Pages disagreeing with each other are refused for the same reason: that
+# is a body from a different read, and taking either one is a guess.
 _ope() {   # _ope <jq input> ; prints "rc|out"
     local out rc=0
     out="$(printf '%s' "$1" | jq -c -s "$RECORDLIB_JQ"'object_pages_or_error("check_runs") | [ .[].check_runs[] ] | length' 2>&1)" || rc=$?
@@ -860,6 +867,10 @@ _ope_lbl=(
     'a page lacking the key'
     'a non-array under the key'
     'a string under the key'
+    'a total_count that is not a number'
+    'a total_count claiming records the page does not carry'
+    'a total_count claiming fewer records than the pages carry'
+    'pages whose totals disagree'
 )
 _ope_in=(
     ''
@@ -867,6 +878,11 @@ _ope_in=(
     '{"total_count":0}'
     '{"check_runs":{"a":1}}'
     '{"check_runs":"none"}'
+    '{"total_count":"1","check_runs":[]}'
+    '{"total_count":1,"check_runs":[]}'
+    '{"total_count":1,"check_runs":[{"n":1},{"n":2}]}'
+    '{"total_count":1,"check_runs":[{"n":1}]}
+{"total_count":2,"check_runs":[]}'
 )
 _i=0
 while [ "$_i" -lt "${#_ope_lbl[@]}" ]; do
@@ -894,8 +910,8 @@ _got="$(_ope '{"total_count":1,"check_runs":[{"name":"a"}]}')"
 # …AND TWO PAGES ARE BOTH READ, which is the whole reason the rule takes pages
 # rather than one response: a paginated read that only counted the first page
 # would under-report a commit with more than a hundred check runs.
-_got="$(_ope '{"check_runs":[{"n":1}]}
-{"check_runs":[{"n":2},{"n":3}]}')"
+_got="$(_ope '{"total_count":3,"check_runs":[{"n":1}]}
+{"total_count":3,"check_runs":[{"n":2},{"n":3}]}')"
 { [ "${_got%%|*}" = 0 ] && [ "${_got#*|}" = 3 ]; } \
     && pass "…and reads every page, not only the first" \
     || die "pagination was not followed: '$_got'"

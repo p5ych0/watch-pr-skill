@@ -204,8 +204,8 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict> [l
         *)     printf '%s' "$2" > "$TMP/gh.out" ;;
     esac
     case "${3-}" in
-        "") printf '{"state":"pending","statuses":[]}\n' > "$TMP/gh.sts" ;;
-        *)  printf '{"state":"%s","statuses":[{"context":"legacy","state":"%s","created_at":"2026-01-01T00:00:00Z"}]}\n' "$3" "$3" > "$TMP/gh.sts" ;;
+        "") printf '{"total_count":0,"state":"pending","statuses":[]}\n' > "$TMP/gh.sts" ;;
+        *)  printf '{"total_count":1,"state":"%s","statuses":[{"context":"legacy","state":"%s","created_at":"2026-01-01T00:00:00Z"}]}\n' "$3" "$3" > "$TMP/gh.sts" ;;
     esac
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
@@ -228,7 +228,7 @@ case "\$*" in
         # `gh api --paginate` concatenates the pages it fetched; the stub does
         # the same, so a helper that parses only the first is visible here.
         if [ -f "$TMP/gh.runs.page2" ]; then
-            printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n'
+            printf '{"total_count":2,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n'
             cat "$TMP/gh.runs.page2"
             exit 0
         fi
@@ -242,7 +242,7 @@ case "\$*" in
         esac ;;
     *"/status"*)
         if [ -f "$TMP/gh.sts.fail" ]; then
-            printf '{"state":"success","statuses":[{"context":"legacy","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n'
+            printf '{"total_count":1,"state":"success","statuses":[{"context":"legacy","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n'
             exit 1
         fi
         if [ -f "$TMP/gh.sts.raw" ]; then
@@ -250,7 +250,7 @@ case "\$*" in
             exit 0
         fi
         if [ -f "$TMP/gh.sts.page2" ]; then
-            printf '{"state":"success","statuses":[{"context":"a","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n'
+            printf '{"total_count":2,"state":"success","statuses":[{"context":"a","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n'
             cat "$TMP/gh.sts.page2"
             exit 0
         fi
@@ -326,7 +326,7 @@ grep -qE "commits/$WANT/status .*--paginate" "$TMP/args" \
 # …AND A WORSE VERDICT ON A LATER PAGE DECIDES. Asserting the flag alone would
 # pass against a helper that requested every page and parsed only the first.
 mkgh_head "$WANT" green; : > "$TMP/gh.runs.page2"
-printf '{"total_count":1,"check_runs":[{"name":"b","status":"completed","conclusion":"failure"}]}\n' > "$TMP/gh.runs.page2"
+printf '{"total_count":2,"check_runs":[{"name":"b","status":"completed","conclusion":"failure"}]}\n' > "$TMP/gh.runs.page2"
 got="$(run 7 --head "$WANT")"
 rm -f "$TMP/gh.runs.page2"
 { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
@@ -338,7 +338,7 @@ rm -f "$TMP/gh.runs.page2"
 # unread — and `gh api --paginate` emits each page as its own document, so parsing
 # every one of them is a different property from requesting them.
 mkgh_head "$WANT" norun
-printf '{"state":"failure","statuses":[{"context":"b","state":"failure","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.page2"
+printf '{"total_count":2,"state":"failure","statuses":[{"context":"b","state":"failure","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.page2"
 got="$(run 7 --head "$WANT")"
 rm -f "$TMP/gh.sts.page2"
 { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
@@ -394,7 +394,7 @@ got="$(run 7 --head "$WANT")"
 # one path by which a value sorting late — junk, or a shaped-but-impossible instant
 # — could report a commit green whose newest event had failed.
 mkgh_head "$WANT" norun
-printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"2026-01-01T00:00:00Z"},{"context":"ci","state":"success","created_at":"2026-01-01T00:05:00Z"}]}\n' > "$TMP/gh.sts.raw"
+printf '{"total_count":2,"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"2026-01-01T00:00:00Z"},{"context":"ci","state":"success","created_at":"2026-01-01T00:05:00Z"}]}\n' > "$TMP/gh.sts.raw"
 got="$(run 7 --head "$WANT")"
 rm -f "$TMP/gh.sts.raw"
 { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
@@ -403,12 +403,35 @@ rm -f "$TMP/gh.sts.raw"
 # …AND THE VERDICT DOES NOT DEPEND ON THE TIMES AT ALL, so no value carried in one
 # can decide it. Nothing here orders, and nothing here needs a calendar.
 mkgh_head "$WANT" norun
-printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"9999-99-99T99:99:99Z"},{"context":"ci","state":"success","created_at":"zzzz"}]}\n' > "$TMP/gh.sts.raw"
+printf '{"total_count":2,"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"9999-99-99T99:99:99Z"},{"context":"ci","state":"success","created_at":"zzzz"}]}\n' > "$TMP/gh.sts.raw"
 got="$(run 7 --head "$WANT")"
 rm -f "$TMP/gh.sts.raw"
 { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
     && pass "…and a timestamp that sorts late decides nothing, whatever it says" \
     || die "a timestamp reached the verdict: '$got'"
+
+# ── A BODY THAT CLAIMS RECORDS IT DOES NOT CARRY IS UNREADABLE ─────────────
+# Both endpoints report `total_count`, and `none` is the verdict a truncated read
+# lands on: the CI gate accepts it as "no checks are configured" and the round
+# closes with nothing asserted. So a page whose count disagrees with its own
+# records has to be an error rather than a benign answer — asserted through BOTH
+# endpoint shapes, since each is read by its own call and only one of them was
+# object-paged before this branch existed.
+mkgh_head "$WANT" '{"total_count":1,"check_runs":[]}'
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 2 ] && grep -qF 'commit_checks_unreadable' <<<"${got#*|}"; } \
+    && pass "a check-runs body claiming a record it does not carry is unreadable" \
+    || die "a truncated check-runs body was read as an answer: '$got'"
+grep -qF 'status=none' <<<"${got#*|}" \
+    && die "…and it emitted the benign verdict anyway: '$got'" \
+    || pass "…and did not emit \`none\` beside the refusal"
+mkgh_head "$WANT" norun
+printf '{"total_count":1,"state":"success","statuses":[]}\n' > "$TMP/gh.sts.raw"
+got="$(run 7 --head "$WANT")"
+rm -f "$TMP/gh.sts.raw"
+{ [ "${got%%|*}" = 2 ] && grep -qF 'commit_checks_unreadable' <<<"${got#*|}"; } \
+    && pass "…and so is a statuses body claiming one" \
+    || die "a truncated statuses body was read as an answer: '$got'"
 
 # ── A GREEN PAGE FROM A FAILED FETCH IS NOT GREEN ──────────────────────────
 # `gh` can print a complete, valid page and then exit non-zero because the request

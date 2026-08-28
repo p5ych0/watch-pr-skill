@@ -33,12 +33,17 @@
   on non-bypassable protection is what closes it, and every layer now says so
   rather than claiming the gate covers it.
 
-  Two details the measurement turned up, both fail-open traps: `commits/<oid>/status`
+  Three details the measurement turned up, all fail-open traps: `commits/<oid>/status`
   reports `state: "pending"` with an EMPTY `statuses` array when a commit has none,
   so the summary is read past in favour of the array; and `check-runs` pages as an
   OBJECT, which `pages_or_error` refuses — `recordlib.sh` gained
   `object_pages_or_error` beside it rather than letting a `.[][]` walk an error
-  body's values.
+  body's values. And both bodies report `total_count`, which is checked against the
+  records actually accumulated: unchecked, `{"total_count":1,"check_runs":[]}`
+  classifies as `none`, which the CI gate accepts as "no checks are configured" —
+  a truncated read arriving as a benign verdict. Measured across pages, the count
+  is the grand total repeated identically on every one, so pages that disagree with
+  each other are refused too.
 
   **Neither read orders anything, and that is measured rather than assumed.** Two
   review rounds built a newest-per-context fold over the statuses on the premise

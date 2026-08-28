@@ -157,11 +157,25 @@ def pages_or_error:
 # VALUES exactly as it did before that rule existed. The key is named rather than
 # assumed, because a page that came back without it is a fetch that told us
 # nothing and must not read as an empty list of checks.
+# AND THE BODY SAYS HOW MANY RECORDS THERE ARE, so a read that lost some can be
+# caught rather than believed. Both endpoints carry `total_count`; MEASURED, it is
+# the grand total repeated identically on every page — 302 on each of the four
+# pages of a `cli/cli` commit whose arrays hold 100, 100, 100 and 2, and 6 on each
+# page of a `scipy/scipy` combined status read two at a time. So a body claiming
+# records while carrying none, or a `--paginate` that stopped early, disagrees with
+# its own count. Unchecked, `{"total_count":1,"check_runs":[]}` reads as `none`,
+# which the CI gate accepts as "no checks are configured" — a truncated fetch
+# arriving as a benign verdict, which is the one outcome this rule exists to stop.
+# Pages disagreeing with EACH OTHER is refused too: that is a body from a different
+# read, and taking either one is a guess.
 def object_pages_or_error($k):
     if length == 0 then error("no pages")
     elif any(.[]; type != "object") then error("non-object page")
     elif any(.[]; has($k) | not) then error("page lacks " + $k)
     elif any(.[]; .[$k] | type != "array") then error($k + " is not an array")
+    elif any(.[]; .total_count | type != "number") then error("total_count is not a number")
+    elif ([ .[].total_count ] | unique | length) != 1 then error("total_count differs across pages")
+    elif .[0].total_count != ([ .[][$k][] ] | length) then error("total_count disagrees with the records")
     else . end;
 '
 
