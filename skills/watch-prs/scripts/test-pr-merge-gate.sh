@@ -717,7 +717,7 @@ world; printf '4' > "$STUB_DIR/pr-ci-state.rc"
 case_is 0 "merged" "a repository with no required checks still merges"
 # THE PROBE IS BRACKETED BY THE HEAD THE MERGE IS PINNED TO. `gh pr checks` takes a
 # PR number and has no commit selector, so without `--head` this gate asks about
-# the pull request while everything around it asks about a commit. The unsafe case
+# the pull request with nothing tying the answer to the commit being merged. The unsafe case
 # is always A → B → A — one move away is refused by `--match-head-commit` — and
 # unbracketed the return could land any time before the merge. #212.
 #

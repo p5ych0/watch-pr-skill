@@ -3,10 +3,12 @@
 ## [2.0.77] — 2026-08-28
 
 - **The merge gate's required-checks probe asked about the pull request, not about
-  the commit it was merging.** Every other probe in the gate takes the head OID it
-  resolved once and pins the merge to; this one called `pr-ci-state.sh` without
-  `--head`, and `gh pr checks` has no commit selector, so it answered about
-  whatever the API currently called the PR's head.
+  the commit it was merging.** Every gate that reaches a head-addressable question
+  was given the OID the gate resolves once and pins the merge to; this one called
+  `pr-ci-state.sh` without `--head`, and `gh pr checks` has no commit selector, so
+  it answered about whatever the API currently called the PR's head. The
+  all-checks gate beside it already passed `--head`, which is why the two were not
+  answering the same question.
 
   **A → B → A is the case, and it always takes the return.** One move away is
   refused by `--match-head-commit`, which requires the head to still BE the OID it
