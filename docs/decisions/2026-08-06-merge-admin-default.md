@@ -219,11 +219,12 @@ permitted to bypass a missing approval, and the unresolved-thread refusal above 
 means it is never reached with a thread open.
 
 `README.md` carries this configuration under its own `REVIEW_MERGE_STRICT`
-heading, with the same two distinctions: disallowing bypass decides whether any
-configured protection binds the credential at all, and conversation resolution
-decides whether unresolved threads are one of those protections. That is where an
-operator is told how; this list is here because the record has to say what the
-trade-off rests on. #211.
+heading, with the same two distinctions: disallowing bypass is what makes GitHub's
+enforcement binding and atomic with the merge — dropping `--admin` already refuses
+requirements that are unmet when GitHub evaluates them — and conversation
+resolution decides whether unresolved threads are among the protections at all.
+That is where an operator is told how; this list is here because the record has to
+say what the trade-off rests on. #211.
 
 ## For reviewers
 
