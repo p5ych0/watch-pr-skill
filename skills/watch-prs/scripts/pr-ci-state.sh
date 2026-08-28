@@ -278,46 +278,33 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
           elif any(.[]; .conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale")) then "failed"
           elif all(.[]; .conclusion | IN("success","neutral","skipped")) then "green"
           else "malformed" end' 2>/dev/null)" || return 2
-    # THE NEWEST EVENT PER CONTEXT, not every event — a rule the check-run fold
-    # above does NOT need, and the asymmetry is the endpoint's rather than ours:
-    # `check-runs` filters to `latest` by default, so a re-run replaces what it
-    # re-ran and there is nothing superseded to order. The combined-status endpoint
-    # keeps the whole history: a context that reported `failure` and then `success`
-    # on the same commit appears TWICE, and folding over all of them leaves the
-    # commit failed forever — a rerun that went green could never reopen the round
-    # or the merge gate. Only the latest event for a context is its current state.
+    # NO ORDERING, because there is nothing to order. Two rounds of this pull
+    # request built a newest-per-context fold here, and the premise was wrong:
+    # MEASURED against the live API, `commits/<oid>/status` — the COMBINED status —
+    # already returns one event per context, the newest. On pandas-dev/pandas
+    # 91ce25ac the combined view holds a single `pre-commit.ci - push` at 14:40:31Z
+    # and `commits/<oid>/statuses`, the plural endpoint this does NOT call, holds
+    # that one plus two earlier `pending`s. The check-run read above needs no
+    # ordering either, and `filter` is why: it defaults to `latest`. That half is
+    # DOCUMENTED rather than measured — no commit among the 32 scanned had a re-run,
+    # so `filter=all` and `filter=latest` returned the same count on every one.
     #
-    # A TIE THAT DISAGREES IS MALFORMED. `created_at` is second-resolution and the
-    # pages come back separately, so two events for one context at the same instant
-    # cannot be ordered, and picking one is a guess about whether the commit is
-    # green. Where they agree there is nothing to guess, which is why the newest
-    # set is reduced with `unique` and only a set of more than one refuses.
-    # `context` and `created_at` are validated for the same reason the state is:
-    # this fold cannot group or order without them. The time is held to
-    # `canonical_utc` rather than to being a string, because the ordering is
-    # LEXICAL — a value like `zzzz` sorts after every real timestamp, so a junk
-    # `created_at` on a `success` event would outrank the `failure` that really is
-    # newest and report the commit green.
+    # AND THE ORDERING WAS THE ONLY FAIL-OPEN PATH. `created_at` is compared
+    # lexically, so a value that merely sorts late — junk, or a shaped-but-impossible
+    # instant no regex rejects — won `max_by` and reported a commit GREEN whose real
+    # newest event had failed. Without it a duplicate that somehow arrived reads
+    # `failed` and the gate stays shut, which is the direction this file is for.
+    # Guarding the ordering meant a calendar validator in jq; removing the ordering
+    # means neither.
     _v_sts="$(printf '%s' "$_sts" | jq -r -s "$RECORDLIB_JQ"'
         object_pages_or_error("statuses")
         | [ .[].statuses[] ]
         | if length == 0 then "none"
-          elif any(.[]; type != "object"
-                        or (.state | type) != "string"
-                        or (.context | type) != "string"
-                        or (.created_at | canonical_utc | not)) then "malformed"
-          else ( group_by(.context)
-                 | map( (max_by(.created_at).created_at) as $t
-                        | map(select(.created_at == $t))
-                        | (map(.state) | unique) ) ) as $cur
-            | if any($cur[]; length != 1) then "malformed"
-              else ($cur | map(.[0])) as $st
-                | if any($st[]; IN("failure","error")) then "failed"
-                  elif any($st[]; . == "pending") then "pending"
-                  elif all($st[]; . == "success") then "green"
-                  else "malformed" end
-              end
-          end' 2>/dev/null)" || return 2
+          elif any(.[]; type != "object" or (.state | type) != "string") then "malformed"
+          elif any(.[]; .state | IN("failure","error")) then "failed"
+          elif any(.[]; .state == "pending") then "pending"
+          elif all(.[]; .state == "success") then "green"
+          else "malformed" end' 2>/dev/null)" || return 2
     # WORST-FIRST, and `none` only where BOTH said it. The tokens are disjoint, so
     # a substring test over the pair is the whole of the precedence.
     case "$_v_runs/$_v_sts" in

@@ -383,74 +383,32 @@ got="$(run 7 --head "$WANT")"
     && pass "…and a conclusion outside the known set is unreadable, not green" \
     || die "an unknown conclusion gave '$got'"
 
-# ── ONLY THE NEWEST EVENT PER CONTEXT IS ITS STATE ─────────────────────────
-# The combined-status endpoint keeps the whole history: a context that reported
-# `failure` and then `success` on the same commit appears TWICE. Folding over every
-# event leaves the commit failed forever, so a rerun that went green could never
-# reopen the round or the merge gate — a gate that cannot recover rather than one
-# that fails closed.
+# ── A DUPLICATED CONTEXT IS REFUSED IN THE SAFE DIRECTION ─────────────────
+# `commits/<oid>/status` is the COMBINED status and returns one event per context,
+# the newest — measured against the live API, where pandas-dev/pandas 91ce25ac
+# shows a single `pre-commit.ci - push` there and three in `commits/<oid>/statuses`,
+# the plural endpoint this does not call. So a context appearing twice is not a
+# state this endpoint produces. What is asserted is the DIRECTION taken if one ever
+# did: the fold reads the failure and the gate stays SHUT. An ordering that picked
+# the newest instead would have to compare `created_at` lexically, and that was the
+# one path by which a value sorting late — junk, or a shaped-but-impossible instant
+# — could report a commit green whose newest event had failed.
 mkgh_head "$WANT" norun
 printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"2026-01-01T00:00:00Z"},{"context":"ci","state":"success","created_at":"2026-01-01T00:05:00Z"}]}\n' > "$TMP/gh.sts.raw"
 got="$(run 7 --head "$WANT")"
 rm -f "$TMP/gh.sts.raw"
-{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
-    && pass "a rerun that went green supersedes the earlier failure for that context" \
-    || die "a superseded failure still decided: '$got'"
-# …AND THE ORDER IS BY TIME, NOT BY POSITION. The pages arrive separately and
-# nothing promises the newest is last, so a fold taking the final element would
-# read this the wrong way round.
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "a context this endpoint cannot duplicate is read closed, not green" \
+    || die "a duplicated context did not fail closed: '$got'"
+# …AND THE VERDICT DOES NOT DEPEND ON THE TIMES AT ALL, so no value carried in one
+# can decide it. Nothing here orders, and nothing here needs a calendar.
 mkgh_head "$WANT" norun
-printf '{"state":"success","statuses":[{"context":"ci","state":"success","created_at":"2026-01-01T00:05:00Z"},{"context":"ci","state":"failure","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.raw"
+printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"9999-99-99T99:99:99Z"},{"context":"ci","state":"success","created_at":"zzzz"}]}\n' > "$TMP/gh.sts.raw"
 got="$(run 7 --head "$WANT")"
 rm -f "$TMP/gh.sts.raw"
-{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
-    && pass "…whichever order the events arrive in" \
-    || die "the newest event was chosen by position: '$got'"
-# …AND A TIE THAT DISAGREES IS UNREADABLE. `created_at` is second-resolution and
-# the pages come back separately, so two events for one context at the same instant
-# cannot be ordered, and picking one is a guess about whether the commit is green.
-mkgh_head "$WANT" norun
-printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"2026-01-01T00:00:00Z"},{"context":"ci","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.raw"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.raw"
-[ "${got%%|*}" = 2 ] \
-    && pass "…and two disagreeing events for one context at one instant are unreadable" \
-    || die "a tie was resolved by guessing: '$got'"
-# …WHERE THEY AGREE THERE IS NOTHING TO GUESS. A context reported twice at one
-# instant with the same state says the same thing either way, so refusing it would
-# be a gate that cannot recover for no reason at all.
-mkgh_head "$WANT" norun
-printf '{"state":"success","statuses":[{"context":"ci","state":"success","created_at":"2026-01-01T00:00:00Z"},{"context":"ci","state":"success","created_at":"2026-01-01T00:00:00Z"}]}\n' > "$TMP/gh.sts.raw"
-got="$(run 7 --head "$WANT")"
-rm -f "$TMP/gh.sts.raw"
-{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
-    && pass "…while two agreeing events at one instant are read, not refused" \
-    || die "an agreeing tie was refused: '$got'"
-
-# …AND A TIME THAT IS NOT ONE CANNOT ORDER ANYTHING. The ordering is LEXICAL, so a
-# junk `created_at` sorts after every real timestamp: a `success` carrying one would
-# outrank the `failure` that really is newest and report the commit green.
-for _junk in 'zzzz' '2026-01-01T00:00:00zzzz' '2026-01-01 00:00:00'; do
-    mkgh_head "$WANT" norun
-    printf '{"state":"success","statuses":[{"context":"ci","state":"failure","created_at":"2026-01-01T00:05:00Z"},{"context":"ci","state":"success","created_at":"%s"}]}\n' "$_junk" > "$TMP/gh.sts.raw"
-    got="$(run 7 --head "$WANT")"
-    rm -f "$TMP/gh.sts.raw"
-    [ "${got%%|*}" = 2 ] \
-        && pass "…and a junk timestamp is unreadable rather than authoritative" \
-        || die "'$_junk' outranked a real timestamp: '$got'"
-done
-
-# …AND A CONTEXT WITH NO NAME OR NO TIME CANNOT BE GROUPED OR ORDERED, so it is
-# malformed rather than folded in as if it were one more event.
-for _bad in '{"context":"ci","state":"success"}' '{"state":"success","created_at":"2026-01-01T00:00:00Z"}'; do
-    mkgh_head "$WANT" norun
-    printf '{"state":"success","statuses":[%s]}\n' "$_bad" > "$TMP/gh.sts.raw"
-    got="$(run 7 --head "$WANT")"
-    rm -f "$TMP/gh.sts.raw"
-    [ "${got%%|*}" = 2 ] \
-        && pass "…and a status lacking what the fold needs is unreadable" \
-        || die "an unfoldable status was accepted: '$got'"
-done
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "…and a timestamp that sorts late decides nothing, whatever it says" \
+    || die "a timestamp reached the verdict: '$got'"
 
 # ── A GREEN PAGE FROM A FAILED FETCH IS NOT GREEN ──────────────────────────
 # `gh` can print a complete, valid page and then exit non-zero because the request

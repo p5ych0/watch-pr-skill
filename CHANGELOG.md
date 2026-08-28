@@ -33,22 +33,29 @@
   on non-bypassable protection is what closes it, and every layer now says so
   rather than claiming the gate covers it.
 
-  Three details the measurement turned up: `commits/<oid>/status`
+  Two details the measurement turned up, both fail-open traps: `commits/<oid>/status`
   reports `state: "pending"` with an EMPTY `statuses` array when a commit has none,
   so the summary is read past in favour of the array; and `check-runs` pages as an
   OBJECT, which `pages_or_error` refuses — `recordlib.sh` gained
   `object_pages_or_error` beside it rather than letting a `.[][]` walk an error
-  body's values. Both are fail-open. The third is a gate that could not RECOVER:
-  that endpoint keeps every event a context ever posted for a commit, so a context
-  that reported `failure` and then `success` appears twice, and folding over all of
-  them leaves the commit failed forever — a rerun that went green would never
-  reopen the round or the merge gate. Only the newest event for a context is its
-  state; two at the same second that disagree are unreadable, since `created_at` is
-  second-resolution and choosing one is a guess about whether the commit is green.
-  That ordering is LEXICAL, so the time is held to canonical UTC rather than to
-  being a string — `zzzz` sorts after every real timestamp, and a `success` event
-  carrying one would outrank the `failure` that really is newest. `check-runs`
-  needs none of it: that endpoint filters to `latest` by default.
+  body's values.
+
+  **Neither read orders anything, and that is measured rather than assumed.** Two
+  review rounds built a newest-per-context fold over the statuses on the premise
+  that the endpoint retains every event a context ever posted; it does not.
+  `commits/<oid>/status` is the COMBINED status and returns one event per context,
+  the newest — on pandas-dev/pandas 91ce25ac it holds a single
+  `pre-commit.ci - push` where `commits/<oid>/statuses`, the plural endpoint this
+  loop does not call, holds that one and two earlier `pending`s. The check-run read
+  is the same shape for a documented reason: `filter` defaults to `latest`.
+
+  The fold was removed again because it was the only FAIL-OPEN path in either read.
+  `created_at` is compared lexically, so a value that merely sorts late — junk, or a
+  shaped-but-impossible instant that no regex rejects — won the ordering and would
+  have reported a commit green whose newest event had failed. Without it a
+  duplicated context reads `failed` and the gate stays shut, which is the direction
+  this file is for; the fixtures now assert that direction, and that no timestamp
+  reaches the verdict at all.
 
   #214 stays open, with the measurement recorded on it.
 
