@@ -540,12 +540,16 @@ waived:
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
-- the PR state is **read back after the merge command**, and a PR that is not
-  `MERGED` is reported as queued rather than merged — `gh` calls adding to a merge
-  queue success, and reporting that as a merge tells the driver work is finished
-  while the head is not on the base branch;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
+
+**And one thing that is NOT a bound, listed so it is not counted as one.** The PR
+state is **read back after the merge command**, and a PR that is not `MERGED` is
+reported as queued rather than merged — `gh` calls adding to a merge queue success,
+and reporting that as a merge tells the driver work is finished while the head is
+not on the base branch. Removing it is still a finding, because the driver then
+acts on a merge that did not happen. It cannot justify the bypass: by the time it
+runs, the merge has been issued.
 
 **And the waiver does not cover a base branch that requires a merge queue.**
 There is no merge-queue probe anywhere in this plugin, and `gh pr merge --admin`

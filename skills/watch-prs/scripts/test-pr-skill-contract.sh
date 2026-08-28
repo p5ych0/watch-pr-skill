@@ -4302,8 +4302,6 @@ if [ -d "$ROOT/docs/decisions" ]; then
                'blocked' \
                'dismissed review' \
                'body-only' \
-               'read back after the merge command' \
-               'reported as queued rather than merged' \
                'REVIEW_MERGE_STRICT=1' \
                'exported, not merely assigned' \
                'requires a merge queue' \
@@ -4311,6 +4309,18 @@ if [ -d "$ROOT/docs/decisions" ]; then
         grep -qF "$_bd" "$ROOT/.github/copilot-instructions.md" \
             && pass "copilot-instructions.md states the '$_bd' bound on the --admin waiver" \
             || die "the --admin bounds are deferred to a record Copilot cannot read: '$_bd' is missing"
+    done
+    # AND THE POST-MERGE CONFIRMATION, ASSERTED SEPARATELY BECAUSE IT IS NOT A
+    # BOUND. It runs after `gh pr merge` has been issued, so it cannot justify the
+    # bypass — but removing it is still a finding, because the driver then acts on
+    # a merge that did not happen. Listing it with the bounds taught a reviewer to
+    # count a reporting safeguard as a reason the merge was allowed.
+    for _pm in 'NOT a bound' \
+               'read back after the merge command' \
+               'reported as queued rather than merged'; do
+        grep -qF "$_pm" "$ROOT/.github/copilot-instructions.md" \
+            && pass "…and states '$_pm' as a post-merge confirmation rather than a bound" \
+            || die "the post-merge confirmation is missing from copilot-instructions.md: '$_pm'"
     done
     # …AND A PROBE THAT ERRORS IS NOT AN INACTIVE RECORD. `grep -q … || continue`
     # treats rc 2 — unreadable, vanished between the `-f` and the read — exactly

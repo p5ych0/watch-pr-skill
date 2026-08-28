@@ -174,9 +174,11 @@ means it is never reached with a thread open.
 
 `README.md` documents the variable itself under its own heading. **It does not yet
 carry this four-part configuration**, and the two parts an operator is most likely
-to miss — conversation resolution, and disallowing bypass — are the two that decide
-whether strict mode enforces anything at all. Until the README carries it, the list
-above is the only place it is written down. Recorded as #211.
+to miss are the two doing the work described above: disallowing bypass, which
+decides whether any configured protection binds the credential at all, and
+conversation resolution, which decides whether unresolved threads are one of those
+protections. Until the README carries it, the list above is the only place it is
+written down. Recorded as #211.
 
 ## For reviewers
 
