@@ -341,6 +341,15 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # so they are named as unsupported and the merge stops; `REVIEW_MERGE_STRICT=1` is
 # where GitHub evaluates them itself.
 #
+# A MERGE QUEUE IS UNEVALUABLE ON THE BYPASSING PATH, and that is the one entry
+# here that depends on how the merge will be made. `gh pr merge --admin` bypasses a
+# merge queue and merges directly, so a queue rule read as "nothing required" is a
+# queue SKIPPED — and `docs/decisions/2026-08-06-merge-admin-default.md` says in as
+# many words that the `--admin` waiver does not cover a base branch requiring one,
+# where `REVIEW_MERGE_STRICT=1` is the only supported setting. So it refuses by
+# default and is skipped under strict mode, where GitHub enforces the queue itself
+# and the gate already reports the queued request as status 4 rather than merged.
+#
 # AND THE TYPE IS NAMED, which is the only thing that makes refusing actionable.
 # jq writes it to `$ERRF` rather than to `/dev/null`, and the caller lifts it onto
 # the error line as `rule=<type>`, filtered to the characters a rule type can have
@@ -384,7 +393,8 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
     # EVERY FIELD IS TYPED BEFORE IT IS USED. An absent or oddly-shaped one read as
     # "no contexts" is a merge gated on an empty required set, which is the
     # direction that opens the gate rather than the one that closes it.
-    printf '%s\n%s\n' "$_branch" "$_rules" | jq -c -s '
+    printf '%s\n%s\n' "$_branch" "$_rules" | jq -c -s --argjson strict \
+        "$(if [ "${REVIEW_MERGE_STRICT:-}" = "1" ]; then printf 'true'; else printf 'false'; fi)" '
         if length != 2 then error("two documents are expected")
         elif (.[0] | type) != "object" then error("the branch is not an object")
         elif (.[0].protected | type) != "boolean" then error("protected is not a boolean")
@@ -427,10 +437,13 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                                     app: (if .integration_id == -1 then null
                                           else .integration_id end)} end
                        end
+                  elif .type == "merge_queue" then
+                       if $strict then empty
+                       else error("a rule type this cannot evaluate: merge_queue") end
                   elif .type | IN(
                       "creation","update","deletion","non_fast_forward",
                       "required_linear_history","required_signatures","pull_request",
-                      "merge_queue","copilot_code_review",
+                      "copilot_code_review",
                       "commit_message_pattern","commit_author_email_pattern",
                       "committer_email_pattern","branch_name_pattern","tag_name_pattern",
                       "file_path_restriction","max_file_size","file_extension_restriction"
@@ -694,6 +707,23 @@ if [ -n "$WANT_HEAD" ]; then
     if [ "$HEAD_AFTER" != "$WANT_HEAD" ]; then
         echo "PR_CI_STATE pr=$PR status=stale head=$HEAD_AFTER want=$WANT_HEAD moved=during_checks"
         exit 5
+    fi
+    # THE BASE IS CONFIRMED TOO, and only the required question needs it. A pull
+    # request can be RETARGETED without its head moving, so `--match-head-commit`
+    # sees nothing: the requirements just read are the old base`s, and the merge
+    # lands on a branch whose own required checks were never asked about. That is
+    # the same shape as a head that moved, so it is the same answer — `stale`, which
+    # the caller re-runs rather than stopping on.
+    if [ -n "$REQUIRED" ]; then
+        _left_base2="$(rb_left)" || {
+            echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
+        BASE_AFTER="$(run_limited "$_left_base2" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
+                        --json baseRefName --jq '.baseRefName' 2>/dev/null)" || {
+            echo "PR_CI_STATE pr=$PR status=error reason=base_unreadable_after" >&2; exit 2; }
+        if [ "$BASE_AFTER" != "$BASE_REF" ]; then
+            echo "PR_CI_STATE pr=$PR status=stale head=$HEAD_AFTER want=$WANT_HEAD moved=base"
+            exit 5
+        fi
     fi
 fi
 

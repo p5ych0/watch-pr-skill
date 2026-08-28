@@ -216,7 +216,8 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | ra
     printf '{"protected":false}\n' > "$TMP/gh.branch"
     printf '[]\n' > "$TMP/gh.rules"
     printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}}\n' > "$TMP/gh.ctx"
-    rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/branch.n" "$TMP/rules.n"
+    rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/gh.base.2" \
+          "$TMP/branch.n" "$TMP/rules.n" "$TMP/base.n"
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
@@ -224,7 +225,14 @@ printf '%s\n' "\$*" >> "$TMP/args"
 case "\$*" in
     *baseRefName*)
         if [ -f "$TMP/gh.base.fail" ]; then exit 1; fi
-        cat "$TMP/gh.base"; exit 0 ;;
+        # The base is read twice — once to ask what it requires, once to confirm
+        # the pull request was not RETARGETED meanwhile — so the second answer is
+        # stageable, which is how that retarget is staged.
+        n=1
+        if [ -f "$TMP/base.n" ]; then n="\$(cat "$TMP/base.n")"; n=\$((n + 1)); fi
+        printf '%s' "\$n" > "$TMP/base.n"
+        if [ -f "$TMP/gh.base.\$n" ]; then cat "$TMP/gh.base.\$n"; else cat "$TMP/gh.base"; fi
+        exit 0 ;;
     *rules/branches*)
         # BEFORE the plain branch pattern, which is a prefix of this one.
         if [ -f "$TMP/gh.rules.fail" ]; then cat "$TMP/gh.rules"; exit 1; fi
@@ -728,7 +736,7 @@ run 7 --head "$WANT" --required >/dev/null
 # those leaves the branch reading as requiring only what its `required_status_checks`
 # rules name — an enforcement rule arriving as an empty required set, which is this
 # issue's own shape one level down.
-for _rt in workflows code_scanning required_deployments future_rule_nobody_has_read; do
+for _rt in workflows code_scanning required_deployments merge_queue future_rule_nobody_has_read; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
         '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
@@ -743,6 +751,21 @@ for _rt in workflows code_scanning required_deployments future_rule_nobody_has_r
         && pass "…and the diagnostic names '$_rt'" \
         || die "the unsupported rule type was swallowed: '$got'"
 done
+# A MERGE QUEUE IS THE ONE ENTRY THAT DEPENDS ON HOW THE MERGE WILL BE MADE.
+# `gh pr merge --admin` bypasses a queue and merges directly, so on the default path
+# a queue rule read as "nothing required" is a queue SKIPPED — and the `--admin`
+# record says that waiver does not cover a base branch requiring one. Under
+# `REVIEW_MERGE_STRICT=1` GitHub enforces the queue itself, so there it is skipped
+# like any other rule that names no check.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' '[{"type":"merge_queue","parameters":{}}]' '[]'
+_mq_rc=0
+_mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
+{ [ "$_mq_rc" = 4 ] && grep -qF 'status=none' <<<"$_mq_out"; } \
+    && pass "…while under strict mode a merge-queue rule is GitHub's to enforce" \
+    || die "a merge-queue rule blocked strict mode: rc=$_mq_rc '$_mq_out'"
+
 # THE NAME IS FILTERED, not passed through: it comes out of an API body and lands
 # on a line other programs parse.
 mkgh_head "$WANT" green
@@ -757,7 +780,7 @@ grep -qE '^PR_CI_STATE pr=7 status=green' <<<"${got#*|}" \
     || pass "…so a rule type cannot forge a line of its own"
 # …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. `cli/cli` carries
 # `copilot_code_review` today, and refusing there would be a gate that never opens.
-for _rt in deletion non_fast_forward pull_request copilot_code_review merge_queue required_signatures branch_name_pattern; do
+for _rt in deletion non_fast_forward pull_request copilot_code_review required_signatures branch_name_pattern; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
     got="$(run 7 --head "$WANT" --required)"
@@ -765,6 +788,34 @@ for _rt in deletion non_fast_forward pull_request copilot_code_review merge_queu
         && pass "…while a '$_rt' rule names no check and is skipped" \
         || die "a '$_rt' rule was treated as a requirement: '$got'"
 done
+
+# ── A PULL REQUEST RETARGETED MID-READ IS STALE, NOT ANSWERED ──────────────
+# A PR can be retargeted without its head moving, so `--match-head-commit` sees
+# nothing and the head confirmations both pass: the requirements just read are the
+# OLD base's, and the merge lands on a branch whose own required checks were never
+# asked about. That is the same shape as a head that moved, so it is the same
+# answer — `stale`, which the caller re-runs.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf 'other-branch\n' > "$TMP/gh.base.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.base.2"
+{ [ "${got%%|*}" = 5 ] && grep -qF 'moved=base' <<<"${got#*|}"; } \
+    && pass "a pull request retargeted while the requirements were read is stale" \
+    || die "a retargeted pull request was answered: '$got'"
+grep -qF 'status=green' <<<"${got#*|}" \
+    && die "…and the old base's verdict was emitted anyway: '$got'" \
+    || pass "…with no verdict about the base it no longer has"
+# …AND THE ALL-CHECKS QUESTION DOES NOT PAY FOR IT. It asks nothing of the base, so
+# a retarget changes nothing about its answer and a second base read there would be
+# a call for no reason.
+mkgh_head "$WANT" green
+: > "$TMP/args"
+run 7 --head "$WANT" >/dev/null
+grep -qF 'baseRefName' "$TMP/args" \
+    && die "the all-checks question read the base: $(cat "$TMP/args")" \
+    || pass "…while the all-checks question never asks about the base at all"
 
 # ── A GREEN ANSWER FROM A FAILED REQUEST IS NOT GREEN ──────────────────────
 # `gh` can print a complete, valid body and then exit non-zero because the request

@@ -79,6 +79,20 @@
   without saying which rule caused it leaves the operator with a merge that will not
   proceed until they change something they cannot see.
 
+  **A merge-queue rule refuses on the default path and is GitHub's to enforce under
+  strict mode** — the one entry that depends on how the merge will be made.
+  `gh pr merge --admin` bypasses a queue and merges directly, so a queue rule read
+  as "nothing required" is a queue skipped, and
+  `docs/decisions/2026-08-06-merge-admin-default.md` already says the `--admin`
+  waiver does not cover a base branch that requires one.
+
+  **And the base branch is confirmed after the read as well as before.** A pull
+  request can be retargeted without its head moving, so `--match-head-commit` sees
+  nothing while the requirements just read belong to the old base. That is the same
+  shape as a head that moved, so it is the same answer: `stale`, which the caller
+  re-runs. Only the required question pays for it; the all-checks one asks nothing
+  of the base.
+
   **The base branch name is encoded rather than restricted.** `#`, `%` and a space
   all need encoding in a URL path and are all legal in a git ref, so refusing them
   would mean this gate could never merge a pull request targeting
