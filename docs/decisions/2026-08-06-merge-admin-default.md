@@ -178,18 +178,22 @@ Concretely, the combination worth having is:
 
 - **required status checks** — on;
 - **require conversation resolution before merging** — on;
-- **required approvals** — zero;
+- **required approvals** — zero only where no eligible approver exists; see below;
 - **do not allow bypassing the above settings** — on (or an equivalent
   non-bypassable ruleset, or a `gh` credential without bypass permission).
 
-**The last one decides whether strict mode binds at all.** GitHub's
+**The last one is what makes the enforcement atomic, and it is not what makes
+strict mode do anything at all.** Dropping `--admin` already refuses a merge whose
+requirements are unmet when GitHub evaluates it — that is the flag's whole purpose
+— so strict mode tightens the gate on any branch with rules configured.
+
+What bypassing being disallowed adds is that GitHub's evaluation BINDS. Its
 protected-branch rules do **not** apply to administrators or roles with bypass
-permission unless bypassing is explicitly disallowed — and in the solo-maintainer
-case this record is about, the operator *is* the administrator. Omitting `--admin`
-from the command therefore does not make any of these gates binding by itself: the
-credential can still merge a pull request whose requirements are unmet. Without
-this setting, strict mode changes which flag is passed and nothing about what
-GitHub enforces.
+permission unless bypassing is explicitly disallowed, and in the solo-maintainer
+case this record is about the operator *is* the administrator — so without it the
+credential can still merge past rules that were unmet, and nothing closes the
+window between the last client-side probe and the merge. That window is the race
+this record accepts, and this setting is the only thing that closes it.
 
 **Conversation resolution decides something narrower**: whether unresolved threads
 are one of the protections GitHub enforces at all. With bypass disallowed and this
@@ -205,19 +209,32 @@ strict mode it becomes atomic — closing the case where a thread is opened afte
 the final client-side probe. Recommending checks only would have pointed operators
 at a weaker configuration than the one they can actually run.
 
-Required approvals stay at zero because that is the single condition this plugin's
-reviewers cannot satisfy for a same-credential PR, and it is exactly what the
-accepted trade-off is about. The gate draws that line itself: `--admin` is
+Required approvals is a BRANCH setting, applied to every PR targeting the branch
+with no author condition. What decides the right value is not who authored a pull
+request but whether ANYONE CAN APPROVE IT.
+
+Codex and Copilot are GitHub Apps whose reviews do not count, and GitHub refuses a
+self-approval — so the requirement is unsatisfiable only where there is no other
+eligible approver at all. That is the case this record is about, and it is what the
+accepted trade-off turns on. Where another maintainer exists they can approve the
+operator's pull requests too, so the requirement costs a wait rather than the merge
+path.
+
+**Where the requirement stays but some pull requests cannot satisfy it, vary the
+MODE.** `REVIEW_MERGE_STRICT` is per invocation rather than per branch, so those
+that can get an approval run strict and the rest fall back to this record's
+default. Zero is right only on a repository with no eligible approver; setting it
+where one exists throws away real human review. The gate draws that line itself: `--admin` is
 permitted to bypass a missing approval, and the unresolved-thread refusal above it
 means it is never reached with a thread open.
 
-`README.md` documents the variable itself under its own heading. **It does not yet
-carry this four-part configuration**, and the two parts an operator is most likely
-to miss are the two doing the work described above: disallowing bypass, which
-decides whether any configured protection binds the credential at all, and
-conversation resolution, which decides whether unresolved threads are one of those
-protections. Until the README carries it, the list above is the only place it is
-written down. Recorded as #211.
+`README.md` carries this configuration under its own `REVIEW_MERGE_STRICT`
+heading, with the same two distinctions: disallowing bypass is what makes GitHub's
+enforcement binding and atomic with the merge — dropping `--admin` already refuses
+requirements that are unmet when GitHub evaluates them — and conversation
+resolution decides whether unresolved threads are among the protections at all.
+That is where an operator is told how; this list is here because the record has to
+say what the trade-off rests on. #211.
 
 ## For reviewers
 
