@@ -27,15 +27,17 @@ and the merge.
 - probes the reviewer's state and verdict **against that head** through
   `pr-review-state.sh`, so a `blocked`, dismissed or body-only
   `CHANGES_REQUESTED` review is seen rather than walked past;
+- probes the required checks **against that head** through `pr-ci-state.sh
+  --head`, which confirms the head before and after the checks read and reports
+  `stale` if it moved;
 - refuses while any review thread is unresolved, paginated;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**Not every probe is bound to that head**, and the difference matters here more
-than it would elsewhere. The review-state probe takes the OID; the required-checks
-probe does not — `pr-ci-state.sh` is called without `--head`, so it answers about
-the pull request rather than about a commit. On an A → B → A force-push during the
-gate it can accept B's checks while `--match-head-commit A` then merges A. That is
-recorded as #212 and is a defect rather than something this record waives.
+**Every probe is bound to that head**, and that is load-bearing rather than tidy.
+`gh pr checks` takes a PR number and has no commit selector, so an unpinned checks
+probe answers about the pull request while everything around it asks about a
+commit: on an A → B → A force-push it would accept B's checks while
+`--match-head-commit A` merged A. That was true here until #212.
 
 ## What is confirmed after the merge
 

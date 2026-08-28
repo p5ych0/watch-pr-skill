@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.77] — 2026-08-28
+
+- **The merge gate's required-checks probe asked about the pull request, not about
+  the commit it was merging.** Every other probe in the gate takes the head OID it
+  resolved once and pins the merge to; this one called `pr-ci-state.sh` without
+  `--head`, and `gh pr checks` has no commit selector, so it answered about
+  whatever the API currently called the PR's head.
+
+  **A → B → A is the case.** The gate resolves the head as A; a force-push moves it
+  to B and B's required checks go green; the probe reads them; the head is forced
+  back to A; and `gh pr merge --match-head-commit A` succeeds, because the head IS
+  A. `--match-head-commit` did its job and the checks gate answered about a commit
+  nobody merged — on the default path, where `--admin` means the probe is the only
+  thing standing between a stale answer and an administrator merge.
+
+  It is pinned now. The helper already confirmed the head before and after the
+  checks read whenever it was given one; this was the one caller that did not use
+  it. Its `stale` status is handled by name rather than by the catch-all, because 5
+  means the head moved and the answer is to re-run the gate, not to investigate a
+  broken probe.
+
+  Both the fixture cases were proved by reverting: dropping `--head` reports the
+  call as unpinned, and dropping the `5` arm reports the wrong instruction.
+
+  The `--admin` decision record listed this as the one probe not bound to the head;
+  it now says every probe is, and `.github/copilot-instructions.md` carries the
+  pinning as a bound on the waiver so the reviewer that follows no pointers can
+  flag its removal. Closes #212.
+
 ## [2.0.76] — 2026-08-28
 
 - **Five more citations described closed work as pending, and the worst was in

@@ -4299,6 +4299,7 @@ if [ -d "$ROOT/docs/decisions" ]; then
                'atomic with the merge' \
                'match-head-commit' \
                'review-state probe' \
+               'required-checks probe is pinned to that head' \
                'blocked' \
                'dismissed review' \
                'body-only' \

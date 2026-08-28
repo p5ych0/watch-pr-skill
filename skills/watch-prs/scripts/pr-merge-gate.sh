@@ -630,12 +630,30 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # without branch protection, permanently — not a fail-closed guard but a gate that
 # never opens, and it was found by trying to merge rather than by reading the
 # code. The helper distinguishes the two and reports 4 for it.
-/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required; CHECKS_RC=$?
+#
+# AND IT IS PINNED TO `$HEAD_OID`, LIKE EVERY OTHER PROBE HERE. `gh pr checks`
+# takes a PR NUMBER and answers about whatever the API currently calls its head —
+# there is no commit selector — so without `--head` this asks a question about the
+# pull request while every gate around it asks about a commit.
+#
+# A → B → A IS WHY THAT MATTERS. The head is resolved once as A; a force-push
+# moves it to B and B's required checks go green; this probe reads them; the head
+# is forced back to A; and `--match-head-commit A` then merges A on B's result.
+# `--match-head-commit` did its job — the head IS A — and the checks gate answered
+# about a commit nobody merged. The helper confirms the head before AND after the
+# checks read when it is given one, so the window shrinks to the moment rather
+# than spanning the request. #212.
+#
+# 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
+# the head moved, and the caller's correct response is to re-run the gate against
+# what is there now — which is a different instruction from "the probe failed".
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required --head "$HEAD_OID"; CHECKS_RC=$?
 case "$CHECKS_RC" in
     0) ;;
     4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
     1) echo "merge blocked: a required check is not green"; exit 1 ;;
     3) echo "merge blocked: the required checks have not finished"; exit 1 ;;
+    5) echo "merge blocked: the head moved while the required checks were read; re-run the gate for the head that is there now"; exit 1 ;;
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
 esac
 
