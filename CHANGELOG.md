@@ -1,5 +1,59 @@
 # Changelog
 
+## [2.0.77] — 2026-08-28
+
+- **The merge gate's required-checks probe asked about the pull request, not about
+  the commit it was merging.** Every gate that reaches a head-addressable question
+  was given the OID the gate resolves once and pins the merge to; this one called
+  `pr-ci-state.sh` without `--head`, and `gh pr checks` has no commit selector, so
+  it answered about whatever the API currently called the PR's head. The
+  all-checks gate beside it already passed `--head`, which is why the two were not
+  answering the same question.
+
+  **A → B → A is the case, and it always takes the return.** One move away is
+  refused by `--match-head-commit`, which requires the head to still BE the OID it
+  is given. The danger is coming back: the head goes to B, B's required checks go
+  green, the probe reads them, the head returns to A, and the merge succeeds on B's
+  result about a commit nobody merged — on the default path, where `--admin` means
+  that probe and the all-checks gate beside it are what stand between a stale
+  answer and an administrator merge — the all-checks one reads the checks
+  unfiltered, so the required ones are among what it sees, and both have to be
+  satisfied.
+
+  It passes `--head` now, so the helper confirms the head before and after the
+  checks read; this was the one caller that did not. Of the gates, `(1)` and `(2)`
+  are commit-addressed, `(3b)` and `(4)` both take the OID and both reach
+  `gh pr checks`, so both are bracketed rather than bound, and the thread and
+  round-boundary checks are PR-level and always were. Its `stale` status is handled
+  by name rather than by the catch-all, because 5 means the head moved and the
+  answer is to re-run the gate, not to investigate a broken probe.
+
+  **That is a bracket and not a binding**, and the change says so everywhere rather
+  than claiming more. `gh pr checks` is addressed by PR number and its answer
+  carries no OID, so the two confirmations catch a head that moved and stayed moved
+  and cannot see an A → B → A whose both moves complete between them — the first
+  sees A, so the move away is after it; the second sees A, so the return is before
+  it. What they change is where those two moves have to fall: between the two head
+  confirmations — a window that still spans the checks request — rather than
+  straddling everything between the checks read and the merge. Binding it
+  needs a commit-addressed query plus the required-contexts read to go with it,
+  which is #214. `REVIEW_MERGE_STRICT=1` closes the required half of it and not the
+  other: on a repository whose required checks are non-bypassable GitHub evaluates
+  those itself, while the all-checks gate also weighs optional ones, which GitHub
+  never enforces. Strict mode without the non-bypassable part only stops passing
+  `--admin`.
+
+  Both the fixture cases were proved by reverting: dropping `--head` reports the
+  call as unpinned, and dropping the `5` arm reports the wrong instruction.
+
+  The `--admin` decision record listed this as the one probe not bound to the head.
+  It now says what the bracket is, and that the remaining race is **not** waived by
+  it — that race needs two force-pushes between the two head confirmations, a
+  window that spans the checks request rather than being contained by it, rather
+  than one push before a merge, and nobody has measured it. `.github/copilot-instructions.md`
+  carries the bracket as a bound on the waiver, with a contract token, so the
+  reviewer that follows no pointers can flag its removal. Closes #212.
+
 ## [2.0.76] — 2026-08-28
 
 - **Five more citations described closed work as pending, and the worst was in

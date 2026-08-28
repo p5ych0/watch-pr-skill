@@ -540,6 +540,14 @@ waived:
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
+- **both check gates are bracketed by that head** with `--head` — the all-checks
+  one through `pr-ci-gate.sh` and the required-checks one directly — because
+  `gh pr checks` takes a PR number and has no commit selector. The unsafe case is
+  always A → B → A — one move away is refused by `--match-head-commit`, so it takes
+  a RETURN — and what the bracket changes is where that pair has to fit: BOTH moves
+  between the two head confirmations, rather than straddling everything between the
+  checks read and the merge. It catches a head that moved and stayed moved; it cannot bind the answer
+  to a commit, and that residue is #214 rather than something this waiver covers;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
 

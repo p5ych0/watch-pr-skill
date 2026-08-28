@@ -24,18 +24,57 @@ and the merge.
 - pins the merge to that OID with `--match-head-commit`, which is what makes the
   comparison atomic: GitHub refuses the merge unless the PR head still matches, so
   there is no client-side re-read to race and none is performed;
-- probes the reviewer's state and verdict **against that head** through
-  `pr-review-state.sh`, so a `blocked`, dismissed or body-only
-  `CHANGES_REQUESTED` review is seen rather than walked past;
-- refuses while any review thread is unresolved, paginated;
+- probes each reviewer's state and verdict through `pr-review-state.sh`, against
+  the head THAT reviewer judged — Copilot's is the merge head, Codex's is the head
+  it signed — so a `blocked`, dismissed or body-only `CHANGES_REQUESTED` review is
+  seen rather than walked past;
+- proves every commit between those two heads is a Copilot fix, which is what
+  licenses the delta;
+- checks that every check on that head is green, not only the required ones,
+  through `pr-ci-gate.sh` — which delegates to the same bracket as the next item,
+  so it is bracketed rather than bound too;
+- brackets the required-checks read with a head confirmation on each side, through
+  `pr-ci-state.sh --head`, and reports `stale` if the head moved;
+- refuses while any review thread is unresolved, paginated — a PR-level question,
+  as is the round-boundary check beside it: neither takes the OID, and neither ever
+  did;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**Not every probe is bound to that head**, and the difference matters here more
-than it would elsewhere. The review-state probe takes the OID; the required-checks
-probe does not — `pr-ci-state.sh` is called without `--head`, so it answers about
-the pull request rather than about a commit. On an A → B → A force-push during the
-gate it can accept B's checks while `--match-head-commit A` then merges A. That is
-recorded as #212 and is a defect rather than something this record waives.
+**BOTH check gates are bracketed rather than bound**, and they are the gates that
+take the OID without being bound by it — the all-checks one reaches `gh pr checks`
+through `pr-ci-gate.sh` and the required-checks one directly, and it is the same
+endpoint with the same bracket. The reviewer verdicts and the reviewed range ARE
+commit-addressed — though the Codex verdict is asked about the head Codex signed
+rather than the merge head, with the range gate licensing the delta — and the
+thread and round-boundary gates do not take an OID at all. `gh pr checks` takes a PR number, has no
+commit selector, and its answer carries no OID — the same is true of the
+all-checks gate, which reaches that endpoint through `pr-ci-gate.sh` — so the two
+confirmations catch a
+head that moved and stayed moved, which is the ordinary case, and cannot see an
+A → B → A whose **both moves complete between them**: the first confirmation sees
+A, so the move away is after it; the second sees A, so the return is before it.
+The unsafe case is always that pair — `--match-head-commit` refuses a head that
+simply moved away. Until #212 there was no bracket at all, so the two moves could
+straddle everything between the checks read and the merge; now they have to fall
+between the two head confirmations — a window that still SPANS the checks request
+rather than being contained by it.
+
+**That residue is #214 and is NOT waived by this record.** It is a race of the same
+family as the one below, and it is not the same race: it needs two force-pushes
+between the two head confirmations rather than one push in the seconds before a
+merge — a window that spans the checks request rather than being contained by it —
+and nobody
+has measured it. Do not widen this record to cover it.
+
+**Strict mode closes the required half of it and not the other.** With
+`REVIEW_MERGE_STRICT=1` on a repository whose required checks are non-bypassable —
+configured, and with bypassing disallowed or the credential lacking that
+permission — GitHub evaluates those itself at merge time, server-side and
+commit-bound. The all-checks gate also weighs OPTIONAL checks, which GitHub never
+enforces at all, so a failing optional check on the merged commit accepted because
+the other's were green survives strict mode. And strict mode without the
+non-bypassable part only stops passing `--admin`, which is the same condition the
+strict-mode list below turns on.
 
 ## What is confirmed after the merge
 

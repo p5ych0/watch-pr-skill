@@ -1,6 +1,8 @@
 #!/usr/bin/env -S bash -p
-# The merge decision: every gate, evaluated immediately before merging, against
-# the head that is merged.
+# The merge decision: every gate, evaluated immediately before merging, and the
+# merge pinned to one head. What each gate is ABOUT differs — see the synopsis
+# below, which says which are commit-addressed, which are bracketed and which are
+# PR-level.
 #
 #   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> [reviewers: both|codex-only]
 #
@@ -27,14 +29,23 @@
 #
 # WHAT IT DECIDES, in order, each one able to stop the merge on its own:
 #
-#   (0) the head is resolved ONCE, and everything below is pinned to it
+#   (0) the head is resolved ONCE, and it is the MERGE TARGET. What each gate is
+#       about differs. (1) and (2) are COMMIT-ADDRESSED but not all about THIS
+#       commit: (1) asks each reviewer about the head THAT reviewer judged, which
+#       for Codex is `$CODEX_SHA` where the Copilot phase moved past it, and (2) is
+#       what licenses the delta. (3b) and (4) are BRACKETED — both take the merge
+#       head and both reach `gh pr checks`, which is addressed by PULL REQUEST, so
+#       the head is confirmed either side of a response that carries none; see the
+#       note at (4) and #214. (3) and (4b) are PR-level and always were
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
-#  (3b) every check on the head is green, not only the required ones
-#   (4) the required checks satisfy branch protection
+#  (3b) every check on the head is green, not only the required ones — through
+#       `pr-ci-gate.sh`, which delegates to the same bracket (4) uses
+#   (4) the required checks satisfy branch protection — BRACKETED by the head
+#       rather than bound to it; see the note at that gate and #214
 #  (4b) the round boundary has not been reached
-#   (5) merge, pinned to the head every gate above was evaluated against
+#   (5) merge, pinned to that head by `--match-head-commit`
 #
 # THE PAUSE IS NOT A REFUSAL, and that is why it has its own status. A caller that
 # cannot tell 3 from 1 either treats an operator decision as a failure or treats a
@@ -620,8 +631,9 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # non-required check still counts.
 #
 # In the default mode the merge below uses `--admin`, which bypasses branch
-# protection, so this probe is the only thing standing between a failed read and
-# an unchecked merge — which is why anything that is not an explicit green or an
+# protection, so this probe and (3b) are what stand between a failed read and an
+# unchecked merge — (3b) reads the checks unfiltered, so the required ones are
+# among what it sees, and both have to be satisfied — which is why anything that is not an explicit green or an
 # explicit "nothing configured" blocks.
 #
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
@@ -630,12 +642,54 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # without branch protection, permanently — not a fail-closed guard but a gate that
 # never opens, and it was found by trying to merge rather than by reading the
 # code. The helper distinguishes the two and reports 4 for it.
-/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required; CHECKS_RC=$?
+#
+# AND IT IS BRACKETED BY `$HEAD_OID`. `gh pr checks`
+# takes a PR NUMBER and answers about whatever the API currently calls its head —
+# there is no commit selector — so without `--head` this asks a question about the
+# pull request with nothing tying the answer to the commit being merged. (3b)
+# reaches the same endpoint through `pr-ci-gate.sh` and carries the same bracket;
+# (1) and (2) are the gates that are genuinely commit-addressed.
+#
+# A → B → A IS THE CASE, AND IT ALWAYS TAKES BOTH MOVES. One force-push away is
+# refused by `--match-head-commit`, which requires the head to still BE the OID it
+# is given — so the danger is a return: the head goes to B, B's required checks go
+# green, this probe reads them, the head comes back to A, and the merge succeeds on
+# B's result about a commit nobody merged. #212.
+#
+# WHAT `--head` BUYS IS WHEN THE MOVES HAVE TO LAND, not how many it takes.
+# Unbracketed, the read could be answered at any point and the return could arrive
+# any time before the merge — through the thread pagination and the round-count
+# probe below. Bracketed, the helper confirms the head on each side of the read, so
+# a head that MOVED AND STAYED MOVED is `stale` and BOTH moves must fit between the
+# two confirmations: the first sees A, so A → B is after it; the second sees A, so
+# B → A is before it.
+#
+# IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
+# by PR number and the answer carries no OID, so an A → B → A fitting inside the
+# bracket still reads B's checks and sees A twice. That residue is #214.
+#
+# STRICT MODE CLOSES THE REQUIRED HALF AND NOT THE OTHER. With
+# `REVIEW_MERGE_STRICT=1` on a repository whose required checks are NON-BYPASSABLE
+# — configured, and with bypassing disallowed or the credential lacking that
+# permission — GitHub evaluates those itself at merge time. (3b) considers OPTIONAL
+# checks as well, and GitHub never enforces those, so a failing optional check on A
+# accepted because B's were green survives strict mode. Strict mode alone, without
+# the non-bypassable part, only stops passing `--admin`.
+#
+# 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
+# the PR head is not the one this gate resolved — reported from EITHER
+# confirmation, so the checks may not have been read at all — and the caller's
+# correct response is to re-run the gate against what is there now, which is a
+# different instruction from "the probe failed". The message names the mismatch and
+# nothing else: from the first confirmation the checks were never requested, so any
+# clause about what the checks answer describes is false on that arm.
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required --head "$HEAD_OID"; CHECKS_RC=$?
 case "$CHECKS_RC" in
     0) ;;
     4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
     1) echo "merge blocked: a required check is not green"; exit 1 ;;
     3) echo "merge blocked: the required checks have not finished"; exit 1 ;;
+    5) echo "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now"; exit 1 ;;
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
 esac
 
@@ -651,7 +705,10 @@ case "$MERGE_ROUNDS_RC" in
     *) echo "merge blocked: could not establish the round count (rc=$MERGE_ROUNDS_RC)"; exit 1 ;;
 esac
 
-# (5) Merge, PINNED to the head every gate above was evaluated against.
+# (5) Merge, PINNED to `$HEAD_OID` — the merge target, not a head every gate above
+# shares. Codex is checked against `$CODEX_EFFECTIVE_SHA` where the Copilot phase
+# moved past it, the two check gates only BRACKET their reads with `$HEAD_OID`,
+# and the thread and round probes are PR-level; see the synopsis at the top.
 #
 # `--admin` by default, and that is a deliberate trade rather than an oversight.
 #

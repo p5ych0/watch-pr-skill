@@ -487,11 +487,33 @@ Then:
    stands, 1 with the reason for one that does not, and 2 for an answer it could
    not read — which is neither of the first two, because reading it as "no
    signoff" repeats a phase and reading it as a signoff skips a review nobody did.
-6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
-   everything against the *current* head — both verdicts, the reviewed range,
-   unresolved threads, required checks — and merges pinned to that head with
-   `--match-head-commit`, so a push landing mid-gate is rejected rather than
-   merged unreviewed.
+6. **Merge gate.** On a clean signoff from both reviewers the skill resolves the
+   head once and runs every gate before merging pinned to that head with
+   `--match-head-commit`, so a push landing mid-gate is rejected rather than merged
+   unreviewed. The gates are not all about the same thing. Each **verdict** is
+   asked about the head *that reviewer judged* — Copilot's is the head being
+   merged; Codex's is the head Codex signed, which the Copilot phase may have moved
+   past — and the **reviewed-range** gate is what licenses that delta, by proving
+   every commit between them is a Copilot fix. The **two check gates are bracketed**
+   by the merge head rather than bound to it (below), and **unresolved threads and
+   the round boundary are questions about the pull request**.
+
+   **What "bracketed" means.** `gh pr checks` is addressed by pull request and has
+   no commit selector, and both check gates reach it — so each confirms the head on
+   either side of its read and refuses if it moved, which catches a push that lands
+   and stays. What neither can do is tie the answer to a commit, so a force-push
+   away *and back* whose both moves fall between those two confirmations would be
+   read as green for a commit that is not the one merged.
+
+   That residue is tracked as issue #214, and it is not covered by the `--admin`
+   trade-off recorded in `docs/decisions/`. **`REVIEW_MERGE_STRICT=1` closes the
+   required half of it and not the other**: on a repository whose required checks
+   are non-bypassable — configured, and with bypassing disallowed or the credential
+   lacking that permission — GitHub evaluates those itself at merge time. The
+   all-checks gate also weighs *optional* checks, which GitHub never enforces, so a
+   failing optional check accepted because the other commit's were green survives
+   strict mode. And strict mode without the non-bypassable part only stops passing
+   `--admin`.
 
 ## Automatic review (opt-in per repo)
 

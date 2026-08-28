@@ -45,6 +45,12 @@ for h in pr-review-state.sh pr-merge-range.sh pr-ci-gate.sh pr-ci-state.sh pr-ro
     cat > "$GATEDIR/$h" <<STUB
 #!/usr/bin/env bash
 printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$STUB_CALLS"
+# EACH ARGUMENT ON ITS OWN LINE, prefixed with the helper, for the reason the
+# \`gh\` stub does it: \`"\$*"\` joins them, so \`--required --head <oid>\` passed as
+# ONE argument looks identical to two — and the real parser refuses that with
+# status 2, blocking every merge, while a substring assertion on the joined form
+# stays green.
+for _a in "\$@"; do printf '%s\t%s\n' "\$(basename "\$0")" "\$_a"; done >> "\$STUB_ARGV"
 _n="\$(basename "\$0" .sh)"
 _out="\$STUB_DIR/\${_n}.out"; _rc="\$STUB_DIR/\${_n}.rc"
 # THE ARGUMENTS SELECT THE ANSWER where a case needs two different ones from the
@@ -709,6 +715,56 @@ case_is 1 "required-checks probe failed" "…and an unreadable probe blocks"
 # unreadable blocked every repository without it, permanently.
 world; printf '4' > "$STUB_DIR/pr-ci-state.rc"
 case_is 0 "merged" "a repository with no required checks still merges"
+# THE PROBE IS BRACKETED BY THE HEAD THE MERGE IS PINNED TO. `gh pr checks` takes a
+# PR number and has no commit selector, so without `--head` this gate asks about
+# the pull request with nothing tying the answer to the commit being merged. The unsafe case
+# is always A → B → A — one move away is refused by `--match-head-commit` — and
+# unbracketed the return could land any time before the merge. #212.
+#
+# BRACKETED, NOT BOUND, AND THIS CASE ASSERTS ONLY THE ARGUMENT. What `--head`
+# gets the helper to do is confirm the head on each side of the checks read, which
+# catches a head that MOVED AND STAYED MOVED. It cannot bind a PR-addressed
+# response to a commit, so an A → B → A whose BOTH MOVES complete between the two
+# confirmations is invisible: the first sees A, so A → B is after it; the second
+# sees A, so B → A is before it. That race is #214 and is NOT covered here. A case
+# claiming otherwise would be worse than none, because it would read as coverage.
+#
+# AND THE HELPER IS A STUB HERE, which is the second reason this asserts the
+# argument rather than the behaviour: there is nothing between the stub's reads to
+# drive, so a staged A → B → A would be asserting the stub. The helper's own
+# before-and-after logic is `test-pr-ci-state.sh`'s subject.
+world; case_is 0 "merged" "a clean merge still merges, with the probe bracketed"
+# ARGUMENT BOUNDARIES, NOT A SUBSTRING. `--required --head <oid>` passed as one
+# argument joins to the same text, and the real parser refuses it with status 2 —
+# so the assertion reads the per-argument log and requires `--head` and the OID to
+# be two separate words, in that order.
+_ci_argv="$(awk -F'\t' '$1=="pr-ci-state.sh"{print $2}' "$TMP/argv")" || _ci_argv=""
+_ci_idx=0; _ci_found=no; _ci_prev=""
+while IFS= read -r _ci_a; do
+    [ -n "$_ci_a" ] || continue
+    if [ "$_ci_prev" = "--head" ] && [ "$_ci_a" = "$HEAD40" ]; then _ci_found=yes; fi
+    _ci_prev="$_ci_a"; _ci_idx=$((_ci_idx + 1))
+done <<EOCIA
+$_ci_argv
+EOCIA
+{ [ "$_ci_found" = yes ] && [ "$_ci_idx" -gt 0 ]; } \
+    && pass "…and the required-checks probe is given --head and the merged head as separate arguments" \
+    || die "the required-checks probe is not given the head as its own argument (argv: $(tr '\n' ' ' <<<"$_ci_argv"))"
+# AND `stale` IS ITS OWN ANSWER. The helper reports 5 when the head moved AND
+# STAYED MOVED, which is not a failed probe: the caller re-runs the gate rather
+# than investigating a broken read, and the catch-all would have told them the
+# wrong thing.
+#
+# THE MESSAGE NAMES THE MISMATCH, NOT THE MOMENT, and this case uses `case_line`,
+# which compares the line ENTIRE. `case_is` is a substring match, so a suffix
+# APPENDED to the end satisfies it — which is the same shape as the defect being
+# guarded against, and the reason `case_line` exists. The helper can report 5 from EITHER
+# confirmation — the one before the checks read, where the checks were never
+# requested at all, or the one after — so any suffix describing a checks answer is
+# false on one of the two arms, and a case matching only the opening cannot see it.
+world; printf '5' > "$STUB_DIR/pr-ci-state.rc"
+case_line 1 "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now" \
+    "a head that moved and stayed moved blocks, naming the mismatch not the moment"
 
 # ── (4b) the round boundary is a PAUSE, not a refusal ──────────────────────
 world; printf '3' > "$STUB_DIR/pr-round-count.rc"
