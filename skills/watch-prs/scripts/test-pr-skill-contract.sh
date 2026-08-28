@@ -5039,9 +5039,11 @@ for doc in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
     # ── THE PORTABILITY CLASSES CI CANNOT SEE ──────────────────────────────
     #
     # The `macos-shell` job covers absent commands and post-3.2 constructs by
-    # running the suite — when it runs, which it does not while #93 stands, so
-    # those two classes are a reviewer's as well for now. Three more stay
-    # invisible to that job even when it is on, and the ONLY thing assigning them
+    # running the suite, which #93 restored it to doing. It is still a reviewer's
+    # job to read for them, because a workflow can be turned off — the operator
+    # disabled `tests` outright while this loop was being worked on — and a class
+    # nobody is assigned is a class nobody checks. Three more stay invisible to
+    # that job even when it runs, and the ONLY thing assigning them
     # to a reviewer is this table. Copilot reads its own copy and
     # follows no pointers, so an edit that weakens either file silently restores
     # the gap — and every check above would stay green, because none of them looks

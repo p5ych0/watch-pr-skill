@@ -17,10 +17,14 @@ protections in force" is **no longer true**. They are in force:
 `--match-head-commit`, probes the reviewer's state and verdict against that head
 through `pr-review-state.sh`, and honours `REVIEW_MERGE_STRICT=1`.
 
-**What is still accepted is the race**, and only that: the window between the last
-probe and the merge itself, in which a review can be submitted or dismissed or a
-check can fail without the head moving. That is what the sections below argue
-about, and it is unchanged.
+**What this record accepts is unchanged**: the `--admin` default itself, which
+bypasses branch protection deliberately, and the race around the client-side
+probes — the window between the last probe and the merge, in which a review can be
+submitted or dismissed or a check can fail without the head moving. Both are
+argued below and both still stand.
+
+What is no longer an exposure is the third thing this section used to name: an
+un-bounded gap where no review-state probe existed at all.
 
 The decision — `--admin` as the default — is unchanged too, which is why this
 record is still `accepted` rather than superseded. Its before-and-after framing,
