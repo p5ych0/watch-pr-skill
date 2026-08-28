@@ -703,7 +703,10 @@ case "$MERGE_ROUNDS_RC" in
     *) echo "merge blocked: could not establish the round count (rc=$MERGE_ROUNDS_RC)"; exit 1 ;;
 esac
 
-# (5) Merge, PINNED to the head every gate above was evaluated against.
+# (5) Merge, PINNED to `$HEAD_OID` — the merge target, not a head every gate above
+# shares. Codex is checked against `$CODEX_EFFECTIVE_SHA` where the Copilot phase
+# moved past it, the two check gates only BRACKET their reads with `$HEAD_OID`,
+# and the thread and round probes are PR-level; see the synopsis at the top.
 #
 # `--admin` by default, and that is a deliberate trade rather than an oversight.
 #
