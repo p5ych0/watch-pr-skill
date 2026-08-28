@@ -2307,7 +2307,7 @@ _both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
         printf "CONTINUED\n"' 2>/dev/null)" || true
 case "$_both_out" in
     *OWNER=*) die "setup announced success with no pin in place: '$_both_out'" ;;
-    *)        pass "…and a readonly pin with `exit` shadowed never announces setup as complete" ;;
+    *)        pass '…and a readonly pin with `exit` shadowed never announces setup as complete' ;;
 esac
 # …AND SAYS WHY, so an operator reading the terminal is not left with silence.
 case "$_both_out" in
