@@ -656,9 +656,12 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 #
 # IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
 # by PR number and the answer carries no OID, so an A → B → A fitting inside the
-# bracket still reads B's checks and sees A twice. That residue is #214, and on the
-# strict path it does not arise at all — GitHub evaluates the required checks
-# itself at merge time.
+# bracket still reads B's checks and sees A twice. That residue is #214. It does not
+# arise with `REVIEW_MERGE_STRICT=1` on a repository whose required checks are
+# NON-BYPASSABLE — configured, and with bypassing disallowed or the credential
+# lacking that permission — because GitHub then evaluates them itself at merge
+# time. Strict mode alone only stops passing `--admin`; where the account can
+# bypass anyway it changes nothing GitHub enforces.
 #
 # 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
 # the PR head is not the one this gate resolved — reported from EITHER

@@ -26,14 +26,21 @@ and the merge.
   there is no client-side re-read to race and none is performed;
 - probes the reviewer's state and verdict **against that head** through
   `pr-review-state.sh`, so a `blocked`, dismissed or body-only
-  `CHANGES_REQUESTED` review is seen rather than walked past;
+  `CHANGES_REQUESTED` review is seen rather than walked past — the reviewed-range
+  check takes the OID too;
+- checks that every check on that head is green, not only the required ones,
+  through `pr-ci-gate.sh`, which takes the OID;
 - brackets the required-checks read with a head confirmation on each side, through
-  `pr-ci-state.sh --head`, and reports `stale` if the head moved;
-- refuses while any review thread is unresolved, paginated;
+  `pr-ci-state.sh --head`, and reports `stale` if the head moved. **This one is
+  bracketed rather than bound**; see below;
+- refuses while any review thread is unresolved, paginated — a PR-level question,
+  as is the round-boundary check beside it: neither takes the OID, and neither ever
+  did;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**The required-checks probe is bracketed rather than bound, and that is the one
-gate here that is not about a commit.** `gh pr checks` takes a PR number, has no
+**The required-checks probe is bracketed rather than bound, and it is the one gate
+that takes the OID without being bound by it.** The thread and round-boundary
+gates do not take it at all and are PR-level by nature. `gh pr checks` takes a PR number, has no
 commit selector, and its answer carries no OID — so the two confirmations catch a
 head that moved and stayed moved, which is the ordinary case, and cannot see an
 A → B → A whose **both moves complete between them**: the first confirmation sees
@@ -49,9 +56,14 @@ family as the one below, and it is not the same race: it needs two force-pushes
 between the two head confirmations rather than one push in the seconds before a
 merge — a window that spans the checks request rather than being contained by it —
 and nobody
-has measured it. Do not widen this record to cover it. On the strict path it does
-not arise — GitHub evaluates the required checks itself, server-side and
-commit-bound.
+has measured it. Do not widen this record to cover it.
+
+It does not arise with `REVIEW_MERGE_STRICT=1` **on a repository whose required
+checks are non-bypassable** — configured, and with bypassing disallowed or the
+credential lacking that permission — because GitHub then evaluates them itself at
+merge time, server-side and commit-bound. Strict mode alone only stops passing
+`--admin`; where the account can bypass anyway it changes nothing GitHub enforces,
+which is the same condition the strict-mode list below turns on.
 
 ## What is confirmed after the merge
 

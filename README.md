@@ -499,9 +499,8 @@ Then:
    if it moved — which catches a push that lands and stays. What it cannot do is
    tie the answer to a commit, so a force-push away *and back* whose both moves
    fall between those two confirmations would be read as green for a commit that
-   is not the one merged. That residue is tracked as issue #214, it does not arise
-   with `REVIEW_MERGE_STRICT=1` — GitHub evaluates the required checks itself —
-   and it is not covered by the `--admin` trade-off recorded in
+   is not the one merged. That residue is tracked as issue #214. It does not
+   arise with `REVIEW_MERGE_STRICT=1` **on a repository whose required checks are non-bypassable** — configured, and with bypassing disallowed or the credential lacking that permission — because GitHub then evaluates them itself at merge time. Strict mode alone only stops passing `--admin`; where the account can bypass anyway, it changes nothing GitHub enforces. It is not covered by the `--admin` trade-off recorded in
    `docs/decisions/`.
 
 ## Automatic review (opt-in per repo)
