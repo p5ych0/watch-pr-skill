@@ -283,7 +283,7 @@ grep -qF "commits/$WANT/check-runs" "$TMP/args" \
     && pass "…by asking the CHECK RUNS of that commit, not the checks of the PR" \
     || die "the all-checks read is not addressed by the commit: $(cat "$TMP/args")"
 grep -qF "commits/$WANT/status" "$TMP/args" \
-    && pass "…and the legacy commit statuses too, which `gh pr checks` also merges" \
+    && pass "…and the legacy commit statuses too, which the PR query also merges" \
     || die "the legacy commit statuses were not read: $(cat "$TMP/args")"
 grep -qE '^pr checks|^checks' "$TMP/args" \
     && die "the PR-addressed query is still used for the all-checks question" \
@@ -300,7 +300,7 @@ run 7 --head "$WANT" --required >/dev/null
 # cannot identify a required context either — so what the call WAS is asserted,
 # with the repository it was pinned to.
 grep -q "pr checks 7 --repo github.com/acme/widget --required" "$TMP/args" \
-    && pass "…while --required asks `gh pr checks --required`, pinned to the repository" \
+    && pass "…while --required asks the PR-addressed query, pinned to the repository" \
     || die "--required did not use the PR-addressed query: $(cat "$TMP/args")"
 grep -qE "commits/$WANT/(check-runs|status)" "$TMP/args" \
     && die "--required used a commit endpoint, which cannot answer it: $(cat "$TMP/args")" \

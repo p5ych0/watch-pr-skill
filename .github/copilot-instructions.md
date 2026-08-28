@@ -544,9 +544,11 @@ waived:
   commit statuses of the merge target itself, and **the required-checks gate is
   bracketed by it** — `gh pr checks --required` takes a PR number and has no commit
   selector, and the read that would say which contexts are required is not
-  available to an ordinary token. That bracket is not a merge-safety hole, because
-  the all-checks gate asks a superset question about the merge target and refuses
-  first. The unsafe case is
+  available to an ordinary token. That bracket IS a merge-safety hole and the
+  all-checks gate does not cover it — that gate reads the checks which EXIST on the
+  merge target, and a required context that has not reported has nothing to read —
+  so it is #214, it is not waived by the `--admin` record, and it closes only under
+  `REVIEW_MERGE_STRICT=1` on non-bypassable protection. The unsafe case is
   always A → B → A — one move away is refused by `--match-head-commit`, so it takes
   a RETURN — and what the bracket changes is where that pair has to fit: BOTH moves
   between the two head confirmations, rather than straddling everything between the

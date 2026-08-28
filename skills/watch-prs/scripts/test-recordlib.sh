@@ -839,9 +839,6 @@ done
     && pass "…with every field cleared" \
     || die "a failed snapshot parse left values behind (id='$RB_SNAP_ID')"
 
-if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
-echo "RESULT: PASS"
-
 # ── object_pages_or_error refuses what pages_or_error cannot see ───────────
 # `/commits/{oid}/check-runs` and `/commits/{oid}/status` page as OBJECTS with the
 # records under a named key, so `pages_or_error` — which requires every page to be
@@ -853,16 +850,41 @@ _ope() {   # _ope <jq input> ; prints "rc|out"
     out="$(printf '%s' "$1" | jq -c -s "$RECORDLIB_JQ"'object_pages_or_error("check_runs") | [ .[].check_runs[] ] | length' 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
-for _c in 'zero pages::' \
-          'a non-object page:[1,2]:' \
-          'a page lacking the key:{"total_count":0}:' \
-          'a non-array under the key:{"check_runs":{"a":1}}:' \
-          'a string under the key:{"check_runs":"none"}:'; do
-    _lbl="${_c%%:*}"; _rest="${_c#*:}"; _in="${_rest%%:*}"
-    _got="$(_ope "$_in")"
+# THE INPUTS ARE NOT PACKED INTO ONE STRING. A `label:json` table split on the
+# first colon TRUNCATES every JSON object at its first key — `{"total_count":0}`
+# became `{"total_count"` — so the cases passed because jq could not parse them
+# rather than because the rule refused them. Two arrays, indexed together.
+_ope_lbl=(
+    'zero pages'
+    'a non-object page'
+    'a page lacking the key'
+    'a non-array under the key'
+    'a string under the key'
+)
+_ope_in=(
+    ''
+    '[1,2]'
+    '{"total_count":0}'
+    '{"check_runs":{"a":1}}'
+    '{"check_runs":"none"}'
+)
+_i=0
+while [ "$_i" -lt "${#_ope_lbl[@]}" ]; do
+    _got="$(_ope "${_ope_in[$_i]}")"
     [ "${_got%%|*}" != 0 ] \
-        && pass "object_pages_or_error refuses $_lbl" \
-        || die "$_lbl was accepted: '$_got'"
+        && pass "object_pages_or_error refuses ${_ope_lbl[$_i]}" \
+        || die "${_ope_lbl[$_i]} was accepted: '$_got'"
+    _i=$((_i + 1))
+done
+# …AND EACH INPUT REALLY IS THE JSON IT LOOKS LIKE, so a refusal is the rule
+# working rather than jq failing to parse the fixture. The last four are valid
+# documents; the first is deliberately empty, which is the zero-pages case.
+_i=1
+while [ "$_i" -lt "${#_ope_in[@]}" ]; do
+    printf '%s' "${_ope_in[$_i]}" | jq -e . >/dev/null 2>&1 \
+        && pass "…and '${_ope_lbl[$_i]}' is valid JSON reaching the rule" \
+        || die "the input for '${_ope_lbl[$_i]}' is not parseable: ${_ope_in[$_i]}"
+    _i=$((_i + 1))
 done
 # …AND ACCEPTS THE REAL SHAPE, so the refusals above are not refusing everything.
 _got="$(_ope '{"total_count":1,"check_runs":[{"name":"a"}]}')"
@@ -877,3 +899,6 @@ _got="$(_ope '{"check_runs":[{"n":1}]}
 { [ "${_got%%|*}" = 0 ] && [ "${_got#*|}" = 3 ]; } \
     && pass "…and reads every page, not only the first" \
     || die "pagination was not followed: '$_got'"
+
+if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
+echo "RESULT: PASS"
