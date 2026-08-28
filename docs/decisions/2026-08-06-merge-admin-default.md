@@ -24,7 +24,7 @@ submitted or dismissed or a check can fail without the head moving. Both are
 argued below and both still stand.
 
 What is no longer an exposure is the third thing this section used to name: an
-un-bounded gap where no review-state probe existed at all.
+unbounded gap where no review-state probe existed at all.
 
 The decision — `--admin` as the default — is unchanged too, which is why this
 record is still `accepted` rather than superseded. Its before-and-after framing,
