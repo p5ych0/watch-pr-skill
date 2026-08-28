@@ -31,8 +31,8 @@ and the merge.
 - proves every commit between those two heads is a Copilot fix, which is what
   licenses the delta;
 - checks that every check on that head is green, not only the required ones,
-  through `pr-ci-gate.sh` — which delegates to the same bracket as the next item,
-  so it is bracketed rather than bound too;
+  through `pr-ci-gate.sh` — addressed by the commit, so that answer is about the
+  merge target;
 - brackets the required-checks read with a head confirmation on each side, through
   `pr-ci-state.sh --head`, and reports `stale` if the head moved;
 - refuses while any review thread is unresolved, paginated — a PR-level question,
@@ -40,16 +40,20 @@ and the merge.
   did;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**BOTH check gates are bracketed rather than bound**, and they are the gates that
-take the OID without being bound by it — the all-checks one reaches `gh pr checks`
-through `pr-ci-gate.sh` and the required-checks one directly, and it is the same
-endpoint with the same bracket. The reviewer verdicts and the reviewed range ARE
-commit-addressed — though the Codex verdict is asked about the head Codex signed
-rather than the merge head, with the range gate licensing the delta — and the
-thread and round-boundary gates do not take an OID at all. `gh pr checks` takes a PR number, has no
-commit selector, and its answer carries no OID — the same is true of the
-all-checks gate, which reaches that endpoint through `pr-ci-gate.sh` — so the two
-confirmations catch a
+**The required-checks gate is bracketed rather than bound, and it is now the only
+one.** It reaches `gh pr checks --required`, which is addressed by pull request;
+the all-checks gate reads the merge target's own check runs and commit statuses,
+and the reviewer verdicts and the reviewed range are commit-addressed too — though
+the Codex verdict is asked about the head Codex signed rather than the merge head,
+with the range gate licensing the delta. The thread and round-boundary gates do not
+take an OID at all.
+
+**And that bracket is no longer a merge-safety question.** The all-checks gate asks
+a SUPERSET of it about the merge target, so a stale required answer can only be
+more permissive than a gate that has already refused a red target. What is left is
+this gate reporting about the wrong commit, which is a defect and not a merge that
+skipped a check. `gh pr checks` takes a PR number, has no
+commit selector, and its answer carries no OID — so the two confirmations catch a
 head that moved and stayed moved, which is the ordinary case, and cannot see an
 A → B → A whose **both moves complete between them**: the first confirmation sees
 A, so the move away is after it; the second sees A, so the return is before it.

@@ -225,6 +225,77 @@ checks_msg_is_none_configured() {
     return 1
 }
 
+# ── THE COMMIT-ADDRESSED READ, for the all-checks question ─────────────────
+#
+# `gh pr checks` is addressed by PULL REQUEST and its answer carries no OID, so
+# bracketing it with head confirmations narrows when a head can move and never
+# binds the answer to a commit. These two endpoints ARE addressed by a commit:
+# what they return is about the OID in the path and nothing else.
+#
+# ONLY FOR THE ALL-CHECKS QUESTION. `--required` needs to know which contexts
+# branch protection requires, and that read is not available: classic protection
+# needs admin and denies with a 404 indistinguishable from "not protected", while
+# the ruleset endpoints are readable without admin but do not see classic
+# protection at all. Measured on #214. So `--required` keeps the bracketed PR-
+# addressed query, and this one answers the question that needs no such read.
+#
+# WHICH IS ENOUGH, because this question is a SUPERSET of the other. If every
+# check on the merge target is green then every required check on it is, so a
+# stale `--required` answer can only be more permissive than a gate that has
+# already refused. It stops being a merge-safety question and becomes a reporting
+# one.
+#
+# BOTH SOURCES, because `gh pr checks` merges them and dropping one would make
+# this laxer than what it replaces: check runs from the Checks API, and the legacy
+# commit statuses that older integrations still post.
+#
+# AND `.statuses` RATHER THAN `.state` for the legacy read. That endpoint reports
+# `state: "pending"` with an EMPTY `statuses` array when a commit has none — so
+# taking the summary would make every commit without legacy statuses pending
+# forever, which is a gate that never opens rather than one that fails closed.
+commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
+    local oid="$1" _left _runs _sts _v_runs _v_sts
+    _left="$(rb_left)" || return 2
+    _runs="$(run_limited "$_left" gh api --hostname "$HOST" \
+        "repos/$OWNER/$REPO/commits/$oid/check-runs" --paginate 2>/dev/null)" || return 2
+    _left="$(rb_left)" || return 2
+    _sts="$(run_limited "$_left" gh api --hostname "$HOST" \
+        "repos/$OWNER/$REPO/commits/$oid/status" --paginate 2>/dev/null)" || return 2
+    # AN UNRECOGNISED CONCLUSION IS MALFORMED, not benign — the same rule the
+    # bucket parse below follows, and for the reason `recordlib.sh` records: a
+    # value outside the known set must not fall through a catch-all into green.
+    _v_runs="$(printf '%s' "$_runs" | jq -r -s "$RECORDLIB_JQ"'
+        object_pages_or_error("check_runs")
+        | [ .[].check_runs[] ]
+        | if length == 0 then "none"
+          elif any(.[]; type != "object" or (.status | type) != "string") then "malformed"
+          elif any(.[]; .status != "completed") then "pending"
+          elif any(.[]; (.conclusion | type) != "string") then "malformed"
+          elif any(.[]; .conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale")) then "failed"
+          elif all(.[]; .conclusion | IN("success","neutral","skipped")) then "green"
+          else "malformed" end' 2>/dev/null)" || return 2
+    _v_sts="$(printf '%s' "$_sts" | jq -r -s "$RECORDLIB_JQ"'
+        object_pages_or_error("statuses")
+        | [ .[].statuses[] ]
+        | if length == 0 then "none"
+          elif any(.[]; type != "object" or (.state | type) != "string") then "malformed"
+          elif any(.[]; .state | IN("failure","error")) then "failed"
+          elif any(.[]; .state == "pending") then "pending"
+          elif all(.[]; .state == "success") then "green"
+          else "malformed" end' 2>/dev/null)" || return 2
+    # WORST-FIRST, and `none` only where BOTH said it. The tokens are disjoint, so
+    # a substring test over the pair is the whole of the precedence.
+    case "$_v_runs/$_v_sts" in
+        *malformed*) printf '%s\n' malformed ;;
+        *failed*)    printf '%s\n' failed ;;
+        *pending*)   printf '%s\n' pending ;;
+        *green*)     printf '%s\n' green ;;
+        none/none)   printf '%s\n' none ;;
+        *)           printf '%s\n' malformed ;;
+    esac
+    return 0
+}
+
 ERRF="$(mktemp 2>/dev/null)" || {
     echo "PR_CI_STATE pr=$PR status=error reason=no_scratch_file" >&2; exit 2; }
 # THE CONTAINER IS VALIDATED BEFORE anything is concluded from it. `all(.[]; …)`
@@ -237,6 +308,20 @@ ERRF="$(mktemp 2>/dev/null)" || {
 # that reached `dismissed` through a catch-all and drove a review loop. See
 # recordlib.sh.
 RC=0
+# THE COMMIT-ADDRESSED PATH IS TAKEN WHERE IT CAN ANSWER, which is the all-checks
+# question with a head to ask about. `--required` cannot use it — see the note on
+# `commit_checks_verdict` — and neither can a call with no `--head`, because there
+# is no commit to address.
+if [ -n "$WANT_HEAD" ] && [ -z "$REQUIRED" ]; then
+    OUT="$(commit_checks_verdict "$WANT_HEAD")" || RC=$?
+    MSG=""
+    if [ "$RC" -ne 0 ]; then
+        echo "PR_CI_STATE pr=$PR status=error reason=commit_checks_unreadable rc=$RC head=$WANT_HEAD" >&2
+        rm -f "$ERRF" 2>/dev/null
+        exit 2
+    fi
+    rm -f "$ERRF" 2>/dev/null
+else
 _left_checks="$(rb_left)" || {
     echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
 OUT="$(run_limited "$_left_checks" gh pr checks "$PR" --repo "$HOST/$OWNER/$REPO" $REQUIRED --json bucket \
@@ -254,6 +339,7 @@ MSG="$(cat "$ERRF" 2>/dev/null)"; MSG_RC=$?
 rm -f "$ERRF" 2>/dev/null
 [ "$MSG_RC" -eq 0 ] || {
     echo "PR_CI_STATE pr=$PR status=error reason=diagnostic_unreadable rc=$MSG_RC" >&2; exit 2; }
+fi
 
 # `gh pr checks` exits non-zero when a check FAILED as well as when it is pending
 # or absent, so the status alone does not classify anything — the parsed value
@@ -264,17 +350,15 @@ rm -f "$ERRF" 2>/dev/null
 # loop, a head that had almost finished earning its grace hands that grace to a
 # different commit, whose own checks have not been registered yet.
 #
-# So the head is read once more and must still be the one asked about. WHAT THIS IS
-# NOT is a binding of the response to a commit: the request is addressed by PR
-# number and the answer carries no OID, so a head that moves away and BACK between
-# the two confirmations is invisible to both, and the checks read describes the
-# commit that was there in between. Nothing here can close that, because `gh pr
-# checks` has no commit selector to pin.
+# So the head is read once more and must still be the one asked about.
 #
-# What it does close is the head that moves and STAYS moved, which is the ordinary
-# case: a push during the request is reported as `stale`, which the caller waits on
-# and which resets the grace. #214 is the commit-addressed query that would make
-# this a binding rather than a bracket.
+# WHICH OF THE TWO QUESTIONS THIS IS DECIDES WHAT THE BRACKET IS WORTH. The
+# all-checks question is answered by `commit_checks_verdict`, addressed by the OID
+# in its path, so its answer is BOUND to the commit and this confirmation only
+# reports whether the head has since moved. The `--required` question still goes
+# through `gh pr checks`, which has no commit selector, so there the confirmations
+# are a BRACKET: they catch a head that moves and stays moved, and an A → B → A
+# whose both moves land between them is invisible to both. #214.
 if [ -n "$WANT_HEAD" ]; then
     _left_after="$(rb_left)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
@@ -307,6 +391,16 @@ case "$OUT" in
         echo "PR_CI_STATE pr=$PR status=green";   exit 0 ;;
     failed)  echo "PR_CI_STATE pr=$PR status=failed";  exit 1 ;;
     pending) echo "PR_CI_STATE pr=$PR status=pending"; exit 3 ;;
+    # `none` REACHES HERE AS A VALUE on the commit-addressed path, where this
+    # script does the classifying and can say so directly. On the PR-addressed
+    # path it arrives as a MESSAGE and a status, below, because that is the only
+    # way `gh pr checks` reports it.
+    none)
+        [ "$RC" -eq 0 ] || {
+            echo "PR_CI_STATE pr=$PR status=error reason=none_from_failed_probe rc=$RC" >&2
+            exit 2
+        }
+        echo "PR_CI_STATE pr=$PR status=none"; exit 4 ;;
 esac
 # AND THE STATUS HAS TO BE THE ONE THAT MEANS IT. `gh` reports "nothing to
 # report" by exiting 1 with that message on stderr; a probe that printed the

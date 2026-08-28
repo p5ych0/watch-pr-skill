@@ -149,6 +149,20 @@ def pages_or_error:
     if length == 0 then error("no pages")
     elif any(.[]; type != "array") then error("non-array page")
     else . end;
+
+# THE SAME RULE FOR THE ENDPOINTS THAT PAGE AS OBJECTS. `/commits/{oid}/check-runs`
+# and `/commits/{oid}/status` return an OBJECT per page with the records under a
+# named key, so `pages_or_error` — which requires every page to be an array —
+# refuses them, and reaching for `.[][]` instead would iterate an error body`s
+# VALUES exactly as it did before that rule existed. The key is named rather than
+# assumed, because a page that came back without it is a fetch that told us
+# nothing and must not read as an empty list of checks.
+def object_pages_or_error($k):
+    if length == 0 then error("no pages")
+    elif any(.[]; type != "object") then error("non-object page")
+    elif any(.[]; has($k) | not) then error("page lacks " + $k)
+    elif any(.[]; .[$k] | type != "array") then error($k + " is not an array")
+    else . end;
 '
 
 # The SAME rule, for shell rather than jq. `pr-watch.sh` does not read the API —

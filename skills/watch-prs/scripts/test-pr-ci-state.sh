@@ -202,16 +202,33 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict>
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$TMP/args"
-case "\$2" in
-    view)
-        h="\$(head -1 "$TMP/heads")"
-        # An exhausted queue repeats its last answer; \`tail -n +2\`, not \`sed -i\`,
-        # which is GNU-only without a suffix argument.
-        if [ "\$(wc -l < "$TMP/heads")" -gt 1 ]; then
-            tail -n +2 "$TMP/heads" > "$TMP/heads.next" && mv "$TMP/heads.next" "$TMP/heads"
-        fi
-        printf '%s\n' "\$h" ;;
-    *)  cat "$TMP/gh.out" ;;
+case "\$*" in
+    *check-runs*)
+        # THE COMMIT-ADDRESSED READ. The verdict file names a bucket; this turns it
+        # into the page shape the endpoint really returns, so the helper's own jq
+        # is what classifies rather than the stub.
+        v="\$(cat "$TMP/gh.out")"
+        case "\$v" in
+            green)   printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n' ;;
+            failed)  printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"failure"}]}\n' ;;
+            pending) printf '{"total_count":1,"check_runs":[{"name":"a","status":"in_progress","conclusion":null}]}\n' ;;
+            none)    printf '{"total_count":0,"check_runs":[]}\n' ;;
+            *)       printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"%s"}]}\n' "\$v" ;;
+        esac ;;
+    *"/status"*)
+        printf '{"state":"pending","statuses":[]}\n' ;;
+    *)
+        case "\$2" in
+            view)
+                h="\$(head -1 "$TMP/heads")"
+                # An exhausted queue repeats its last answer; \`tail -n +2\`, not
+                # \`sed -i\`, which is GNU-only without a suffix argument.
+                if [ "\$(wc -l < "$TMP/heads")" -gt 1 ]; then
+                    tail -n +2 "$TMP/heads" > "$TMP/heads.next" && mv "$TMP/heads.next" "$TMP/heads"
+                fi
+                printf '%s\n' "\$h" ;;
+            *)  cat "$TMP/gh.out" ;;
+        esac ;;
 esac
 exit 0
 GHSH
@@ -230,9 +247,61 @@ got="$(run 7 --head "$WANT")"
 # …and the checks were never asked. Reporting stale while still consulting the
 # previous head's result leaves the wrong answer available to anything that reads
 # stdout rather than the status.
-grep -q 'checks' "$TMP/args" \
+grep -qE 'checks|check-runs' "$TMP/args" \
     && die "the checks were read for a head that does not match: $(cat "$TMP/args")" \
     || pass "…without reading the checks of the head it found"
+
+# ── THE ALL-CHECKS READ IS ADDRESSED BY THE COMMIT ─────────────────────────
+# `gh pr checks` takes a PR number and has no commit selector, so bracketing it
+# with head confirmations narrows WHEN a head can move and never binds the answer
+# to a commit: an A → B → A completing between the two reads is invisible to both.
+# These endpoints are addressed by the OID in their path, so the answer is about
+# that commit and nothing else. #214.
+#
+# THE ARGUMENT IS ASSERTED, not the verdict alone: a regression to `gh pr checks`
+# would still answer green here, and the whole point is WHICH question was asked.
+mkgh_head "$WANT" green; : > "$TMP/args"
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "the all-checks question is answered for a matching head" \
+    || die "the commit-addressed read did not report green ('$got')"
+grep -qF "commits/$WANT/check-runs" "$TMP/args" \
+    && pass "…by asking the CHECK RUNS of that commit, not the checks of the PR" \
+    || die "the all-checks read is not addressed by the commit: $(cat "$TMP/args")"
+grep -qF "commits/$WANT/status" "$TMP/args" \
+    && pass "…and the legacy commit statuses too, which `gh pr checks` also merges" \
+    || die "the legacy commit statuses were not read: $(cat "$TMP/args")"
+grep -qE '^pr checks|^checks' "$TMP/args" \
+    && die "the PR-addressed query is still used for the all-checks question" \
+    || pass "…and the PR-addressed query is not used for it at all"
+
+# `--required` KEEPS THE PR-ADDRESSED QUERY, because the commit endpoints cannot
+# say which contexts branch protection requires: classic protection needs admin
+# and denies with a 404 indistinguishable from "not protected", and the ruleset
+# endpoints do not see classic protection at all. Measured on #214.
+mkgh_head "$WANT" green; : > "$TMP/args"
+run 7 --head "$WANT" --required >/dev/null
+grep -qF 'check-runs' "$TMP/args" \
+    && die "--required used the commit read, which cannot answer it: $(cat "$TMP/args")" \
+    || pass "…while --required keeps the PR-addressed query, which is the only one that filters"
+
+# EVERY VERDICT COMES THROUGH THE HELPER'S OWN CLASSIFIER on this path, so the
+# stub returns the endpoint's real shape and the jq below is what decides.
+for _cv in failed:1:failed pending:3:pending none:4:none; do
+    _want="${_cv%%:*}"; _rest="${_cv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
+    mkgh_head "$WANT" "$_want"
+    got="$(run 7 --head "$WANT")"
+    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_st" <<<"${got#*|}"; } \
+        && pass "…and a $_want check run is $_st" \
+        || die "a $_want check run gave '$got'"
+done
+# AN UNRECOGNISED CONCLUSION IS MALFORMED, not benign — the rule `recordlib.sh`
+# records, applied to the value this path parses itself.
+mkgh_head "$WANT" surprising
+got="$(run 7 --head "$WANT")"
+[ "${got%%|*}" = 2 ] \
+    && pass "…and a conclusion outside the known set is unreadable, not green" \
+    || die "an unknown conclusion gave '$got'"
 # …AND A PUSH LANDING DURING THE CHECKS REQUEST IS CAUGHT. Confirming the head only
 # BEFORE the request leaves a window: the answer then describes a commit nobody
 # verified, and in the round loop a head that had almost finished earning its grace

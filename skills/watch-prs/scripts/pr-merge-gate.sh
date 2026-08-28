@@ -33,15 +33,16 @@
 #       about differs. (1) and (2) are COMMIT-ADDRESSED but not all about THIS
 #       commit: (1) asks each reviewer about the head THAT reviewer judged, which
 #       for Codex is `$CODEX_SHA` where the Copilot phase moved past it, and (2) is
-#       what licenses the delta. (3b) and (4) are BRACKETED — both take the merge
-#       head and both reach `gh pr checks`, which is addressed by PULL REQUEST, so
-#       the head is confirmed either side of a response that carries none; see the
-#       note at (4) and #214. (3) and (4b) are PR-level and always were
+#       what licenses the delta. (3b) is COMMIT-ADDRESSED too since #214: it reads
+#       the check runs and commit statuses of the merge target itself. (4) is the
+#       one that is only BRACKETED — `gh pr checks --required` is addressed by PULL
+#       REQUEST, so the head is confirmed either side of a response that carries
+#       none; see the note there. (3) and (4b) are PR-level and always were
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
-#  (3b) every check on the head is green, not only the required ones — through
-#       `pr-ci-gate.sh`, which delegates to the same bracket (4) uses
+#  (3b) every check on the merge target is green, not only the required ones —
+#       through `pr-ci-gate.sh`, and addressed by the commit
 #   (4) the required checks satisfy branch protection — BRACKETED by the head
 #       rather than bound to it; see the note at that gate and #214
 #  (4b) the round boundary has not been reached
@@ -646,9 +647,9 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # AND IT IS BRACKETED BY `$HEAD_OID`. `gh pr checks`
 # takes a PR NUMBER and answers about whatever the API currently calls its head —
 # there is no commit selector — so without `--head` this asks a question about the
-# pull request with nothing tying the answer to the commit being merged. (3b)
-# reaches the same endpoint through `pr-ci-gate.sh` and carries the same bracket;
-# (1) and (2) are the gates that are genuinely commit-addressed.
+# pull request with nothing tying the answer to the commit being merged. (3b) does
+# not share that any more: since #214 it reads the check runs and commit statuses
+# of the merge target directly, which needs no knowledge of what is REQUIRED.
 #
 # A → B → A IS THE CASE, AND IT ALWAYS TAKES BOTH MOVES. One force-push away is
 # refused by `--match-head-commit`, which requires the head to still BE the OID it
@@ -667,6 +668,12 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
 # by PR number and the answer carries no OID, so an A → B → A fitting inside the
 # bracket still reads B's checks and sees A twice. That residue is #214.
+#
+# AND (3b) IS WHAT KEEPS THIS SAFE. It asks whether EVERY check on the merge
+# target is green, which is a superset of the required ones — so a stale answer
+# here can only be more permissive than a gate that has already refused a red
+# merge target. What #214 leaves is a reporting inaccuracy in this gate rather
+# than a merge that skipped a check.
 #
 # STRICT MODE CLOSES THE REQUIRED HALF AND NOT THE OTHER. With
 # `REVIEW_MERGE_STRICT=1` on a repository whose required checks are NON-BYPASSABLE

@@ -540,9 +540,13 @@ waived:
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
-- **both check gates are bracketed by that head** with `--head` — the all-checks
-  one through `pr-ci-gate.sh` and the required-checks one directly — because
-  `gh pr checks` takes a PR number and has no commit selector. The unsafe case is
+- **the all-checks gate is addressed by that head**, reading the check runs and
+  commit statuses of the merge target itself, and **the required-checks gate is
+  bracketed by it** — `gh pr checks --required` takes a PR number and has no commit
+  selector, and the read that would say which contexts are required is not
+  available to an ordinary token. That bracket is not a merge-safety hole, because
+  the all-checks gate asks a superset question about the merge target and refuses
+  first. The unsafe case is
   always A → B → A — one move away is refused by `--match-head-commit`, so it takes
   a RETURN — and what the bracket changes is where that pair has to fit: BOTH moves
   between the two head confirmations, rather than straddling everything between the

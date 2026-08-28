@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.78] — 2026-08-28
+
+- **The all-checks gate now asks about the commit it is merging.** `gh pr checks` is
+  addressed by pull request and its answer carries no OID, so #212's `--head` could
+  only BRACKET the read: an A → B → A whose both moves land between the two head
+  confirmations was invisible, and the gate could accept B's checks for a merge of
+  A. `pr-ci-state.sh` reads `commits/<oid>/check-runs` and `commits/<oid>/status`
+  instead when it is asked the all-checks question with a head, so the answer is
+  about that commit and nothing else. The confirmations either side stay, and now
+  only report whether the head has since moved.
+
+  **The required-checks question keeps the bracketed query, because the read that
+  would replace it does not exist for an ordinary token.** Measured for #214:
+  classic branch protection needs admin and denies with a **404 indistinguishable
+  from "not protected"** — so a loop that cannot read it cannot tell "nothing is
+  required" from "I am not allowed to know" — while the ruleset endpoints are
+  readable without admin and do not see classic protection at all. The intersection
+  that issue proposed cannot be computed, and cannot fail honestly.
+
+  **It does not need to be.** The all-checks question is a superset of the required
+  one, so a green answer about the merge target entails its required checks are
+  green, and a stale `--required` answer can only be more permissive than a gate
+  that has already refused. What remains is that gate reporting about the wrong
+  commit — a defect, not a merge that skipped a check — and every layer says which
+  gate is which.
+
+  Two details the measurement turned up, both fail-open traps: `commits/<oid>/status`
+  reports `state: "pending"` with an EMPTY `statuses` array when a commit has none,
+  so the summary is read past in favour of the array; and `check-runs` pages as an
+  OBJECT, which `pages_or_error` refuses — `recordlib.sh` gained
+  `object_pages_or_error` beside it rather than letting a `.[][]` walk an error
+  body's values. Closes #214.
+
 ## [2.0.77] — 2026-08-28
 
 - **The merge gate's required-checks probe asked about the pull request, not about

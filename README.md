@@ -494,9 +494,10 @@ Then:
    asked about the head *that reviewer judged* — Copilot's is the head being
    merged; Codex's is the head Codex signed, which the Copilot phase may have moved
    past — and the **reviewed-range** gate is what licenses that delta, by proving
-   every commit between them is a Copilot fix. The **two check gates are bracketed**
-   by the merge head rather than bound to it (below), and **unresolved threads and
-   the round boundary are questions about the pull request**.
+   every commit between them is a Copilot fix. The **all-checks gate is asked about
+   the merge target too**, while the **required-checks gate is only bracketed** by
+   it (below), and **unresolved threads and the round boundary are questions about
+   the pull request**.
 
    **What "bracketed" means.** `gh pr checks` is addressed by pull request and has
    no commit selector, and both check gates reach it — so each confirms the head on
