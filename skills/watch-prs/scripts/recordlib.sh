@@ -168,6 +168,16 @@ def pages_or_error:
 # arriving as a benign verdict, which is the one outcome this rule exists to stop.
 # Pages disagreeing with EACH OTHER is refused too: that is a body from a different
 # read, and taking either one is a guess.
+#
+# AND THE COUNT ALONE IS NOT ENOUGH, because `--paginate` is not a snapshot. It
+# requests the pages one after another, so a rerun landing between two of them
+# REORDERS the result: an offset that has shifted returns a record already seen and
+# skips the one that moved past it. The total still matches, and what was dropped
+# can be the failing run while what repeated is a passing one — `green` on a red
+# commit, which is the direction nothing else here would catch. Records are
+# therefore identified rather than counted: every one carries a numeric `id` — both
+# endpoints supply it — and an id seen twice means the read is inconsistent and
+# says nothing about the commit.
 def object_pages_or_error($k):
     if length == 0 then error("no pages")
     elif any(.[]; type != "object") then error("non-object page")
@@ -176,6 +186,8 @@ def object_pages_or_error($k):
     elif any(.[]; .total_count | type != "number") then error("total_count is not a number")
     elif ([ .[].total_count ] | unique | length) != 1 then error("total_count differs across pages")
     elif .[0].total_count != ([ .[][$k][] ] | length) then error("total_count disagrees with the records")
+    elif any(.[][$k][]; type != "object" or (.id | type) != "number") then error("a record has no numeric id")
+    elif ([ .[][$k][].id ] | unique | length) != ([ .[][$k][] ] | length) then error("a record is repeated across pages")
     else . end;
 '
 

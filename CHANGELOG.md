@@ -43,7 +43,20 @@
   classifies as `none`, which the CI gate accepts as "no checks are configured" —
   a truncated read arriving as a benign verdict. Measured across pages, the count
   is the grand total repeated identically on every one, so pages that disagree with
-  each other are refused too.
+  each other are refused too. The count alone is not enough, because `--paginate`
+  requests the pages one after another and is not a snapshot: a rerun landing
+  between two of them shifts the offset, so a record already seen comes back and
+  the one that moved past it is skipped. The total still matches, and what was
+  dropped can be the failing run while what repeated is a passing one — `green` on
+  a red commit. Records are identified rather than counted: every one carries a
+  numeric `id`, and an id seen twice means the read says nothing about the commit.
+
+  **And a failed run decides while another is still going.** Status 3 is documented
+  as "at least one is still running and none has failed", and the PR-addressed
+  bucket parse has always ordered it that way; the commit-addressed fold asked
+  whether anything was unfinished first, so a head with one red run and one still
+  in progress answered `pending` and the round gate polled a decided commit to its
+  timeout.
 
   **Neither read orders anything, and that is measured rather than assumed.** Two
   review rounds built a newest-per-context fold over the statuses on the premise

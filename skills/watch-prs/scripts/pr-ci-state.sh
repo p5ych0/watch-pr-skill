@@ -268,14 +268,24 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
     # AN UNRECOGNISED CONCLUSION IS MALFORMED, not benign — the same rule the
     # bucket parse below follows, and for the reason `recordlib.sh` records: a
     # value outside the known set must not fall through a catch-all into green.
+    #
+    # FAILED BEATS PENDING, which is this file`s stated contract — status 3 is "at
+    # least one is still running AND NONE HAS FAILED" — and what the bucket parse
+    # below has always done. Asking `is anything unfinished` first inverted it for
+    # the commit-addressed read alone: a head with one red run and one still going
+    # answered `pending`, so the round gate went on polling a commit that was
+    # already decided, to its timeout. A conclusion is only read where the run
+    # reported one, because an unfinished run carries `conclusion: null` and would
+    # otherwise be the malformed case rather than the pending one.
     _v_runs="$(printf '%s' "$_runs" | jq -r -s "$RECORDLIB_JQ"'
         object_pages_or_error("check_runs")
         | [ .[].check_runs[] ]
         | if length == 0 then "none"
           elif any(.[]; type != "object" or (.status | type) != "string") then "malformed"
+          elif any(.[]; .status == "completed" and (.conclusion | type) != "string") then "malformed"
+          elif any(.[]; .status == "completed"
+                        and (.conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale"))) then "failed"
           elif any(.[]; .status != "completed") then "pending"
-          elif any(.[]; (.conclusion | type) != "string") then "malformed"
-          elif any(.[]; .conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale")) then "failed"
           elif all(.[]; .conclusion | IN("success","neutral","skipped")) then "green"
           else "malformed" end' 2>/dev/null)" || return 2
     # NO ORDERING, because there is nothing to order. Two rounds of this pull
