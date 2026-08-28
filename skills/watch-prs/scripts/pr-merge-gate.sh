@@ -632,10 +632,11 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # non-required check still counts.
 #
 # In the default mode the merge below uses `--admin`, which bypasses branch
-# protection, so this probe and (3b) are what stand between a failed read and an
-# unchecked merge — (3b) reads the checks unfiltered, so the required ones are
-# among what it sees, and both have to be satisfied — which is why anything that is not an explicit green or an
-# explicit "nothing configured" blocks.
+# protection, so this probe is the only one that asks whether branch protection is
+# SATISFIED — which is why anything that is not an explicit green or an explicit
+# "nothing configured" blocks. (3b) reads the checks unfiltered, so a required
+# check that REPORTED is among what it sees; one that has not reported is not, and
+# that is the hole this probe's bracket leaves open. See the note there and #214.
 #
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
 # non-zero when the branch has no required checks at all, not because anything
@@ -684,13 +685,16 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # about. What closes it is `REVIEW_MERGE_STRICT=1` on non-bypassable protection,
 # where GitHub evaluates the required checks itself at merge time.
 #
-# STRICT MODE CLOSES THE REQUIRED HALF AND NOT THE OTHER. With
-# `REVIEW_MERGE_STRICT=1` on a repository whose required checks are NON-BYPASSABLE
-# — configured, and with bypassing disallowed or the credential lacking that
-# permission — GitHub evaluates those itself at merge time. (3b) considers OPTIONAL
-# checks as well, and GitHub never enforces those, so a failing optional check on A
-# accepted because B's were green survives strict mode. Strict mode alone, without
-# the non-bypassable part, only stops passing `--admin`.
+# STRICT MODE IS WHAT CLOSES IT. With `REVIEW_MERGE_STRICT=1` on a repository whose
+# required checks are NON-BYPASSABLE — configured, and with bypassing disallowed or
+# the credential lacking that permission — GitHub evaluates those itself at merge
+# time, addressed by the commit it is merging. Strict mode alone, without the
+# non-bypassable part, only stops passing `--admin`.
+#
+# THE OPTIONAL CHECKS NEED NOTHING FROM GITHUB, which was not true before this
+# gate's sibling was bound: GitHub never enforces an optional check, and (3b) now
+# reads the merge target`s own, so a failing optional check on the commit being
+# merged is caught here rather than surviving into it.
 #
 # 5 IS NOT A FAILURE, and the catch-all below would have called it one. It means
 # the PR head is not the one this gate resolved — reported from EITHER

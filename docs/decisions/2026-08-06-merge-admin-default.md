@@ -78,16 +78,17 @@ this loop does not administer — the gate that never opens rather than one that
 fails closed. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is what closes
 it, because GitHub then evaluates the required checks itself at merge time.
 
-**Strict mode closes the required half of it and not the other.** With
-`REVIEW_MERGE_STRICT=1` on a repository whose required checks are non-bypassable —
-configured, and with bypassing disallowed or the credential lacking that
-permission — GitHub evaluates those itself at merge time, server-side and
-commit-bound. The all-checks gate also weighs OPTIONAL checks, which GitHub never
-enforces at all — though since #214 that gate reads the merge target's own checks,
-so an optional failure ON THE MERGED COMMIT is caught by the gate itself rather
-than needing GitHub to enforce it. And strict mode without the
-non-bypassable part only stops passing `--admin`, which is the same condition the
-strict-mode list below turns on.
+**Strict mode is what closes it.** With `REVIEW_MERGE_STRICT=1` on a repository
+whose required checks are non-bypassable — configured, and with bypassing
+disallowed or the credential lacking that permission — GitHub evaluates those
+itself at merge time, server-side and addressed by the commit it is merging. Strict
+mode without the non-bypassable part only stops passing `--admin`, which is the
+same condition the strict-mode list below turns on.
+
+**The optional checks need nothing from GitHub**, which was not true until the
+all-checks gate was bound to the merge target: GitHub never enforces an optional
+check, and that gate now reads the merged commit's own, so a failing optional check
+on it is caught by the gate rather than surviving into the merge.
 
 ## What is confirmed after the merge
 

@@ -225,6 +225,13 @@ case "\$*" in
         # into the page shape the endpoint really returns, so the helper's own jq
         # is what classifies rather than the stub.
         v="\$(cat "$TMP/gh.out")"
+        # `gh api --paginate` concatenates the pages it fetched; the stub does
+        # the same, so a helper that parses only the first is visible here.
+        if [ -f "$TMP/gh.runs.page2" ]; then
+            printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n'
+            cat "$TMP/gh.runs.page2"
+            exit 0
+        fi
         case "\$v" in
             '{'*) printf '%s\n' "\$v" ;;
             green)   printf '{"total_count":1,"check_runs":[{"name":"a","status":"completed","conclusion":"success"}]}\n' ;;
@@ -297,6 +304,25 @@ grep -qF "commits/$WANT/check-runs" "$TMP/args" \
 grep -qF "commits/$WANT/status" "$TMP/args" \
     && pass "…and the legacy commit statuses too, which the PR query also merges" \
     || die "the legacy commit statuses were not read: $(cat "$TMP/args")"
+# BOTH PAGINATED, and asserted rather than assumed. A commit can carry hundreds of
+# check runs — 294 on one commit of `cli/cli` when this was measured — so a read
+# that stops at the first page classifies a subset, and the record that would have
+# blocked the merge may be on the second.
+grep -qE "commits/$WANT/check-runs .*--paginate" "$TMP/args" \
+    && pass "…and the check-runs read is paginated" \
+    || die "the check-runs read is not paginated: $(cat "$TMP/args")"
+grep -qE "commits/$WANT/status .*--paginate" "$TMP/args" \
+    && pass "…and so is the commit-status read" \
+    || die "the commit-status read is not paginated: $(cat "$TMP/args")"
+# …AND A WORSE VERDICT ON A LATER PAGE DECIDES. Asserting the flag alone would
+# pass against a helper that requested every page and parsed only the first.
+mkgh_head "$WANT" green; : > "$TMP/gh.runs.page2"
+printf '{"total_count":1,"check_runs":[{"name":"b","status":"completed","conclusion":"failure"}]}\n' > "$TMP/gh.runs.page2"
+got="$(run 7 --head "$WANT")"
+rm -f "$TMP/gh.runs.page2"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "…and a failure on a LATER page is what the verdict reports" \
+    || die "a failing second page did not decide: '$got'"
 grep -qE '^pr checks|^checks' "$TMP/args" \
     && die "the PR-addressed query is still used for the all-checks question" \
     || pass "…and the PR-addressed query is not used for it at all"
@@ -547,6 +573,23 @@ sd_out="$(run_limited 8 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=6 \
 { [ "$sd_rc" -ne 124 ] && [ "$sd_rc" -ne 0 ]; } \
     && pass "a slow probe followed by a hung one still finishes inside one deadline" \
     || die "the per-call limit outlasted the helper's own budget (rc=$sd_rc)"
+
+# …AND THE SECOND COMMIT READ IS INSIDE IT TOO. The case above hangs on the FIRST
+# request after the head lookup, so it never reaches the legacy-status call and
+# the `rb_left` refresh between the two commit reads went uncovered: a check-runs
+# request that succeeds slowly and a status request that then stalls would reuse
+# the earlier allowance and outlast the caller's whole bound.
+#
+# The stub answers the head, answers check-runs slowly, and hangs on `/status`.
+printf '#!/usr/bin/env bash\ncase "$*" in\n  *check-runs*) sleep 3; printf %%s "{\"total_count\":1,\"check_runs\":[{\"name\":\"a\",\"status\":\"completed\",\"conclusion\":\"success\"}]}"; exit 0 ;;\n  *"/status"*) sleep 300 ;;\n  *) printf "0123456789abcdef0123456789abcdef01234567\\n"; exit 0 ;;\nesac\n' > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"
+sd2_rc=0
+sd2_out="$(run_limited 8 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=6 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 \
+    --head 0123456789abcdef0123456789abcdef01234567 2>&1)" || sd2_rc=$?
+{ [ "$sd2_rc" -ne 124 ] && [ "$sd2_rc" -ne 0 ]; } \
+    && pass "…and a slow check-runs read followed by a hung status read stays inside it" \
+    || die "the legacy-status call was granted a fresh allowance (rc=$sd2_rc out='$sd2_out')"
 
 # ── an exhausted deadline is refused, not renewed ──────────────────────────
 # Clamping a non-positive remainder up to one second granted a fresh allowance to
