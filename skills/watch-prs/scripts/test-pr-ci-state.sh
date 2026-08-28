@@ -254,7 +254,7 @@ got="$(run 7 --head "$WANT")"
 # …and the checks were never asked. Reporting stale while still consulting the
 # previous head's result leaves the wrong answer available to anything that reads
 # stdout rather than the status.
-grep -qE 'checks|check-runs' "$TMP/args" \
+grep -qE 'checks|check-runs|statusCheckRollup|graphql' "$TMP/args" \
     && die "the checks were read for a head that does not match: $(cat "$TMP/args")" \
     || pass "…without reading the checks of the head it found"
 
@@ -278,6 +278,41 @@ grep -qF "statusCheckRollup" "$TMP/args" \
 grep -qF "oid=$WANT" "$TMP/args" \
     && pass "…for the OID it was pinned to" \
     || die "the rollup was not addressed by the commit: $(cat "$TMP/args")"
+# …AND FOR THE RIGHT REPOSITORY, ON THE RIGHT SERVER. The stub answers the same
+# rollup whatever it is asked, so none of these is covered by the verdict: dropping
+# `--hostname` sends an Enterprise checkout to github.com, and a wrong owner or
+# repository reads the rollup of a FORK that has the same commit — a green answer
+# about a commit nobody is merging.
+grep -qF -- '--hostname github.com' "$TMP/args" \
+    && pass "…on the host the origin names" \
+    || die "the rollup was not pinned to a host: $(cat "$TMP/args")"
+grep -qF 'o=acme' "$TMP/args" \
+    && pass "…for the owner the origin names" \
+    || die "the rollup was not pinned to an owner: $(cat "$TMP/args")"
+grep -qF 'r=widget' "$TMP/args" \
+    && pass "…and the repository it names" \
+    || die "the rollup was not pinned to a repository: $(cat "$TMP/args")"
+# …AND THE THREE ARE SENT AS STRINGS. `--field` performs magic conversion, so a
+# repository named `123` would be sent as a JSON number against a `String!`
+# variable and rejected by the server — this helper reporting the round unreadable
+# for that repository alone. An OID of forty digits is the same trap.
+grep -qE -- '-F (o|r|oid)=' "$TMP/args" \
+    && die "a GraphQL variable is sent with magic conversion: $(cat "$TMP/args")" \
+    || pass "…each as a raw string, which is the only shape they can have"
+# …AND A NUMERIC REPOSITORY NAME IS THE CASE THAT PROVES IT. `acme/123` is a legal
+# repository, and with magic conversion its name reaches a `String!` variable as a
+# number: the server rejects the query and this helper reports every round on that
+# repository unreadable, while every other repository is fine.
+mkgh_head "$WANT" green; : > "$TMP/args"
+_num_rc=0
+_num_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/123.git' "$SCRIPT" 7 --head "$WANT" 2>&1)" || _num_rc=$?
+{ [ "$_num_rc" = 0 ] && grep -qF 'status=green' <<<"$_num_out"; } \
+    && pass "…so a repository whose name is a number is read like any other" \
+    || die "a numeric repository name was not readable: rc=$_num_rc '$_num_out'"
+grep -qF -- '-f r=123' "$TMP/args" \
+    && pass "…with its name sent as the string it is" \
+    || die "a numeric repository name was not sent raw: $(cat "$TMP/args")"
 # …AND IT IS ONE READ. The two REST endpoints it replaces had to be reconciled
 # here, and `--paginate` is not a snapshot: a rerun landing between two pages lets
 # a record repeat, or be replaced by one with a fresh id while the count holds.

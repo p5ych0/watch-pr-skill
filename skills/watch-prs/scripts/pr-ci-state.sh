@@ -285,9 +285,15 @@ checks_msg_is_none_configured() {
 commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
     local oid="$1" _left _out
     _left="$(rb_left)" || return 2
+    # `-f`, NOT `-F`. `--field` performs magic conversion, so a value that looks
+    # like a number is sent as a JSON number — and both of these variables are
+    # declared `String!`, so a repository named `123` is rejected by the server and
+    # this helper reports the round unreadable for that repository alone. An OID of
+    # forty digits is the same trap on the other variable. `--raw-field` sends the
+    # string that was measured, which is the only shape any of the three can have.
     _out="$(run_limited "$_left" gh api graphql --hostname "$HOST" \
         -f query='query($o:String!,$r:String!,$oid:GitObjectID!){repository(owner:$o,name:$r){object(oid:$oid){... on Commit{statusCheckRollup{state}}}}}' \
-        -F o="$OWNER" -F r="$REPO" -F oid="$oid" 2>/dev/null)" || return 2
+        -f o="$OWNER" -f r="$REPO" -f oid="$oid" 2>/dev/null)" || return 2
     # THE WHOLE PATH IS WALKED WITH `has`, not with `//`. A default swallows the
     # difference between a field that is absent because the body is an error and
     # one that is null because there is nothing to report, and those are opposite
