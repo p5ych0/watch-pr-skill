@@ -1,5 +1,61 @@
 # Changelog
 
+## [2.0.79] — 2026-08-28
+
+- **The required-checks gate is bound to the commit it merges, and the read that
+  makes that possible was there all along.** #214 recorded that it could not be
+  done: the required set is branch-protection state, and reading it needs admin —
+  `repos/{o}/{r}/branches/{b}/protection` denies with a **404 indistinguishable
+  from "not protected"**, so a loop that cannot read it cannot tell "nothing is
+  required" from "I am not allowed to know". That measurement was right about that
+  endpoint and wrong about the question. The **branch object** —
+  `repos/{o}/{r}/branches/{b}` — carries the same answer and is readable with the
+  `repo` scope this loop runs under.
+
+  Measured on ten repositories, none of which the measuring account administers:
+  three required contexts came back for `cli/cli`, eleven for
+  `kubernetes/kubernetes`, twenty-three for `microsoft/vscode`, while the dedicated
+  protection endpoint 404s on the same repository with the same token. Rulesets are
+  the other source and neither subsumes the other — `home-assistant/core` reports
+  `protection.enabled: false` with `protected: true` and its eight contexts appear
+  only under `rules/branches/{b}`, `cli/cli` is the other way round — so the
+  required set is the **union**, and a helper reading one alone reports a
+  requirement as absent.
+
+  With that set in hand the question becomes "do these contexts pass on THIS
+  commit", which the merge target's own rollup answers. So `--required` no longer
+  goes through `gh pr checks`, which is addressed by pull request and carries no
+  OID; the A → B → A that fitted inside #212's bracket — head moves to B, B's
+  required checks go green, the probe reads them, head returns to A, and A merges
+  on B's result — has nothing left to read.
+
+  **And a required context that has not reported is now visible.** That is the part
+  the all-checks gate beside it could never cover, and the reason this was a
+  merge-safety hole rather than a reporting inaccuracy: that gate reads the checks
+  which EXIST on the commit, and a requirement nothing has reported has neither a
+  check run nor a commit status. Named, it is `pending` — the requirement stands
+  and the answer is not in yet.
+
+  **A branch that requires nothing is still an answer**; one whose protection
+  cannot be read is not. `protected: false` reports `none` and the gate has nothing
+  to assert, exactly as before. A branch that IS protected whose protection comes
+  back missing or misshapen is an error and blocks, because the alternative is a
+  merge gated on an empty required set. The branch read is also what proves the
+  branch NAME: `rules/branches/{b}` answers `[]` for a branch that does not exist,
+  so a misspelling would arrive as "nothing is required", while `branches/{b}`
+  404s.
+
+  **What is still not bound**, stated because the layers that claimed too much for
+  this gate are what made #214 expensive: the required set is a property of the
+  base branch rather than of a commit, so a protection rule changed between that
+  read and the merge is a race GitHub has too; the "require branches to be up to
+  date" policy is not read; and on the default path the merge still uses `--admin`,
+  which bypasses protection outright, so this gate is the client-side stand-in for
+  it. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is still where GitHub
+  evaluates the requirement itself, at merge time.
+
+  Closes #214.
+
 ## [2.0.78] — 2026-08-28
 
 - **The all-checks gate now asks about the commit it is merging.** `gh pr checks` is

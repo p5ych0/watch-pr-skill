@@ -494,33 +494,32 @@ Then:
    asked about the head *that reviewer judged* — Copilot's is the head being
    merged; Codex's is the head Codex signed, which the Copilot phase may have moved
    past — and the **reviewed-range** gate is what licenses that delta, by proving
-   every commit between them is a Copilot fix. The **all-checks gate is asked about
-   the merge target too**, while the **required-checks gate is only bracketed** by
-   it (below), and **unresolved threads and the round boundary are questions about
-   the pull request**.
+   every commit between them is a Copilot fix. The **all-checks and required-checks
+   gates are both asked about the merge target**, and **unresolved threads and the
+   round boundary are questions about the pull request**.
 
-   **What "bracketed" means, and which gate it is.** The all-checks gate reads the
-   check runs and commit statuses *of the merge target*, so its answer is about that
-   commit. The required-checks gate cannot: `gh pr checks --required` is addressed
-   by pull request and has no commit selector, and the read that would say which
-   contexts are required is not available to an ordinary token — classic branch
-   protection needs administrator access and denies with a 404 that looks exactly
-   like "not protected". So that gate confirms the head either side of its read,
-   which catches a push that lands and stays, and a force-push away *and back*
-   whose both moves fall between those two confirmations is invisible to it.
+   **How the required-checks gate is bound.** It reads what the *base branch*
+   requires — the contexts under classic branch protection on the branch itself,
+   plus any a repository ruleset adds — and then asks the merge target's own check
+   rollup whether each of those passed on that commit. A required context that has
+   not reported yet is `pending`, which is the answer the all-checks gate beside it
+   cannot give: that one reads the checks which *exist* on the commit, and a
+   requirement nothing has reported has neither a check run nor a status.
 
-   **The all-checks gate does not cover that**, and it is worth being plain about
-   why: it reads the checks that *exist* on the merge target, which is not the set a
-   branch *requires*. A required context that has not reported has nothing to read,
-   so that gate can be green while the requirement is unmet.
+   **A branch that requires nothing is an answer; one whose protection cannot be
+   read is not.** An unprotected branch reports "nothing to assert" and the gate
+   passes, as before. A branch that *is* protected whose protection comes back
+   missing or misshapen blocks the merge, because the alternative is a merge gated
+   on an empty required set.
 
-   **On the default `--admin` path this is a real hole**, tracked as issue #214 and
-   not covered by the trade-off recorded in `docs/decisions/`. Refusing whenever the
-   required set cannot be read would refuse on every repository you do not
-   administer, so what closes it is **`REVIEW_MERGE_STRICT=1` on non-bypassable
-   protection** — configured, and with bypassing disallowed or the credential
-   lacking that permission — where GitHub evaluates the required checks itself at
-   merge time. That is the strongest reason in this README to configure it.
+   **What is still not bound.** The required set is a property of the base branch
+   rather than of a commit, so a protection rule changed between that read and the
+   merge is a race GitHub has as well. The "require branches to be up to date"
+   policy is not read: a branch behind its base with that policy on is blocked by
+   GitHub, not by this. And on the default `--admin` path the merge bypasses branch
+   protection regardless, so this gate is the client-side stand-in for it —
+   **`REVIEW_MERGE_STRICT=1` on non-bypassable protection** is still where GitHub
+   evaluates the requirement itself, at merge time, atomically.
 
 ## Automatic review (opt-in per repo)
 

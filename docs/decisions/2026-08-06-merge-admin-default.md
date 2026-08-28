@@ -40,43 +40,33 @@ and the merge.
   did;
 - honours `REVIEW_MERGE_STRICT=1`, which drops `--admin` entirely.
 
-**The required-checks gate is bracketed rather than bound, and it is now the only
-one.** It reaches `gh pr checks --required`, which is addressed by pull request;
-the all-checks gate reads the merge target's own check runs and commit statuses,
-and the reviewer verdicts and the reviewed range are commit-addressed too — though
-the Codex verdict is asked about the head Codex signed rather than the merge head,
-with the range gate licensing the delta. The thread and round-boundary gates do not
-take an OID at all.
+**Every gate that can be addressed by a commit now is.** The reviewer verdicts and
+the reviewed range are commit-addressed — though the Codex verdict is asked about
+the head Codex signed rather than the merge head, with the range gate licensing the
+delta. The all-checks gate reads the merge target's own rollup. The required-checks
+gate reads what the base branch requires and asks that same rollup about those
+contexts, which is #214 and closed. The thread and round-boundary gates do not take
+an OID at all, and are about the pull request by nature.
 
-**That bracket IS a merge-safety question, and an argument that it was not has
-been refuted.** The all-checks gate is not a superset of what a branch requires: it
-reads the checks that EXIST on the merge target, and a required context which has
-not reported has neither a check run nor a commit status. So it can answer green
-while a requirement is unmet, and a stale required answer about another commit then
-approves the merge. `gh pr checks` takes a PR number, has no
-commit selector, and its answer carries no OID — so the two confirmations catch a
-head that moved and stayed moved, which is the ordinary case, and cannot see an
-A → B → A whose **both moves complete between them**: the first confirmation sees
-A, so the move away is after it; the second sees A, so the return is before it.
-The unsafe case is always that pair — `--match-head-commit` refuses a head that
-simply moved away. Until #212 there was no bracket at all, so the two moves could
-straddle everything between the checks read and the merge; now they have to fall
-between the two head confirmations — a window that still SPANS the checks request
-rather than being contained by it.
+**#214 IS CLOSED, and this record used to say it could not be.** It said the read
+that would bind the required set needs administrator access and denies with a 404
+indistinguishable from "not protected". That was measured on
+`repos/{o}/{r}/branches/{b}/protection`, which does behave that way. The BRANCH
+OBJECT — `repos/{o}/{r}/branches/{b}` — carries the same answer and is readable
+with the `repo` scope this loop runs under: measured on ten repositories none of
+which the measuring account administers, three required contexts came back for
+`cli/cli`, eleven for `kubernetes/kubernetes`, twenty-three for `microsoft/vscode`,
+while the dedicated endpoint 404s on the same repository with the same token. A
+ruleset's contexts come from `repos/{o}/{r}/rules/branches/{b}`, and the required
+set is the union: `home-assistant/core` requires eight contexts through a ruleset
+with `protection.enabled` false, `cli/cli` the other way round.
 
-**That residue is #214 and is NOT waived by this record.** It is a race of the same
-family as the one below, and it is not the same race: it needs two force-pushes
-between the two head confirmations rather than one push in the seconds before a
-merge — a window that spans the checks request rather than being contained by it —
-and nobody
-has measured it. Do not widen this record to cover it.
-
-**Nor is it closable from the client.** The read that would bind the required set
-needs administrator access and denies with a 404 indistinguishable from "not
-protected", so refusing whenever it cannot be read would refuse on every repository
-this loop does not administer — the gate that never opens rather than one that
-fails closed. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is what closes
-it, because GitHub then evaluates the required checks itself at merge time.
+**What that leaves for this record.** Nothing about the required set — it is bound.
+What is still bounded rather than closed is the `--admin` bypass itself, below,
+and two smaller things named where the code is: protection changed between the
+required-set read and the merge, which is a race GitHub has too because protection
+is a property of a branch rather than of a commit, and the "require branches to be
+up to date" policy, which is not read.
 
 **Strict mode is what closes it.** With `REVIEW_MERGE_STRICT=1` on a repository
 whose required checks are non-bypassable — configured, and with bypassing

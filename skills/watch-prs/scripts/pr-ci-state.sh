@@ -232,15 +232,12 @@ checks_msg_is_none_configured() {
 #
 # `gh pr checks` is addressed by PULL REQUEST and its answer carries no OID, so
 # bracketing it with head confirmations narrows when a head can move and never
-# binds the answer to a commit. These two endpoints ARE addressed by a commit:
-# what they return is about the OID in the path and nothing else.
+# binds the answer to a commit. This rollup IS addressed by a commit: what it
+# returns is about the OID it is asked for and nothing else.
 #
-# ONLY FOR THE ALL-CHECKS QUESTION. `--required` needs to know which contexts
-# branch protection requires, and that read is not available: classic protection
-# needs admin and denies with a 404 indistinguishable from "not protected", while
-# the ruleset endpoints are readable without admin but do not see classic
-# protection at all. Measured on #214. So `--required` keeps the bracketed PR-
-# addressed query, and this one answers the question that needs no such read.
+# THE ALL-CHECKS QUESTION ONLY. `--required` also needs to know WHICH contexts the
+# base branch requires, which this cannot say; `required_checks_verdict` below
+# reads that separately and then asks this same rollup for the contexts.
 #
 # IT IS NOT A SUPERSET OF WHAT IS REQUIRED, and an earlier version of this comment
 # claimed it was. These endpoints report the checks that EXIST on the commit; a
@@ -317,6 +314,152 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
     return 0
 }
 
+# ── WHAT THE BASE BRANCH REQUIRES, AND WHETHER THIS COMMIT MEETS IT ────────
+#
+# THE READ IS AVAILABLE, and #214 said it was not. That issue measured
+# `repos/{o}/{r}/branches/{b}/protection`, which does need admin and denies with a
+# 404 indistinguishable from "not protected". The BRANCH OBJECT carries the same
+# answer and is readable with the `repo` scope this loop runs under: measured on
+# ten repositories none of which this account administers, `repos/{o}/{r}/branches/{b}`
+# returns `protected` and, under `protection.required_status_checks`, the contexts
+# themselves — three on `cli/cli`, eleven on `kubernetes/kubernetes`,
+# twenty-three on `microsoft/vscode` — while the dedicated endpoint 404s on the
+# same repository with the same token.
+#
+# BOTH SOURCES, because either can be the whole answer. `home-assistant/core`
+# reports `protection.enabled: false` with `protected: true`: its protection is a
+# RULESET, and its eight required contexts appear only under
+# `repos/{o}/{r}/rules/branches/{b}`. `cli/cli` is the other way round. So the
+# required set is the UNION, and reading one alone reports a requirement as absent.
+#
+# `protected: false` IS AN ANSWER; an unreadable shape is not. A branch with no
+# protection from either source requires nothing, and that is what `none` means
+# here — not "could not tell". But a branch that IS protected whose protection
+# object is missing or of another shape is `malformed`, because the contexts
+# cannot be listed and a merge would then be gated on an empty set.
+#
+# THE BRANCH READ IS ALSO WHAT PROVES THE NAME. `rules/branches/{b}` answers `[]`
+# for a branch that does not exist — a misspelling would arrive as "nothing is
+# required" — while `branches/{b}` 404s, so the read that can be wrong is the one
+# behind the read that cannot.
+#
+# WHAT IS NOT COVERED, stated because the comment beside the code is where a
+# reader looks: the "require branches to be up to date" policy (`strict` in
+# classic protection, `strict_required_status_checks_policy` in a ruleset) is not
+# read. A branch behind its base with that policy on is blocked by GitHub and not
+# by this. #214 is about which contexts are required.
+required_contexts() {   # <base ref> ; prints a JSON array of context names
+    local base="$1" _left _branch _rules
+    _left="$(rb_left)" || return 2
+    _branch="$(run_limited "$_left" gh api --hostname "$HOST" \
+        "repos/$OWNER/$REPO/branches/$base" 2>/dev/null)" || return 2
+    _left="$(rb_left)" || return 2
+    _rules="$(run_limited "$_left" gh api --hostname "$HOST" \
+        "repos/$OWNER/$REPO/rules/branches/$base" 2>/dev/null)" || return 2
+    # EVERY FIELD IS TYPED BEFORE IT IS USED. An absent or oddly-shaped one read as
+    # "no contexts" is a merge gated on an empty required set, which is the
+    # direction that opens the gate rather than the one that closes it.
+    printf '%s\n%s\n' "$_branch" "$_rules" | jq -c -s '
+        if length != 2 then error("two documents are expected")
+        elif (.[0] | type) != "object" then error("the branch is not an object")
+        elif (.[0].protected | type) != "boolean" then error("protected is not a boolean")
+        elif (.[1] | type) != "array" then error("the rules are not an array")
+        else
+          ( .[0] as $b
+            | if ($b.protection | type) == "object" then
+                if ($b.protection.required_status_checks | type) == "null"
+                   or ($b.protection | has("required_status_checks") | not) then []
+                elif ($b.protection.required_status_checks | type) != "object"
+                  then error("required_status_checks is not an object")
+                elif ($b.protection.required_status_checks.contexts | type) != "array"
+                  then error("the classic contexts are not an array")
+                elif any($b.protection.required_status_checks.contexts[]; type != "string")
+                  then error("a classic context is not a string")
+                else $b.protection.required_status_checks.contexts end
+              elif $b.protected then error("the branch is protected and its protection is unreadable")
+              else [] end ) as $classic
+          | ( [ .[1][]
+                | if type != "object" then error("a rule is not an object")
+                  elif (.type | type) != "string" then error("a rule has no type")
+                  elif .type != "required_status_checks" then empty
+                  elif (.parameters | type) != "object" then error("a rule has no parameters")
+                  elif (.parameters.required_status_checks | type) != "array"
+                    then error("the ruleset checks are not an array")
+                  else .parameters.required_status_checks[]
+                       | if type != "object" or (.context | type) != "string"
+                         then error("a ruleset context is not a string")
+                         else .context end
+                  end ] ) as $ruleset
+          | ( $classic + $ruleset | unique )
+        end' 2>/dev/null || return 2
+    return 0
+}
+
+# THE CONTEXTS OF THE COMMIT, from the same rollup the all-checks question uses
+# and therefore addressed the same way. `contexts` is the rollup's own view, one
+# entry per context rather than one per run: measured, a `cli/cli` commit whose
+# REST check-run listing holds 302 records reports 10 here. A page boundary is
+# still refused rather than truncated — a required context on the second page
+# would read as one that has not reported, and this loop would wait for a check
+# that had already passed.
+#
+# A REQUIRED CONTEXT THAT IS NOT THERE IS PENDING, not missing. That is what
+# `EXPECTED` means on the other side of the same question: the requirement stands
+# and the answer is not in yet.
+required_checks_verdict() {   # <oid> <base> ; prints green|failed|pending|none|malformed
+    local oid="$1" base="$2" _left _req _out
+    _req="$(required_contexts "$base")" || return 2
+    case "$_req" in
+        '[]') printf '%s\n' none; return 0 ;;
+        '['*) ;;
+        *)    return 2 ;;
+    esac
+    _left="$(rb_left)" || return 2
+    _out="$(run_limited "$_left" gh api graphql --hostname "$HOST" \
+        -f query='query($o:String!,$r:String!,$oid:GitObjectID!){repository(owner:$o,name:$r){object(oid:$oid){... on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage}nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}' \
+        -f o="$OWNER" -f r="$REPO" -f oid="$oid" 2>/dev/null)" || return 2
+    printf '%s' "$_out" | jq -r --argjson req "$_req" '
+        if type != "object" or (has("errors")) then "malformed"
+        elif (.data | type) != "object" then "malformed"
+        elif (.data.repository | type) != "object" then "malformed"
+        elif (.data.repository | has("object") | not) then "malformed"
+        elif (.data.repository.object | type) != "object" then "malformed"
+        elif (.data.repository.object | has("statusCheckRollup") | not) then "malformed"
+        else ( if .data.repository.object.statusCheckRollup == null then []
+               elif (.data.repository.object.statusCheckRollup | type) != "object" then null
+               elif (.data.repository.object.statusCheckRollup.contexts | type) != "object" then null
+               elif (.data.repository.object.statusCheckRollup.contexts.pageInfo.hasNextPage | type) != "boolean" then null
+               elif .data.repository.object.statusCheckRollup.contexts.pageInfo.hasNextPage then null
+               elif (.data.repository.object.statusCheckRollup.contexts.nodes | type) != "array" then null
+               else .data.repository.object.statusCheckRollup.contexts.nodes end ) as $ctx
+          | if $ctx == null then "malformed"
+            elif any($ctx[]; type != "object" or (.__typename | type) != "string") then "malformed"
+            else [ $req[] as $name
+                   | ( [ $ctx[] | select((.name // .context) == $name) ] | first ) as $c
+                   | if $c == null then "pending"
+                     elif $c.__typename == "CheckRun" then
+                       if ($c.status | type) != "string" then "malformed"
+                       elif $c.status != "COMPLETED" then "pending"
+                       elif ($c.conclusion | type) != "string" then "malformed"
+                       elif $c.conclusion | IN("FAILURE","CANCELLED","TIMED_OUT","ACTION_REQUIRED","STARTUP_FAILURE","STALE") then "failed"
+                       elif $c.conclusion | IN("SUCCESS","NEUTRAL","SKIPPED") then "green"
+                       else "malformed" end
+                     elif $c.__typename == "StatusContext" then
+                       if ($c.state | type) != "string" then "malformed"
+                       elif $c.state | IN("FAILURE","ERROR") then "failed"
+                       elif $c.state | IN("PENDING","EXPECTED") then "pending"
+                       elif $c.state == "SUCCESS" then "green"
+                       else "malformed" end
+                     else "malformed" end ] as $v
+              | if any($v[]; . == "malformed") then "malformed"
+                elif any($v[]; . == "failed") then "failed"
+                elif any($v[]; . == "pending") then "pending"
+                else "green" end
+            end
+        end' 2>/dev/null || return 2
+    return 0
+}
+
 ERRF="$(mktemp 2>/dev/null)" || {
     echo "PR_CI_STATE pr=$PR status=error reason=no_scratch_file" >&2; exit 2; }
 # THE CONTAINER IS VALIDATED BEFORE anything is concluded from it. `all(.[]; …)`
@@ -329,15 +472,40 @@ ERRF="$(mktemp 2>/dev/null)" || {
 # that reached `dismissed` through a catch-all and drove a review loop. See
 # recordlib.sh.
 RC=0
-# THE COMMIT-ADDRESSED PATH IS TAKEN WHERE IT CAN ANSWER, which is the all-checks
-# question with a head to ask about. `--required` cannot use it — see the note on
-# `commit_checks_verdict` — and neither can a call with no `--head`, because there
-# is no commit to address.
+# THE COMMIT-ADDRESSED PATH IS TAKEN WHERE IT CAN ANSWER, and since #214 that is
+# BOTH questions with a head to ask about. A call with no `--head` still goes to
+# `gh pr checks`, because there is no commit to address.
 if [ -n "$WANT_HEAD" ] && [ -z "$REQUIRED" ]; then
     OUT="$(commit_checks_verdict "$WANT_HEAD")" || RC=$?
     MSG=""
     if [ "$RC" -ne 0 ]; then
         echo "PR_CI_STATE pr=$PR status=error reason=commit_checks_unreadable rc=$RC head=$WANT_HEAD" >&2
+        rm -f "$ERRF" 2>/dev/null
+        exit 2
+    fi
+    rm -f "$ERRF" 2>/dev/null
+elif [ -n "$WANT_HEAD" ]; then
+    # WHICH BRANCH IS BEING MERGED INTO, because that is what requires anything.
+    # It is the PR's own field rather than the checkout's: this helper is given a
+    # PR number, and the working tree may be on any branch or none.
+    _left_base="$(rb_left)" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
+    BASE_REF="$(run_limited "$_left_base" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO"                   --json baseRefName --jq '.baseRefName' 2>/dev/null)" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=base_unreadable" >&2; exit 2; }
+    # THE SHAPE IS CHECKED because the value goes into a URL PATH. A leading `-`
+    # is read by `gh` as a flag, `#` truncates the path at a fragment, `%` invites
+    # a second decoding, and whitespace is not a thing a ref can contain — so each
+    # is a value this cannot ask about rather than one to ask about anyway. A
+    # SLASH is left alone: measured, `branches/foo/bar` and `branches/foo%2Fbar`
+    # reach the same handler, so `feature/x` needs no encoding.
+    case "$BASE_REF" in
+        ""|-*|/*|*[%#]*|*[[:space:]]*|*..*)
+            echo "PR_CI_STATE pr=$PR status=error reason=bad_base base=$BASE_REF" >&2; exit 2 ;;
+    esac
+    OUT="$(required_checks_verdict "$WANT_HEAD" "$BASE_REF")" || RC=$?
+    MSG=""
+    if [ "$RC" -ne 0 ]; then
+        echo "PR_CI_STATE pr=$PR status=error reason=required_checks_unreadable rc=$RC head=$WANT_HEAD" >&2
         rm -f "$ERRF" 2>/dev/null
         exit 2
     fi
@@ -365,21 +533,24 @@ fi
 # `gh pr checks` exits non-zero when a check FAILED as well as when it is pending
 # or absent, so the status alone does not classify anything — the parsed value
 # does, and the status only matters where there is no value to trust.
-# THE READ IS BRACKETED BY THE HEAD, not merely preceded by a check of it. The
-# confirmation above and the checks call are two requests, and a push landing
-# between them means the answer describes a commit nobody verified — in the round
-# loop, a head that had almost finished earning its grace hands that grace to a
-# different commit, whose own checks have not been registered yet.
+# THE HEAD IS CONFIRMED AFTER THE READ as well as before it. The confirmation
+# above and the read are separate requests, and a push landing between them means
+# the answer describes a commit nobody verified — in the round loop, a head that
+# had almost finished earning its grace hands that grace to a different commit,
+# whose own checks have not been registered yet.
 #
 # So the head is read once more and must still be the one asked about.
 #
-# WHICH OF THE TWO QUESTIONS THIS IS DECIDES WHAT THE BRACKET IS WORTH. The
-# all-checks question is answered by `commit_checks_verdict`, addressed by the OID
-# in its path, so its answer is BOUND to the commit and this confirmation only
-# reports whether the head has since moved. The `--required` question still goes
-# through `gh pr checks`, which has no commit selector, so there the confirmations
-# are a BRACKET: they catch a head that moves and stays moved, and an A → B → A
-# whose both moves land between them is invisible to both. #214.
+# WHAT THE CONFIRMATION IS WORTH DEPENDS ON WHICH READ ANSWERED. Both questions
+# are addressed by the OID now — `commit_checks_verdict` and
+# `required_checks_verdict` each ask a rollup for the commit they are given — so
+# the answer is BOUND and this confirmation only reports whether the head has
+# since moved. Only a call with NO `--head` goes through `gh pr checks`, which has
+# no commit selector; there this block does not run at all. #214.
+#
+# THE REQUIRED SET ITSELF IS A PROPERTY OF THE BASE BRANCH, not of the commit, so
+# it is not bound by an OID and cannot be: protection changed between the read and
+# the merge is a race GitHub has too, and it is not the one #214 is about.
 if [ -n "$WANT_HEAD" ]; then
     _left_after="$(rb_left)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
