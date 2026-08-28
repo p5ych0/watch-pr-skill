@@ -409,9 +409,12 @@ rediscovering them.
   124 for reasons of its own, and a branch deciding between them in a YAML file is
   logic no fixture can reach.
 
-  **`SKILL.md`'s bash is covered by neither CI job, and that is settled rather than
-  open.** Reaching it where it lives means parsing Markdown, which was tried and
-  removed — four rounds of fence spellings, two of which rejected valid source.
+  **`SKILL.md`'s bash is covered ONLY WHERE THE CONTRACT LIFTS IT, and that boundary
+  is settled rather than open.** Neither CI job reaches the document: they run the
+  suite, and a fenced block is not a file the suite has. What they reach is whatever
+  `test-pr-skill-contract.sh` extracts and runs. Reaching the document itself would
+  mean parsing Markdown, which was tried and removed — four rounds of fence
+  spellings, two of which rejected valid source.
 
   MOVING IT INTO `.sh` FILES IS NOT THE ANSWER, and #26 is the measurement that
   says so rather than the issue that asks for it. What remains in the document is
@@ -424,11 +427,12 @@ rediscovering them.
   WHAT COVERS IT INSTEAD is `test-pr-skill-contract.sh`, which LIFTS AND EXECUTES
   these blocks — against readonly names, namerefs, `declare -i/-l/-u`, a shadowed
   `exit`, a neutralised `echo`, an interactive shell and a forged helper. BOTH CI
-  JOBS RUN IT, because both loop over every `test-*.sh`, so the lifted blocks are
+  JOBS RUN IT, because both loop over every `test-*.sh`, so the LIFTED blocks are
   parsed and run by the bash 3.2 job as well whenever the workflow is on — which is
-  what would catch the `[[ … =~ … ]]` defect that prompted #26 today. One narrow
-  lift by anchored `grep`, with no grammar, covers the merge-gate condition that
-  made the gap visible.
+  what would catch the `[[ … =~ … ]]` defect that prompted #26 today. A block
+  nothing lifts gets none of that, which is the boundary an author has to know.
+  One narrow lift by anchored `grep`, with no grammar, covers the merge-gate
+  condition that made the gap visible.
 
   **Behavioural differences count too, not only parsing, and this one recurs.**
   Three examples from a single pull request: bash 5 traces a simple command BEFORE

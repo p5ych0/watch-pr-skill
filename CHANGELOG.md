@@ -17,8 +17,14 @@
   "the fix is to move the code into `.sh` files". Both are false: #26 closed on the
   finding that the code cannot move, and `test-pr-skill-contract.sh` lifts and
   EXECUTES those blocks against readonly names, namerefs, `declare -i/-l/-u`, a
-  shadowed `exit`, a neutralised `echo`, an interactive shell and a forged helper.
-  That is the authoring source, so it is the worst place for it.
+  shadowed `exit`, a neutralised `echo`, an interactive shell and a forged helper —
+  in BOTH CI jobs, so on bash 3.2 as well. That is the authoring source, so it is
+  the worst place for it.
+
+  The replacement says the boundary falls **by lift, not by file**: neither job
+  reaches the document, both run whatever the contract extracts, and a block nothing
+  lifts has no coverage at all. Saying "covered by neither job" would have been the
+  same defect pointing the other way.
 
   `SKILL-RATIONALE.md` carried the same coverage claim and a conditional owned by
   #93, which is closed and whose CI job is enabled. `clocklib.sh` described a
