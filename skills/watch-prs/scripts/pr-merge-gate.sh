@@ -27,14 +27,19 @@
 #
 # WHAT IT DECIDES, in order, each one able to stop the merge on its own:
 #
-#   (0) the head is resolved ONCE, and it is the merge target every gate is about.
-#       (1), (2) and (3b) TAKE it as an argument; (4) only BRACKETS its request
-#       with it, which is weaker — see the note there and #214; (3) and (4b) are
-#       PR-level and always were
+#   (0) the head is resolved ONCE, and it is the MERGE TARGET. What each gate is
+#       about differs. (1) and (2) are COMMIT-ADDRESSED but not all about THIS
+#       commit: (1) asks each reviewer about the head THAT reviewer judged, which
+#       for Codex is `$CODEX_SHA` where the Copilot phase moved past it, and (2) is
+#       what licenses the delta. (3b) and (4) are BRACKETED — both take the merge
+#       head and both reach `gh pr checks`, which is addressed by PULL REQUEST, so
+#       the head is confirmed either side of a response that carries none; see the
+#       note at (4) and #214. (3) and (4b) are PR-level and always were
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
-#  (3b) every check on the head is green, not only the required ones
+#  (3b) every check on the head is green, not only the required ones — through
+#       `pr-ci-gate.sh`, which delegates to the same bracket (4) uses
 #   (4) the required checks satisfy branch protection — BRACKETED by the head
 #       rather than bound to it; see the note at that gate and #214
 #  (4b) the round boundary has not been reached

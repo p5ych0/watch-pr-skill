@@ -24,10 +24,12 @@ and the merge.
 - pins the merge to that OID with `--match-head-commit`, which is what makes the
   comparison atomic: GitHub refuses the merge unless the PR head still matches, so
   there is no client-side re-read to race and none is performed;
-- probes the reviewer's state and verdict **against that head** through
-  `pr-review-state.sh`, so a `blocked`, dismissed or body-only
-  `CHANGES_REQUESTED` review is seen rather than walked past — the reviewed-range
-  check takes the OID too;
+- probes each reviewer's state and verdict through `pr-review-state.sh`, against
+  the head THAT reviewer judged — Copilot's is the merge head, Codex's is the head
+  it signed — so a `blocked`, dismissed or body-only `CHANGES_REQUESTED` review is
+  seen rather than walked past;
+- proves every commit between those two heads is a Copilot fix, which is what
+  licenses the delta;
 - checks that every check on that head is green, not only the required ones,
   through `pr-ci-gate.sh` — which delegates to the same bracket as the next item,
   so it is bracketed rather than bound too;
@@ -42,8 +44,9 @@ and the merge.
 take the OID without being bound by it — the all-checks one reaches `gh pr checks`
 through `pr-ci-gate.sh` and the required-checks one directly, and it is the same
 endpoint with the same bracket. The reviewer verdicts and the reviewed range ARE
-commit-addressed; the thread and round-boundary gates do not take the OID at all
-and are PR-level by nature. `gh pr checks` takes a PR number, has no
+commit-addressed — though the Codex verdict is asked about the head Codex signed
+rather than the merge head, with the range gate licensing the delta — and the
+thread and round-boundary gates do not take an OID at all. `gh pr checks` takes a PR number, has no
 commit selector, and its answer carries no OID — the same is true of the
 all-checks gate, which reaches that endpoint through `pr-ci-gate.sh` — so the two
 confirmations catch a

@@ -490,10 +490,13 @@ Then:
 6. **Merge gate.** On a clean signoff from both reviewers the skill resolves the
    head once and runs every gate before merging pinned to that head with
    `--match-head-commit`, so a push landing mid-gate is rejected rather than merged
-   unreviewed. The gates are not all about the same thing: **both verdicts and the
-   reviewed range are asked about that commit**, the **two check gates are
-   bracketed** by it (below), and **unresolved threads and the round boundary are
-   questions about the pull request**.
+   unreviewed. The gates are not all about the same thing. Each **verdict** is
+   asked about the head *that reviewer judged* — Copilot's is the head being
+   merged; Codex's is the head Codex signed, which the Copilot phase may have moved
+   past — and the **reviewed-range** gate is what licenses that delta, by proving
+   every commit between them is a Copilot fix. The **two check gates are bracketed**
+   by the merge head rather than bound to it (below), and **unresolved threads and
+   the round boundary are questions about the pull request**.
 
    **What "bracketed" means.** `gh pr checks` is addressed by pull request and has
    no commit selector, and both check gates reach it — so each confirms the head on
