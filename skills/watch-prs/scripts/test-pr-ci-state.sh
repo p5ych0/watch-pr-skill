@@ -519,102 +519,118 @@ for _wf in base branch rules; do
         && pass "…and a failed $_wf read is an error, not an empty requirement" \
         || die "a failed $_wf read gave '$got'"
 done
-# A BASE NAME THIS CANNOT ASK ABOUT IS REFUSED, because it goes into a URL PATH: a
-# leading `-` is read by `gh` as a flag, `#` truncates at a fragment, `%` invites a
-# second decoding, and whitespace is not something a ref can hold.
-for _bb in '' '-x' '/x' 'a b' 'a#b' 'a%2Fb' '../x'; do
+# A BASE NAME IS ENCODED, NOT REFUSED. It goes into a URL path, so `#`, `%` and a
+# space all need encoding there — and every one of them is legal in a git ref, so
+# refusing them would mean this gate could never merge a pull request targeting
+# `release#candidate` whatever its checks said.
+for _bb in 'release#candidate:release%23candidate' 'a%b:a%25b' 'a b:a%20b' '-x:-x' 'release/2.0:release%2F2.0' 'ünïcode:%C3%BCn%C3%AFcode'; do
+    _raw="${_bb%%:*}"; _enc="${_bb#*:}"
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[]' '[]'
+    printf '%s\n' "$_raw" > "$TMP/gh.base"
+    : > "$TMP/args"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
+        && pass "the base '$_raw' is asked about rather than refused" \
+        || die "the base '$_raw' was refused: '$got'"
+    grep -qF "repos/acme/widget/branches/$_enc" "$TMP/args" \
+        && pass "…encoded as '$_enc', which is what the endpoint answers" \
+        || die "the base '$_raw' was not encoded: $(cat "$TMP/args")"
+done
+# TWO ARE STILL REFUSED, and neither is a ref git would create. An empty name has
+# nothing to ask about, and `..` is the one traversal encoding does not close —
+# `.` is unreserved and stays itself, so `branches/../../secret` would ask about
+# another repository. Git rejects two consecutive dots in a ref name.
+for _bb in '' '../x' 'a..b'; do
     mkgh_head "$WANT" green
     printf '%s\n' "$_bb" > "$TMP/gh.base"
     got="$(run 7 --head "$WANT" --required)"
     { [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_base' <<<"${got#*|}"; } \
-        && pass "…and a base name that cannot go in a path is refused" \
+        && pass "…while the base '$_bb' is refused" \
         || die "the base '$_bb' was accepted: '$got'"
 done
-# …WHILE A SLASH IS NOT ONE OF THEM. Measured, `branches/foo/bar` and
-# `branches/foo%2Fbar` reach the same handler, so `release/2.0` needs no encoding
-# and refusing it would be a gate that never opens for whoever branches that way.
+
+# ── A REQUIREMENT BOUND TO AN APP IS NOT MET BY ANOTHER APP'S RUN ──────────
+# Both sources can bind a context to an app — `app_id` under classic protection's
+# `checks`, `integration_id` in a ruleset — and GitHub then counts only that app's
+# run. Matching on the name alone lets a passing run of the same name from another
+# app satisfy this gate, which on the default `--admin` path is the merge.
 mkgh_head "$WANT" green
-mkgh_required '{"protected":false}' '[]' '[]'
-printf 'release/2.0\n' > "$TMP/gh.base"
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42,"context":"build"}]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":42}}}]'
 got="$(run 7 --head "$WANT" --required)"
-{ [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
-    && pass "…while a base branch with a slash in its name is asked about as it is" \
-    || die "a slashed base branch was refused: '$got'"
-grep -qF 'repos/acme/widget/branches/release/2.0' "$TMP/args" \
-    && pass "…unencoded, which is the form that endpoint answers" \
-    || die "the slashed base was not asked about as it is: $(cat "$TMP/args")"
-
-# EVERY VERDICT COMES THROUGH THE HELPER'S OWN CLASSIFIER on this path, so the stub
-# returns the response GitHub really sends and the jq is what decides. The states
-# are the `StatusState` enum, read from the schema rather than assumed.
-for _cv in FAILURE:1:failed ERROR:1:failed PENDING:3:pending EXPECTED:3:pending SUCCESS:0:green; do
-    _state="${_cv%%:*}"; _rest="${_cv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
-    mkgh_head "$WANT" "$_state"
-    got="$(run 7 --head "$WANT")"
-    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_st" <<<"${got#*|}"; } \
-        && pass "…and a $_state rollup is $_st" \
-        || die "a $_state rollup gave '$got'"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "a run from the app the requirement names satisfies it" \
+    || die "the named app's run did not satisfy the requirement: '$got'"
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42,"context":"build"}]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…while the same name from another app does not" \
+    || die "another app's run satisfied a bound requirement: '$got'"
+# …AND A LEGACY STATUS CANNOT MEET A BOUND ONE. A StatusContext carries a creator,
+# not the app id the requirement names, so there is nothing to compare.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42,"context":"legacy"}]}}}' '[]' \
+    '[{"__typename":"StatusContext","context":"legacy","state":"SUCCESS"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and neither does a legacy status, which carries no app id" \
+    || die "a legacy status satisfied a bound requirement: '$got'"
+# …WHILE AN UNBOUND REQUIREMENT IS MET BY EITHER KIND, as GitHub does it. All three
+# of `cli/cli`'s required contexts carry `app_id: null`.
+for _n in '{"__typename":"CheckRun","name":"any","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}' '{"__typename":"StatusContext","context":"any","state":"SUCCESS"}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":null,"context":"any"}]}}}' '[]' "[$_n]"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+        && pass "…while an unbound requirement is met whichever kind reports it" \
+        || die "an unbound requirement was not met: '$got'"
 done
-# `EXPECTED` IS PENDING RATHER THAN GREEN, and that is the one above whose direction
-# matters most: it is the state of a context branch protection requires that has not
-# reported, so reading it as green would merge on a check that never ran.
-mkgh_head "$WANT" EXPECTED
-got="$(run 7 --head "$WANT")"
-grep -qF 'status=green' <<<"${got#*|}" \
-    && die "an unreported required context was read as green: '$got'" \
-    || pass "…and never green, since that context has not reported"
-# AN UNRECOGNISED STATE IS MALFORMED, not benign — the rule `recordlib.sh` records,
-# applied to the value this path parses itself.
-mkgh_head "$WANT" SURPRISING
-got="$(run 7 --head "$WANT")"
-[ "${got%%|*}" = 2 ] \
-    && pass "…and a state outside the enum is unreadable, not green" \
-    || die "an unknown rollup state gave '$got'"
+# A RULESET BINDING IS THE SAME RULE by another name.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
+    '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"scan","integration_id":42}]}}]' \
+    '[{"__typename":"CheckRun","name":"scan","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and a ruleset integration_id binds the same way" \
+    || die "a ruleset binding was ignored: '$got'"
+# AN IDENTITY OF ANOTHER SHAPE IS UNREADABLE, rather than a requirement with no
+# binding — which would be the binding dropped in silence.
+for _bad in '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":"42","context":"build"}]}}}' '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42}]}}}'; do
+    mkgh_head "$WANT" green
+    mkgh_required "$_bad" '[]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and a check identity of another shape is unreadable" \
+        || die "a malformed check identity was accepted: '$got'"
+done
 
-# ── A NULL ROLLUP IS `none`; A NULL OBJECT IS AN ERROR ─────────────────────
-# They arrive the same way, with status 0 and no message: a commit with no checks
-# at all answers `statusCheckRollup: null`, and an OID this repository does not
-# have answers `object: null`. Both were measured against the live API. Reading the
-# second as `none` would hand the CI gate "no checks are configured" for a commit
-# nobody could find, which is a failed lookup arriving as a benign verdict.
-mkgh_head "$WANT" none
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
-    && pass "a commit with no checks at all is none" \
-    || die "a null rollup gave '$got'"
-mkgh_head "$WANT" '{"data":{"repository":{"object":null}}}'
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 2 ] && grep -qF 'status=error' <<<"${got#*|}"; } \
-    && pass "…while a commit the repository does not have is an error" \
-    || die "an unknown commit was read as an answer: '$got'"
-grep -qF 'status=none' <<<"${got#*|}" \
-    && die "…and it emitted the benign verdict anyway: '$got'" \
-    || pass "…and did not emit the benign verdict beside the refusal"
-# …AND EVERY OTHER SHAPE THAT IS NOT AN ANSWER. A GraphQL error body arrives with
-# HTTP 200, and a truncated one parses; each of these would otherwise walk a path
-# that is absent and come out as the benign verdict.
-for _bad in \
-    '{"errors":[{"message":"Something went wrong"}],"data":null}' \
-    '{"data":null}' \
-    '{"data":{}}' \
-    '{"data":{"repository":null}}' \
-    '{"data":{"repository":{}}}' \
-    '{"data":{"repository":{"object":{}}}}' \
-    '{"data":{"repository":{"object":{"statusCheckRollup":{}}}}}' \
-    '{"data":{"repository":{"object":{"statusCheckRollup":{"state":null}}}}}' \
-    '[]' ; do
-    mkgh_head "$WANT" "$_bad"
-    got="$(run 7 --head "$WANT")"
-    # THE CLASSIFIER NAMED IT, rather than jq dying on the way. Both come out as
-    # status 2, so asserting the status alone would pass against a walk that
-    # crashed on a shape it does not handle — and a crash is one refactor away
-    # from being caught and read as something benign.
-    { [ "${got%%|*}" = 2 ] && grep -qF 'out=malformed' <<<"${got#*|}"; } \
-        && pass "…and a body that answers nothing is refused by name" \
-        || die "'$_bad' was read as an answer: '$got'"
-    grep -qE 'status=(none|green)' <<<"${got#*|}" \
-        && die "…and a verdict was emitted beside the refusal: '$got'" \
-        || pass "…with no verdict beside the refusal"
+# ── A RULE THIS CANNOT EVALUATE IS NOT A RULE WITH NO CONTEXTS ─────────────
+# A ruleset can gate a merge on something that is not a status context. Dropping
+# those leaves the branch reading as requiring only what its `required_status_checks`
+# rules name — an enforcement rule arriving as an empty required set, which is this
+# issue's own shape one level down.
+for _rt in workflows code_scanning required_deployments future_rule_nobody_has_read; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
+        '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "a '$_rt' rule is unsupported, not an empty requirement" \
+        || die "a '$_rt' rule was dropped: '$got'"
+done
+# …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. `cli/cli` carries
+# `copilot_code_review` today, and refusing there would be a gate that never opens.
+for _rt in deletion non_fast_forward pull_request copilot_code_review merge_queue required_signatures branch_name_pattern; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
+        && pass "…while a '$_rt' rule names no check and is skipped" \
+        || die "a '$_rt' rule was treated as a requirement: '$got'"
 done
 
 # ── A GREEN ANSWER FROM A FAILED REQUEST IS NOT GREEN ──────────────────────

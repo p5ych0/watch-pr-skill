@@ -45,6 +45,28 @@
   so a misspelling would arrive as "nothing is required", while `branches/{b}`
   404s.
 
+  **A requirement bound to an app is matched on the app.** Both sources can name
+  one — `app_id` under classic protection's `checks`, `integration_id` in a ruleset
+  — and GitHub then counts only that app's run, so matching on the context name
+  alone would let a passing run of the same name from another app open the gate. A
+  bound requirement is also not met by a legacy status, which carries a creator
+  rather than the app id the requirement names; an unbound one is met by either
+  kind, as GitHub does it.
+
+  **A ruleset rule this cannot evaluate stops the merge** rather than being dropped.
+  `workflows`, `code_scanning` and `required_deployments` gate a merge on something
+  that is not a status context, so ignoring them would leave the branch reading as
+  requiring only what its `required_status_checks` rules name — this issue's own
+  shape one level down. The list the helper carries is of rule types that cannot
+  name a check, so a type nobody has read yet refuses instead of passing.
+
+  **The base branch name is encoded rather than restricted.** `#`, `%` and a space
+  all need encoding in a URL path and are all legal in a git ref, so refusing them
+  would mean this gate could never merge a pull request targeting
+  `release#candidate`. Two names are still refused: an empty one, and one
+  containing `..`, which is the one traversal encoding does not close — and git
+  rejects that in a ref name anyway.
+
   **What is still not bound**, stated because the layers that claimed too much for
   this gate are what made #214 expensive: the required set is a property of the
   base branch rather than of a commit, so a protection rule changed between that
