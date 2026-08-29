@@ -39,7 +39,10 @@ unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 # pattern did not, though an installed copy serves every project and a slug baked
 # into a script would route another project's reviews here.
 #
-# A LITERAL AFTER `owner=` OR `repo=`, NEVER AN EXPANSION. The first generalisation
+# A LITERAL AFTER `owner=` OR `repo=`, NEVER AN EXPANSION. The literal may start
+# with a DIGIT: `acme/123` is a legal repository, which this suite proves elsewhere,
+# so an arm requiring a letter first would have let `repo=123` into a runtime helper
+# and reported the tree clean. The first generalisation
 # wrote `repo=.?[A-Za-z]`, where the `.?` eats the `$` and the class eats the first
 # letter of the variable — so `repo=$REPO`, the spelling this repository REQUIRES,
 # would have failed the guard. It matched nothing here only because no script
@@ -55,7 +58,7 @@ unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 #
 # EVERY ARM HAS A PROBE, below. This scan asserts an ABSENCE, so an arm that
 # matches nothing reports the invariant holding without testing it.
-PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|/home/[^ ]*/[A-Za-z0-9_-]+-(review-bus|claude-worktrees)|owner=["'"'"']?[A-Za-z]|repo=["'"'"']?[A-Za-z]|[A-Z][A-Z0-9]*_REVIEW_BUS'
+PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|/home/[^ ]*/[A-Za-z0-9_-]+-(review-bus|claude-worktrees)|owner=["'"'"']?[A-Za-z0-9]|repo=["'"'"']?[A-Za-z0-9]|[A-Z][A-Z0-9]*_REVIEW_BUS'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1159,6 +1162,9 @@ for _pp in 'x=p5ych0/some-other-repo' \
            'd=/home/someone/sample-project-claude-worktrees' \
            'gh api -f owner=someowner' \
            'gh api -f repo=somerepo' \
+           'gh api -f repo=123' \
+           'gh api -f repo="123"' \
+           'gh api -f owner=42' \
            'SOMETHING_REVIEW_BUS=1' \
            '# a comment naming owner=p5ych0'; do
     printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
