@@ -74,10 +74,13 @@
   gated head stay on a filesystem that has just refused a directory produces a session
   that looks set up and dies at its first write, after posting. `pr-setup.sh` asks the
   question itself now, with a probe beside where the pin will go — a
-  directory AND a leaf written inside it, because that is what the pin creates and a
+  directory AND an object inside it, because that is what the pin creates and a
   filesystem with room for one more inode passes a directory-only probe and fails the
-  real call. The refusal happens inside the unit the driver already retries, so the whole
-  session moves.
+  real call. Both are directories, so both come out with `rmdir`, which refuses a symlink
+  and refuses anything with contents — a file leaf would have to come back out with
+  `rm -f`, and that resolves a nested name the held descriptor says nothing about. The
+  refusal happens inside the unit the driver already retries, so the whole session moves,
+  and the candidate it refused is given back rather than left holding an empty child.
 
 - **The setup values are read, not sourced, and only one of them crosses.** The helper
   wrote a file of twelve assignments the driver sourced, and `.` is a name: in the

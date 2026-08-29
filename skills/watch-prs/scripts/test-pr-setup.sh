@@ -632,6 +632,17 @@ chmod 700 "$_ps" 2>/dev/null || true
 rm -rf "$_ps"
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+# AND NOTHING UNDER THE RESERVED DIRECTORY IS UNLINKED BY A NESTED NAME WHERE `rmdir`
+# WOULD DO. The held descriptor authenticates `$RB_DIR` and says nothing about a name
+# inside it, so an `rm -f` on one resolves whatever is there by the time it runs. The
+# probe's objects are both directories for that reason, and both come out with `rmdir`,
+# which refuses a symlink outright and refuses a directory with anything in it.
+case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
+    *'rm -f "$RB_DIR/pinprobe'*)
+        die "the pin probe unlinks a nested name with rm -f, which resolves a replacement" ;;
+    *)  pass "the pin probe creates and removes directories, so every removal is an rmdir" ;;
+esac
+
 # AND THE LEAF IS PROBED AS WELL AS THE DIRECTORY, which is what `pr-origin.sh pin`
 # actually creates. A filesystem or quota with room for ONE more inode passes a
 # directory-only probe — it releases the inode before the real call — and then the pin
@@ -642,9 +653,9 @@ cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # state that leaves room for the directory and none for the leaf.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^: > "$RB_DIR/pinprobe/pin"|chmod 500 "$RB_DIR/pinprobe"; &|' \
+sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe/leaf"|chmod 500 "$RB_DIR/pinprobe"; &|' \
     "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'chmod 500 "$RB_DIR/pinprobe"; : >' "$_stage/pr-setup.sh" \
+grep -qF 'chmod 500 "$RB_DIR/pinprobe"; /usr/bin/env mkdir' "$_stage/pr-setup.sh" \
     && pass "the pin-leaf stage is patched" \
     || die "the pin-leaf stage did not patch pr-setup.sh; the case proves nothing"
 _pl="$(mktemp -d "$TMP/pl.XXXXXX")/dir"
@@ -654,6 +665,14 @@ chmod -R 700 "$_pl" 2>/dev/null || true
 { [ "$_pl_rc" -eq 2 ] && case "$_pl_out" in *'reason=pin_storage'*) true ;; *) false ;; esac; } \
     && pass "…so storage that takes the directory but not the leaf is a retryable refusal too" \
     || die "the pin-leaf probe did not report a retryable refusal (rc=$_pl_rc out='$_pl_out')"
+# AND THE CANDIDATE IS GONE. A refusal between creating the probe's objects and removing
+# them leaves an empty child under the reserved directory, after which the final `rmdir`
+# trips over it and the caller is left a NON-empty published directory — more than the
+# one empty directory the accepted bound permits, and on the path the driver takes when
+# it retries elsewhere and cleans nothing.
+[ ! -e "$_pl" ] \
+    && pass "…and the candidate it refused is given back rather than left behind" \
+    || die "the pin-leaf refusal left '$(ls -A "$_pl" 2>/dev/null | tr '\n' ' ')' behind"
 rm -rf "$_pl"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # …AND IT LEAVES NOTHING BEHIND, because the probe directory is this run's and is
