@@ -321,6 +321,42 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "…and a leaf two helpers claim is an error too" \
     || die "two claimants did not fail closed (rc=$rc out=$out)"
 
+# …AND A NEAR MATCH IS NOT A CLAIM. The leaf was interpolated into an ERE, where a
+# dot matches any character — and the extractor allows dots in a leaf. So a helper
+# declaring `setupXenv` claimed a document sourcing `setup.env`, and the scan credited
+# a different helper's names while nothing claimed the real file. The declaration is
+# parsed and compared as a STRING now, which removes the pattern rather than escaping
+# it.
+DOT_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+RB_SETUP_DIR=/tmp/d
+if . "$RB_SETUP_DIR/setup.env"; then
+    echo "$OWNER"
+fi
+```
+'
+R="$(mkroot "$DOT_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: setupXenv
+# rb-assigns: OWNER
+exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=sourced_file_unclaimed' <<<"$out"; } \
+    && pass "a declaration that only matches the leaf as a regex does not claim it" \
+    || die "a near-match claimed the leaf (rc=$rc out=$out)"
+# …while the LITERAL leaf still is claimed, so the case above is not passing because
+# a dot broke the comparison outright.
+R="$(mkroot "$DOT_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: setup.env
+# rb-assigns: OWNER
+exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…and the leaf spelled exactly still is" \
+    || die "an exact declaration with a dot in it was not credited (rc=$rc out=$out)"
+
 # …AND A CLAIMANT THAT DECLARES NO NAMES IS AN ERROR, for the library's reason.
 R="$(mkroot "$WRITER_SKILL")"
 addscript "$R" pr-setup.sh '# rb-writes: env

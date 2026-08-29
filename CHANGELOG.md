@@ -29,6 +29,31 @@
   `test-pr-setup.sh` stages six such shapes against the real helper: each round-trips
   byte-exact through the source and none of them executes.
 
+- **A `HOME` or `TMPDIR` containing a space works.** The helper's argument check
+  restricted the characters a path may hold, which the inline setup it replaced never
+  did — and that refusal is terminal, so a usable second parent was never tried and
+  the session ended on a path that works. What is refused is the shape now: a value
+  that is missing, one that is relative, and one carrying a `..` component. Nothing
+  evaluates the path; it is quoted in the `mkdir`, in every redirection and in every
+  `printf`.
+
+- **A failed setup no longer removes anything it did not create.** The directory's
+  name is published in argv before the `mkdir` reserves it, and under a parent
+  without the sticky bit another account can replace it afterwards — where a
+  recursive cleanup would delete the replacement and everything in it. That is far
+  past what `docs/decisions/2026-08-26-reservation-inference.md` accepts, and the
+  record rests on `rmdir` refusing anything with contents. The cleanup takes the
+  objects this run named, one at a time, and uses `rmdir` for the directories, so a
+  replacement carrying anything else survives and is left for its owner.
+
+- **An env file with a line missing is refused rather than announced ready.**
+  `{ a; b; c; } > file` reports only the last command's status, so a write that
+  failed in the middle while a later one succeeded passed — and the read-back could
+  not see it either, because the line it checked for was the last one. Every write's
+  status is preserved now, and the complete key set is read back against the helper's
+  own declaration. Losing the reviewer login that way let setup announce ready with
+  no bot name, after which the watch polls for a reviewer nobody named.
+
 - **The pre-push gate could not see through a source, and said so.** `pr-selfcheck.sh`
   scans `SKILL.md` for names used and never assigned, and the twelve setup values are
   now assigned in a file that does not exist at scan time — so all twelve were

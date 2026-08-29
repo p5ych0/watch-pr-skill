@@ -450,7 +450,16 @@ if [ -f "$SKILL" ]; then
         | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk srcfiles $?
     for leaf in $srcfiles; do
         [ -f "$SCRIPTS/$leaf" ] && continue
-        # NOT THROUGH `nomatch` HERE, and that is the difference between this loop
+        # THE DECLARATION IS PARSED AND COMPARED AS A STRING, never interpolated
+        # into a pattern. `grep -qxE "# rb-writes:[[:space:]]*$leaf"` was the first
+        # shape and it made the leaf a REGEX: the extractor allows a dot, and a dot
+        # in an ERE matches any character, so `# rb-writes: setupXenv` claimed a
+        # document sourcing `setup.env` — the scan then credited a different
+        # helper's names and reported clean while nothing claimed the real file.
+        # Escaping the leaf would work and would be a guard; reading the declared
+        # value out and testing `=` removes the pattern altogether.
+        #
+        # NOT THROUGH `nomatch` EITHER, and that is the difference between this loop
         # and every other grep in this file. `nomatch` turns "no matches" into
         # success so a status check can tell a failed grep from an empty result —
         # correct where the OUTPUT is the answer, and wrong where the STATUS is:
@@ -459,7 +468,9 @@ if [ -f "$SKILL" ]; then
         claimants=""
         for h in "$SCRIPTS"/pr-*.sh; do
             [ -f "$h" ] || continue
-            grep -qxE "# rb-writes:[[:space:]]*$leaf" "$h" \
+            claimed="$(grep -oE '^# rb-writes:[[:space:]]*[^[:space:]]+' "$h" \
+                | sed -E 's/^# rb-writes:[[:space:]]*//')" || claimed=""
+            [ "$claimed" = "$leaf" ] \
                 && claimants="$claimants $(basename "$h")"
         done
         set -- $claimants

@@ -290,8 +290,26 @@ _argcase() {   # _argcase <reason> <args…>
 _argcase bad_dir
 _argcase dir_not_absolute rel/ative
 _argcase bad_dir "$TMP/a/../b"
-_argcase bad_dir "$TMP/has space"
 _argcase usage "$TMP/one" "$TMP/two"
+# …AND AN ORDINARY FILESYSTEM CHARACTER IS NOT A REFUSAL. A character class was here
+# and it was a regression: the driver builds this name under `$TMPDIR` or `$HOME`, an
+# operator's home directory can contain a SPACE, and `bad_dir` is TERMINAL — so the
+# second parent was never tried and the session ended on a path that works. Nothing
+# evaluates the value; it is quoted in the `mkdir`, in every redirection and in every
+# `printf`.
+_sp="$TMP/parent with space"; mkdir -p "$_sp"
+_sp_d="$_sp/dir"
+_sp_rc=0
+_sp_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_sp_d" 2>&1)" || _sp_rc=$?
+{ [ "$_sp_rc" -eq 0 ] && [ -f "$_sp_d/env" ] && [ -f "$_sp_d/work/summary.md" ]; } \
+    && pass "…while a parent containing a space is set up rather than refused" \
+    || die "a path with a space was refused (rc=$_sp_rc out='$_sp_out')"
+# AND THE VALUES IN IT SURVIVE THE SOURCE, which is the half a shape check cannot
+# see: the paths are written into the env file and read back by the driver.
+_sp_got="$(env -u REVIEW_BUS_REMOTE bash -c '. "$1/env" || exit 9; printf "%s" "$SUMMARY_FILE"' _ "$_sp_d" 2>&1)" || _sp_got="SOURCE_FAILED:$_sp_got"
+[ "$_sp_got" = "$_sp_d/work/summary.md" ] \
+    && pass "…and the spaced path round-trips through the source intact" \
+    || die "the spaced working path came back as '$_sp_got'"
 # A TERMINAL REFUSAL IS `1` AND NOT `2`, and that distinction is the one the driver
 # acts on: it retries a `2` under a second parent and stops on a `1`, because
 # another parent fixes none of these.
@@ -343,16 +361,27 @@ _forge_origin() {   # _forge_origin <body>
     chmod +x "$_stage/pr-origin.sh"
     return 0
 }
-_stagecase() {   # _stagecase <reason> <status>
-    local want="$1" wrc="$2" d o=0 oo
+# THE THIRD ARGUMENT IS WHAT THE CLEANUP IS EXPECTED TO DO, and it is not always
+# "removed". The give-back takes objects away one at a time and uses `rmdir` for the
+# directories, so anything it did not create REFUSES to go — which is the property,
+# not a shortfall: the name is published in argv, and a recursive removal would
+# delete whatever an account that replaced the directory had put in it.
+_stagecase() {   # _stagecase <reason> <status> <gone|kept>
+    local want="$1" wrc="$2" fate="$3" d o=0 oo
     d="$(mktemp -d "$TMP/st.XXXXXX")/dir"
     oo="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$d" 2>&1)" || o=$?
     { [ "$o" -eq "$wrc" ] && case "$oo" in *"reason=$want"*) true ;; *) false ;; esac; } \
         && pass "…$want is reported, with status $wrc" \
         || die "the $want case gave rc=$o '$oo'"
-    [ ! -e "$d" ] \
-        && pass "…and its directory is given back" \
-        || die "the $want case left its directory behind"
+    if [ "$fate" = gone ]; then
+        [ ! -e "$d" ] \
+            && pass "…and its directory is given back" \
+            || die "the $want case left its directory behind"
+    else
+        { [ -d "$d" ] && [ ! -f "$d/env" ]; } \
+            && pass "…and the directory is left, because rmdir refuses what it holds" \
+            || die "the $want case did not leave the unexpected object alone"
+    fi
     return 0
 }
 # THE STAGED COPY STILL WORKS, or every case below passes against a broken staging
@@ -365,20 +394,80 @@ _so_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "the staged copy with a working reader is ready, so the cases below reach their states" \
     || die "the staged copy failed on a good read (rc=$_so out='$_so_out')"
 _forge_origin ': > "$2/origin"'
-_stagecase origin_empty 1
+_stagecase origin_empty 1 gone
 _forge_origin 'printf "a\nb\n" > "$2/origin"'
-_stagecase origin_multiline 1
+_stagecase origin_multiline 1 gone
 _forge_origin 'mkdir "$2/origin"'
-_stagecase origin_transport 1
+_stagecase origin_transport 1 kept
 # AND THE READER'S OWN STORAGE REFUSAL IS CARRIED THROUGH AS ONE. `pr-origin.sh`
 # reports 2 where the storage would not take what it asked, and that is the status
 # the DRIVER retries on — folding it into 1 would turn a full filesystem into a
 # session that stops instead of one that moves to the other parent.
 printf '#!/usr/bin/env bash\nexit 2\n' > "$_stage/pr-origin.sh"; chmod +x "$_stage/pr-origin.sh"
-_stagecase origin_storage 2
+_stagecase origin_storage 2 gone
 # …WHILE THE READER'S TERMINAL REFUSAL STAYS TERMINAL.
 printf '#!/usr/bin/env bash\nexit 1\n' > "$_stage/pr-origin.sh"; chmod +x "$_stage/pr-origin.sh"
-_stagecase origin_unreadable 1
+_stagecase origin_unreadable 1 gone
+
+# ── the cleanup removes what this run made, and nothing else ──────────────
+# THE NAME IS PUBLISHED IN ARGV BEFORE THE `mkdir` RESERVES IT, and under a parent
+# without the sticky bit another account can replace the directory AFTER the
+# reservation. A recursive removal on a later failure then deletes the replacement
+# and everything in it — which is far past what
+# `docs/decisions/2026-08-26-reservation-inference.md` accepts, and that record rests
+# on `rmdir` REFUSING anything with contents in it.
+#
+# STAGED DETERMINISTICALLY, by having the forged reader do the replacing: it is
+# handed `<dir>/o`, so its parent is the directory under test, and it swaps that for
+# one of its own carrying a witness before refusing. No timing, no race to lose.
+_forge_origin 'p="$(dirname "$2")"
+rm -rf "$p"
+mkdir -m 700 "$p"
+mkdir -m 700 "$p/squatter-subdir"
+printf "not this runs\n" > "$p/witness"
+printf "not this runs\n" > "$p/env"
+exit 1'
+_rr="$(mktemp -d "$TMP/rr.XXXXXX")/dir"
+_rr_rc=0
+_rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_rr" 2>&1)" || _rr_rc=$?
+[ "$_rr_rc" -ne 0 ] \
+    && pass "a directory replaced after the reservation still ends in a refusal" \
+    || die "the replacement case did not refuse (out='$_rr_out')"
+{ [ -f "$_rr/witness" ] && [ -d "$_rr/squatter-subdir" ]; } \
+    && pass "…and the cleanup leaves what it did not create" \
+    || die "the cleanup destroyed a replacement's contents (witness=$([ -e "$_rr/witness" ] && echo yes || echo no) subdir=$([ -e "$_rr/squatter-subdir" ] && echo yes || echo no))"
+# THE DIRECTORY ITSELF SURVIVES TOO, because `rmdir` refuses one with contents. That
+# is the bound the record describes, reached from the other end: at most an empty
+# directory goes.
+[ -d "$_rr" ] \
+    && pass "…and the replacement directory itself, which rmdir refuses to take" \
+    || die "the replacement directory was removed although it had contents"
+rm -rf "$_rr"
+
+# ── an incomplete env file is refused ─────────────────────────────────────
+# `{ a; b; c; } > f` REPORTS ONLY C'S STATUS. A `printf` that failed in the middle
+# while a later one succeeded was a group that reported success, and checking for the
+# LAST line could not see it either — `HEAD_FILE=` is that line. Losing `CODEX_BOT`
+# that way lets setup announce ready with no reviewer login, after which the watch
+# polls for a bot nobody named.
+#
+# STAGED BY REMOVING ONE WRITE from a copy of the subject, which is the state a
+# part-way failure leaves: the declaration still names the key and the file does not.
+# A flush that fails at close produces the same shape and no status in the chain sees
+# it, which is why the read-back is a key SET rather than a last line.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+grep -v 'rb_setup_put CODEX_BOT' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+_mw="$(mktemp -d "$TMP/mw.XXXXXX")/dir"
+_mw_rc=0
+_mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_mw" 2>&1)" || _mw_rc=$?
+{ [ "$_mw_rc" -eq 2 ] && case "$_mw_out" in *'reason=env_truncated'*) true ;; *) false ;; esac; } \
+    && pass "an env file missing a declared key is refused, not announced ready" \
+    || die "a missing middle key was announced ready (rc=$_mw_rc out='$_mw_out')"
+[ ! -e "$_mw" ] \
+    && pass "…and that refusal gives its directory back" \
+    || die "the incomplete-env refusal left its directory behind"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
 # ── the streams are separate ───────────────────────────────────────────────
 # NOTHING BUT THE READY LINE ON STDOUT, and every reason on stderr. The driver

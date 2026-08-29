@@ -300,7 +300,7 @@ grep -qF '. "$RB_SETUP_DIR/env"' <<<"$skill_flat" \
     && pass "the session's values arrive by sourcing the helper's file" \
     || die "SKILL.md does not source the setup helper's environment file"
 if [ -f "$SCRIPT_DIR/pr-setup.sh" ]; then
-    { grep -qF "printf 'REVIEW_BUS_REMOTE=%s" "$SCRIPT_DIR/pr-setup.sh" \
+    { grep -qF 'rb_setup_put REVIEW_BUS_REMOTE' "$SCRIPT_DIR/pr-setup.sh" \
       && grep -qF "printf 'export REVIEW_BUS_REMOTE" "$SCRIPT_DIR/pr-setup.sh"; } \
         && pass "…and that file carries the pin as an assignment and an export" \
         || die "pr-setup.sh does not write REVIEW_BUS_REMOTE and its export"
@@ -636,6 +636,27 @@ FORGE
         *'PINNED=[git@'*) die "the interactive neutralised-exit case pinned the session: '$_su_io'" ;;
         *)                pass "…and interactively too, where the shell does not end" ;;
     esac
+
+    # …AND A PARENT CONTAINING A SPACE IS AN ORDINARY PARENT. The driver builds the
+    # setup directory's name under `$TMPDIR` or `$HOME`, and an operator's home
+    # directory can contain one — this is the driver-to-helper half of that, because
+    # the name crosses a process boundary in argv and comes back inside a sourced
+    # path. A character class in the helper refused it once, terminally, so the
+    # second parent was never tried and the session ended on a path that works.
+    _sp_dir="$_forge_dir/parent with space"
+    mkdir -p "$_sp_dir"
+    _sp=0
+    _sp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 TMPDIR="$_sp_dir" HOME="$_sp_dir" bash -c '
+            '"$_setup_body"'
+            printf "S=[%s]\n" "${SUMMARY_FILE-}"
+        ' 2>&1)" || _sp=$?
+    { [ "$_sp" -eq 0 ] \
+      && case "$_sp_out" in *'OWNER=acme REPO=widget'*) true ;; *) false ;; esac \
+      && case "$_sp_out" in *"S=[$_sp_dir/"*'/work/summary.md]'*) true ;; *) false ;; esac; } \
+        && pass "a parent containing a space starts a session and the paths survive the source" \
+        || die "a spaced parent was refused or its paths were mangled (rc=$_sp out='$_sp_out')"
+    rm -rf "$_sp_dir"
 
     # ── the retry, and what it is gated on ────────────────────────────────
     # A STORAGE REFUSAL IS RETRIED UNDER THE OTHER PARENT. Status 2 means both
