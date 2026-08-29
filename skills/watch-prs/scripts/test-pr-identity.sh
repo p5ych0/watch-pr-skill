@@ -46,8 +46,15 @@ unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 # while `[A-Za-z0-9]` misses `repo=.github`, and a leading dot is how GitHub's own
 # special repositories are named. So the first character is anything that is not an
 # expansion, a quote, whitespace, or a glob metacharacter: `$` keeps `repo=$REPO`
-# out, and `*` and `?` keep a `case` pattern like `*" --repo="*)` out, which is a
-# real line in `pr-selfcheck.sh` and the only false positive this arm has had. The first generalisation
+# out, and `*`, `?` and `[` keep a `case` pattern out — `*" --repo="*)` is a real
+# line in `pr-selfcheck.sh`, and `--repo=[A-Za-z]*)` is the shape a future one would
+# take. Both are staged below, because the arm that is too wide blocks the
+# self-check on legal code, which is the same defect as the arm that is too narrow
+# pointing the other way.
+#
+# THE PATH ARMS TAKE A DOT IN THE NAME for the same reason the literal arms do: a
+# repository may be called `.github`, so `/home/<user>/.github-review-bus` is a
+# hard-coded path and the `/home` arm was the one class that had not been told. The first generalisation
 # wrote `repo=.?[A-Za-z]`, where the `.?` eats the `$` and the class eats the first
 # letter of the variable — so `repo=$REPO`, the spelling this repository REQUIRES,
 # would have failed the guard. It matched nothing here only because no script
@@ -63,7 +70,7 @@ unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 #
 # EVERY ARM HAS A PROBE, below. This scan asserts an ABSENCE, so an arm that
 # matches nothing reports the invariant holding without testing it.
-PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|/home/[^ ]*/[A-Za-z0-9_-]+-(review-bus|claude-worktrees)|owner=["'"'"']?[^$*?"'"'"'[:space:]]|repo=["'"'"']?[^$*?"'"'"'[:space:]]|[A-Z][A-Z0-9]*_REVIEW_BUS'
+PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|/home/[^ ]*/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|owner=["'"'"']?[^$*?["'"'"'[:space:]]|repo=["'"'"']?[^$*?["'"'"'[:space:]]|[A-Z][A-Z0-9]*_REVIEW_BUS'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1172,6 +1179,8 @@ for _pp in 'x=p5ych0/some-other-repo' \
            'gh api -f owner=42' \
            'gh api -f repo=.github' \
            'gh api -f repo=_internal' \
+           'd=/home/someone/.github-review-bus' \
+           'd=/tmp/.github-claude-worktrees' \
            'SOMETHING_REVIEW_BUS=1' \
            '# a comment naming owner=p5ych0'; do
     printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
@@ -1192,6 +1201,7 @@ for _pn in 'gh api -f repo="$REPO"' \
            'owner=$OWNER' \
            'u="repos/$OWNER/$REPO/commits"' \
            'case "$c" in *" --repo="*) ;; esac' \
+           'case "$a" in --repo=[A-Za-z]*) ;; esac' \
            'REVIEW_BUS_REMOTE=x'; do
     printf '%s\n' "$_pn" > "$pat_probe_dir/probe.sh"
     if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
