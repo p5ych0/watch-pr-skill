@@ -10,6 +10,10 @@
 #   3  pending  — at least one is still running and none has failed
 #   4  none     — no checks are configured; there is nothing to be green
 #   5  stale    — the PR head is not the OID asked about; ask again shortly
+#   6  behind   — a RULESET on the base branch requires its pull requests to be up
+#                 to date and this head is behind it. `--required` only; the same
+#                 policy under CLASSIC protection is not readable here, so this
+#                 status says a branch IS behind and never that one is not
 #   2  error    — could not be established; fail closed
 #
 # WHY THIS EXISTS
@@ -402,15 +406,29 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # endpoints accept: measured, `branches/foo/bar` and `branches/foo%2Fbar` reach the
 # same handler.
 #
-# WHAT IS NOT COVERED, stated because the comment beside the code is where a
-# reader looks: the "require branches to be up to date" policy (`strict` in
-# classic protection, `strict_required_status_checks_policy` in a ruleset) is not
-# read. Nothing enforces it on the DEFAULT path — `--admin` bypasses branch
-# protection outright, so a branch behind its base merges with its checks never
-# having run against the merged state — and under `REVIEW_MERGE_STRICT=1` GitHub
-# enforces it, as it enforces everything else there. #214 is about which contexts
-# are required; that gap is #220.
-required_contexts() {   # <base ref> ; prints a JSON array of {context, app} entries
+# THE "REQUIRE BRANCHES TO BE UP TO DATE" POLICY IS READ WHERE IT CAN BE, and where
+# it cannot the comment says so rather than the code pretending. A ruleset carries
+# `strict_required_status_checks_policy` on its `required_status_checks` rule and
+# that is READABLE with this loop`s scope; classic protection carries `strict` on
+# the ADMIN-only `/protection` endpoint and nowhere else — measured, the branch
+# object`s `required_status_checks` holds `checks`, `contexts` and
+# `enforcement_level` and no `strict`, GraphQL`s `branchProtectionRule` is null
+# without admin, and `RefUpdateRule` has no such field at all.
+#
+# SO THE RULESET HALF IS ENFORCED AND THE CLASSIC HALF IS NOT, which matters
+# because `--admin` bypasses protection outright: on the default path nothing else
+# enforces either, so a branch behind its base under CLASSIC strict protection
+# still merges with its checks never having run against the merged state.
+# `REVIEW_MERGE_STRICT=1` is where GitHub enforces it. #220.
+#
+# `mergeStateStatus` WAS MEASURED AND REJECTED as the way to cover the classic
+# half. `BEHIND` is one of its values and it needs no admin, but it is computed
+# lazily — 40 of 40 open pull requests on two of the five repositories sampled
+# reported `UNKNOWN` — and it is a single value with a precedence, so `BLOCKED`
+# masks `BEHIND` whenever a review is also outstanding, which on this loop`s own
+# repositories is most of the time. Absence of `BEHIND` proves nothing, and a gate
+# cannot be built on a signal that is usually absent for another reason.
+required_contexts() {   # <base ref> ; prints {contexts: [{context, app}], strict: bool}
     local base="$1" _left _branch _rules
     _left="$(rb_left)" || return 2
     _branch="$(run_limited "$_left" gh api --hostname "$HOST" \
@@ -460,6 +478,9 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                        if (.parameters | type) != "object" then error("a rule has no parameters")
                        elif (.parameters.required_status_checks | type) != "array"
                          then error("the ruleset checks are not an array")
+                       elif (.parameters | has("strict_required_status_checks_policy"))
+                            and ((.parameters.strict_required_status_checks_policy | type) != "boolean")
+                         then error("the ruleset strict policy is not a boolean")
                        else .parameters.required_status_checks[]
                             | if type != "object" or (.context | type) != "string"
                               then error("a ruleset context is not a string")
@@ -483,7 +504,11 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                   elif .type == "merge_queue" and $strict then empty
                   else error("a rule type this cannot evaluate: " + .type)
                   end ] ) as $ruleset
-          | ( $classic + $ruleset | unique )
+          | ( [ .[1:][][]
+                | select((.type? // "") == "required_status_checks")
+                | .parameters.strict_required_status_checks_policy == true ]
+              | any ) as $strict_policy
+          | { contexts: ($classic + $ruleset | unique), strict: $strict_policy }
         end' 2>"$ERRF" || return 2
     return 0
 }
@@ -542,8 +567,8 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
 # requirement names, so there is nothing to compare and the requirement reads as
 # not yet answered. An UNBOUND one — `app_id` null, which is what `cli/cli` carries
 # on all three of its contexts — is met by either kind, as GitHub does it.
-required_checks_verdict() {   # <oid> <base> ; prints green|failed|pending|none|malformed
-    local oid="$1" base="$2" _left _req _req2 _out
+required_checks_verdict() {   # <oid> <base> ; prints green|failed|behind|pending|none|malformed
+    local oid="$1" base="$2" _left _req _req2 _strict _cmp _ctx_verdict _out
     # BOTH SOURCES ARE READ TWICE AND EVERYTHING IS UNIONED, because the two reads
     # are not one snapshot and a requirement can MOVE between them. Add the context
     # to classic protection after the branch read, remove it from the ruleset before
@@ -563,9 +588,46 @@ required_checks_verdict() {   # <oid> <base> ; prints green|failed|pending|none|
     # migrations inside one gate run.
     _req="$(required_contexts "$base")" || return 2
     _req2="$(required_contexts "$base")" || return 2
+    # THE STRICT POLICY IS UNIONED THE SAME WAY, and for the same reason: on at
+    # either sample is on. Turning it off between the two reads and having this
+    # believe the second is the direction that merges.
+    _strict="$(printf '%s\n%s\n' "$_req" "$_req2" | jq -r -s '
+        if length != 2 or any(.[]; type != "object") then error("two objects are expected")
+        elif any(.[]; (.contexts | type) != "array" or (.strict | type) != "boolean")
+          then error("a required-set answer is not the shape it should be")
+        else (any(.[]; .strict) | tostring) end' 2>/dev/null)" || return 2
     _req="$(printf '%s\n%s\n' "$_req" "$_req2" | jq -c -s '
-        if length != 2 or any(.[]; type != "array") then error("two arrays are expected")
-        else (.[0] + .[1] | unique) end' 2>/dev/null)" || return 2
+        if length != 2 or any(.[]; type != "object") then error("two objects are expected")
+        else (.[0].contexts + .[1].contexts | unique) end' 2>/dev/null)" || return 2
+    # THE UP-TO-DATE POLICY IS ASKED FIRST, because it does not depend on any check
+    # and because being behind is not something waiting fixes: the head has to move,
+    # and every context verdict is about a commit that will not be merged.
+    case "$_strict" in
+        true)
+            _left="$(rb_left)" || return 2
+            _cmp="$(run_limited "$_left" gh api --hostname "$HOST" \
+                "repos/$OWNER/$REPO/compare/$base...$oid" 2>/dev/null)" || return 2
+            _cmp="$(printf '%s' "$_cmp" | jq -r '
+                if type != "object" then "malformed"
+                elif (.behind_by | type) != "number" then "malformed"
+                # A COUNT IS A WHOLE NUMBER AND NOT NEGATIVE. `-1` is a number, so
+                # the type test passes it, and it is neither above zero nor a real
+                # count — read as `current` it opens the gate on a body nothing
+                # produced. Fractions go the same way and for the same reason.
+                elif .behind_by < 0 or (.behind_by | floor) != .behind_by then "malformed"
+                elif (.status | type) != "string" then "malformed"
+                elif (.status | IN("identical","ahead","behind","diverged") | not) then "malformed"
+                elif .behind_by > 0 then "behind"
+                elif .status | IN("behind","diverged") then "behind"
+                else "current" end' 2>/dev/null)" || return 2
+            case "$_cmp" in
+                behind)    printf '%s\n' behind; return 0 ;;
+                current)   ;;
+                *)         return 2 ;;
+            esac ;;
+        false) ;;
+        *)     return 2 ;;
+    esac
     case "$_req" in
         '[]') printf '%s\n' none; return 0 ;;
         '['*) ;;
@@ -798,6 +860,23 @@ case "$OUT" in
         }
         echo "PR_CI_STATE pr=$PR status=green";   exit 0 ;;
     failed)  echo "PR_CI_STATE pr=$PR status=failed";  exit 1 ;;
+    # BEHIND HAS ITS OWN STATUS, and it is not a wait. The base branch requires its
+    # pull requests to be up to date and this head is not, so no check on this
+    # commit can settle it: the head has to move. Reporting `pending` would wait for
+    # something that is not going to happen, which is a gate that never opens by
+    # another route.
+    #
+    # AND IT IS NOT `failed` EITHER, for the reason `stale` is not: every caller
+    # branches on the STATUS, and the operator`s next action here is to rebase
+    # rather than to look for a broken check. Folded into 1 the merge gate said "a
+    # required check is not green" over a green check set, which sends someone
+    # looking for a failure that does not exist.
+    behind)
+        [ "$RC" -eq 0 ] || {
+            echo "PR_CI_STATE pr=$PR status=error reason=behind_from_failed_probe rc=$RC" >&2
+            exit 2
+        }
+        echo "PR_CI_STATE pr=$PR status=behind"; exit 6 ;;
     pending) echo "PR_CI_STATE pr=$PR status=pending"; exit 3 ;;
     # `none` REACHES HERE AS A VALUE on the commit-addressed path, where this
     # script does the classifying and can say so directly. On the PR-addressed

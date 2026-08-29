@@ -709,6 +709,16 @@ world; printf '1' > "$STUB_DIR/pr-ci-state.rc"
 case_is 1 "a required check is not green" "a failing required check blocks"
 world; printf '3' > "$STUB_DIR/pr-ci-state.rc"
 case_is 1 "have not finished" "…and unfinished required checks block"
+# BEHIND IS ITS OWN STATUS AND ITS OWN MESSAGE. Folded into 1 the operator was told
+# "a required check is not green" over a green check set, and went looking for a
+# failure that does not exist; the action here is to bring the base in.
+world; printf '6' > "$STUB_DIR/pr-ci-state.rc"
+case_is 1 "up to date and this head is behind it" "…and a head behind its base blocks, saying so"
+world; printf '6' > "$STUB_DIR/pr-ci-state.rc"
+_behind_out="$(run_gate 7 "$HEAD40" no)"
+grep -qF 'a required check is not green' <<<"${_behind_out#*|}" \
+    && die "a behind head was reported as a failing check: '$_behind_out'" \
+    || pass "…without being reported as a failing check"
 world; printf '2' > "$STUB_DIR/pr-ci-state.rc"
 case_is 1 "required-checks probe failed" "…and an unreadable probe blocks"
 # NONE CONFIGURED IS NOT COULD NOT TELL. Treating "no branch protection" as

@@ -216,6 +216,7 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | ra
     printf '{"protected":false}\n' > "$TMP/gh.branch"
     printf '[]\n' > "$TMP/gh.rules"
     printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}}\n' > "$TMP/gh.ctx"
+    printf '{"status":"identical","ahead_by":0,"behind_by":0}\n' > "$TMP/gh.cmp"
     rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/gh.base.2" "$TMP/gh.rules.page2" \
           "$TMP/branch.n" "$TMP/rules.n" "$TMP/base.n"
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
@@ -253,6 +254,9 @@ case "\$*" in
         printf '%s' "\$n" > "$TMP/branch.n"
         if [ -f "$TMP/gh.branch.\$n" ]; then cat "$TMP/gh.branch.\$n"; else cat "$TMP/gh.branch"; fi
         exit 0 ;;
+    *"/compare/"*)
+        if [ -f "$TMP/gh.cmp.fail" ]; then cat "$TMP/gh.cmp"; exit 1; fi
+        cat "$TMP/gh.cmp"; exit 0 ;;
     *"contexts(first"*)
         # The REQUIRED rollup, which asks for the contexts; the all-checks one
         # below asks only for the state, and the two must not answer each other.
@@ -712,6 +716,148 @@ for _order in "[$_pair_run,$_pair_pend]" "[$_pair_pend,$_pair_run]"; do
     { [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
         && pass "…and one still running is pending, whichever is listed first" \
         || die "a passing record answered for an unfinished one: '$got'"
+done
+
+# ── THE UP-TO-DATE POLICY IS ENFORCED WHERE IT CAN BE READ ─────────────────
+# A ruleset carries `strict_required_status_checks_policy` and that is readable with
+# this loop's scope. On the default path nothing else enforces it — `--admin`
+# bypasses protection — so a branch behind its base would otherwise merge with its
+# checks never having run against the merged state.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' \
+    '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf '{"status":"behind","ahead_by":0,"behind_by":3}\n' > "$TMP/gh.cmp"
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
+    && pass "a head behind a base that requires up-to-date branches is refused" \
+    || die "a behind head was not refused: '$got'"
+# …AND IT IS A FAILURE RATHER THAN A WAIT. No check on this commit can settle it —
+# the head has to move — so `pending` would wait for something that is not going to
+# happen.
+grep -qF 'status=pending' <<<"${got#*|}" \
+    && die "…and it was reported as something to wait for: '$got'" \
+    || pass "…as a failure rather than something to wait for"
+# …AND IT BEATS THE CONTEXT VERDICT, since every one of those is about a commit
+# that will not be merged.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' \
+    '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+    '[{"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"app":{"databaseId":7}}}]'
+printf '{"status":"diverged","ahead_by":2,"behind_by":3}\n' > "$TMP/gh.cmp"
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
+    && pass "…and it decides ahead of a check that is still running" \
+    || die "a pending check answered for a behind head: '$got'"
+# …AND THE COUNT DECIDES AS WELL AS THE SUMMARY. A real body never disagrees with
+# itself — `behind_by` above zero is `behind` or `diverged` — so a body that says
+# `identical` while counting commits behind is one of the two fields lying, and the
+# gate takes the answer that does not merge.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' \
+    '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf '{"status":"identical","ahead_by":0,"behind_by":5}\n' > "$TMP/gh.cmp"
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
+    && pass "…and a body counting commits behind is behind, whatever its summary says" \
+    || die "a self-contradicting comparison was read as current: '$got'"
+
+# …AND THE SUMMARY DECIDES AS WELL AS THE COUNT, which is the same rule read from
+# the other end: a body saying `behind` while counting nothing behind is the other
+# field lying, and the gate again takes the answer that does not merge.
+for _cs in '{"status":"behind","ahead_by":0,"behind_by":0}' '{"status":"diverged","ahead_by":2,"behind_by":0}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' \
+        '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+    printf '%s\n' "$_cs" > "$TMP/gh.cmp"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
+        && pass "…and a body saying behind is behind, whatever its count says" \
+        || die "a self-contradicting summary was read as current: '$got'"
+done
+
+# …AND A CURRENT HEAD IS NOT REFUSED, which is the half that would otherwise be a
+# gate that never opens.
+for _cs in '{"status":"identical","ahead_by":0,"behind_by":0}' '{"status":"ahead","ahead_by":4,"behind_by":0}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' \
+        '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+    printf '%s\n' "$_cs" > "$TMP/gh.cmp"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+        && pass "…while a head that is not behind still merges" \
+        || die "a current head was refused: '$got'"
+done
+# …AND THE COMPARISON IS ASKED ABOUT THE COMMIT BEING MERGED, against the base the
+# requirements were read from. Asked the other way round it answers `ahead` for
+# exactly the branch that must be refused.
+grep -qF "compare/main...$WANT" "$TMP/args" \
+    && pass "…and the comparison is base...head, addressed by the merge target" \
+    || die "the comparison was not base...head: $(cat "$TMP/args")"
+# WITHOUT THE POLICY THERE IS NO COMPARISON, so a repository that does not ask for
+# up-to-date branches pays nothing for this.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf '{"status":"behind","ahead_by":0,"behind_by":3}\n' > "$TMP/gh.cmp"
+: > "$TMP/args"
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "a base that does not require up-to-date branches ignores a behind head" \
+    || die "a behind head was refused with no policy asking for it: '$got'"
+grep -qF '/compare/' "$TMP/args" \
+    && die "the comparison was made with no policy asking for it: $(cat "$TMP/args")" \
+    || pass "…and never asks for the comparison at all"
+# THE POLICY IS UNIONED ACROSS THE TWO READS like the contexts, so turning it off
+# between them does not turn the gate off.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' \
+    '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"required_status_checks":[{"context":"build"}]}}]\n' > "$TMP/gh.rules.2"
+printf '{"status":"behind","ahead_by":0,"behind_by":3}\n' > "$TMP/gh.cmp"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.rules.2"
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
+    && pass "…and a policy switched off between the two reads still decides" \
+    || die "the strict policy was lost between the reads: '$got'"
+# A COMPARISON THAT CANNOT BE READ IS AN ERROR, in every shape it can arrive in.
+for _bad in '{"status":"behind"}' '{"behind_by":0}' '{"status":"sideways","behind_by":0}' '{"status":"identical","behind_by":"0"}' '{"status":"identical","behind_by":-1}' '{"status":"identical","behind_by":1.5}' '[]'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' \
+        '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+    printf '%s\n' "$_bad" > "$TMP/gh.cmp"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and a comparison of another shape is unreadable" \
+        || die "'$_bad' was read as an answer: '$got'"
+done
+# …AND SO IS ONE THAT PRINTED A COMPLETE BODY AND THEN FAILED.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' \
+    '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf '{"status":"identical","ahead_by":0,"behind_by":0}\n' > "$TMP/gh.cmp"
+: > "$TMP/gh.cmp.fail"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.cmp.fail"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "…and a current-looking body from a failed comparison is an error" \
+    || die "a failed comparison that printed current gave '$got'"
+# A STRICT POLICY THAT IS NOT A BOOLEAN IS UNREADABLE, rather than absent — read as
+# absent it is the whole gate switched off by a body of another shape.
+for _sp in '"yes"' '1' 'null'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' \
+        '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":'"$_sp"',"required_status_checks":[{"context":"build"}]}}]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and a strict policy that is not a boolean is unreadable" \
+        || die "a malformed strict policy was read as absent: '$got'"
 done
 
 # ── A RECORD IS IDENTIFIED BY THE FIELD ITS KIND HAS ───────────────────────
