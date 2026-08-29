@@ -269,7 +269,7 @@ checks_msg_is_none_configured() {
 # and no fold to get wrong. `prefer removing the dependency over guarding it`.
 #
 # THE PRECEDENCE IS THE SERVER`S TOO, and it agrees with this file`s contract: the
-# pandas commit above has a failed run and six unfinished ones and reports FAILURE,
+# second commit above has a failed run and six unfinished ones and reports FAILURE,
 # which is "at least one is still running AND NONE HAS FAILED" read the way the
 # bucket parse below reads it.
 #
