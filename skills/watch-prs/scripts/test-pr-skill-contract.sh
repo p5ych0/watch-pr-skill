@@ -5589,6 +5589,130 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
     && pass "the acknowledgement footer names the reviewer and the count" \
     || die "the acknowledgement footer is unscoped and will cross between phases"
 
+# ── THE ACKNOWLEDGEMENT, LIFTED AND RUN ────────────────────────────────────
+# The three greps above are ABOUT this block and cannot execute it, which is what
+# #222 was: `grep -q 'ROUNDS_RC" -eq 3'` passes against
+# `[ "$ROUNDS_RC" -eq 3 ] || true`, and against a version whose parse succeeds on a
+# body from a probe that died. The block posts a MUTATION recording the operator's
+# permission to continue past a check-in, and its own comment says permission must
+# never be inferred from unreadable output — so it is the one place in this file
+# where a described-but-unexecuted check is worth the most.
+_rb_ack=""
+_rb_ack="$(mktemp_d)" || _rb_ack=""
+{ [ -n "$_rb_ack" ] && [ -d "$_rb_ack" ]; } \
+    || die "no scratch directory for the acknowledgement cases; the block was never run"
+if [ -n "$_rb_ack" ] && [ -d "$_rb_ack" ]; then
+mkdir -p "$_rb_ack/bin" "$_rb_ack/scripts" "$_rb_ack/sedbin"
+# LIFTED WITH ITS OWN INDENT STRIPPED. It sits inside step 6's `3` bullet, two
+# spaces in, and the cases below set their own state at column 0.
+awk '/^  ROUNDS_OUT="\$\(/,/^      \|\| \{ echo "ABORT: could not record the acknowledgement/' "$SKILL" \
+    | sed 's/^  //' > "$_rb_ack/ack.sh"
+# THE EXCERPT HAS TO CONTAIN ALL THREE PARTS, or the cases prove nothing. A range
+# that stopped early would leave a lift that never posts, and every "did not post"
+# case below would pass against it.
+_rb_ack_src="$(cat "$_rb_ack/ack.sh")"
+case "$_rb_ack_src" in
+    *'ROUNDS_RC" -eq 3'*) ;;
+    *) die "the lifted acknowledgement has no status check; the cases below prove nothing" ;;
+esac
+case "$_rb_ack_src" in
+    *'sed -n'*) ;;
+    *) die "the lifted acknowledgement has no parse; the cases below prove nothing" ;;
+esac
+case "$_rb_ack_src" in
+    *'gh pr comment N'*) ;;
+    *) die "the lifted acknowledgement does not reach the post; every case below would pass" ;;
+esac
+pass "the round check-in acknowledgement lifts out whole"
+# THE HELPER AND `gh` ARE BOTH STUBS, and the log is what every case reads. The
+# block ends its refusal arms with `exit 0`, so the STATUS says nothing here —
+# exactly as the setup-probe harness above records.
+printf '%s\n' 'cat "$RB_ACK_DIR/count.out"; exit "$(cat "$RB_ACK_DIR/count.rc")"' \
+    > "$_rb_ack/scripts/pr-round-count.sh"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$RB_ACK_DIR/gh.log"\n' > "$_rb_ack/bin/gh"
+chmod +x "$_rb_ack/bin/gh"
+# A `sed` THAT PRINTS SOMETHING THAT IS NOT A COUNT, for the case that exercises
+# the shape guard rather than the parse. It lives in its own directory so only the
+# case that asks for it gets it.
+printf '#!/bin/sh\nprintf "not-a-count\\n"\n' > "$_rb_ack/sedbin/sed"
+chmod +x "$_rb_ack/sedbin/sed"
+rb_ack_run() {   # rb_ack_run <helper stdout> <helper rc> [extra PATH dir] ; prints the driver's output
+    printf '%s' "$1" > "$_rb_ack/count.out"
+    printf '%s' "$2" > "$_rb_ack/count.rc"
+    : > "$_rb_ack/gh.log"
+    local _p="$_rb_ack/bin:$PATH"
+    [ -n "${3:-}" ] && _p="$3:$_p"
+    run_limited 25 env PATH="$_p" RB_ACK_DIR="$_rb_ack" \
+        bash --noprofile --norc -c '
+HOST=github.com; OWNER=acme; REPO=widget
+WHO="chatgpt-codex-connector[bot]"
+RB_SCRIPTS="$RB_ACK_DIR/scripts"
+. "$RB_ACK_DIR/ack.sh"
+' 2>&1 || true
+}
+_rb_ack_pause='PR_ROUND_PAUSE pr=7 rounds=41 threshold=10 acknowledged=0'
+# THE CONTROL FIRST, so every refusal below is refusing something this harness can
+# otherwise carry all the way to the post.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3)"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment N'*) pass "a genuine pause is acknowledged on the PR" ;;
+    *) die "the control never posted; every refusal case below proves nothing ('$_rb_ack_out')" ;;
+esac
+# …WITH THE COUNT THE GATE REPORTED, not one retyped into the body. An
+# acknowledgement naming the wrong number pauses again at once or skips a later
+# check-in, and both are silent.
+case "$(cat "$_rb_ack/gh.log")" in
+    *'`41`'*) pass "…carrying the count the gate itself reported" ;;
+    *) die "the acknowledgement does not carry the gate's count: $(cat "$_rb_ack/gh.log")" ;;
+esac
+# …AND THE REVIEWER, because the count is per reviewer: an unscoped acknowledgement
+# of 41 Codex rounds is read by a Copilot invocation with 5.
+case "$(cat "$_rb_ack/gh.log")" in
+    *'chatgpt-codex-connector[bot]'*) pass "…and the reviewer it is about" ;;
+    *) die "the acknowledgement is unscoped: $(cat "$_rb_ack/gh.log")" ;;
+esac
+# A PROBE THAT PRINTED A PLAUSIBLE PAUSE AND THEN DIED IS NOT PERMISSION. This is
+# the case the greps cannot see: the output parses, the count is digits, and the
+# only thing saying the probe failed is the status.
+for _rb_ack_rc in 1 2 0; do
+    _rb_ack_out="$(rb_ack_run "$_rb_ack_pause" "$_rb_ack_rc")"
+    case "$(cat "$_rb_ack/gh.log")" in
+        *'pr comment'*) die "a probe exiting $_rb_ack_rc had its output acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+        *) pass "a plausible pause line from a probe exiting $_rb_ack_rc is not acknowledged" ;;
+    esac
+    case "$_rb_ack_out" in
+        *ABORT*) pass "…and says so" ;;
+        *) die "the refusal was silent for rc=$_rb_ack_rc ('$_rb_ack_out')" ;;
+    esac
+done
+# OUTPUT THE PARSE CANNOT READ IS NOT PERMISSION EITHER, even where the status is
+# the distinguished 3.
+for _rb_ack_bad in '' 'PR_ROUND_COUNT pr=7 rounds=41' 'PR_ROUND_PAUSE pr=7 rounds= threshold=10'; do
+    _rb_ack_out="$(rb_ack_run "$_rb_ack_bad" 3)"
+    case "$(cat "$_rb_ack/gh.log")" in
+        *'pr comment'*) die "an unparseable pause was acknowledged: '$_rb_ack_bad'" ;;
+        *) pass "…and neither is a pause line the parse cannot read" ;;
+    esac
+    case "$_rb_ack_out" in
+        *ABORT*) pass "…saying so as well" ;;
+        *) die "the unreadable count was refused silently ('$_rb_ack_out')" ;;
+    esac
+done
+# …AND A COUNT THAT IS NOT DIGITS IS REFUSED BY SHAPE, which is the arm the parse
+# itself can never reach: its pattern only ever yields digits, so the guard exists
+# for a `sed` that is not the one this block means.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3 "$_rb_ack/sedbin")"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "a count that is not digits was acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and a count that is not digits is refused by shape" ;;
+esac
+case "$_rb_ack_out" in
+    *ABORT*) pass "…saying so too" ;;
+    *) die "the non-numeric count was refused silently ('$_rb_ack_out')" ;;
+esac
+rm -rf "$_rb_ack"
+fi
+
 # ── the none-configured checks message is matched whole, not searched ──────
 # ── the none-configured diagnostic is matched WHOLE ───────────────────────
 # `gh` has no dedicated status for "nothing to report", so the message is the only
