@@ -1,5 +1,136 @@
 # Changelog
 
+## [2.0.79] — 2026-08-28
+
+- **The required-checks gate is bound to the commit it merges, and the read that
+  makes that possible was there all along.** #214 recorded that it could not be
+  done: the required set is branch-protection state, and reading it needs admin —
+  `repos/{o}/{r}/branches/{b}/protection` denies with a **404 indistinguishable
+  from "not protected"**, so a loop that cannot read it cannot tell "nothing is
+  required" from "I am not allowed to know". That measurement was right about that
+  endpoint and wrong about the question. The **branch object** —
+  `repos/{o}/{r}/branches/{b}` — carries the same answer and is readable with the
+  `repo` scope this loop runs under.
+
+  Measured on ten repositories, none of which the measuring account administers:
+  three required contexts came back for `cli/cli`, eleven for
+  `kubernetes/kubernetes`, twenty-three for `microsoft/vscode`, while the dedicated
+  protection endpoint 404s on the same repository with the same token. Rulesets are
+  the other source and neither subsumes the other — `home-assistant/core` reports
+  `protection.enabled: false` with `protected: true` and its eight contexts appear
+  only under `rules/branches/{b}`, `cli/cli` is the other way round — so the
+  required set is the **union**, and a helper reading one alone reports a
+  requirement as absent.
+
+  With that set in hand the question becomes "do these contexts pass on THIS
+  commit", which the merge target's own rollup answers. So `--required` no longer
+  goes through `gh pr checks`, which is addressed by pull request and carries no
+  OID; the A → B → A that fitted inside #212's bracket — head moves to B, B's
+  required checks go green, the probe reads them, head returns to A, and A merges
+  on B's result — has nothing left to read.
+
+  **And a required context that has not reported is now visible.** That is the part
+  the all-checks gate beside it could never cover, and the reason this was a
+  merge-safety hole rather than a reporting inaccuracy: that gate reads the checks
+  which EXIST on the commit, and a requirement nothing has reported has neither a
+  check run nor a commit status. Named, it is `pending` — the requirement stands
+  and the answer is not in yet.
+
+  **A branch that requires nothing is still an answer**; one whose protection
+  cannot be read is not. `protected: false` reports `none` and the gate has nothing
+  to assert, exactly as before. A branch that IS protected whose protection comes
+  back missing or misshapen is an error and blocks, because the alternative is a
+  merge gated on an empty required set. The branch read is also what proves the
+  branch NAME: `rules/branches/{b}` answers `[]` for a branch that does not exist,
+  so a misspelling would arrive as "nothing is required", while `branches/{b}`
+  404s.
+
+  **A requirement bound to an app is matched on the app.** Both sources can name
+  one — `app_id` under classic protection's `checks`, `integration_id` in a ruleset
+  — and GitHub then counts only that app's run, so matching on the context name
+  alone would let a passing run of the same name from another app open the gate. A
+  bound requirement is also not met by a legacy status, which carries a creator
+  rather than the app id the requirement names; an unbound one is met by either
+  kind, as GitHub does it. `app_id: -1` is the wildcard GitHub writes where any app
+  may provide the check, so it is normalised to unbound — kept as a binding it
+  would look for a check suite whose app id is `-1`, find none, and report
+  `pending` for ever on a context that had passed.
+
+  **A record is identified by the field its own kind has.** A check run is named by
+  `name` and a legacy status by `context`; taking whichever was present let a status
+  carrying a `name` answer for a requirement its own `context` did not name, and be
+  classified green. A record missing the field its kind is identified by makes the
+  whole rollup unreadable rather than being passed over.
+
+  **Every record sharing a required name is evaluated**, not the first one found. A
+  name can arrive as a check run and as a legacy status at once, and GitHub requires
+  all of them; taking the first match let whichever the rollup happened to list
+  first decide, so a passing record could answer for a failing one.
+
+  **Both sources are read twice and everything is unioned.** The branch read and the
+  rules read are not one snapshot, so a requirement can MOVE between them: add the
+  context to classic protection after the branch read, remove it from the ruleset
+  before the rules read, and neither body carries it though it was required
+  throughout. The union is monotone, which is why this is a second read rather than
+  a comparison — unioning cannot lose a requirement, and the cost of a stale one is
+  that the gate reports it pending for a run and the operator re-runs.
+
+  **A ruleset rule this cannot evaluate stops the merge** rather than being dropped.
+  `workflows`, `code_scanning` and `required_deployments` gate a merge on something
+  that is not a status context, so ignoring them would leave the branch reading as
+  requiring only what its `required_status_checks` rules name — this issue's own
+  shape one level down. The list the helper carries is of rule types that cannot
+  name a check, so a type nobody has read yet refuses instead of passing. The type
+  is named on the error line, filtered to what a rule type can contain: refusing
+  without saying which rule caused it leaves the operator with a merge that will not
+  proceed until they change something they cannot see.
+
+  **The refusal stands in both modes, and `merge_queue` is the one exception.**
+  `REVIEW_MERGE_STRICT=1` only stops passing `--admin`; it does not make a
+  repository's rules non-bypassable, so a credential on a ruleset's bypass list
+  merges past them there too, and the two mistakes are not symmetrical — refusing
+  costs a merge the operator can make by hand with the rule named on the line, while
+  passing costs a merge nobody evaluated. The queue is excepted because
+  `docs/decisions/2026-08-06-merge-admin-default.md` says the `--admin` waiver does
+  not cover a base branch requiring one and that strict mode is the only supported
+  setting there — and because `gh pr merge` without `--admin` does the right thing
+  on that rule by queueing the request, which the gate reports as status 4 rather
+  than as a merge. The list
+  of rules that name no check comes from the `RepositoryRuleType` schema rather than
+  from what has been seen in the wild; `workflows`,
+  `required_workflow_status_checks`, `code_scanning`, `secret_scanning`,
+  `license_compliance_scanning`, `required_deployments` and `merge_queue` are
+  deliberately not on it. The rules read is paginated, at thirty a page by default:
+  a branch with more rules than that could otherwise carry its
+  `required_status_checks` on a page nobody read, parsed as a well-formed array
+  with the requirement simply absent.
+
+  **And the base branch is confirmed after the read as well as before.** A pull
+  request can be retargeted without its head moving, so `--match-head-commit` sees
+  nothing while the requirements just read belong to the old base. That is the same
+  shape as a head that moved, so it is the same answer: `stale`, which the caller
+  re-runs. Only the required question pays for it; the all-checks one asks nothing
+  of the base.
+
+  **The base branch name is encoded rather than restricted.** `#`, `%` and a space
+  all need encoding in a URL path and are all legal in a git ref, so refusing them
+  would mean this gate could never merge a pull request targeting
+  `release#candidate`. Two names are still refused: an empty one, and one
+  containing `..`, which is the one traversal encoding does not close — and git
+  rejects that in a ref name anyway.
+
+  **What is still not bound**, stated because the layers that claimed too much for
+  this gate are what made #214 expensive: the required set is a property of the
+  base branch rather than of a commit, so a protection rule changed between that
+  read and the merge is a race GitHub has too; the "require branches to be up to
+  date" policy is not read, and nothing enforces it on the default path either,
+  since `--admin` bypasses protection — filed as #220; and on the default path the merge still uses `--admin`,
+  which bypasses protection outright, so this gate is the client-side stand-in for
+  it. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is still where GitHub
+  evaluates the requirement itself, at merge time.
+
+  Closes #214.
+
 ## [2.0.78] — 2026-08-28
 
 - **The all-checks gate now asks about the commit it is merging.** `gh pr checks` is

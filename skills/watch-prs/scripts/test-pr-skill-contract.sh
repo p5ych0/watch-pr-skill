@@ -4301,7 +4301,9 @@ if [ -d "$ROOT/docs/decisions" ]; then
                'review-state probe' \
                'all-checks gate is addressed by that head' \
                'required-checks gate is' \
-               'bracketed by it' \
+               'addressed by it too' \
+               'BASE BRANCH requires' \
+               'protection cannot be' \
                'blocked' \
                'dismissed review' \
                'body-only' \

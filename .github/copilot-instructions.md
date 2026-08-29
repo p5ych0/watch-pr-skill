@@ -540,20 +540,28 @@ waived:
   a push cannot land between the check and the merge call;
 - a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
   `CHANGES_REQUESTED`;
-- **the all-checks gate is addressed by that head**, reading the check runs and
-  commit statuses of the merge target itself, and **the required-checks gate is
-  bracketed by it** — `gh pr checks --required` takes a PR number and has no commit
-  selector, and the read that would say which contexts are required is not
-  available to an ordinary token. That bracket IS a merge-safety hole and the
-  all-checks gate does not cover it — that gate reads the checks which EXIST on the
-  merge target, and a required context that has not reported has nothing to read —
-  so it is #214, it is not waived by the `--admin` record, and it closes only under
-  `REVIEW_MERGE_STRICT=1` on non-bypassable protection. The unsafe case is
-  always A → B → A — one move away is refused by `--match-head-commit`, so it takes
-  a RETURN — and what the bracket changes is where that pair has to fit: BOTH moves
-  between the two head confirmations, rather than straddling everything between the
-  checks read and the merge. It catches a head that moved and stayed moved; it cannot bind the answer
-  to a commit, and that residue is #214 rather than something this waiver covers;
+- **the all-checks gate is addressed by that head**, reading the merge target's own
+  check rollup, and **the required-checks gate is addressed by it too** since #214:
+  it reads what the BASE BRANCH requires — the contexts under classic protection on
+  the branch object, plus any a repository ruleset adds — and asks that same rollup
+  whether each passed on the commit being merged. A required context that has NOT
+  reported is `pending`, which is the case the all-checks gate cannot see, since
+  that one reads the checks which EXIST on the commit. A branch that requires
+  nothing reports `none`; a branch that IS protected whose protection cannot be
+  read is an ERROR, because a merge gated on an empty required set is the direction
+  that opens the gate. What is still not bound is the required SET itself —
+  protection is a property of the base branch, not of a commit — and the "require
+  branches to be up to date" policy is not read at all, and nothing enforces it on
+  the default path either, since `--admin` bypasses protection — that gap is #220,
+  and `REVIEW_MERGE_STRICT=1` is where GitHub enforces it. The base branch IS confirmed
+  either side of the read, because a retarget moves no head and
+  `--match-head-commit` would see nothing; a changed base is `stale`, not an answer.
+  A ruleset rule that gates a merge on something this cannot read — `workflows`,
+  `code_scanning`, `required_deployments` and the rest — refuses in BOTH modes, since
+  `REVIEW_MERGE_STRICT=1` only stops passing `--admin` and does not make the
+  repository's rules non-bypassable. `merge_queue` is the one exception, skipped
+  under strict mode because the `--admin` record names that as the only supported
+  setting for a queue branch;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
 

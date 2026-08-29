@@ -1,8 +1,7 @@
 #!/usr/bin/env -S bash -p
 # The merge decision: every gate, evaluated immediately before merging, and the
 # merge pinned to one head. What each gate is ABOUT differs — see the synopsis
-# below, which says which are commit-addressed, which are bracketed and which are
-# PR-level.
+# below, which says which are commit-addressed and which are PR-level.
 #
 #   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> [reviewers: both|codex-only]
 #
@@ -33,18 +32,17 @@
 #       about differs. (1) and (2) are COMMIT-ADDRESSED but not all about THIS
 #       commit: (1) asks each reviewer about the head THAT reviewer judged, which
 #       for Codex is `$CODEX_SHA` where the Copilot phase moved past it, and (2) is
-#       what licenses the delta. (3b) is COMMIT-ADDRESSED too since #214: it reads
-#       the check runs and commit statuses of the merge target itself. (4) is the
-#       one that is only BRACKETED — `gh pr checks --required` is addressed by PULL
-#       REQUEST, so the head is confirmed either side of a response that carries
-#       none; see the note there. (3) and (4b) are PR-level and always were
+#       what licenses the delta. (3b) and (4) are COMMIT-ADDRESSED too since #214:
+#       (3b) reads the merge target's own rollup, and (4) reads what the BASE
+#       BRANCH requires and then asks that same rollup for those contexts. (3) and
+#       (4b) are PR-level and always were
 #   (1) each reviewer is clean on the head THAT reviewer judged
 #   (2) the delta between those two heads is Copilot fixes only
 #   (3) no unresolved review threads, paginated, fail closed
 #  (3b) every check on the merge target is green, not only the required ones —
 #       through `pr-ci-gate.sh`, and addressed by the commit
-#   (4) the required checks satisfy branch protection — BRACKETED by the head
-#       rather than bound to it; see the note at that gate and #214
+#   (4) the required checks satisfy branch protection — the required set read
+#       from the base branch, evaluated against the merge target
 #  (4b) the round boundary has not been reached
 #   (5) merge, pinned to that head by `--match-head-commit`
 #
@@ -635,55 +633,44 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # protection, so this probe is the only one that asks whether branch protection is
 # SATISFIED — which is why anything that is not an explicit green or an explicit
 # "nothing configured" blocks. (3b) reads the checks unfiltered, so a required
-# check that REPORTED is among what it sees; one that has not reported is not, and
-# that is the hole this probe's bracket leaves open. See the note there and #214.
+# check that REPORTED is among what it sees; one that has NOT reported is not, and
+# naming it is what this probe adds. See the note below and #214.
 #
-# "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
-# non-zero when the branch has no required checks at all, not because anything
-# failed. Treating that as unreadable blocked the merge on every repository
-# without branch protection, permanently — not a fail-closed guard but a gate that
-# never opens, and it was found by trying to merge rather than by reading the
-# code. The helper distinguishes the two and reports 4 for it.
+# "NONE CONFIGURED" IS NOT "COULD NOT TELL", and since #214 it is a branch that is
+# not protected which says so rather than an exit status. Treating "nothing is
+# required" as unreadable blocked the merge on every repository without branch
+# protection, permanently — not a fail-closed guard but a gate that never opens,
+# and it was found by trying to merge rather than by reading the code. The helper
+# distinguishes the two and reports 4 for the first; a branch that IS protected
+# whose protection cannot be read is the second, and blocks.
 #
-# AND IT IS BRACKETED BY `$HEAD_OID`. `gh pr checks`
-# takes a PR NUMBER and answers about whatever the API currently calls its head —
-# there is no commit selector — so without `--head` this asks a question about the
-# pull request with nothing tying the answer to the commit being merged. (3b) does
-# not share that any more: since #214 it reads the check runs and commit statuses
-# of the merge target directly, which needs no knowledge of what is REQUIRED.
+# AND IT IS BOUND TO `$HEAD_OID`, which is what #214 said could not be done.
+# `gh pr checks` takes a PR NUMBER and answers about whatever the API currently
+# calls its head, so bracketing it with head confirmations narrowed WHEN a head
+# could move and never tied the answer to a commit: an A → B → A fitting inside
+# the bracket read B's required checks and saw A twice.
 #
-# A → B → A IS THE CASE, AND IT ALWAYS TAKES BOTH MOVES. One force-push away is
-# refused by `--match-head-commit`, which requires the head to still BE the OID it
-# is given — so the danger is a return: the head goes to B, B's required checks go
-# green, this probe reads them, the head comes back to A, and the merge succeeds on
-# B's result about a commit nobody merged. #212.
+# WHAT MADE IT POSSIBLE IS THAT THE REQUIRED SET IS READABLE. #214 measured
+# `branches/{b}/protection`, which needs admin and 404s indistinguishably from
+# "not protected"; the BRANCH OBJECT carries the same answer with the `repo` scope
+# this loop runs under, and a ruleset's contexts come from `rules/branches/{b}`.
+# With the required set in hand the question becomes "do these contexts pass on
+# THIS commit", which the commit's own rollup answers. See `pr-ci-state.sh`.
 #
-# WHAT `--head` BUYS IS WHEN THE MOVES HAVE TO LAND, not how many it takes.
-# Unbracketed, the read could be answered at any point and the return could arrive
-# any time before the merge — through the thread pagination and the round-count
-# probe below. Bracketed, the helper confirms the head on each side of the read, so
-# a head that MOVED AND STAYED MOVED is `stale` and BOTH moves must fit between the
-# two confirmations: the first sees A, so A → B is after it; the second sees A, so
-# B → A is before it.
+# A REQUIRED CONTEXT THAT HAS NOT REPORTED IS NOW SEEN, and that is the part (3b)
+# could never cover. (3b) reads the checks that EXIST on the merge target, which is
+# not a superset of what a branch REQUIRES — a context that has not reported has no
+# check run and no commit status — so (3b) could answer green while a requirement
+# was unmet. Named, it is `pending`: the requirement stands and the answer is not
+# in yet.
 #
-# IT DOES NOT BIND THE RESPONSE TO A COMMIT, and cannot: the request is addressed
-# by PR number and the answer carries no OID, so an A → B → A fitting inside the
-# bracket still reads B's checks and sees A twice. That residue is #214.
-#
-# (3b) DOES NOT COVER THIS, AND THE ARGUMENT THAT IT DID WAS WRONG. It reads the
-# checks that EXIST on the merge target, which is not a superset of the checks a
-# branch REQUIRES: a required context that has not reported on A has no check run
-# and no commit status, so (3b) sees only what did report and can answer green.
-# The stale required answer then approves B and A merges without its required
-# context ever running. Refuted in review, and the residue it leaves is a
-# merge-safety hole rather than a reporting inaccuracy. #214.
-#
-# FAILING CLOSED HERE IS NOT THE ANSWER. "Refuse unless the required set can be
-# bound" refuses on every repository where the read needs admin — which is every
-# repository this loop does not administer — and that is the gate that never opens
-# rather than one that fails closed, the shape this file already carries a comment
-# about. What closes it is `REVIEW_MERGE_STRICT=1` on non-bypassable protection,
-# where GitHub evaluates the required checks itself at merge time.
+# WHAT IS STILL NOT BOUND IS THE REQUIRED SET ITSELF, and it cannot be: branch
+# protection is a property of the base branch rather than of a commit, so a
+# protection rule changed between that read and the merge is a race GitHub has too.
+# The "require branches to be up to date" policy is not read either, and on THIS
+# path nothing enforces it: `--admin` below bypasses branch protection, so a branch
+# behind its base merges with its checks never having run against the merged state.
+# Under `REVIEW_MERGE_STRICT=1` GitHub enforces it. #220.
 #
 # STRICT MODE IS WHAT CLOSES IT. With `REVIEW_MERGE_STRICT=1` on a repository whose
 # required checks are NON-BYPASSABLE — configured, and with bypassing disallowed or
@@ -727,9 +714,9 @@ esac
 
 # (5) Merge, PINNED to `$HEAD_OID` — the merge target, not a head every gate above
 # shares. Codex is checked against `$CODEX_EFFECTIVE_SHA` where the Copilot phase
-# moved past it, (3b) reads the merge target's own checks, (4) only BRACKETS its
-# read with `$HEAD_OID`, and the thread and round probes are PR-level; see the
-# synopsis at the top.
+# moved past it, (3b) reads the merge target's own checks, (4) evaluates the base
+# branch's required contexts against that same commit, and the thread and round
+# probes are PR-level; see the synopsis at the top.
 #
 # `--admin` by default, and that is a deliberate trade rather than an oversight.
 #

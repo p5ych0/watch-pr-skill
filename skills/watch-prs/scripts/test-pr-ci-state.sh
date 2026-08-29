@@ -209,11 +209,54 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | ra
         none)    printf '{"data":{"repository":{"object":{"statusCheckRollup":null}}}}\n' > "$TMP/gh.gql" ;;
         *)       printf '{"data":{"repository":{"object":{"statusCheckRollup":{"state":"%s"}}}}}\n' "$2" > "$TMP/gh.gql" ;;
     esac
+    # THE REQUIRED-CHECKS READS GET DEFAULTS, so every case above stays a
+    # one-liner: an unprotected base with no rules, which requires nothing. The
+    # cases that are about `--required` overwrite these with `mkgh_required`.
+    printf 'main\n' > "$TMP/gh.base"
+    printf '{"protected":false}\n' > "$TMP/gh.branch"
+    printf '[]\n' > "$TMP/gh.rules"
+    printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}}\n' > "$TMP/gh.ctx"
+    rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/gh.base.2" "$TMP/gh.rules.page2" \
+          "$TMP/branch.n" "$TMP/rules.n" "$TMP/base.n"
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$TMP/args"
 case "\$*" in
+    *baseRefName*)
+        if [ -f "$TMP/gh.base.fail" ]; then exit 1; fi
+        # The base is read twice — once to ask what it requires, once to confirm
+        # the pull request was not RETARGETED meanwhile — so the second answer is
+        # stageable, which is how that retarget is staged.
+        n=1
+        if [ -f "$TMP/base.n" ]; then n="\$(cat "$TMP/base.n")"; n=\$((n + 1)); fi
+        printf '%s' "\$n" > "$TMP/base.n"
+        if [ -f "$TMP/gh.base.\$n" ]; then cat "$TMP/gh.base.\$n"; else cat "$TMP/gh.base"; fi
+        exit 0 ;;
+    *rules/branches*)
+        # BEFORE the plain branch pattern, which is a prefix of this one.
+        if [ -f "$TMP/gh.rules.fail" ]; then cat "$TMP/gh.rules"; exit 1; fi
+        # EACH READ CAN BE ANSWERED DIFFERENTLY, which is how a rule migrating
+        # BETWEEN two reads is staged. \`gh.rules.2\` answers the second call.
+        n=1
+        if [ -f "$TMP/rules.n" ]; then n="\$(cat "$TMP/rules.n")"; n=\$((n + 1)); fi
+        printf '%s' "\$n" > "$TMP/rules.n"
+        if [ -f "$TMP/gh.rules.\$n" ]; then cat "$TMP/gh.rules.\$n"; else cat "$TMP/gh.rules"; fi
+        # \`gh api --paginate\` concatenates the pages it fetched; the stub does the
+        # same, so a helper that parses only the first is visible here.
+        if [ -f "$TMP/gh.rules.page2" ]; then cat "$TMP/gh.rules.page2"; fi
+        exit 0 ;;
+    *branches/*)
+        if [ -f "$TMP/gh.branch.fail" ]; then cat "$TMP/gh.branch"; exit 1; fi
+        n=1
+        if [ -f "$TMP/branch.n" ]; then n="\$(cat "$TMP/branch.n")"; n=\$((n + 1)); fi
+        printf '%s' "\$n" > "$TMP/branch.n"
+        if [ -f "$TMP/gh.branch.\$n" ]; then cat "$TMP/gh.branch.\$n"; else cat "$TMP/gh.branch"; fi
+        exit 0 ;;
+    *"contexts(first"*)
+        # The REQUIRED rollup, which asks for the contexts; the all-checks one
+        # below asks only for the state, and the two must not answer each other.
+        cat "$TMP/gh.ctx"; exit 0 ;;
     *graphql*)
         # A COMPLETE-LOOKING ANSWER AND THEN A FAILURE is the case the guard on
         # this read exists for: command substitution keeps what a command printed
@@ -240,6 +283,14 @@ esac
 exit 0
 GHSH
     chmod +x "$TMP/bin/gh"
+}
+mkgh_required() {   # mkgh_required <branch JSON> <rules JSON> <rollup nodes JSON | raw body>
+    printf '%s\n' "$1" > "$TMP/gh.branch"
+    printf '%s\n' "$2" > "$TMP/gh.rules"
+    case "$3" in
+        '{'*) printf '%s\n' "$3" > "$TMP/gh.ctx" ;;
+        *) printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false},"nodes":%s}}}}}}\n' "$3" > "$TMP/gh.ctx" ;;
+    esac
 }
 mkgh_head "$WANT" green
 got="$(run 7 --head "$WANT")"
@@ -325,96 +376,562 @@ grep -qE '^pr checks|^checks' "$TMP/args" \
     && die "the PR-addressed query is still used for the all-checks question" \
     || pass "…nor the PR-addressed query"
 
-# `--required` KEEPS THE PR-ADDRESSED QUERY, because neither the rollup nor the
-# commit endpoints can say which contexts branch protection requires: classic
-# protection needs admin and denies with a 404 indistinguishable from "not
-# protected", and the ruleset endpoints do not see classic protection at all.
-# Measured on #214.
-mkgh_head "$WANT" green; : > "$TMP/args"
+# ── `--required` IS BOUND TO THE COMMIT TOO ────────────────────────────────
+# #214 recorded that this could not be done, having measured
+# `branches/{b}/protection`, which does need admin. The BRANCH OBJECT carries the
+# same answer with the scope this loop runs under, so the required set is readable
+# and the question becomes commit-addressed like the other one.
+# A REQUIREMENT IS STAGED, because a base that requires nothing is answered before
+# the rollup is ever asked — which is right, and would leave the last assertion
+# below passing against a helper that never addressed a commit at all.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"}]'
+: > "$TMP/args"
 run 7 --head "$WANT" --required >/dev/null
-# THE POSITIVE ASSERTION AS WELL AS THE ABSENCE. "It did not ask for the rollup" is
-# also true of an implementation that called a commit endpoint, which cannot
-# identify a required context either — so what the call WAS is asserted, with the
-# repository it was pinned to.
-grep -q "pr checks 7 --repo github.com/acme/widget --required" "$TMP/args" \
-    && pass "…while --required asks the PR-addressed query, pinned to the repository" \
-    || die "--required did not use the PR-addressed query: $(cat "$TMP/args")"
-grep -qF 'statusCheckRollup' "$TMP/args" \
-    && die "--required used the rollup, which cannot answer it: $(cat "$TMP/args")" \
-    || pass "…and not the rollup, which does not know what is required"
+grep -qF 'pr checks' "$TMP/args" \
+    && die "--required still asks the PR-addressed query: $(cat "$TMP/args")" \
+    || pass "…while --required no longer asks the PR-addressed query at all"
+# WHICH BRANCH IS ASKED ABOUT IS THE PR'"'"'S OWN. The working tree may be on any
+# branch or none, and this helper is given a PR number.
+grep -qF -- '--json baseRefName' "$TMP/args" \
+    && pass "…and takes the base branch from the pull request" \
+    || die "the base branch was not read from the PR: $(cat "$TMP/args")"
+# BOTH SOURCES OF PROTECTION ARE READ. Either can be the whole answer — measured,
+# `cli/cli` requires three contexts through classic protection and nothing through
+# rulesets, while `home-assistant/core` requires eight the other way round — so a
+# helper reading one alone reports a requirement as absent.
+grep -qF 'repos/acme/widget/branches/main' "$TMP/args" \
+    && pass "…asking what classic protection requires of it" \
+    || die "the branch object was not read: $(cat "$TMP/args")"
+grep -qF 'repos/acme/widget/rules/branches/main' "$TMP/args" \
+    && pass "…and what its rulesets require" \
+    || die "the ruleset rules were not read: $(cat "$TMP/args")"
+grep -qF "oid=$WANT" "$TMP/args" \
+    && pass "…then asking the rollup of the commit being merged" \
+    || die "the required read was not addressed by the commit: $(cat "$TMP/args")"
 
-# EVERY VERDICT COMES THROUGH THE HELPER'S OWN CLASSIFIER on this path, so the stub
-# returns the response GitHub really sends and the jq is what decides. The states
-# are the `StatusState` enum, read from the schema rather than assumed.
-for _cv in FAILURE:1:failed ERROR:1:failed PENDING:3:pending EXPECTED:3:pending SUCCESS:0:green; do
-    _state="${_cv%%:*}"; _rest="${_cv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
-    mkgh_head "$WANT" "$_state"
-    got="$(run 7 --head "$WANT")"
-    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_st" <<<"${got#*|}"; } \
-        && pass "…and a $_state rollup is $_st" \
-        || die "a $_state rollup gave '$got'"
-done
-# `EXPECTED` IS PENDING RATHER THAN GREEN, and that is the one above whose direction
-# matters most: it is the state of a context branch protection requires that has not
-# reported, so reading it as green would merge on a check that never ran.
-mkgh_head "$WANT" EXPECTED
-got="$(run 7 --head "$WANT")"
-grep -qF 'status=green' <<<"${got#*|}" \
-    && die "an unreported required context was read as green: '$got'" \
-    || pass "…and never green, since that context has not reported"
-# AN UNRECOGNISED STATE IS MALFORMED, not benign — the rule `recordlib.sh` records,
-# applied to the value this path parses itself.
-mkgh_head "$WANT" SURPRISING
-got="$(run 7 --head "$WANT")"
-[ "${got%%|*}" = 2 ] \
-    && pass "…and a state outside the enum is unreadable, not green" \
-    || die "an unknown rollup state gave '$got'"
-
-# ── A NULL ROLLUP IS `none`; A NULL OBJECT IS AN ERROR ─────────────────────
-# They arrive the same way, with status 0 and no message: a commit with no checks
-# at all answers `statusCheckRollup: null`, and an OID this repository does not
-# have answers `object: null`. Both were measured against the live API. Reading the
-# second as `none` would hand the CI gate "no checks are configured" for a commit
-# nobody could find, which is a failed lookup arriving as a benign verdict.
-mkgh_head "$WANT" none
-got="$(run 7 --head "$WANT")"
+# NOTHING REQUIRED IS AN ANSWER, and it is `protected: false` that says so rather
+# than an empty list from a read that may have been refused.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' '[]' '[]'
+got="$(run 7 --head "$WANT" --required)"
 { [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
-    && pass "a commit with no checks at all is none" \
-    || die "a null rollup gave '$got'"
-mkgh_head "$WANT" '{"data":{"repository":{"object":null}}}'
-got="$(run 7 --head "$WANT")"
-{ [ "${got%%|*}" = 2 ] && grep -qF 'status=error' <<<"${got#*|}"; } \
-    && pass "…while a commit the repository does not have is an error" \
-    || die "an unknown commit was read as an answer: '$got'"
-grep -qF 'status=none' <<<"${got#*|}" \
-    && die "…and it emitted the benign verdict anyway: '$got'" \
-    || pass "…and did not emit the benign verdict beside the refusal"
-# …AND EVERY OTHER SHAPE THAT IS NOT AN ANSWER. A GraphQL error body arrives with
-# HTTP 200, and a truncated one parses; each of these would otherwise walk a path
-# that is absent and come out as the benign verdict.
-for _bad in \
-    '{"errors":[{"message":"Something went wrong"}],"data":null}' \
-    '{"data":null}' \
-    '{"data":{}}' \
-    '{"data":{"repository":null}}' \
-    '{"data":{"repository":{}}}' \
-    '{"data":{"repository":{"object":{}}}}' \
-    '{"data":{"repository":{"object":{"statusCheckRollup":{}}}}}' \
-    '{"data":{"repository":{"object":{"statusCheckRollup":{"state":null}}}}}' \
-    '[]' ; do
-    mkgh_head "$WANT" "$_bad"
-    got="$(run 7 --head "$WANT")"
-    # THE CLASSIFIER NAMED IT, rather than jq dying on the way. Both come out as
-    # status 2, so asserting the status alone would pass against a walk that
-    # crashed on a shape it does not handle — and a crash is one refactor away
-    # from being caught and read as something benign.
-    { [ "${got%%|*}" = 2 ] && grep -qF 'out=malformed' <<<"${got#*|}"; } \
-        && pass "…and a body that answers nothing is refused by name" \
-        || die "'$_bad' was read as an answer: '$got'"
-    grep -qE 'status=(none|green)' <<<"${got#*|}" \
-        && die "…and a verdict was emitted beside the refusal: '$got'" \
-        || pass "…with no verdict beside the refusal"
+    && pass "an unprotected base requires nothing" \
+    || die "an unprotected base did not report none: '$got'"
+
+# THE CASE #214 IS ABOUT. A required context that has NOT reported has no check run
+# and no status, so the all-checks rollup is green while the requirement is unmet.
+# Bound to the commit, that is `pending` — the requirement stands and the answer is
+# not in yet — and it is the one answer the old probe could not give.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' '[]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…while a required context that has not reported is pending, not green" \
+    || die "an unreported requirement gave '$got'"
+
+# EVERY REQUIRED VERDICT COMES THROUGH THE HELPER'"'"'S OWN CLASSIFIER, so the stub
+# returns the shape GitHub really sends and the jq is what decides.
+for _rv in SUCCESS:0:green NEUTRAL:0:green SKIPPED:0:green FAILURE:1:failed CANCELLED:1:failed TIMED_OUT:1:failed ACTION_REQUIRED:1:failed STARTUP_FAILURE:1:failed STALE:1:failed; do
+    _c="${_rv%%:*}"; _rest="${_rv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"'"$_c"'"}]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_st" <<<"${got#*|}"; } \
+        && pass "…and a required run concluding $_c is $_st" \
+        || die "a required $_c run gave '$got'"
 done
+# AN UNFINISHED REQUIRED RUN IS PENDING, and its null conclusion is not malformed.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and a required run still going is pending" \
+    || die "an unfinished required run gave '$got'"
+# A REQUIRED CONTEXT CAN BE A LEGACY STATUS, which the rollup reports as a
+# StatusContext with its own enum. Reading only the check runs would report an
+# integration that still posts statuses as one that has not reported.
+for _sv in SUCCESS:0:green FAILURE:1:failed ERROR:1:failed PENDING:3:pending EXPECTED:3:pending; do
+    _c="${_sv%%:*}"; _rest="${_sv#*:}"; _rc="${_rest%%:*}"; _st="${_rest#*:}"
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["legacy"]}}}' '[]' \
+        '[{"__typename":"StatusContext","context":"legacy","state":"'"$_c"'"}]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = "$_rc" ] && grep -qF "status=$_st" <<<"${got#*|}"; } \
+        && pass "…and a required legacy status of $_c is $_st" \
+        || die "a required $_c status gave '$got'"
+done
+# A RULESET REQUIREMENT COUNTS THE SAME, with classic protection saying nothing.
+# `home-assistant/core` is that shape: `protection.enabled` false, `protected`
+# true, eight contexts under the rules endpoint.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"enabled":false,"required_status_checks":{"contexts":[]}}}' \
+    '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"hassfest"}]}}]' \
+    '[{"__typename":"CheckRun","name":"hassfest","status":"COMPLETED","conclusion":"FAILURE"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "…and a ruleset requirement is read where classic protection has none" \
+    || die "a ruleset requirement was not read: '$got'"
+# …AND THE TWO ARE A UNION rather than a choice. A failing context named by only
+# one of the sources still decides, whichever source names it.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' \
+    '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"hassfest"}]}}]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"hassfest","status":"COMPLETED","conclusion":"FAILURE"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+    && pass "…and the two sources are a union, not a choice" \
+    || die "the union of both sources was not taken: '$got'"
+# A CONTEXT THE COMMIT HAS THAT NOTHING REQUIRES DOES NOT DECIDE. That is the whole
+# difference between this question and the all-checks one beside it.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"optional","status":"COMPLETED","conclusion":"FAILURE"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "…and a failing check nothing requires does not block the required gate" \
+    || die "an optional failure decided the required question: '$got'"
+
+# ── AND WHAT CANNOT BE READ IS NOT AN EMPTY REQUIREMENT ────────────────────
+# Every one of these would otherwise arrive as "nothing is required", which is a
+# merge gated on an empty set: the failure reported as the benign answer.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true}' '[]' '[]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "a protected branch whose protection is not readable is an error" \
+    || die "an unreadable protection was read as no requirement: '$got'"
+for _bad in '{"protected":"yes"}' '[]' '{"protected":true,"protection":{"required_status_checks":{"contexts":"build"}}}' '{"protected":true,"protection":{"required_status_checks":{"contexts":[7]}}}'; do
+    mkgh_head "$WANT" green
+    mkgh_required "$_bad" '[]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and so is a branch body of another shape" \
+        || die "'$_bad' was read as no requirement: '$got'"
+done
+for _bad in '{}' '[{"type":"required_status_checks"}]' '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":7}]}}]' '[7]'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' "$_bad" '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and so is a rules body of another shape" \
+        || die "'$_bad' was read as no rules: '$got'"
+done
+# A SECOND PAGE OF CONTEXTS IS REFUSED rather than truncated: a required context on
+# the next page would read as one that has not reported, and the loop would wait
+# for a check that had already passed.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":true},"nodes":[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"}]}}}}}}'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "…and a rollup with a second page of contexts is unreadable" \
+    || die "a truncated context list was read as an answer: '$got'"
+# EITHER READ FAILING IS AN ERROR, including one that printed a complete body first.
+for _wf in base branch rules; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[]' '[]'
+    : > "$TMP/gh.$_wf.fail"
+    got="$(run 7 --head "$WANT" --required)"
+    rm -f "$TMP/gh.$_wf.fail"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and a failed $_wf read is an error, not an empty requirement" \
+        || die "a failed $_wf read gave '$got'"
+done
+# A BASE NAME IS ENCODED, NOT REFUSED. It goes into a URL path, so `#`, `%` and a
+# space all need encoding there — and every one of them is legal in a git ref, so
+# refusing them would mean this gate could never merge a pull request targeting
+# `release#candidate` whatever its checks said.
+for _bb in 'release#candidate:release%23candidate' 'a%b:a%25b' 'a b:a%20b' '-x:-x' 'release/2.0:release%2F2.0' 'ünïcode:%C3%BCn%C3%AFcode'; do
+    _raw="${_bb%%:*}"; _enc="${_bb#*:}"
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[]' '[]'
+    printf '%s\n' "$_raw" > "$TMP/gh.base"
+    : > "$TMP/args"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
+        && pass "the base '$_raw' is asked about rather than refused" \
+        || die "the base '$_raw' was refused: '$got'"
+    grep -qF "repos/acme/widget/branches/$_enc" "$TMP/args" \
+        && pass "…encoded as '$_enc', which is what the endpoint answers" \
+        || die "the base '$_raw' was not encoded: $(cat "$TMP/args")"
+done
+# TWO ARE STILL REFUSED, and neither is a ref git would create. An empty name has
+# nothing to ask about, and `..` is the one traversal encoding does not close —
+# `.` is unreserved and stays itself, so `branches/../../secret` would ask about
+# another repository. Git rejects two consecutive dots in a ref name.
+for _bb in '' '../x' 'a..b'; do
+    mkgh_head "$WANT" green
+    printf '%s\n' "$_bb" > "$TMP/gh.base"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_base' <<<"${got#*|}"; } \
+        && pass "…while the base '$_bb' is refused" \
+        || die "the base '$_bb' was accepted: '$got'"
+done
+
+# ── A REQUIREMENT BOUND TO AN APP IS NOT MET BY ANOTHER APP'S RUN ──────────
+# Both sources can bind a context to an app — `app_id` under classic protection's
+# `checks`, `integration_id` in a ruleset — and GitHub then counts only that app's
+# run. Matching on the name alone lets a passing run of the same name from another
+# app satisfy this gate, which on the default `--admin` path is the merge.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42,"context":"build"}]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":42}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "a run from the app the requirement names satisfies it" \
+    || die "the named app's run did not satisfy the requirement: '$got'"
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42,"context":"build"}]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…while the same name from another app does not" \
+    || die "another app's run satisfied a bound requirement: '$got'"
+# …AND A LEGACY STATUS CANNOT MEET A BOUND ONE. A StatusContext carries a creator,
+# not the app id the requirement names, so there is nothing to compare.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42,"context":"legacy"}]}}}' '[]' \
+    '[{"__typename":"StatusContext","context":"legacy","state":"SUCCESS"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and neither does a legacy status, which carries no app id" \
+    || die "a legacy status satisfied a bound requirement: '$got'"
+# …WHILE AN UNBOUND REQUIREMENT IS MET BY EITHER KIND, as GitHub does it. All three
+# of `cli/cli`'s required contexts carry `app_id: null`.
+for _n in '{"__typename":"CheckRun","name":"any","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}' '{"__typename":"StatusContext","context":"any","state":"SUCCESS"}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":null,"context":"any"}]}}}' '[]' "[$_n]"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+        && pass "…while an unbound requirement is met whichever kind reports it" \
+        || die "an unbound requirement was not met: '$got'"
+done
+# A `checks` FIELD OF ANOTHER SHAPE IS NOT AN ABSENT ONE. Falling back to the flat
+# `contexts` list there turns every app-bound requirement into an unbound one, and a
+# run from the wrong app then satisfies it — from a body that was truncated or
+# unfamiliar rather than old.
+for _cs in '"truncated"' '{"0":{"context":"build"}}' '7'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":'"$_cs"',"contexts":["build"]}}}' '[]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "a checks field of another shape is unreadable, not an absent one" \
+        || die "a malformed checks field fell back to the flat list: '$got'"
+done
+# …WHILE AN ABSENT ONE STILL FALLS BACK, which is why that path exists: older bodies
+# carry only the flat list, and refusing them would be a gate that never opens.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "…while a body carrying only the flat list is read as unbound" \
+    || die "a body with no checks field was refused: '$got'"
+# …AND SO DOES AN EXPLICIT NULL, which GitHub sends for a branch with none.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":null,"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "…and so does an explicit null" \
+    || die "a null checks field was refused: '$got'"
+
+# `-1` IS THE WILDCARD, NOT AN APP. GitHub writes `app_id: -1` where the
+# requirement explicitly allows any app to provide the check, so keeping it as a
+# binding would look for a check suite whose app id is `-1`, find none, and report
+# `pending` for ever — a required context that has passed, on a gate that cannot
+# open.
+# THE TWO SOURCES ARE WRITTEN OUT rather than packed into one string. A
+# `branch:rules` table split on the first colon truncates every JSON body at its
+# first key, and the cases then pass because jq could not parse them.
+_w1_branch='{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":-1,"context":"build"}]}}}'
+_w1_rules='[]'
+_w2_branch='{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}'
+_w2_rules='[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build","integration_id":-1}]}}]'
+_w_run='[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+for _w in 1 2; do
+    eval '_b="$_w'"$_w"'_branch"; _r="$_w'"$_w"'_rules"'
+    printf '%s' "$_b" | jq -e . >/dev/null 2>&1 \
+        && pass "…and the -1 case $_w reaches the rule as the JSON it looks like" \
+        || die "the -1 case $_w input is not parseable: $_b"
+    mkgh_head "$WANT" green
+    mkgh_required "$_b" "$_r" "$_w_run"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+        && pass "…and -1 is the wildcard, met by whichever app reported" \
+        || die "-1 was read as an app binding: '$got'"
+done
+
+# A RULESET BINDING IS THE SAME RULE by another name.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
+    '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"scan","integration_id":42}]}}]' \
+    '[{"__typename":"CheckRun","name":"scan","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and a ruleset integration_id binds the same way" \
+    || die "a ruleset binding was ignored: '$got'"
+# AN IDENTITY OF ANOTHER SHAPE IS UNREADABLE, rather than a requirement with no
+# binding — which would be the binding dropped in silence.
+for _bad in '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":"42","context":"build"}]}}}' '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":42}]}}}'; do
+    mkgh_head "$WANT" green
+    mkgh_required "$_bad" '[]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "…and a check identity of another shape is unreadable" \
+        || die "a malformed check identity was accepted: '$got'"
+done
+
+# ── EVERY RECORD SHARING A REQUIRED NAME IS EVALUATED ──────────────────────
+# A name can arrive as a check run AND as a legacy status — an integration posting
+# both, or two apps using the same name where the requirement is unbound — and
+# GitHub requires all of them. Taking the first match let whichever the rollup
+# happened to list first decide, so a passing record answered for a failing one.
+# BOTH ORDERS, because the defect is exactly an order dependence.
+_pair_run='{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}'
+_pair_bad='{"__typename":"StatusContext","context":"build","state":"FAILURE"}'
+for _order in "[$_pair_run,$_pair_bad]" "[$_pair_bad,$_pair_run]"; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' "$_order"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 1 ] && grep -qF 'status=failed' <<<"${got#*|}"; } \
+        && pass "a failing record sharing the required name decides, whichever is listed first" \
+        || die "a passing record answered for a failing one: '$got'"
+done
+# …AND PENDING TOO, since a second record still running is a requirement not met.
+_pair_pend='{"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"app":{"databaseId":7}}}'
+for _order in "[$_pair_run,$_pair_pend]" "[$_pair_pend,$_pair_run]"; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' "$_order"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+        && pass "…and one still running is pending, whichever is listed first" \
+        || die "a passing record answered for an unfinished one: '$got'"
+done
+
+# ── A RECORD IS IDENTIFIED BY THE FIELD ITS KIND HAS ───────────────────────
+# A check run is named by `name` and a legacy status by `context`. Taking whichever
+# of the two is present let a `StatusContext` carrying a `name` — which is not its
+# identifier — match a requirement whose own `context` was absent, and be classified
+# green from a body this does not understand.
+for _x in '{"__typename":"StatusContext","name":"build","state":"SUCCESS"}' '{"__typename":"CheckRun","context":"build","status":"COMPLETED","conclusion":"SUCCESS"}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' "[$_x]"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "a record carrying the other kind's identifier is unreadable" \
+        || die "a cross-shaped record was accepted: '$got'"
+done
+# …AND A WELL-FORMED RECORD IS MATCHED ON ITS OWN FIELD, which is the half the
+# validation above cannot catch: this status is perfectly shaped for its kind, and
+# its `context` is not the required one. Only its `name` is, and a status is not
+# named by `name` — so the requirement is unmet and the answer is pending.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"StatusContext","context":"other","name":"build","state":"SUCCESS"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and a status whose own context is not the required one does not answer for it" \
+    || die "a status was matched on a field that does not identify it: '$got'"
+
+# …AND IT IS THE WHOLE ROLLUP THAT IS UNREADABLE, not that one record passed over.
+# A body of a shape this does not understand may mis-read the next record too, and
+# that one might be the one that matters.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}},{"__typename":"StatusContext","name":"other","state":"SUCCESS"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "…even where the required context itself was answered properly" \
+    || die "a malformed record elsewhere in the rollup was passed over: '$got'"
+
+# ── A REQUIREMENT THAT MOVES BETWEEN THE TWO READS IS NOT LOST ─────────────
+# The branch read and the rules read are not one snapshot. Add the context to
+# classic protection after the branch read and remove it from the ruleset before
+# the rules read, and neither body carries it though it was required throughout —
+# an empty required set, which is a merge with nothing asserted. Both sources are
+# read twice and everything is unioned, so a requirement present at any of the four
+# instants is honoured.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' '[]' '[]'
+# The first branch read has no classic requirement and the first rules read has
+# already lost the ruleset one; the SECOND branch read is where the migration
+# lands.
+printf '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}\n' > "$TMP/gh.branch.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.branch.2"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "a requirement that appears only on the second read is still required" \
+    || die "a migrating requirement was lost: '$got'"
+# …AND THE SAME FROM THE RULESET SIDE.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' '[]' '[]'
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build"}]}}]\n' > "$TMP/gh.rules.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.rules.2"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…whichever source it appears in" \
+    || die "a migrating ruleset requirement was lost: '$got'"
+# …AND A REQUIREMENT THAT WAS THERE FIRST IS NOT DROPPED BY A LATER EMPTY READ,
+# which is the same union read from the other end.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' '[]'
+printf '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}\n' > "$TMP/gh.branch.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.branch.2"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and one that vanishes between the reads is still required for this run" \
+    || die "a vanishing requirement was dropped: '$got'"
+# …AND BOTH SOURCES REALLY ARE READ TWICE, so the union above is not resting on a
+# single read that happened to be right.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+: > "$TMP/args"
+run 7 --head "$WANT" --required >/dev/null
+[ "$(grep -cF 'repos/acme/widget/branches/main' "$TMP/args")" = 2 ] \
+    && pass "…because the branch object is read twice" \
+    || die "the branch was not read twice: $(cat "$TMP/args")"
+[ "$(grep -cF 'repos/acme/widget/rules/branches/main' "$TMP/args")" = 2 ] \
+    && pass "…and so are its rules" \
+    || die "the rules were not read twice: $(cat "$TMP/args")"
+
+# ── A RULE THIS CANNOT EVALUATE IS NOT A RULE WITH NO CONTEXTS ─────────────
+# A ruleset can gate a merge on something that is not a status context. Dropping
+# those leaves the branch reading as requiring only what its `required_status_checks`
+# rules name — an enforcement rule arriving as an empty required set, which is this
+# issue's own shape one level down.
+for _rt in workflows required_workflow_status_checks code_scanning secret_scanning license_compliance_scanning required_deployments merge_queue future_rule_nobody_has_read; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
+        '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "a '$_rt' rule is unsupported, not an empty requirement" \
+        || die "a '$_rt' rule was dropped: '$got'"
+    # …AND THE TYPE IS ON THE LINE. Refusing without naming it leaves the operator
+    # told the required checks are unreadable and nothing else, on a merge that
+    # will not proceed until they change something they cannot see.
+    grep -qF "rule=$_rt" <<<"${got#*|}" \
+        && pass "…and the diagnostic names '$_rt'" \
+        || die "the unsupported rule type was swallowed: '$got'"
+done
+# A MERGE QUEUE IS THE ONE ENTRY THAT DEPENDS ON HOW THE MERGE WILL BE MADE.
+# `gh pr merge --admin` bypasses a queue and merges directly, so on the default path
+# a queue rule read as "nothing required" is a queue SKIPPED — and the `--admin`
+# record says that waiver does not cover a base branch requiring one. Under
+# `REVIEW_MERGE_STRICT=1` GitHub enforces the queue itself, so there it is skipped
+# like any other rule that names no check.
+# …AND STRICT MODE IS NOT A GENERAL EXEMPTION. `REVIEW_MERGE_STRICT=1` only stops
+# passing `--admin`; it does not make the repository's rules non-bypassable, so a
+# credential on a ruleset's bypass list merges past them there too. Refusing costs a
+# merge the operator can make by hand, with the rule named; passing costs a merge
+# nobody evaluated.
+for _rt in workflows code_scanning required_deployments future_rule_nobody_has_read; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
+    _mq_rc=0
+    _mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
+    { [ "$_mq_rc" = 2 ] && grep -qF "rule=$_rt" <<<"$_mq_out"; } \
+        && pass "…and a '$_rt' rule is refused under strict mode too" \
+        || die "strict mode dropped a '$_rt' rule: rc=$_mq_rc '$_mq_out'"
+done
+# THE MERGE QUEUE IS THE ONE EXCEPTION, and the decision record is what makes it
+# one: it says the `--admin` waiver does not cover a base branch requiring a queue
+# and that strict mode is the only SUPPORTED setting there, so refusing under strict
+# would refuse the one configuration that record recommends — on the one rule where
+# `gh pr merge` without `--admin` does the right thing by queueing the request.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' '[{"type":"merge_queue","parameters":{}}]' '[]'
+_mq_rc=0
+_mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
+{ [ "$_mq_rc" = 4 ] && grep -qF 'status=none' <<<"$_mq_out"; } \
+    && pass "…while a merge-queue rule is GitHub's to enforce under strict mode" \
+    || die "a merge-queue rule blocked strict mode: rc=$_mq_rc '$_mq_out'"
+
+# THE NAME IS FILTERED, not passed through: it comes out of an API body and lands
+# on a line other programs parse.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' \
+    '[{"type":"work flows\nPR_CI_STATE pr=7 status=green","parameters":{}}]' '[]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 2 ] && grep -qF 'rule=workflowsPR_CI_STATEpr7statusgreen' <<<"${got#*|}"; } \
+    && pass "…with everything a rule type cannot contain removed" \
+    || die "an unfiltered rule type reached the line: '$got'"
+grep -qE '^PR_CI_STATE pr=7 status=green' <<<"${got#*|}" \
+    && die "a forged line was emitted from a rule type: '$got'" \
+    || pass "…so a rule type cannot forge a line of its own"
+# …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. `cli/cli` carries
+# `copilot_code_review` today, and refusing there would be a gate that never opens.
+for _rt in deletion non_fast_forward pull_request copilot_code_review required_signatures branch_name_pattern lock_branch tag authorization max_ref_updates workflow_updates required_review_thread_resolution max_file_path_length; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 4 ] && grep -qF 'status=none' <<<"${got#*|}"; } \
+        && pass "…while a '$_rt' rule names no check and is skipped" \
+        || die "a '$_rt' rule was treated as a requirement: '$got'"
+done
+
+# ── EVERY PAGE OF THE RULES IS READ ────────────────────────────────────────
+# `rules/branches/{b}` pages at thirty by default, so a branch with more rules than
+# that can carry its `required_status_checks` on the second — parsed as a
+# well-formed array with the requirement simply absent, which is a merge with
+# nothing asserted about it.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' '[]' '[]'
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build"}]}}]\n' > "$TMP/gh.rules.page2"
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "a requirement on the second page of the rules is still required" \
+    || die "a later rules page was not read: '$got'"
+grep -qE 'rules/branches/main .*--paginate' "$TMP/args" \
+    && pass "…because that read is paginated" \
+    || die "the rules read is not paginated: $(cat "$TMP/args")"
+# …AND A LATER PAGE THAT IS NOT AN ARRAY IS UNREADABLE, since `jq -s` slurps the
+# pages as separate documents and a `.[][]` over an error body walks its values.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' '[]' '[]'
+printf '{"message":"Server Error"}\n' > "$TMP/gh.rules.page2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.rules.page2"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "…and a later page of another shape is unreadable" \
+    || die "an error body on a later rules page was accepted: '$got'"
+
+# ── A PULL REQUEST RETARGETED MID-READ IS STALE, NOT ANSWERED ──────────────
+# A PR can be retargeted without its head moving, so `--match-head-commit` sees
+# nothing and the head confirmations both pass: the requirements just read are the
+# OLD base's, and the merge lands on a branch whose own required checks were never
+# asked about. That is the same shape as a head that moved, so it is the same
+# answer — `stale`, which the caller re-runs.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+printf 'other-branch\n' > "$TMP/gh.base.2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.base.2"
+{ [ "${got%%|*}" = 5 ] && grep -qF 'moved=base' <<<"${got#*|}"; } \
+    && pass "a pull request retargeted while the requirements were read is stale" \
+    || die "a retargeted pull request was answered: '$got'"
+grep -qF 'status=green' <<<"${got#*|}" \
+    && die "…and the old base's verdict was emitted anyway: '$got'" \
+    || pass "…with no verdict about the base it no longer has"
+# …AND THE ALL-CHECKS QUESTION DOES NOT PAY FOR IT. It asks nothing of the base, so
+# a retarget changes nothing about its answer and a second base read there would be
+# a call for no reason.
+mkgh_head "$WANT" green
+: > "$TMP/args"
+run 7 --head "$WANT" >/dev/null
+grep -qF 'baseRefName' "$TMP/args" \
+    && die "the all-checks question read the base: $(cat "$TMP/args")" \
+    || pass "…while the all-checks question never asks about the base at all"
 
 # ── A GREEN ANSWER FROM A FAILED REQUEST IS NOT GREEN ──────────────────────
 # `gh` can print a complete, valid body and then exit non-zero because the request
