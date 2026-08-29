@@ -58,6 +58,13 @@
   nobody chose. All ten names the block assigns are in the generic probe now, and its
   refusal names them.
 
+- **A failed setup removes only the names it had already taken.** The cleanup knew which
+  objects the helper CAN create, not which it HAD created, so a refusal early on — a
+  `pr-origin.sh` that planted a file at the origin name and then failed, say — deleted a
+  file this run never wrote. Each creation is recorded as it happens now, and only what is
+  on that list is removed: files by name, directories in reverse so a parent is never
+  asked for before its child.
+
 - **The origin transport is left where it is.** The helper copied the origin out of
   `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
   followed by `rmdir` on its parent — a pair that destroys a REPLACEMENT, since the first

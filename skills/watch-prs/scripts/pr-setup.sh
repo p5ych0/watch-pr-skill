@@ -123,6 +123,19 @@ RB_PHASE=reserved
 RB_OWNED=no
 RB_PREEXISTED=no
 RB_INO=
+# AND WHAT HAS ACTUALLY BEEN CREATED IS RECORDED AS IT HAPPENS, name by name. `RB_PHASE`
+# alone said "something can be inside now", and the cleanup then removed every name this
+# helper EVER creates — including ones it had not got to yet. A `pr-origin.sh` that
+# planted `$RB_DIR/origin` and then refused had that file deleted by a run which never
+# wrote it, which is past the bound `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
+# accepts: the names this session HAD ALREADY TAKEN, not the ones it might have.
+#
+# TWO LISTS, because the removals differ: files come out with `rm -f`, directories with
+# `rmdir`, and the directories go in reverse so a parent is never asked for before its
+# child. The names are relative to `$RB_DIR` and contain no spaces, which is what lets
+# the lists be split on whitespace.
+RB_MADE_F=
+RB_MADE_D=
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
 # AND THE OBJECT ITSELF IS HELD, because ownership is not identity. `-O` refuses a
 # name another ACCOUNT holds and that is the boundary the record is about — but a
@@ -216,18 +229,16 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
     # anything and leaves a directory behind at worst.
     if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
-        # THE PIN PROBES' DIRECTORIES FIRST, each by one `rmdir` on its own name. A
-        # refusal between creating one and removing it leaves an empty child under
-        # `$RB_DIR`, which the final `rmdir` then trips over — the caller is left a
-        # NON-empty published directory where the accepted bound is one empty one.
-        /usr/bin/env rmdir "$RB_DIR/pinprobe2" 2>/dev/null
-        /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null
-        /usr/bin/env rm -f "$RB_DIR/origin" "$RB_DIR/o/origin" 2>/dev/null
-        /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
-        for _g in summary.md request.md prior.txt head.txt; do
-            /usr/bin/env rm -f "$RB_DIR/work/$_g" 2>/dev/null
+        # ONLY WHAT WAS RECORDED, and nothing else. The files first, then the
+        # directories in reverse, so a parent is never asked for before its child.
+        for _g in $RB_MADE_F; do
+            /usr/bin/env rm -f "$RB_DIR/$_g" 2>/dev/null
         done
-        /usr/bin/env rmdir "$RB_DIR/work" 2>/dev/null
+        _rb_rev=
+        for _g in $RB_MADE_D; do _rb_rev="$_g $_rb_rev"; done
+        for _g in $_rb_rev; do
+            /usr/bin/env rmdir "$RB_DIR/$_g" 2>/dev/null
+        done
     fi
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
@@ -300,6 +311,10 @@ RB_PHASE=written
     [ "$_rc" -eq 2 ] && rb_setup_stop origin_storage 2
     rb_setup_stop origin_unreadable 1
 }
+# THE READ SUCCEEDED, so `o` and its leaf are this run's — `pr-origin.sh` gives its own
+# directory back on a refusal, so they exist only on this path.
+RB_MADE_D="$RB_MADE_D o"
+RB_MADE_F="$RB_MADE_F o/origin"
 RB_REMOTE=""
 RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transport 1
 # AND IT IS LEFT WHERE IT IS, which is what `SKILL.md` does with its own transports and
@@ -386,8 +401,10 @@ umask 077
 set -C
 RB_WORK_DIR="$RB_DIR/work"
 /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" 2>/dev/null || rb_setup_stop work_dir 2
+RB_MADE_D="$RB_MADE_D work"
 for _f in summary.md request.md prior.txt head.txt; do
     : > "$RB_WORK_DIR/$_f" || rb_setup_stop work_files 2
+    RB_MADE_F="$RB_MADE_F work/$_f"
     { [ -f "$RB_WORK_DIR/$_f" ] && [ ! -s "$RB_WORK_DIR/$_f" ]; } \
         || rb_setup_stop work_files_not_empty 2
 done
@@ -422,6 +439,9 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 # or truncated origin would pin the session to it.
 [ -s "$RB_DIR/origin" ] || rb_setup_stop origin_write 2
 [ "$(cat "$RB_DIR/origin" 2>/dev/null)" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
+# RECORDED ONLY NOW, because until the write happened a file at that name was somebody
+# else's — which is the case that made this list necessary.
+RB_MADE_F="$RB_MADE_F origin"
 
 # ── the storage the pin will still need ────────────────────────────────────
 #
@@ -451,7 +471,9 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 # processes apart and cannot be closed from either. The abort the driver prints there
 # says to re-run, which relocates the session as a whole.
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
+RB_MADE_D="$RB_MADE_D pinprobe"
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
+RB_MADE_D="$RB_MADE_D pinprobe2"
 /usr/bin/env rmdir "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
 /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 

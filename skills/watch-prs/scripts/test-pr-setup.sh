@@ -564,6 +564,31 @@ for _sig in HUP INT TERM; do
 done
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
+# ── an early failure does not remove what it never created ────────────────
+# `RB_PHASE` SAID "SOMETHING CAN BE INSIDE NOW", not which names this run had taken. The
+# cleanup removed every name the helper EVER creates, so a `pr-origin.sh` that planted
+# `$RB_DIR/origin` and then refused had that file deleted by a run which never wrote it —
+# past the bound `docs/decisions/2026-08-29-setup-leaf-cleanup.md` accepts, which is the
+# names this session HAD ALREADY TAKEN.
+#
+# STAGED WITH THE FORGED READER DOING THE PLANTING, since it runs after the reservation
+# and before any of the later creates — which is exactly the window.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "planted\n" > "$(dirname "$2")/origin"
+exit 1'
+_ec="$(mktemp -d "$TMP/ec.XXXXXX")/dir"
+_ec_rc=0
+_ec_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ec" 2>&1)" || _ec_rc=$?
+{ [ "$_ec_rc" -ne 0 ] && case "$_ec_out" in *'reason=origin_unreadable'*) true ;; *) false ;; esac; } \
+    && pass "an early read failure refuses, so the cleanup ran" \
+    || die "the early-failure case did not refuse as expected (rc=$_ec_rc out='$_ec_out')"
+[ -f "$_ec/origin" ] \
+    && pass "…and a file at a name this run had not yet taken survives it" \
+    || die "the cleanup removed a name this run never created"
+rm -rf "$_ec"
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
 # ── what a substitution AFTER the identity check can cost ─────────────────
 # THE CLEANUP CHECKS THE HELD IDENTITY AND THEN REMOVES BY NAME, and nothing in shell
 # can unlink relative to a held descriptor. A same-UID process that substitutes the tree
@@ -583,9 +608,15 @@ sed 's|^    if \[\[ $RB_PHASE = written \]\]|    /usr/bin/env rm -rf "$RB_DIR"; 
 grep -qF 'printf "keep\n" > "$RB_DIR/unrelated"' "$_stage/pr-setup.sh" \
     && pass "the post-check substitution stage is patched" \
     || die "the post-check substitution stage did not patch pr-setup.sh; the case proves nothing"
-sed -i.bak 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null .*|rb_setup_stop pin_storage 2|' "$_stage/pr-setup.sh" 2>/dev/null \
-    || sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null .*|rb_setup_stop pin_storage 2|' "$_stage/pr-setup.sh" > "$_stage/pr-setup.sh.new" && mv "$_stage/pr-setup.sh.new" "$_stage/pr-setup.sh"
-rm -f "$_stage/pr-setup.sh.bak"
+# NO `sed -i`, AND NO `||`/`&&` CHAIN AROUND IT. `sed -i` is GNU-and-BSD-incompatible in
+# its argument, and the fallback was written as `sed -i … || sed … > new && mv` — one
+# left-associative list, so the `mv` ran after the FIRST branch succeeded too and printed
+# `cannot stat` on a file that was never made. The fixture still reported PASS, which is a
+# failed setup command presented as a clean run.
+sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null .*|rb_setup_stop pin_storage 2|' \
+    "$_stage/pr-setup.sh" > "$_stage/pr-setup.sh.new" \
+    && mv "$_stage/pr-setup.sh.new" "$_stage/pr-setup.sh" \
+    || die "the pin-storage rewrite failed; the substitution case would run against the wrong copy"
 _sub="$(mktemp -d "$TMP/sub.XXXXXX")/dir"
 _sub_rc=0
 _sub_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sub" 2>&1)" || _sub_rc=$?

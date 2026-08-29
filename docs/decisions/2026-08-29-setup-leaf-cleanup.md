@@ -41,8 +41,14 @@ the real code.
 
 | What the racer leaves at the substituted path | Measured outcome |
 | --- | --- |
-| a file at a name this run created — `origin`, `work/summary.md` | **removed** |
+| a file at a name this run HAD ALREADY CREATED — `origin`, `work/summary.md` | **removed** |
+| a file at a name this run creates LATER, or never | **survives, untouched** |
 | a file at any other name | **survives, untouched** |
+
+The middle row is a separate case and a separate fixture. The cleanup used to remove
+every name this helper ever creates, so a `pr-origin.sh` that planted `$RB_DIR/origin`
+and then refused had that file deleted by a run which never wrote it. Each creation is
+recorded as it happens now, and only what is on that list comes out.
 
 **So the loss is bounded by the names this session had already taken.** The victim is a
 same-UID process that chose to write at one of them, which is the same class of victim
