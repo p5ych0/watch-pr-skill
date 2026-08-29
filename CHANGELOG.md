@@ -2,7 +2,12 @@
 
 ## [2.0.82] — 2026-08-29
 
-- **No repository other than this one is named anywhere in the tree.** The
+- **The plugin works on the repository in the current directory, and names no
+  other — anywhere, prose included.** That rule is now written down in `CLAUDE.md`
+  and in both reviewer files, so a slug added to a comment or a changelog entry is a
+  blocking finding rather than something to notice later.
+
+- **Thirty such mentions are gone.** The
   measurements behind the required-checks work cited the public repositories they
   were taken on, and two archived v1 planning documents discussed another project of
   the same author. Every one of those names is gone: the measurements keep their

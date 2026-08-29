@@ -253,6 +253,20 @@ rediscovering them.
 - No hard-coded owner, repo, or branch name in the scripts or in `SKILL.md`. The
   same installed copy serves every project, so a literal identity there would
   leak one project's state into another's.
+- **AND NO REPOSITORY BUT THIS ONE IS NAMED ANYWHERE, including prose.** The plugin
+  works on the repository in the current directory; any other is a repository the
+  operator did not ask about. That covers documentation and comments as well as
+  code — a measurement taken somewhere else is evidence for its COUNT and its
+  SHAPE, not for whose repository it was, so write "three required contexts on one,
+  eleven on another" and never the slugs. The exception is the operator asking, in
+  the session, about a named repository; it does not survive into a file.
+
+  This was not free. The required-checks work cited five public repositories across
+  nine files, and two archived planning documents discussed another project of the
+  same author — thirty mentions, removed in 2.0.82. `test-pr-identity.sh` enforces
+  the code half and now keys on the OWNER and the shape rather than on a list of
+  project names, which was itself a list of other repositories living in the file
+  whose job is to forbid them.
 - It does **not** cover this repository's own metadata or its installation
   documentation. `.claude-plugin/` and the install commands in `README.md`
   necessarily name `p5ych0/watch-pr-skill` — that is this plugin's own identity.
