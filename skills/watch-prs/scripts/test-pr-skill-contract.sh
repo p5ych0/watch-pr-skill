@@ -5251,8 +5251,13 @@ if [ -f "$_wy_doc" ]; then
     # `pend`, so a pair whose pointer is the LAST line of the fence never sets it —
     # which is the most obvious way to write a pair that annotates nothing, and the
     # first version of this check passed against exactly that.
-    _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; pend=0; next}
-       f && /^```$/{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++
+    #
+    # INDENTED FENCES HERE TOO, for the reason the claim scan above takes them: two
+    # of this document's blocks sit inside list items, and a column-anchored scan
+    # would let a pair at the END of one satisfy the bijection while annotating
+    # nothing — the pair is counted there and floats here.
+    _wy_float="$(awk '/^[[:space:]]*```bash$/ && !f {f=1; prev=""; pend=0; next}
+       f && /^[[:space:]]*```$/{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++
                      f=0; prev=""; pend=0; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/) pend=1
            if (pend && $0 !~ /^[[:space:]]*#/ && NF > 0) pend=0
@@ -5422,10 +5427,21 @@ grep -qF 'revoke, prove, baseline, request' "$SKILL" \
 # than depending on what block 8 happens to look like this month. `_wy_contract`
 # is the real one; nothing here re-implements a check.
 _wy_ptr='# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md'
-_wy_case() {   # <label> <expect: pass|fail> <skill-body> <doc-body>
+_wy_case() {   # <label> <expect: pass|fail> <skill-body> <doc-body> [indent]
     local _c_label="$1" _c_expect="$2" _c_skill="$3" _c_doc="$4" _c_dir _c_out
     _c_dir="$(mktemp_d)" || { die "no scratch directory for the '$_c_label' case"; return 0; }
-    printf '## S\n\n```bash\n%s\n```\n' "$_c_skill" > "$_c_dir/SKILL.md"
+    # AN INDENTED FENCE IS STAGEABLE, because two of this document's blocks are
+    # inside list items and both scans have to reach them. Without this every case
+    # here is a column-zero fence, so the indentation handling in the two awks
+    # would be uncovered — and a pair at the end of an indented fence would satisfy
+    # the bijection while annotating nothing.
+    if [ -n "${5:-}" ]; then
+        { printf '## S\n\n- a list item:\n\n  ```bash\n'
+          printf '%s\n' "$_c_skill" | sed 's/^/  /'
+          printf '  ```\n'; } > "$_c_dir/SKILL.md"
+    else
+        printf '## S\n\n```bash\n%s\n```\n' "$_c_skill" > "$_c_dir/SKILL.md"
+    fi
     printf '%s\n' "$_c_doc" > "$_c_dir/doc.md"
     _c_out="$(_wy_contract "$_c_dir/SKILL.md" "$_c_dir/doc.md" 2>&1)" \
         || _c_out="FAIL - the case run ended non-zero: $_c_out"
@@ -5482,6 +5498,26 @@ $_wy_ptr" \
 "## CLAIM ONE.
 
 first argument"
+
+# REFUSED IN AN INDENTED FENCE TOO, which is where the two scans could disagree:
+# the claim scan counts a pair inside one, so the float scan has to see the same
+# fence or a pair at its end annotates nothing and still balances.
+_wy_case "a pointer that is the last line of an INDENTED fence" fail \
+"x=1
+# CLAIM ONE.
+$_wy_ptr" \
+"## CLAIM ONE.
+
+first argument" indented
+# …AND ACCEPTED THERE WHEN CODE FOLLOWS IT, so the case above is refusing the
+# floating pair rather than the indentation.
+_wy_case "a pair inside an INDENTED fence with code after it" pass \
+"# CLAIM ONE.
+$_wy_ptr
+x=1" \
+"## CLAIM ONE.
+
+first argument" indented
 
 # REFUSED — a heading whose argument was deleted while the heading stayed. TWICE,
 # because the scan has two arms and the two are reached by different documents: the
@@ -5746,6 +5782,19 @@ esac
 case "$_rb_ack_out" in
     *'could not parse'*) pass "…saying which step refused" ;;
     *) die "the failed parse was refused silently ('$_rb_ack_out')" ;;
+esac
+# A PARSER THAT SUCCEEDS AND PRINTS SOMETHING THAT IS NOT A COUNT is refused by
+# shape rather than by status — the arm the parse itself can never reach, since its
+# own pattern only ever yields digits, so it exists for a `sed` that is not the one
+# this block means.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3 "$_rb_ack/sedbin")"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "a count that is not digits was acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and a count that is not digits is refused by shape" ;;
+esac
+case "$_rb_ack_out" in
+    *'could not read a round count'*) pass "…saying so" ;;
+    *) die "the non-numeric count was refused silently ('$_rb_ack_out')" ;;
 esac
 # A COUNT OF `0` IS NOT A COUNT. No pause happens at zero rounds — and under a
 # `declare -i` inherited from the operator's shell an empty parse becomes exactly

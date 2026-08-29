@@ -59,12 +59,15 @@
   recorded, the round is not closed, and the next call pauses again on the same
   count. Closes #224.
 
-- The contract test's claim scanner now sees **indented** bash fences. Two of this
+- The contract test's claim and float scanners now see **indented** bash fences. Two of this
   document's blocks sit inside list items, and a column-anchored scan did not reach
   them — which made those two the only blocks that could carry no argument at all,
   since a pointer inside one was counted in the file total but not in the fenced
   total and the two could never agree. Fail-closed rather than blind, which is why
-  it surfaced the moment this change put a claim there.
+  it surfaced the moment this change put a claim there. The float scan — the one
+  that requires code to follow a pair before its fence closes — needed the same
+  handling, or a pair at the END of an indented fence would satisfy the bijection
+  while annotating nothing.
 
 ## [2.0.80] — 2026-08-29
 
