@@ -1703,13 +1703,17 @@ So the identity is re-derived from the sourced value rather than trusted, and a
 sourced value that is empty, spans a line, or is not a usable identity is refused by
 expansion — the same three refusals the block made when it read the origin itself.
 
-## EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL AND PROVED.
+## EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL.
 
-The helper hands back the origin and nothing else, so the rest is assigned here: the
-two reviewer logins, which are constants, and the four working paths, which are a
-literal suffix under a directory this shell chose. Assigning them here rather than
-receiving them removes the transport they used to travel in, and with it the `.` that
-carried it.
+The helper hands back the origin and nothing else, so the rest is assigned here: the two
+reviewer logins, which are constants, and the four working paths, which are a literal
+suffix under a directory this shell chose. Assigning them here rather than receiving
+them removes the transport they used to travel in, and with it the `.` that carried it.
+
+THAT THEY ARRIVED IS A SEPARATE OBLIGATION, and it has its own claim below. This one is
+about PROVENANCE — where the values come from — and a future edit could satisfy it while
+dropping the read-backs, or keep the read-backs while going back to receiving the values.
+Merging the two would leave the bijection green over either half.
 
 ## THE ASSIGNMENTS ARE READ BACK, because a readonly name fails one in silence.
 

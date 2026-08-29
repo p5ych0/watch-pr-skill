@@ -331,6 +331,23 @@ REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
 # and a redirection that cannot be made reports it. Each is then proven present and
 # empty: a missing one fails closed later anyway, but "fails closed later" is not a
 # reason to be unable to say so here.
+#
+# `set -C` MAKES EVERY ONE OF THOSE OPENS EXCLUSIVE, and it is the difference between
+# losing a reservation and destroying somebody's file. A plain `>` opens with O_TRUNC
+# and FOLLOWS SYMLINKS: this directory's name is published in argv, so an account that
+# can reach it may put a symlink at `work/summary.md` pointing anywhere the operator can
+# write, and the redirection would truncate THAT. With noclobber the open is O_EXCL,
+# which refuses a regular file and refuses a symlink whether or not its target exists.
+# Nothing legitimate is lost — `work/` was created exclusively two lines up, so none of
+# these paths can already be there. `>|` is deliberately not used anywhere below; that
+# is the spelling that overrides noclobber, and it is what a later edit reaches for when
+# this refuses something.
+#
+# `umask 077` GOES WITH IT: O_EXCL says who may replace the object, the mode says who
+# may write it once created, and the caller's umask is whatever the operator's shell
+# had. Same pair, same reason, as `pr-origin.sh`.
+umask 077
+set -C
 RB_WORK_DIR="$RB_DIR/work"
 /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" 2>/dev/null || rb_setup_stop work_dir 2
 for _f in summary.md request.md prior.txt head.txt; do
@@ -356,7 +373,14 @@ done
 # WHAT IT DOES NOT CLOSE is a filesystem that fills between this probe and the pin,
 # and nothing can: the two are in different processes. The abort the driver prints
 # there says to re-run, which relocates the session as a whole.
+# THE WHOLE OPERATION, NOT HALF OF IT. `pr-origin.sh pin` creates a directory AND
+# writes a leaf inside it, so a filesystem or quota with room for one more inode passes
+# a directory-only probe and fails the real call — after setup has announced ready,
+# where the driver has nowhere to put the retry. The probe creates both and removes
+# both, in the order the real call does.
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
+: > "$RB_DIR/pinprobe/pin" || rb_setup_stop pin_storage 2
+/usr/bin/env rm -f "$RB_DIR/pinprobe/pin" 2>/dev/null || rb_setup_stop pin_storage 2
 /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 
 # ── the one value that has to cross ────────────────────────────────────────

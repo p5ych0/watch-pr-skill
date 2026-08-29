@@ -58,14 +58,26 @@
   nobody chose. All ten names the block assigns are in the generic probe now, and its
   refusal names them.
 
+- **Nothing setup creates can be written through a symlink.** The four working files and
+  the origin were created with a plain `>`, which opens with `O_TRUNC` and follows
+  symlinks — and the directory's name is published in argv, so an account that can reach
+  it could put a symlink at one of those paths and have the redirection truncate whatever
+  it pointed at. That is destroying a file the operator owns rather than losing an empty
+  reservation. The opens are exclusive now, under `set -C` with `umask 077`, which is the
+  pair `pr-origin.sh` already uses and for the same reason: `O_EXCL` refuses a regular
+  file and refuses a symlink whether or not its target exists.
+
 - **A parent that cannot take another directory is found before the session commits to
   it.** `pr-origin.sh pin` creates a directory, and by the time the driver calls it the
   working files are already allocated on that parent — so a storage failure there could
   not be recovered from: pinning under the second parent while the round summary and the
   gated head stay on a filesystem that has just refused a directory produces a session
   that looks set up and dies at its first write, after posting. `pr-setup.sh` asks the
-  question itself now, with a probe directory beside where the pin will go, so the
-  refusal happens inside the unit the driver already retries and the whole session moves.
+  question itself now, with a probe beside where the pin will go — a
+  directory AND a leaf written inside it, because that is what the pin creates and a
+  filesystem with room for one more inode passes a directory-only probe and fails the
+  real call. The refusal happens inside the unit the driver already retries, so the whole
+  session moves.
 
 - **The setup values are read, not sourced, and only one of them crosses.** The helper
   wrote a file of twelve assignments the driver sourced, and `.` is a name: in the

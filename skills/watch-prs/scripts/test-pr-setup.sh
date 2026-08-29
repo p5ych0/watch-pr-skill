@@ -544,6 +544,65 @@ for _sig in HUP INT TERM; do
 done
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
+# ── the creates are exclusive, so nothing is truncated through them ───────
+# A PLAIN `>` OPENS WITH O_TRUNC AND FOLLOWS SYMLINKS. This directory's name is
+# published in argv, so an account that can reach it may put a symlink at one of these
+# paths pointing anywhere the operator can write — and the redirection would truncate
+# THAT, which is destroying somebody's file rather than losing a reservation. With
+# `set -C` the open is O_EXCL: it refuses a regular file, and it refuses a symlink
+# whether or not the target exists.
+grep -qx 'set -C' "$SCRIPT" \
+    && pass "the helper opens its outputs under noclobber" \
+    || die "pr-setup.sh does not set -C; a symlink at a working path is followed and truncated"
+grep -qx 'umask 077' "$SCRIPT" \
+    && pass "…with a umask that says who may write what it created" \
+    || die "pr-setup.sh does not set umask 077 alongside noclobber"
+# COUNTED OVER THE CODE, NOT THE PROSE. The comment beside the creates names `>|` as
+# the spelling a later edit reaches for, and a whole-file scan read its own subject as
+# the defect.
+case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
+    *'>|'*) die "pr-setup.sh uses >|, which overrides the noclobber the creates rely on" ;;
+    *) pass "…and never uses >|, which is what overrides it" ;;
+esac
+# THE ORIGIN WRITE, STAGED. The forged reader runs before that write, so it can plant
+# the symlink in the window the case is about.
+_vic="$TMP/victim-origin"
+printf 'PRECIOUS\n' > "$_vic"
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"
+ln -s '"$_vic"' "$(dirname "$2")/origin"'
+_sy="$(mktemp -d "$TMP/sy.XXXXXX")/dir"
+_sy_rc=0
+_sy_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sy" 2>&1)" || _sy_rc=$?
+[ "$_sy_rc" -ne 0 ] \
+    && pass "a symlink planted at the origin name is refused rather than written through" \
+    || die "the helper wrote through a planted symlink (out='$_sy_out')"
+[ "$(cat "$_vic" 2>/dev/null)" = "PRECIOUS" ] \
+    && pass "…and the file it pointed at is untouched" \
+    || die "the symlink target was truncated: '$(cat "$_vic" 2>/dev/null)'"
+rm -rf "$_sy"
+# AND A WORKING LEAF, STAGED THE SAME WAY the signal cases are — the plant has to happen
+# between `work/` being created and the loop that fills it, which nothing outside the
+# process can reach.
+printf 'PRECIOUS\n' > "$_vic"
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+sed 's|^for _f in summary.md request.md prior.txt head.txt; do|ln -s '"$_vic"' "$RB_WORK_DIR/summary.md"; &|' \
+    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'ln -s' "$_stage/pr-setup.sh" \
+    && pass "the working-leaf symlink stage is patched" \
+    || die "the working-leaf stage did not patch pr-setup.sh; the case proves nothing"
+_sw="$(mktemp -d "$TMP/sw.XXXXXX")/dir"
+_sw_rc=0
+_sw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sw" 2>&1)" || _sw_rc=$?
+[ "$_sw_rc" -ne 0 ] \
+    && pass "a symlink planted at a working path is refused rather than written through" \
+    || die "the helper wrote through a planted working-path symlink (out='$_sw_out')"
+[ "$(cat "$_vic" 2>/dev/null)" = "PRECIOUS" ] \
+    && pass "…and that target is untouched too" \
+    || die "the working-path symlink target was truncated: '$(cat "$_vic" 2>/dev/null)'"
+rm -rf "$_sw"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
 # ── the storage the pin will need is proved here ──────────────────────────
 # THE DRIVER CANNOT ACT ON A PIN THAT REPORTS A STORAGE FAILURE. By the time it calls
 # `pr-origin.sh pin`, `work/` and its four files are already on this parent, so pinning
@@ -572,6 +631,30 @@ chmod 700 "$_ps" 2>/dev/null || true
     || die "the pin-storage probe did not report a retryable refusal (rc=$_ps_rc out='$_ps_out')"
 rm -rf "$_ps"
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+# AND THE LEAF IS PROBED AS WELL AS THE DIRECTORY, which is what `pr-origin.sh pin`
+# actually creates. A filesystem or quota with room for ONE more inode passes a
+# directory-only probe — it releases the inode before the real call — and then the pin
+# creates its directory and fails to write `pin`, returning 2 after setup has announced
+# ready, where the driver has nowhere to put the retry.
+#
+# STAGED BY MAKING THE PROBE DIRECTORY UNWRITABLE THE MOMENT IT EXISTS, which is the
+# state that leaves room for the directory and none for the leaf.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+sed 's|^: > "$RB_DIR/pinprobe/pin"|chmod 500 "$RB_DIR/pinprobe"; &|' \
+    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'chmod 500 "$RB_DIR/pinprobe"; : >' "$_stage/pr-setup.sh" \
+    && pass "the pin-leaf stage is patched" \
+    || die "the pin-leaf stage did not patch pr-setup.sh; the case proves nothing"
+_pl="$(mktemp -d "$TMP/pl.XXXXXX")/dir"
+_pl_rc=0
+_pl_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_pl" 2>&1)" || _pl_rc=$?
+chmod -R 700 "$_pl" 2>/dev/null || true
+{ [ "$_pl_rc" -eq 2 ] && case "$_pl_out" in *'reason=pin_storage'*) true ;; *) false ;; esac; } \
+    && pass "…so storage that takes the directory but not the leaf is a retryable refusal too" \
+    || die "the pin-leaf probe did not report a retryable refusal (rc=$_pl_rc out='$_pl_out')"
+rm -rf "$_pl"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # …AND IT LEAVES NOTHING BEHIND, because the probe directory is this run's and is
 # removed the moment it has answered.

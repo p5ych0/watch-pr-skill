@@ -260,7 +260,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             # THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             export REVIEW_BUS_REMOTE="$RB_REMOTE"
-            # EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL AND PROVED.
+            # EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             CODEX_BOT='chatgpt-codex-connector[bot]'
             COPILOT_BOT='copilot-pull-request-reviewer[bot]'
