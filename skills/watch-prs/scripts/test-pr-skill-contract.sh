@@ -5589,6 +5589,177 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
     && pass "the acknowledgement footer names the reviewer and the count" \
     || die "the acknowledgement footer is unscoped and will cross between phases"
 
+# ── THE ACKNOWLEDGEMENT, LIFTED AND RUN ────────────────────────────────────
+# The three greps above are ABOUT this block and cannot execute it, which is what
+# #222 was: `grep -q 'ROUNDS_RC" -eq 3'` passes against
+# `[ "$ROUNDS_RC" -eq 3 ] || true`, and against a version whose parse succeeds on a
+# body from a probe that died. The block posts a MUTATION recording the operator's
+# permission to continue past a check-in, and its own comment says permission must
+# never be inferred from unreadable output — so it is the one place in this file
+# where a described-but-unexecuted check is worth the most.
+_rb_ack=""
+_rb_ack="$(mktemp_d)" || _rb_ack=""
+{ [ -n "$_rb_ack" ] && [ -d "$_rb_ack" ]; } \
+    || die "no scratch directory for the acknowledgement cases; the block was never run"
+if [ -n "$_rb_ack" ] && [ -d "$_rb_ack" ]; then
+mkdir -p "$_rb_ack/bin" "$_rb_ack/scripts" "$_rb_ack/sedbin"
+# LIFTED WITH ITS OWN INDENT STRIPPED. It sits inside step 6's `3` bullet, two
+# spaces in, and the cases below set their own state at column 0.
+awk '/^  ROUNDS_OUT="\$\(/,/^      \|\| \{ echo "ABORT: could not record the acknowledgement/' "$SKILL" \
+    | sed 's/^  //' > "$_rb_ack/ack.sh"
+# THE EXCERPT HAS TO CONTAIN ALL THREE PARTS, or the cases prove nothing. A range
+# that stopped early would leave a lift that never posts, and every "did not post"
+# case below would pass against it.
+_rb_ack_src="$(cat "$_rb_ack/ack.sh")"
+case "$_rb_ack_src" in
+    *'ROUNDS_RC" -eq 3'*) ;;
+    *) die "the lifted acknowledgement has no status check; the cases below prove nothing" ;;
+esac
+case "$_rb_ack_src" in
+    *'sed -n'*) ;;
+    *) die "the lifted acknowledgement has no parse; the cases below prove nothing" ;;
+esac
+case "$_rb_ack_src" in
+    *'gh pr comment N'*) ;;
+    *) die "the lifted acknowledgement does not reach the post; every case below would pass" ;;
+esac
+pass "the round check-in acknowledgement lifts out whole"
+# THE HELPER AND `gh` ARE BOTH STUBS, and the log is what every case reads. The
+# block ends its refusal arms with `exit 0`, so the STATUS says nothing here —
+# exactly as the setup-probe harness above records.
+printf '%s\n' 'cat "$RB_ACK_DIR/count.out"; exit "$(cat "$RB_ACK_DIR/count.rc")"' \
+    > "$_rb_ack/scripts/pr-round-count.sh"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$RB_ACK_DIR/gh.log"\n' > "$_rb_ack/bin/gh"
+chmod +x "$_rb_ack/bin/gh"
+# A `sed` THAT PRINTS SOMETHING THAT IS NOT A COUNT, for the case that exercises
+# the shape guard rather than the parse. It lives in its own directory so only the
+# case that asks for it gets it.
+printf '#!/bin/sh\nprintf "not-a-count\\n"\n' > "$_rb_ack/sedbin/sed"
+chmod +x "$_rb_ack/sedbin/sed"
+rb_ack_run() {   # rb_ack_run <helper stdout> <helper rc> [extra PATH dir] [shell attack] ; prints the driver's output
+    printf '%s' "$1" > "$_rb_ack/count.out"
+    printf '%s' "$2" > "$_rb_ack/count.rc"
+    : > "$_rb_ack/gh.log"
+    : > "$_rb_ack/attack.log"
+    local _p="$_rb_ack/bin:$PATH"
+    [ -n "${3:-}" ] && _p="$3:$_p"
+    # THE ATTACK IS DEFINED IN THE CHILD, before the block is sourced, because that
+    # is where the driver's own bash runs: `SKILL.md` executes in the operator's
+    # shell and cannot re-exec, so a function defined there is in scope for it.
+    run_limited 25 env PATH="$_p" RB_ACK_DIR="$_rb_ack" RB_ACK_ATTACK="${4:-}" \
+        bash --noprofile --norc -c '
+HOST=github.com; OWNER=acme; REPO=widget
+WHO="chatgpt-codex-connector[bot]"
+eval "${RB_ACK_ATTACK:-}"
+RB_SCRIPTS="$RB_ACK_DIR/scripts"
+. "$RB_ACK_DIR/ack.sh"
+' 2>&1 || true
+}
+_rb_ack_pause='PR_ROUND_PAUSE pr=7 rounds=41 threshold=10 acknowledged=0'
+# THE CONTROL FIRST, so every refusal below is refusing something this harness can
+# otherwise carry all the way to the post.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3)"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment N'*) pass "a genuine pause is acknowledged on the PR" ;;
+    *) die "the control never posted; every refusal case below proves nothing ('$_rb_ack_out')" ;;
+esac
+# …WITH THE COUNT THE GATE REPORTED, not one retyped into the body. An
+# acknowledgement naming the wrong number pauses again at once or skips a later
+# check-in, and both are silent.
+#
+# TWO COUNTS, because ONE proves nothing about propagation: with a single
+# successful pause the body could carry that number as a LITERAL and every case
+# here would still pass — the refusal cases never post, so they cannot tell. Two
+# different counts through the same block is what makes it dynamic.
+for _rb_ack_n in 41 7; do
+    _rb_ack_out="$(rb_ack_run "PR_ROUND_PAUSE pr=7 rounds=$_rb_ack_n threshold=10 acknowledged=0" 3)"
+    case "$(cat "$_rb_ack/gh.log")" in
+        *"\`$_rb_ack_n\`"*) pass "…carrying the count the gate itself reported ($_rb_ack_n)" ;;
+        *) die "the acknowledgement does not carry the gate's count $_rb_ack_n: $(cat "$_rb_ack/gh.log")" ;;
+    esac
+done
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3)"
+# …AND THE REVIEWER, because the count is per reviewer: an unscoped acknowledgement
+# of 41 Codex rounds is read by a Copilot invocation with 5.
+case "$(cat "$_rb_ack/gh.log")" in
+    *'chatgpt-codex-connector[bot]'*) pass "…and the reviewer it is about" ;;
+    *) die "the acknowledgement is unscoped: $(cat "$_rb_ack/gh.log")" ;;
+esac
+# A NEUTERED `echo` DOES NOT REACH THE POST, which is the half of the
+# operator-shell case that holds today: `SKILL.md` runs in a shell where `echo` is
+# a NAME, and with it silenced the refusal says nothing — but `exit 0` still fires
+# and nothing is acknowledged.
+#
+# THE OTHER HALF IS #224 AND IS NOT ASSERTED HERE. Measured against this same lift:
+# with `echo` AND `exit` both shadowed the refusal arm runs, `exit` returns instead
+# of terminating, and the forged line is acknowledged. That is a defect in the
+# block rather than in this fixture, so it is filed; asserting the behaviour it has
+# today would bake it into the suite, and asserting the behaviour it should have
+# would be red.
+# THE SHADOW HAS TO BE OBSERVABLE, or the case passes without it. "Nothing was
+# posted" is equally true of the plain rc=1 case below, so an attack that stopped
+# being injected — or stopped defining `echo` — would leave this green while
+# staging nothing. The stub RECORDS that it was called, so the assertion is that
+# the refusal ran THROUGH the shadowed name and still did not reach the post.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1 "" \
+    'echo() { printf "SHADOWED\n" >> "$RB_ACK_DIR/attack.log"; }')"
+[ -s "$_rb_ack/attack.log" ] \
+    && pass "the shadowed \`echo\` is the one the refusal arm reaches" \
+    || die "the echo shadow was never installed or never called; the case below stages nothing"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "a failed probe was acknowledged with echo shadowed: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and a failed probe is still not acknowledged" ;;
+esac
+# …AND THE MARKER MEANS SOMETHING, which it only does if an unattacked run leaves
+# the log empty: a stub that wrote unconditionally would satisfy the check above
+# whatever the child did.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1)"
+[ -s "$_rb_ack/attack.log" ] \
+    && die "the attack log is written without an attack; the evidence above proves nothing" \
+    || pass "…and an unattacked run leaves that evidence empty"
+
+# A PROBE THAT PRINTED A PLAUSIBLE PAUSE AND THEN DIED IS NOT PERMISSION. This is
+# the case the greps cannot see: the output parses, the count is digits, and the
+# only thing saying the probe failed is the status.
+for _rb_ack_rc in 1 2 0; do
+    _rb_ack_out="$(rb_ack_run "$_rb_ack_pause" "$_rb_ack_rc")"
+    case "$(cat "$_rb_ack/gh.log")" in
+        *'pr comment'*) die "a probe exiting $_rb_ack_rc had its output acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+        *) pass "a plausible pause line from a probe exiting $_rb_ack_rc is not acknowledged" ;;
+    esac
+    case "$_rb_ack_out" in
+        *ABORT*) pass "…and says so" ;;
+        *) die "the refusal was silent for rc=$_rb_ack_rc ('$_rb_ack_out')" ;;
+    esac
+done
+# OUTPUT THE PARSE CANNOT READ IS NOT PERMISSION EITHER, even where the status is
+# the distinguished 3.
+for _rb_ack_bad in '' 'PR_ROUND_COUNT pr=7 rounds=41' 'PR_ROUND_PAUSE pr=7 rounds= threshold=10'; do
+    _rb_ack_out="$(rb_ack_run "$_rb_ack_bad" 3)"
+    case "$(cat "$_rb_ack/gh.log")" in
+        *'pr comment'*) die "an unparseable pause was acknowledged: '$_rb_ack_bad'" ;;
+        *) pass "…and neither is a pause line the parse cannot read" ;;
+    esac
+    case "$_rb_ack_out" in
+        *ABORT*) pass "…saying so as well" ;;
+        *) die "the unreadable count was refused silently ('$_rb_ack_out')" ;;
+    esac
+done
+# …AND A COUNT THAT IS NOT DIGITS IS REFUSED BY SHAPE, which is the arm the parse
+# itself can never reach: its pattern only ever yields digits, so the guard exists
+# for a `sed` that is not the one this block means.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3 "$_rb_ack/sedbin")"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "a count that is not digits was acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and a count that is not digits is refused by shape" ;;
+esac
+case "$_rb_ack_out" in
+    *ABORT*) pass "…saying so too" ;;
+    *) die "the non-numeric count was refused silently ('$_rb_ack_out')" ;;
+esac
+rm -rf "$_rb_ack"
+fi
+
 # ── the none-configured checks message is matched whole, not searched ──────
 # ── the none-configured diagnostic is matched WHOLE ───────────────────────
 # `gh` has no dedicated status for "nothing to report", so the message is the only
