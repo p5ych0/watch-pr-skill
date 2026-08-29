@@ -827,6 +827,29 @@ a well-formed timestamp for it. If any record is unreadable the command exits 2
 and the driver stops, rather than counting the bad record as another head — an
 inflated count is the direction that sails past the boundary and skips the pause.
 
+**Nothing is recorded unless the pause was read.** The acknowledgement is written
+only where the counter reported a pause with its own distinguished status, the
+count parsed out of that report, and the parse itself succeeded — and the comment
+is posted inside the branch where all three held. Any of them failing prints an
+`ABORT:` line saying which step refused and **nothing was recorded**; the round is
+not closed and no permission exists, so the next call pauses again on the same
+count. A count of `0` is refused with the values that are not counts at all: no
+pause happens at zero rounds.
+
+That shape is deliberate rather than defensive habit. The block runs in *your*
+shell, and the earlier version refused with `|| { echo …; exit 0; }` — both names
+belong to whatever your session has defined. With `echo` and `exit` shadowed
+together the refusal ran, `exit` returned instead of stopping, and a counter that
+had *died* after printing a plausible line had its output recorded as your
+permission to continue. The acknowledgement now sits inside the branch that proved
+each step, so **shadowing `echo` or `exit` can no longer turn a refusal into an
+acknowledgement** — a shadowed `echo` costs you the diagnostic and nothing else.
+
+That is the guarantee, and not a broader one: `printf`, `sed` and `gh` are names in
+your shell too, and a function that fabricates a plausible count is indistinguishable
+from a real one. The same is true of every other command this loop runs on your
+machine.
+
 ## Updating
 
 ```

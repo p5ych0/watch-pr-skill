@@ -5193,8 +5193,16 @@ if [ -f "$_wy_doc" ]; then
     #    would mean editing this awk for each block that lands, which is a list
     #    that goes one entry stale exactly when someone forgets it.
     _wy_claims=""; _wy_rc=0
-    _wy_claims="$(awk '/^```bash$/ && !f {f=1; prev=""; next}
-       f && /^```$/{f=0; next}
+    #
+    #    INDENTED FENCES COUNT. Two of this document's bash blocks sit inside list
+    #    items, and a column-anchored scan does not see them — so a claim in one
+    #    was refused: `_wy_all` counts the whole file and this counted only the
+    #    fences at column zero, and the totals could not agree. That was
+    #    fail-closed rather than blind, which is why it surfaced the moment #224
+    #    put a claim in the round check-in block, but it made those two blocks the
+    #    only ones that could carry no argument at all.
+    _wy_claims="$(awk '/^[[:space:]]*```bash$/ && !f {f=1; prev=""; next}
+       f && /^[[:space:]]*```$/{f=0; next}
        f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SKILL-RATIONALE\.md$/) {
                if (prev ~ /^[[:space:]]*#/) { c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c); print c }
                else print "!!POINTER-NOT-UNDER-A-CLAIM!!" }
@@ -5243,8 +5251,13 @@ if [ -f "$_wy_doc" ]; then
     # `pend`, so a pair whose pointer is the LAST line of the fence never sets it —
     # which is the most obvious way to write a pair that annotates nothing, and the
     # first version of this check passed against exactly that.
-    _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; pend=0; next}
-       f && /^```$/{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++
+    #
+    # INDENTED FENCES HERE TOO, for the reason the claim scan above takes them: two
+    # of this document's blocks sit inside list items, and a column-anchored scan
+    # would let a pair at the END of one satisfy the bijection while annotating
+    # nothing — the pair is counted there and floats here.
+    _wy_float="$(awk '/^[[:space:]]*```bash$/ && !f {f=1; prev=""; pend=0; next}
+       f && /^[[:space:]]*```$/{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++
                      f=0; prev=""; pend=0; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/) pend=1
            if (pend && $0 !~ /^[[:space:]]*#/ && NF > 0) pend=0
@@ -5414,10 +5427,21 @@ grep -qF 'revoke, prove, baseline, request' "$SKILL" \
 # than depending on what block 8 happens to look like this month. `_wy_contract`
 # is the real one; nothing here re-implements a check.
 _wy_ptr='# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md'
-_wy_case() {   # <label> <expect: pass|fail> <skill-body> <doc-body>
+_wy_case() {   # <label> <expect: pass|fail> <skill-body> <doc-body> [indent]
     local _c_label="$1" _c_expect="$2" _c_skill="$3" _c_doc="$4" _c_dir _c_out
     _c_dir="$(mktemp_d)" || { die "no scratch directory for the '$_c_label' case"; return 0; }
-    printf '## S\n\n```bash\n%s\n```\n' "$_c_skill" > "$_c_dir/SKILL.md"
+    # AN INDENTED FENCE IS STAGEABLE, because two of this document's blocks are
+    # inside list items and both scans have to reach them. Without this every case
+    # here is a column-zero fence, so the indentation handling in the two awks
+    # would be uncovered — and a pair at the end of an indented fence would satisfy
+    # the bijection while annotating nothing.
+    if [ -n "${5:-}" ]; then
+        { printf '## S\n\n- a list item:\n\n  ```bash\n'
+          printf '%s\n' "$_c_skill" | sed 's/^/  /'
+          printf '  ```\n'; } > "$_c_dir/SKILL.md"
+    else
+        printf '## S\n\n```bash\n%s\n```\n' "$_c_skill" > "$_c_dir/SKILL.md"
+    fi
     printf '%s\n' "$_c_doc" > "$_c_dir/doc.md"
     _c_out="$(_wy_contract "$_c_dir/SKILL.md" "$_c_dir/doc.md" 2>&1)" \
         || _c_out="FAIL - the case run ended non-zero: $_c_out"
@@ -5474,6 +5498,26 @@ $_wy_ptr" \
 "## CLAIM ONE.
 
 first argument"
+
+# REFUSED IN AN INDENTED FENCE TOO, which is where the two scans could disagree:
+# the claim scan counts a pair inside one, so the float scan has to see the same
+# fence or a pair at its end annotates nothing and still balances.
+_wy_case "a pointer that is the last line of an INDENTED fence" fail \
+"x=1
+# CLAIM ONE.
+$_wy_ptr" \
+"## CLAIM ONE.
+
+first argument" indented
+# …AND ACCEPTED THERE WHEN CODE FOLLOWS IT, so the case above is refusing the
+# floating pair rather than the indentation.
+_wy_case "a pair inside an INDENTED fence with code after it" pass \
+"# CLAIM ONE.
+$_wy_ptr
+x=1" \
+"## CLAIM ONE.
+
+first argument" indented
 
 # REFUSED — a heading whose argument was deleted while the heading stayed. TWICE,
 # because the scan has two arms and the two are reached by different documents: the
@@ -5582,7 +5626,7 @@ grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SKILL-RATIONALE.md" \
 # probe. And the count is per reviewer, so an unscoped footer acknowledging 41
 # Codex rounds is read by a Copilot invocation with 5, trips its ahead-of-count
 # guard and blocks that phase for good.
-grep -q 'ROUNDS_RC" -eq 3' "$SKILL" \
+grep -qF 'if [[ $ROUNDS_RC == 3 ]]; then' "$SKILL" \
     && pass "the acknowledgement requires the gate's distinguished pause status" \
     || die "the driver acknowledges a check-in without checking the gate exited 3"
 grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
@@ -5602,18 +5646,17 @@ _rb_ack="$(mktemp_d)" || _rb_ack=""
 { [ -n "$_rb_ack" ] && [ -d "$_rb_ack" ]; } \
     || die "no scratch directory for the acknowledgement cases; the block was never run"
 if [ -n "$_rb_ack" ] && [ -d "$_rb_ack" ]; then
-mkdir -p "$_rb_ack/bin" "$_rb_ack/scripts" "$_rb_ack/sedbin"
+mkdir -p "$_rb_ack/bin" "$_rb_ack/scripts" "$_rb_ack/sedbin" "$_rb_ack/sedfail"
 # LIFTED WITH ITS OWN INDENT STRIPPED. It sits inside step 6's `3` bullet, two
 # spaces in, and the cases below set their own state at column 0.
-awk '/^  ROUNDS_OUT="\$\(/,/^      \|\| \{ echo "ABORT: could not record the acknowledgement/' "$SKILL" \
-    | sed 's/^  //' > "$_rb_ack/ack.sh"
+awk '/^  ROUNDS_OUT="\$\(/,/^  fi$/' "$SKILL" | sed 's/^  //' > "$_rb_ack/ack.sh"
 # THE EXCERPT HAS TO CONTAIN ALL THREE PARTS, or the cases prove nothing. A range
 # that stopped early would leave a lift that never posts, and every "did not post"
 # case below would pass against it.
 _rb_ack_src="$(cat "$_rb_ack/ack.sh")"
 case "$_rb_ack_src" in
-    *'ROUNDS_RC" -eq 3'*) ;;
-    *) die "the lifted acknowledgement has no status check; the cases below prove nothing" ;;
+    *'if [[ $ROUNDS_RC == 3 ]]; then'*) ;;
+    *) die "the lifted acknowledgement has no status proof; the cases below prove nothing" ;;
 esac
 case "$_rb_ack_src" in
     *'sed -n'*) ;;
@@ -5636,6 +5679,11 @@ chmod +x "$_rb_ack/bin/gh"
 # case that asks for it gets it.
 printf '#!/bin/sh\nprintf "not-a-count\\n"\n' > "$_rb_ack/sedbin/sed"
 chmod +x "$_rb_ack/sedbin/sed"
+# A `sed` THAT PRINTS A PLAUSIBLE COUNT AND THEN FAILS, which is the case the parse
+# status exists for: command substitution keeps what a command printed before it
+# died, so the digits are there and only the status says they mean nothing.
+printf '#!/bin/sh\nprintf "41\\n"\nexit 1\n' > "$_rb_ack/sedfail/sed"
+chmod +x "$_rb_ack/sedfail/sed"
 rb_ack_run() {   # rb_ack_run <helper stdout> <helper rc> [extra PATH dir] [shell attack] ; prints the driver's output
     printf '%s' "$1" > "$_rb_ack/count.out"
     printf '%s' "$2" > "$_rb_ack/count.rc"
@@ -5685,78 +5733,123 @@ case "$(cat "$_rb_ack/gh.log")" in
     *'chatgpt-codex-connector[bot]'*) pass "…and the reviewer it is about" ;;
     *) die "the acknowledgement is unscoped: $(cat "$_rb_ack/gh.log")" ;;
 esac
-# A NEUTERED `echo` DOES NOT REACH THE POST, which is the half of the
-# operator-shell case that holds today: `SKILL.md` runs in a shell where `echo` is
-# a NAME, and with it silenced the refusal says nothing — but `exit 0` still fires
-# and nothing is acknowledged.
+# A SHADOWED `echo` AND `exit` TOGETHER DO NOT REACH THE POST, which is what #224
+# was. `SKILL.md` runs in the operator's own shell, where both are NAMES: with the
+# refusals written as `|| { echo …; exit 0; }` the arm ran, `exit` RETURNED instead
+# of terminating, execution continued into the parse — which succeeds, because the
+# forged line is well-formed — and a failed probe's output became the operator's
+# recorded permission. Measured then: an ordinary shell no, `echo` alone no, both
+# together YES.
 #
-# THE OTHER HALF IS #224 AND IS NOT ASSERTED HERE. Measured against this same lift:
-# with `echo` AND `exit` both shadowed the refusal arm runs, `exit` returns instead
-# of terminating, and the forged line is acknowledged. That is a defect in the
-# block rather than in this fixture, so it is filed; asserting the behaviour it has
-# today would bake it into the suite, and asserting the behaviour it should have
-# would be red.
-# THE SHADOW HAS TO BE OBSERVABLE, or the case passes without it. "Nothing was
-# posted" is equally true of the plain rc=1 case below, so an attack that stopped
-# being injected — or stopped defining `echo` — would leave this green while
-# staging nothing. The stub RECORDS that it was called, so the assertion is that
-# the refusal ran THROUGH the shadowed name and still did not reach the post.
-_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1 "" \
-    'echo() { printf "SHADOWED\n" >> "$RB_ACK_DIR/attack.log"; }')"
-[ -s "$_rb_ack/attack.log" ] \
-    && pass "the shadowed \`echo\` is the one the refusal arm reaches" \
-    || die "the echo shadow was never installed or never called; the case below stages nothing"
+# SUCCESS-ARM CONTAINMENT HAS NO SUCH GAP: a refusal is an arm NOT TAKEN rather
+# than a statement that has to terminate, so there is nothing to walk past. The
+# assertions are in three parts because each alone would pass for the wrong reason.
+# The attack writes a marker WHEN IT IS INJECTED, so a case that stopped staging it
+# is not silently green; nothing is posted, which is the property; and `exit` is
+# never reached, which is what the old shape needed and this one does not use.
+#
+# `echo` IS STILL REACHED, deliberately: the diagnostics are `echo`, so a shadowed
+# one is called and silences them. That is why the third assertion names `exit`
+# alone — the guarantee here is about a refusal PATH, not about every name.
+_rb_ack_attack='printf "INSTALLED\n" >> "$RB_ACK_DIR/attack.log"
+echo() { printf "ECHO\n" >> "$RB_ACK_DIR/attack.log"; }
+exit() { printf "EXIT\n" >> "$RB_ACK_DIR/attack.log"; return 0; }'
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1 "" "$_rb_ack_attack")"
+grep -q INSTALLED "$_rb_ack/attack.log" \
+    && pass "the shadowed \`echo\` and \`exit\` are installed in the child" \
+    || die "the attack was never injected; the two cases below stage nothing"
 case "$(cat "$_rb_ack/gh.log")" in
-    *'pr comment'*) die "a failed probe was acknowledged with echo shadowed: $(cat "$_rb_ack/gh.log")" ;;
-    *) pass "…and a failed probe is still not acknowledged" ;;
+    *'pr comment'*) die "a failed probe was acknowledged past a shadowed echo and exit: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and a failed probe is not acknowledged past them" ;;
 esac
-# …AND THE MARKER MEANS SOMETHING, which it only does if an unattacked run leaves
-# the log empty: a stub that wrote unconditionally would satisfy the check above
-# whatever the child did.
-_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1)"
-[ -s "$_rb_ack/attack.log" ] \
-    && die "the attack log is written without an attack; the evidence above proves nothing" \
-    || pass "…and an unattacked run leaves that evidence empty"
+# `exit` IS NEVER REACHED, which is the half that matters. The diagnostics are
+# still `echo`, so a shadowed one is reached and silences them — harmlessly, since
+# nothing but a message depends on it. What the old shape needed was `exit` to
+# TERMINATE, and this one does not use it at all.
+grep -q EXIT "$_rb_ack/attack.log" \
+    && die "the refusal still depends on exit: $(cat "$_rb_ack/attack.log")" \
+    || pass "…because nothing in the refusal path calls \`exit\` at all"
 
-# A PROBE THAT PRINTED A PLAUSIBLE PAUSE AND THEN DIED IS NOT PERMISSION. This is
-# the case the greps cannot see: the output parses, the count is digits, and the
-# only thing saying the probe failed is the status.
-for _rb_ack_rc in 1 2 0; do
-    _rb_ack_out="$(rb_ack_run "$_rb_ack_pause" "$_rb_ack_rc")"
-    case "$(cat "$_rb_ack/gh.log")" in
-        *'pr comment'*) die "a probe exiting $_rb_ack_rc had its output acknowledged: $(cat "$_rb_ack/gh.log")" ;;
-        *) pass "a plausible pause line from a probe exiting $_rb_ack_rc is not acknowledged" ;;
-    esac
-    case "$_rb_ack_out" in
-        *ABORT*) pass "…and says so" ;;
-        *) die "the refusal was silent for rc=$_rb_ack_rc ('$_rb_ack_out')" ;;
-    esac
-done
-# OUTPUT THE PARSE CANNOT READ IS NOT PERMISSION EITHER, even where the status is
-# the distinguished 3.
-for _rb_ack_bad in '' 'PR_ROUND_COUNT pr=7 rounds=41' 'PR_ROUND_PAUSE pr=7 rounds= threshold=10'; do
-    _rb_ack_out="$(rb_ack_run "$_rb_ack_bad" 3)"
-    case "$(cat "$_rb_ack/gh.log")" in
-        *'pr comment'*) die "an unparseable pause was acknowledged: '$_rb_ack_bad'" ;;
-        *) pass "…and neither is a pause line the parse cannot read" ;;
-    esac
-    case "$_rb_ack_out" in
-        *ABORT*) pass "…saying so as well" ;;
-        *) die "the unreadable count was refused silently ('$_rb_ack_out')" ;;
-    esac
-done
-# …AND A COUNT THAT IS NOT DIGITS IS REFUSED BY SHAPE, which is the arm the parse
-# itself can never reach: its pattern only ever yields digits, so the guard exists
-# for a `sed` that is not the one this block means.
+# A PARSER THAT PRINTED AND THEN FAILED IS NOT A COUNT. Command substitution keeps
+# what it printed, so the digits reach the shape check and pass it — only the
+# status says they mean nothing, which is why the parse is the `if`'s own condition
+# rather than an assignment followed by a check.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3 "$_rb_ack/sedfail")"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "a count from a parser that failed was acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and a plausible count from a parser that then failed is not acknowledged" ;;
+esac
+case "$_rb_ack_out" in
+    *'could not parse'*) pass "…saying which step refused" ;;
+    *) die "the failed parse was refused silently ('$_rb_ack_out')" ;;
+esac
+# A PARSER THAT SUCCEEDS AND PRINTS SOMETHING THAT IS NOT A COUNT is refused by
+# shape rather than by status — the arm the parse itself can never reach, since its
+# own pattern only ever yields digits, so it exists for a `sed` that is not the one
+# this block means.
 _rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3 "$_rb_ack/sedbin")"
 case "$(cat "$_rb_ack/gh.log")" in
     *'pr comment'*) die "a count that is not digits was acknowledged: $(cat "$_rb_ack/gh.log")" ;;
     *) pass "…and a count that is not digits is refused by shape" ;;
 esac
 case "$_rb_ack_out" in
-    *ABORT*) pass "…saying so too" ;;
+    *'could not read a round count'*) pass "…saying so" ;;
     *) die "the non-numeric count was refused silently ('$_rb_ack_out')" ;;
 esac
+# A COUNT OF `0` IS NOT A COUNT. No pause happens at zero rounds — and under a
+# `declare -i` inherited from the operator's shell an empty parse becomes exactly
+# that, so without this the block acknowledges `0` on output it could not read.
+_rb_ack_out="$(rb_ack_run 'PR_ROUND_PAUSE pr=7 threshold=10' 3 "" 'declare -i ROUNDS')"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "an unparseable count became 0 and was acknowledged: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and an empty parse under \`declare -i\` is refused rather than acknowledged as 0" ;;
+esac
+
+# AND THE SAME HOLDS INTERACTIVELY, which is a separate question and the reason the
+# first version of this fix needed a brace group: an expansion-based refusal stops a
+# non-interactive shell outright and abandons only the current compound command in
+# an interactive one. Containment by position does not depend on the mode at all —
+# the post is inside arms that were never taken — but that is a claim about a shell,
+# so it is run rather than argued.
+#
+# THE MARKER IS SPELLED DIFFERENTLY IN THE SOURCE THAN IN ITS OUTPUT, because an
+# interactive shell ECHOES its input: a line that prints `REACHED-THE-END` appears
+# in the transcript whether or not it ran. The source carries a format, the output
+# carries the value.
+rb_ack_interactive() {   # rb_ack_interactive <attack> ; prints what an interactive shell did
+    : > "$_rb_ack/gh.log"
+    : > "$_rb_ack/attack.log"
+    { printf '%s\n' "${1:-}"; cat "$_rb_ack/ack.sh"
+      printf '%s\n' 'printf "REACHED-%s-END\n" THE'; } > "$_rb_ack/int.in"
+    run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV \
+            PATH="$_rb_ack/bin:$PATH" RB_ACK_DIR="$_rb_ack" \
+            HOST=github.com OWNER=acme REPO=widget WHO='chatgpt-codex-connector[bot]' \
+            RB_SCRIPTS="$_rb_ack/scripts" \
+            bash --noprofile --norc -i < "$_rb_ack/int.in" 2>&1 || true
+}
+printf '%s' "$_rb_ack_pause" > "$_rb_ack/count.out"; printf '1' > "$_rb_ack/count.rc"
+_rb_ack_out="$(rb_ack_interactive "$_rb_ack_attack")"
+grep -q INSTALLED "$_rb_ack/attack.log" \
+    && pass "the attack is installed in the interactive session too" \
+    || die "the interactive attack was never injected; the case below stages nothing"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "an interactive session acknowledged a failed probe: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "…and an interactive session acknowledges nothing either" ;;
+esac
+# …AND THE SESSION IS STILL THERE, so that absence is the arms and not a dead shell.
+case "$_rb_ack_out" in
+    *REACHED-THE-END*) pass "…with the session still running afterwards" ;;
+    *) die "the interactive session did not reach the line after the block ('$_rb_ack_out')" ;;
+esac
+# …AND A GENUINE PAUSE STILL POSTS THERE, so the two above are not passing because
+# an interactive run can never reach the post at all.
+printf '3' > "$_rb_ack/count.rc"
+_rb_ack_out="$(rb_ack_interactive "")"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) pass "…while a genuine pause is acknowledged interactively" ;;
+    *) die "no interactive run can reach the post; the two cases above prove nothing ('$_rb_ack_out')" ;;
+esac
+
 rm -rf "$_rb_ack"
 fi
 
