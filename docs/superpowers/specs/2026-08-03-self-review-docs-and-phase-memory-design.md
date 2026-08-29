@@ -3,11 +3,12 @@
 > **Archived, and not written against this repository's issue numbering.** These are
 > v1-era planning documents for the `review-bus` watcher that v2 removed —
 > `review-bus-codex-watcher.sh` and the `test-review-bus-*.sh` fixtures are gone, so
-> nothing here describes code in this tree. **#3** is this repository's issue.
-> **#207** and **#212** are `p5ych0/strumok`'s: the design spec names #212 as
-> strumok's at first mention and leaves #207 unqualified, so an unqualified number
-> here resolves against the wrong repository. Read these as a record of what was
-> planned on 2026-08-03, not as a description of the tree.
+> nothing here describes code in this tree. Issue **3** below is this repository's.
+> Every other number is `p5ych0/strumok`'s, and each occurrence is written out in
+> full so that GitHub links it there: a bare `#207` in this repository renders as a
+> link to an unrelated issue here, which explaining in prose does not change. Read
+> these as a record of what was planned on 2026-08-03, not as a description of the
+> tree.
 
 
 Date: 2026-08-03
@@ -41,7 +42,7 @@ after a failed test, inheriting exit status 1.
 Under `set -Eeuo pipefail` with an unguarded caller, the daemon exits and systemd
 restarts it every few seconds.
 
-**Model summary discarded (strumok #212).** `process_review()` reads `.summary`
+**Model summary discarded (p5ych0/strumok#212).** `process_review()` reads `.summary`
 only in the zero-findings branch. Any review with findings overwrites it with a
 status line, so a reviewer's stated verification limitation is lost.
 
@@ -51,18 +52,18 @@ status line, so a reviewer's stated verification limitation is lost.
 to use them. Every project must re-author that instruction by hand; `strumok`
 did, in its `.review-bus.md`.
 
-Out of scope: issue #207 (project guidance read from the PR head). It is
+Out of scope: issue p5ych0/strumok#207 (project guidance read from the PR head). It is
 acknowledged below where it bears on a decision, and fixed in separate work.
 
 ## Sequencing
 
 Three sub-projects, landed in this order. S3 and S1 are one PR each; **S2 is two**
-(see *Split into two deliveries* under Issue #212):
+(see *Split into two deliveries* under Issue p5ych0/strumok#212):
 
 1. **S3 — self-review docs** (this spec's first deliverable), including the
    watcher prompt change for task awareness.
 2. **S1 — reviewer-phase memory** and Copilot enforcement.
-3. **S2 — issue #212**, delivered in two PRs:
+3. **S2 — issue p5ych0/strumok#212**, delivered in two PRs:
    - **S2a — preservation**: the reviewer's summary is kept in the bus response
      as `model_summary` on every review, including one with findings.
    - **S2b — surfacing**: the handoff flag and the reader that delivers the note
@@ -95,7 +96,7 @@ block when absent.
 `.review-bus.md` is already loaded from the PR's base ref, so review policy is
 trusted. `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` are read
 from the PR head by the instruction at `:521`, so a PR that edits them supplies
-instructions to its own reviewer. That is issue #207. It is accepted for this
+instructions to its own reviewer. That is issue p5ych0/strumok#207. It is accepted for this
 work — the author is the repository owner — and closed by separate work. This
 spec records the exposure rather than leaving it implicit.
 
@@ -130,13 +131,13 @@ redundant. Removing it is follow-up work in that repository, not part of this.
 so a fresh clone arms itself. Adding `.review-bus.md` at the root is what makes
 `hooks/session-start.sh:14` stop treating this repository as opted out.
 
-### The #212 workaround, with an expiry
+### The p5ych0/strumok#212 workaround, with an expiry
 
-Until #212 lands, `.review-bus.md` must carry strumok's "there is no channel for
+Until p5ych0/strumok#212 lands, `.review-bus.md` must carry strumok's "there is no channel for
 a non-blocking note" paragraph: with one or more findings the model's `summary`
 is discarded, and `findings[]` is not an alternative because every entry becomes
 a thread the merge gate requires resolved. The paragraph is marked as tied to
-issue #212 so it cannot outlive the bug.
+issue p5ych0/strumok#212 so it cannot outlive the bug.
 
 Because S2 ships in two parts, its retirement does too, and each part owns one
 half:
@@ -216,7 +217,7 @@ Regression test: preflight green, an existing terminal `comments_posted` respons
 for the current head, assert no request is written, `write_auto_request` returns
 0, and the watcher stays alive.
 
-### Issue #212
+### Issue p5ych0/strumok#212
 
 The model's summary is preserved in the bus response as `model_summary` (**S2a**),
 and the driving session is told a note exists so it can read it (**S2b**). The two
@@ -275,10 +276,10 @@ New coverage:
 
 - `write_auto_request` no-op returns 0 with a terminal response present (#3 —
   already shipped in 1.0.11, listed for completeness).
-- A review with findings preserves `model_summary`, byte-exact (#212, S2a).
+- A review with findings preserves `model_summary`, byte-exact (p5ych0/strumok#212, S2a).
 - The handoff line flags a present note, and the reader returns its text safely
   to the driver; an end-to-end mixed review (findings *and* a note) reaches the
-  session with both (#212, S2b). S2b does not merge without this.
+  session with both (p5ych0/strumok#212, S2b). S2b does not merge without this.
 - Clean signoff writes `.codex-clean-<pr>` and `next_phase` in the response.
 - Auto-enqueue holds when all commits since the clean SHA carry the trailer.
 - Auto-enqueue invalidates and enqueues when any commit lacks it.
@@ -297,8 +298,8 @@ own. Version numbers are assigned at merge, since the order can change.
 - Between the S2a and S2b merges the reviewer's note is *recorded and not
   delivered*. Every layer describing that window says so; no layer claims the
   author has read it.
-- Issue #207 stays open through this work. The documents added by S3 are read
-  from the PR head, so a PR editing them steers its own review until #207 lands.
+- Issue p5ych0/strumok#207 stays open through this work. The documents added by S3 are read
+  from the PR head, so a PR editing them steers its own review until p5ych0/strumok#207 lands.
 - The `Review-Phase: copilot` trailer is a convention the skill must apply. A
   missed trailer costs one redundant Codex review, not a missed review.
 - `strumok`'s `.review-bus.md` keeps its now-redundant task-awareness paragraph
