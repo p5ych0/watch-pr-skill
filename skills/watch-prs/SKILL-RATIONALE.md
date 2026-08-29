@@ -1646,6 +1646,25 @@ SO NOTHING IS REMOVED, and the whole class goes with it. The setup directory is 
 session's and outlives the block regardless — it holds `work/`, the four files every
 later stage writes into.
 
+## A SQUATTED PIN NAME COSTS A SECOND NAME, NOT THE SESSION.
+
+`pr-origin.sh pin` creates the directory it is given, exclusively, so a same-UID process
+that pre-creates `$RB_SETUP_DIR/pin` makes that call report 2 — the storage status. The
+name is derived from one published in argv, which is exactly the race
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts, and what makes that
+acceptance hold is that a squat costs a RETRY rather than a session.
+
+So a 2 is retried once, under a second name. `elif [[ $? -eq 2 ]] && …` reads the status
+in its own condition, inside the same `if`, so nothing becomes a statement after a guard
+— the shape `pr-origin.sh`'s own two-call retry uses, and for the same reason.
+
+A FIXED SECOND NAME, NOT A RANDOM ONE. The value has to be spelled twice — once for the
+call and once for the redirection that reads it back — and this shell has no name to hold
+it in that a startup file cannot have made readonly or aimed elsewhere. A random suffix
+would have to be recovered by a glob in a redirection, which is one more thing that can
+match nothing or match twice. One retry is what the record bounds the cost at, and one
+fixed name is exactly one retry.
+
 ## A PIN FAILURE IS TERMINAL, because the work files are already on this parent.
 
 `pr-origin.sh pin` reports 2 where the STORAGE would not take what it asked, and every

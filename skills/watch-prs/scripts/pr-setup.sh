@@ -122,30 +122,9 @@ esac
 # when this run began is one this run made. And `-O` refuses a name another ACCOUNT
 # holds, which neither flag can see — that is what stops a replacement's own `origin`
 # or `o/origin` being unlinked through a path this run no longer owns.
-RB_PHASE=reserved
 RB_OWNED=no
 RB_PREEXISTED=no
 RB_INO=
-# AND WHAT HAS ACTUALLY BEEN CREATED IS RECORDED AS IT HAPPENS, name by name. `RB_PHASE`
-# alone said "something can be inside now", and the cleanup then removed every name this
-# helper EVER creates — including ones it had not got to yet. A `pr-origin.sh` that
-# planted `$RB_DIR/origin` and then refused had that file deleted by a run which never
-# wrote it, which is past the bound `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
-# accepts: the names this session HAD ALREADY TAKEN, not the ones it might have.
-#
-# ONE LIST, AND ONLY FOR FILES. A file comes out with `rm -f`, which resolves whatever is
-# at the name and destroys it, so it may only be used on a name this run is known to have
-# written. A DIRECTORY comes out with `rmdir`, which refuses a symlink and refuses
-# anything with contents — so the worst it can take is an empty directory at one of this
-# helper's own names, which is the cost
-# `docs/decisions/2026-08-26-reservation-inference.md` already accounts for. Directories
-# therefore need no ledger, and that is not a shortcut: it is what closes the window
-# between an external `mkdir` returning and the next command, where a signal is handled
-# and a ledger entry has not yet been made.
-#
-# THE NAMES ARE RELATIVE TO `$RB_DIR` and contain no spaces, which is what lets the list
-# be split on whitespace.
-RB_MADE_F=
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
 # AND THE OBJECT ITSELF IS HELD, because ownership is not identity. `-O` refuses a
 # name another ACCOUNT holds and that is the boundary the record is about — but a
@@ -195,60 +174,36 @@ rb_setup_ino_held() {   # the inode of the object descriptor 8 holds, or nothing
 # DELETED, and `[` is a name; `[[` is a reserved word the parser handles and nothing
 # can stand in for.
 #
-# `RB_PHASE` PICKS BETWEEN TWO SHAPES. Until a write has happened nothing can be
-# inside, so `rmdir` ALONE is correct — it refuses a symlink outright, and it is what
-# the accepted record describes when it says the cost is one EMPTY directory. Once a
-# write has happened `rmdir` necessarily fails on a directory holding its leaf, so
-# the leaves this run named go first. Never `rm -rf`: a recursive removal on a
-# replaced name deletes whatever is under it, which is past what any record accepts.
-# WHAT THE LEAF REMOVALS BELOW CAN AND CANNOT DESTROY, stated because review reaches
-# this function every round. They run only on a FAILURE path, only while the held
-# descriptor and the recorded inode still say `$RB_DIR` is the object the `mkdir` made,
-# and only on NAMES this run created — `origin`, `o/origin`, and the four under `work/`.
+# ONE `rmdir` AND NOTHING ELSE, which is the shape six rounds of review converged on
+# rather than a simplification. Every attempt to give the CONTENTS back needed a NAME,
+# and a name inside a directory a same-UID process can write to is one that may have been
+# substituted: `rm -rf` took a replacement's whole tree, a named `rm -f` took a
+# replacement's file, a ledger of what this run had created missed whatever a signal
+# landed in front of, and removing the directories unconditionally took a watcher's empty
+# directory at a name this run had not reached.
 #
-# A same-UID process can still substitute one of those between the identity check and
-# the removal; there is no way to unlink relative to a held descriptor in shell, and a
-# per-object descriptor is a check-then-use one level down. What it costs is bounded by
-# the names: the only thing that can be destroyed is a file a racer chose to place at a
-# name this session had already taken, which is the record's own framing of the victim —
-# another same-UID process losing a reservation. An arbitrary file of the operator's is
-# NOT reachable, because `set -C` refuses a symlink at every one of these names when it
-# creates them, so none of them can point elsewhere.
+# SO NOTHING INSIDE IS REMOVED AT ALL. `rmdir` succeeds only on a directory that is
+# empty and refuses a symlink outright, so this can destroy nothing whatever has happened
+# at that name — which is the property each of those attempts was reaching for and none
+# of them held.
 #
-# THAT RESIDUE IS #230's BOUNDARY QUESTION, not a separate one: a same-UID process
-# writing inside a mode-700 directory this run created exclusively can also edit the
-# checkout, `SKILL.md`, and the origin file the driver reads.
-rb_setup_give_back() {   # give back what this run created, for the phase it is in
+# WHAT IT COSTS is a failed setup leaving its own tree behind: one directory per refused
+# attempt, holding files this run wrote and nothing else. That is more litter than the
+# empty directory `docs/decisions/2026-08-26-reservation-inference.md` accounts for, and
+# `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records it — litter rather than loss,
+# which is the direction this file is for.
+rb_setup_give_back() {   # give back the reservation, if it is still this run's and empty
     [[ $RB_OWNED = yes ]] \
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
         || return 0
     [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
-    # THE SAME OBJECT, or there is nothing here this run made. Where the inode was
-    # never recorded the `mkdir` had not reported success, and the three tests above
-    # are what stands; where it was, the name must still resolve to it — and the held
-    # descriptor is what makes that number mean the same object rather than one that
-    # inherited its inode.
+    # THE SAME OBJECT, or there is nothing here this run made. Where the inode was never
+    # recorded the `mkdir` had not reported success, and the three tests above are what
+    # stands; where it was, the name must still resolve to it — and the held descriptor
+    # is what makes that number mean the same object rather than one that inherited its
+    # inode.
     if [[ -n $RB_INO ]]; then
         [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
-    fi
-    # LEAVES ONLY WHERE THE IDENTITY IS DURABLE, AND THAT NEEDS BOTH HALVES. The held
-    # descriptor is what stops the inode being reused; the recorded NUMBER is what the
-    # comparison is against, and `ls -di` can fail or print nothing — after which the
-    # comparison above is skipped entirely and `RB_HELD=yes` alone would let the leaf
-    # removals run against a name this run cannot vouch for. So an empty record is the
-    # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
-    # anything and leaves a directory behind at worst.
-    if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
-        # THE FILES THIS RUN RECORDED WRITING, and nothing else.
-        for _g in $RB_MADE_F; do
-            /usr/bin/env rm -f "$RB_DIR/$_g" 2>/dev/null
-        done
-        # THEN THE DIRECTORIES, IN REVERSE, and unconditionally — `rmdir` refuses a
-        # symlink and refuses anything with contents, so a name this helper never got to
-        # is either absent or somebody's non-empty directory, and both are no-ops.
-        for _g in pinprobe2 pinprobe work o; do
-            /usr/bin/env rmdir "$RB_DIR/$_g" 2>/dev/null
-        done
     fi
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
@@ -312,18 +267,11 @@ RB_HELD=no
 # ── the origin, through the helper that reads it privileged ────────────────
 # NOT `git remote get-url` HERE. `pr-origin.sh` is where that read is hardened, and
 # a second copy of it is the duplication `CLAUDE.md` records paying for four times.
-# THE PHASE FLIPS BEFORE THE CALL, not after it: `pr-origin.sh` creates `$RB_DIR/o`
-# and leaves it for this caller, so from the moment it is started something can be
-# inside — and a refusal between the two is exactly when the cleanup has to know.
-RB_PHASE=written
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-origin.sh read "$RB_DIR/o" || {
     _rc=$?
     [ "$_rc" -eq 2 ] && rb_setup_stop origin_storage 2
     rb_setup_stop origin_unreadable 1
 }
-# THE READ SUCCEEDED, so the leaf is this run's — `pr-origin.sh` gives its own directory
-# back on a refusal, so it exists only on this path.
-RB_MADE_F="$RB_MADE_F o/origin"
 RB_REMOTE=""
 RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transport 1
 # AND IT IS LEFT WHERE IT IS, which is what `SKILL.md` does with its own transports and
@@ -412,7 +360,6 @@ RB_WORK_DIR="$RB_DIR/work"
 /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" 2>/dev/null || rb_setup_stop work_dir 2
 for _f in summary.md request.md prior.txt head.txt; do
     : > "$RB_WORK_DIR/$_f" || rb_setup_stop work_files 2
-    RB_MADE_F="$RB_MADE_F work/$_f"
     { [ -f "$RB_WORK_DIR/$_f" ] && [ ! -s "$RB_WORK_DIR/$_f" ]; } \
         || rb_setup_stop work_files_not_empty 2
 done
@@ -447,9 +394,6 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 # or truncated origin would pin the session to it.
 [ -s "$RB_DIR/origin" ] || rb_setup_stop origin_write 2
 [ "$(cat "$RB_DIR/origin" 2>/dev/null)" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
-# RECORDED ONLY NOW, because until the write happened a file at that name was somebody
-# else's — which is the case that made this list necessary.
-RB_MADE_F="$RB_MADE_F origin"
 
 # ── the storage the pin will still need ────────────────────────────────────
 #

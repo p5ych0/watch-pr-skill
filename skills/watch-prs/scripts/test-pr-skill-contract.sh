@@ -491,13 +491,19 @@ if [ -n "$_forge_dir" ]; then
     # whether the names are cleared or not.
     _fe_log="$_forge_dir/forge-log-that-must-not-exist"
     export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' \
-           FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_PIN_EXTRA=1 FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
+           FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_PIN_EXTRA=1 FORGE_PIN_SQUAT=1 FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
            FORGE_NOORIGIN=1 FORGE_ORIGIN_DIR=1 FORGE_NONEMPTY=1
-    unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_PIN_EXTRA FORGE_SETUP_RC \
+    unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_PIN_EXTRA FORGE_PIN_SQUAT FORGE_SETUP_RC \
           FORGE_SETUP_LOG FORGE_NOORIGIN FORGE_ORIGIN_DIR FORGE_NONEMPTY
     cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
 [ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
+# A SQUATTED FIRST PIN NAME, which is what `pr-origin.sh` reports 2 for: the name was
+# taken and the reservation could not be made. Only the leaf ending in `/pin` is refused,
+# so the retry's own name goes through.
+if [ -n "${FORGE_PIN_SQUAT:-}" ] && [ "$1" = pin ]; then
+    case "$2" in */pin) exit 2 ;; esac
+fi
 mkdir -m 700 "$2" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 # THE LEAF CAN BE MADE SOMETHING THE READ-BACK REJECTS, which is the only way to
@@ -795,6 +801,21 @@ FORGE
     else
         pass "this shell has no declare -n, so the identity-alias states are skipped by name"
     fi
+
+    # …AND A SQUATTED PIN NAME COSTS A SECOND NAME RATHER THAN THE SESSION. The pin
+    # directory is derived from a name published in argv, so a same-UID process can
+    # pre-create it and `pr-origin.sh pin` then reports 2 — the storage status. That is
+    # the race `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts, and
+    # what makes the acceptance hold is that a squat costs a RETRY.
+    _pq=0
+    _pq_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 FORGE_PIN_SQUAT=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            '"$_setup_body"'
+        ' 2>&1)" || _pq=$?
+    { [ "$_pq" -eq 0 ] \
+      && case "$_pq_out" in *'OWNER=acme REPO=widget'*) true ;; *) false ;; esac; } \
+        && pass "a squatted pin name costs a second name, not the session" \
+        || die "a squatted pin name ended the session (rc=$_pq out='$_pq_out')"
 
     # ── the retry, and what it is gated on ────────────────────────────────
     # A STORAGE REFUSAL IS RETRIED UNDER THE OTHER PARENT. Status 2 means both

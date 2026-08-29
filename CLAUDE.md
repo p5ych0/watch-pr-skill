@@ -779,20 +779,18 @@ author side of that contract matters:
   **Three are accepted there, one record each.** #160: the transport candidate name
   is published in argv before the `mkdir` reserves it. #162: the reservation is an
   inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. And
-  2026-08-29: `pr-setup.sh` gives its reservation back by removing the leaves it
-  created BY NAME, after proving the directory is still the object its `mkdir` made,
-  so a same-UID substitution between that proof and the removals is not refused —
-  shell cannot unlink relative to a held descriptor, and a per-leaf descriptor moves
-  the same check-then-use one level down. What makes
+  2026-08-29: `pr-setup.sh` gives its reservation back with ONE `rmdir` and removes
+  nothing inside it, so a refusal after anything exists leaves this run's own tree —
+  every shape that gave the contents back needed a name a same-UID process may have
+  substituted, and each destroyed something. What makes
   each acceptable is MEASURED rather than argued, and the measurement is a
   FIXTURE rather than a paragraph. A squatter costs a denial of service bounded by
   the second-parent retry and never a forged identity, which
   `test-pr-skill-contract.sh` stages against the real helper; the reservation
   races cost one empty directory, lost or left behind, which `test-pr-origin.sh`
-  stages with `mkdir` on `PATH` as the racer; and the leaf cleanup loses exactly the
-  names this session had already taken and nothing else, which `test-pr-setup.sh`
-  stages by patching the substitution into a copy of the helper at the line it is
-  about. Those cases are what the records
+  stages with `mkdir` on `PATH` as the racer; and the cleanup can destroy nothing at all,
+  which `test-pr-setup.sh` stages against the real helper and pins with a scan
+  requiring exactly one `rmdir` in that function and no `rm`. Those cases are what the records
   rest on: **if a bound changes they fail**, which is what stops an accepted limit
   drifting into an unexamined one.
 

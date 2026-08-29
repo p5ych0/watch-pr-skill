@@ -58,6 +58,13 @@
   nobody chose. All ten names the block assigns are in the generic probe now, and its
   refusal names them.
 
+- **A squatted pin name costs a second name, not the session.** `pr-origin.sh pin`
+  creates the directory it is given, exclusively, so a same-UID process that pre-creates
+  it makes that call report the storage status — and setup aborted. The name is derived
+  from one published in argv, which is the race
+  `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts on the grounds that
+  a squat costs a RETRY. It does again: a second, fixed name, tried once.
+
 - **A name the operator's shell has aliased to the identity stops setup.** `RB_REMOTE`
   joins the ten names the generic probe already covered: declared as a nameref onto
   `OWNER` or `HOST`, the clear and the origin read write through it, `rb_identity` then
@@ -65,12 +72,21 @@
   fragment of its own remote — which the child pin echoes back, so the comparison agrees
   and setup announces success on an identity every later helper rejects.
 
-- **A failed setup removes only the names it had already taken.** The cleanup knew which
-  objects the helper CAN create, not which it HAD created, so a refusal early on — a
-  `pr-origin.sh` that planted a file at the origin name and then failed, say — deleted a
-  file this run never wrote. Each creation is recorded as it happens now, and only what is
-  on that list is removed: files by name, directories in reverse so a parent is never
-  asked for before its child.
+- **A failed setup gives its reservation back with one `rmdir`, and removes nothing
+  inside it.** Every shape that gave the contents back needed a name, and a name inside a
+  directory a same-UID process can write to is one that may have been substituted between
+  being created and being removed: a recursive removal took a replacement's whole tree, a
+  named `rm -f` took a replacement's file, a ledger of what this run created missed
+  whatever a signal landed in front of, and removing the directory names unconditionally
+  took a watcher's empty directory at a name this run never reached. Shell has no
+  `unlinkat`, so every removal resolves a path and a descriptor per object moves the same
+  check-then-use one level down.
+
+  `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup can
+  now destroy nothing whatever has happened at that name. The cost moves from loss to
+  litter: a refusal after anything exists leaves this run's own tree — one directory per
+  refused attempt — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with
+  the table of what each earlier shape destroyed.
 
 - **The origin transport is left where it is.** The helper copied the origin out of
   `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name

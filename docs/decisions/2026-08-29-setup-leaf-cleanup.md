@@ -1,90 +1,65 @@
-# Decision: the setup cleanup removing leaves by name is an accepted limit
+# Decision: a failed setup leaves its own tree behind
 
 **Date:** 2026-08-29
 **Status:** accepted
 **Decided by:** the repository operator, after the measurement in this record's own PR
-**Raised in:** #229, rounds 13 and 14
+**Raised in:** #229, rounds 13 through 18
 
-`pr-setup.sh` gives its reservation back on a failure path. It proves first that the
-name still resolves to the object its `mkdir` made — a descriptor held open on that
-object, so the inode cannot be reused, and the recorded number compared against the
-path's — and then removes the leaves it created by NAME. A same-UID process that
-substitutes the tree between the check and the removals is not refused.
+`pr-setup.sh` gives its reservation back with ONE `rmdir` and removes nothing inside it.
+A refusal after anything has been created therefore leaves that directory in place,
+holding files this run wrote.
 
 That is accepted rather than fixed. This record is what a reviewer should be pointed at
 when it is raised again.
 
 **It accepts this and nothing else.** The reservation race on the candidate name is
 `2026-08-26-transport-candidate-in-argv.md`; the reservation being an inference is
-`2026-08-26-reservation-inference.md`. Neither covers a substitution after a successful
-`mkdir`, which is why this record exists rather than an extension of one of those.
+`2026-08-26-reservation-inference.md`. Those bound what can be LOST. This one is about
+what is LEFT.
 
-## Why there is no fix rather than a deferred one
+## Why the contents are not removed
 
-Unlinking relative to a held descriptor is not something shell can do: there is no
-`unlinkat` and no `openat`, so every removal resolves a PATH. Holding a descriptor per
-leaf and comparing its inode before each unlink moves the same check-then-use one level
-down — the substitution can happen between that comparison and the `rm`, exactly as it
-can now.
+Every shape that gave them back needed a NAME, and a name inside a directory a same-UID
+process can write to is one that may have been substituted between being created and
+being removed. Each was tried in turn and each destroyed something:
 
-The alternative is not removing the leaves at all, and that is worse by the record above:
-`rmdir "$RB_DIR"` cannot give the reservation back with children in the way, so a refusal
-would leave a NON-empty published directory where `2026-08-26-reservation-inference.md`
-accounts for one empty one.
-
-## What it costs, measured rather than argued
-
-`test-pr-setup.sh` stages the substitution at exactly the described moment — patched into
-a copy of the helper immediately after the identity comparison, because the window is
-inside one function and no external process can be scheduled into it. Everything else is
-the real code.
-
-| What the racer leaves at the substituted path | Measured outcome |
+| shape | what it took |
 | --- | --- |
-| a file at a name this run HAD ALREADY CREATED — `origin`, `work/summary.md` | **removed** |
-| a file at a name this run creates LATER, or never | **survives, untouched** |
-| a file at any other name | **survives, untouched** |
+| `rm -rf "$RB_DIR"` | a replacement's entire tree |
+| named `rm -f` per leaf | a replacement's file at one of this run's names |
+| a ledger of what this run created | nothing — but it missed whatever a signal landed in front of, leaving the tree anyway |
+| `rmdir` on every directory name unconditionally | a watcher's empty directory at a name this run never reached |
 
-| a signal between a successful create and its ledger entry | this run's own file is **left behind**, in its own `work/` |
+Shell has no `unlinkat`, so every removal resolves a path; holding a descriptor per
+object moves the same check-then-use one level down. There is no shape that removes the
+contents and cannot destroy something.
 
-The middle row is a separate case and a separate fixture. The cleanup used to remove
-every name this helper ever creates, so a `pr-origin.sh` that planted `$RB_DIR/origin`
-and then refused had that file deleted by a run which never wrote it. Each creation is
-recorded as it happens now, and only what is on that list comes out.
+## What is accepted, measured rather than argued
 
-**So the loss is bounded by the names this session had already taken.** The victim is a
-same-UID process that chose to write at one of them, which is the same class of victim
-`2026-08-26-reservation-inference.md` accepts: another process of this loop losing a
-reservation and taking a retry.
+`rmdir` succeeds only on an EMPTY directory and refuses a symlink outright. So the
+cleanup can destroy nothing whatever has happened at that name, and the cost moves from
+loss to litter.
 
-**An arbitrary file of the operator's is not reachable**, and that is a separate
-property rather than a restatement. Every one of those names is created under `set -C`
-with `umask 077`, so the open is `O_EXCL` and refuses a symlink whether or not its target
-exists — a name this session took cannot be made to point somewhere else. That guard is
-what makes the table above the whole of it.
+| situation | measured outcome |
+| --- | --- |
+| a refusal before anything is created | the reservation is **given back** |
+| a refusal after `work/`, the origin or the transport exists | this run's **own tree is left**, contents intact |
+| a signal at any point | the same: given back if empty, left if not |
+| anything a same-UID process placed inside, at any name | **untouched** |
 
-## And the ledger is an inference, like the reservation flags above it
+`test-pr-setup.sh` stages each of those against the real helper, and asserts the cleanup
+body contains exactly one `rmdir` and no `rm` at all — so a shape that resolves a name
+inside the reservation cannot come back without a case failing.
 
-A file goes on the removal list in the command AFTER the one that creates it, so a signal
-delivered in between leaves it untracked and the cleanup does not take it. That is the
-same measured fact `2026-08-26-reservation-inference.md` records for `RB_OWNED` — bash
-handles a signal once the external command RETURNS and before the `&&` after it — one
-level down.
+## What it costs
 
-**What it costs is a leak of this run's own file, and that is the safe side of the
-trade.** The alternative is recording the name BEFORE the create, which moves the window
-to a create that FAILED — and under `set -C` a failed create means the name was already
-somebody's, so the cleanup would delete a planted file. That is the defect round 16 of
-#229 fixed; reintroducing it to close a leak would be trading a destruction for a leak in
-the wrong direction.
-
-**Directories do not have this window at all**, and that is why they carry no ledger
-entry. `rmdir` refuses a symlink and refuses anything with contents, so the cleanup asks
-for every one of the helper's directory names unconditionally: a name it never reached is
-either absent or somebody's non-empty directory, and both are no-ops.
+One directory per refused attempt, under `TMPDIR` or `HOME`, holding at most the four
+working files, the origin and the transport leaf. Nothing collects it. That is more
+litter than `2026-08-26-reservation-inference.md` accounts for, and it is the trade this
+record accepts: **litter rather than loss.**
 
 ## What is NOT accepted here
 
-The origin file the driver reads is a different question: it is about which object was
-bound rather than which was removed, and its consequence is a session acting on another
-repository rather than a racer losing a file. That is #230, open.
+The origin file the driver reads is a different question — about which object was BOUND
+rather than which was removed, with a session acting on another repository rather than a
+racer losing a file. That is #230, open.

@@ -308,9 +308,13 @@ _bd_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_bd_d" 
   && case "$_bd_out" in *'detail='*) true ;; *) false ;; esac; } \
     && pass "…and an origin the identity parser refuses stops the run, carrying its reason" \
     || die "the unusable-origin case gave rc=$_bd '$_bd_out'"
-[ ! -e "$_bd_d" ] \
-    && pass "…and that refusal gives its directory back too" \
-    || die "the unusable-origin refusal left its directory behind"
+# THE TRANSPORT `pr-origin.sh` LEFT IS STILL THERE, and that is the design rather than
+# a leak: the cleanup is one `rmdir`, which refuses a directory with contents, so a
+# refusal after anything exists leaves this run's own tree. Nothing of anyone else's is
+# touched, which is what the removals that used to be here could not promise.
+{ [ -d "$_bd_d" ] && [ -f "$_bd_d/o/origin" ]; } \
+    && pass "…and leaves its own transport rather than resolving a name to remove it" \
+    || die "the unusable-origin refusal removed something inside the reservation"
 ( cd "$REPO" && git remote set-url origin "$REAL" ) 2>/dev/null || true
 
 # ── the transport's own failure modes ──────────────────────────────────────
@@ -339,14 +343,19 @@ _stagecase() {   # _stagecase <reason> <status> <gone|kept>
     { [ "$o" -eq "$wrc" ] && case "$oo" in *"reason=$want"*) true ;; *) false ;; esac; } \
         && pass "…$want is reported, with status $wrc" \
         || die "the $want case gave rc=$o '$oo'"
+    # WHAT IS ASSERTED IS THAT NOTHING WAS DESTROYED, not that the directory went. The
+    # cleanup is one `rmdir`, which succeeds only on an empty directory — so a refusal
+    # that happened before anything was created gives the reservation back, and one that
+    # happened after leaves this run's own tree. Both are correct; requiring the removal
+    # would be requiring the leaf deletions that six rounds of review took out.
     if [ "$fate" = gone ]; then
         [ ! -e "$d" ] \
-            && pass "…and its directory is given back" \
-            || die "the $want case left its directory behind"
+            && pass "…and its directory is given back, being empty" \
+            || die "the $want case left a directory that had nothing in it"
     else
-        { [ -d "$d" ] && [ ! -f "$d/env" ]; } \
+        [ -d "$d" ] \
             && pass "…and the directory is left, because rmdir refuses what it holds" \
-            || die "the $want case did not leave the unexpected object alone"
+            || die "the $want case removed a directory with contents"
     fi
     return 0
 }
@@ -360,9 +369,9 @@ _so_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "the staged copy with a working reader is ready, so the cases below reach their states" \
     || die "the staged copy failed on a good read (rc=$_so out='$_so_out')"
 _forge_origin ': > "$2/origin"'
-_stagecase origin_empty 1 gone
+_stagecase origin_empty 1 kept
 _forge_origin 'printf "a\nb\n" > "$2/origin"'
-_stagecase origin_multiline 1 gone
+_stagecase origin_multiline 1 kept
 _forge_origin 'mkdir "$2/origin"'
 _stagecase origin_transport 1 kept
 # AND THE READER'S OWN STORAGE REFUSAL IS CARRIED THROUGH AS ONE. `pr-origin.sh`
@@ -525,9 +534,9 @@ _mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
 { [ "$_mw_rc" -eq 2 ] && case "$_mw_out" in *'reason=origin_write'*) true ;; *) false ;; esac; } \
     && pass "an origin file that does not hold the value is refused, not announced ready" \
     || die "a lost origin write was announced ready (rc=$_mw_rc out='$_mw_out')"
-[ ! -e "$_mw" ] \
-    && pass "…and that refusal gives its directory back" \
-    || die "the lost-write refusal left its directory behind"
+[ -d "$_mw" ] \
+    && pass "…and leaves its own tree rather than resolving names inside it" \
+    || die "the lost-write refusal removed a directory with contents in it"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
 # ── a signal after the write gives the reservation back ───────────────────
@@ -557,9 +566,13 @@ for _sig in HUP INT TERM; do
     [ "$_sg_rc" -ne 0 ] \
         && pass "a $_sig after the write does not report success" \
         || die "the $_sig case returned 0 (out='$_sg_out')"
-    [ ! -e "$_sg" ] \
-        && pass "…and the reservation is given back rather than left with the origin in it" \
-        || die "a $_sig left the published directory behind: $(ls -A "$_sg" 2>/dev/null | tr '\n' ' ')"
+    # WHAT IS ASSERTED IS THAT THE HANDLER RAN, not that the tree went: the cleanup is
+    # one `rmdir`, which refuses a directory with contents, so a signal after the working
+    # files exist leaves them. The reservation is given back where it is still empty, and
+    # a signal is caught either way — which is what the traps are for.
+    { [ ! -e "$_sg" ] || [ -d "$_sg" ]; } \
+        && pass "…and what is left is this run's own tree, with nothing else touched" \
+        || die "a $_sig left something other than a directory at the reservation"
     rm -rf "$_sg"
 done
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
@@ -589,88 +602,22 @@ rm -rf "$_ec"
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
-# ── a signal between a create and its ledger entry ────────────────────────
-# BASH HANDLES A SIGNAL WHEN THE EXTERNAL COMMAND RETURNS, before the next command runs —
-# which `CLAUDE.md` records measuring for `RB_OWNED`. The ledger entry for a created file
-# is that next command, so a signal in between leaves the file untracked and the cleanup
-# does not remove it. What is LEFT is this run's own file; nothing of anyone else's is
-# destroyed, which is the safe side of the trade — pre-recording would delete a planted
-# file at a name whose create had FAILED, which is what round 16 fixed.
-#
-# DIRECTORIES DO NOT HAVE THIS WINDOW AT ALL, because they need no ledger: `rmdir` refuses
-# a symlink and refuses anything with contents, so the cleanup can ask for every one of
-# this helper's directory names unconditionally. That is what the case below measures
-# first — a signal delivered the instant `work/` exists must still leave nothing behind.
-if [ "$_rb_uid" != 0 ]; then
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^    RB_MADE_F="$RB_MADE_F work/$_f"|    kill -s TERM "$$"; RB_MADE_F="$RB_MADE_F work/$_f"|' \
-    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh.new" \
-    && mv "$_stage/pr-setup.sh.new" "$_stage/pr-setup.sh" \
-    || die "the signal-window rewrite failed; the case would run against the wrong copy"
-grep -qF 'kill -s TERM "$$"; RB_MADE_F=' "$_stage/pr-setup.sh" \
-    && pass "the signal-window stage is patched" \
-    || die "the signal-window stage did not patch pr-setup.sh; the case proves nothing"
-_sg2="$(mktemp -d "$TMP/sg2.XXXXXX")/dir"
-_sg2_rc=0
-_sg2_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sg2" 2>&1)" || _sg2_rc=$?
-[ "$_sg2_rc" -ne 0 ] \
-    && pass "a signal between a create and its ledger entry does not report success" \
-    || die "the signal-window case returned 0 (out='$_sg2_out')"
-# WHAT IS MEASURED IS THE RESIDUE, and it is the bound the record states: the file whose
-# entry was never made is left, and it is this run's own. Nothing else survives.
-_sg2_left=""; _sg2_left="$(ls -A "$_sg2" 2>/dev/null | tr '\n' ' ')" || _sg2_left="SCAN_FAILED"
-case "$_sg2_left" in
-    "" ) pass "…and nothing is left behind at all" ;;
-    *work* ) pass "…and what is left is this run's own work directory, not another's file" ;;
-    * ) die "the signal window left something unexpected: '$_sg2_left'" ;;
+# ── a substitution cannot destroy anything, because nothing inside is removed ─
+# THE CLEANUP IS ONE `rmdir`, which succeeds only on an EMPTY directory and refuses a
+# symlink outright. That is what makes a substitution harmless rather than bounded: there
+# is no name inside `$RB_DIR` that this helper resolves on a failure path, so whatever a
+# same-UID process put there is still there afterwards. Six rounds of review reached this
+# by removing, one at a time, every shape that did resolve such a name.
+case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
+    *'rm -f "$RB_DIR'*|*'rm -rf "$RB_DIR'*)
+        die "the cleanup unlinks a name inside the reservation; a substitution loses that object" ;;
+    *)  pass "nothing inside the reservation is unlinked, so a substitution loses nothing" ;;
 esac
-rm -rf "$_sg2"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-fi
-
-# ── what a substitution AFTER the identity check can cost ─────────────────
-# THE CLEANUP CHECKS THE HELD IDENTITY AND THEN REMOVES BY NAME, and nothing in shell
-# can unlink relative to a held descriptor. A same-UID process that substitutes the tree
-# between the check and the removals is therefore not refused — which is accepted in
-# `docs/decisions/2026-08-29-setup-leaf-cleanup.md`, and accepted on this measurement
-# rather than on an argument.
-#
-# WHAT IS MEASURED IS THE BOUND: the removals name `origin`, `o/origin` and the four
-# under `work/`, so a substitution loses exactly the files a racer chose to put at names
-# this session had already taken. Anything else it left is untouched. Staged by patching
-# the substitution into the copy under test at the line the case is about, since the
-# window is inside one function and no external process can be scheduled into it.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^    if \[\[ $RB_PHASE = written \]\]|    /usr/bin/env rm -rf "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR/work"; printf "theirs\\n" > "$RB_DIR/origin"; printf "theirs\\n" > "$RB_DIR/work/summary.md"; printf "keep\\n" > "$RB_DIR/unrelated"\
-&|' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'printf "keep\n" > "$RB_DIR/unrelated"' "$_stage/pr-setup.sh" \
-    && pass "the post-check substitution stage is patched" \
-    || die "the post-check substitution stage did not patch pr-setup.sh; the case proves nothing"
-# NO `sed -i`, AND NO `||`/`&&` CHAIN AROUND IT. `sed -i` is GNU-and-BSD-incompatible in
-# its argument, and the fallback was written as `sed -i … || sed … > new && mv` — one
-# left-associative list, so the `mv` ran after the FIRST branch succeeded too and printed
-# `cannot stat` on a file that was never made. The fixture still reported PASS, which is a
-# failed setup command presented as a clean run.
-sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null .*|rb_setup_stop pin_storage 2|' \
-    "$_stage/pr-setup.sh" > "$_stage/pr-setup.sh.new" \
-    && mv "$_stage/pr-setup.sh.new" "$_stage/pr-setup.sh" \
-    || die "the pin-storage rewrite failed; the substitution case would run against the wrong copy"
-_sub="$(mktemp -d "$TMP/sub.XXXXXX")/dir"
-_sub_rc=0
-_sub_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sub" 2>&1)" || _sub_rc=$?
-[ "$_sub_rc" -ne 0 ] \
-    && pass "the staged failure refuses, so the cleanup ran" \
-    || die "the substitution case did not reach a refusal (out='$_sub_out')"
-{ [ ! -e "$_sub/origin" ] && [ ! -e "$_sub/work/summary.md" ]; } \
-    && pass "…and a substitution loses exactly the names this session had taken" \
-    || die "the measured bound has changed: a name this run created survived the cleanup"
-[ -f "$_sub/unrelated" ] \
-    && pass "…while anything at a name it never took is untouched" \
-    || die "the cleanup removed a name this run never created; the record's bound is wrong"
-rm -rf "$_sub"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+_cl_body="$(sed -n '/^rb_setup_give_back/,/^}/p' "$SCRIPT")" || _cl_body=""
+_cl_n=0; _cl_n="$(grep -c 'rmdir' <<<"$_cl_body")" || _cl_n=0
+{ [ -n "$_cl_body" ] && [ "$_cl_n" -eq 1 ]; } \
+    && pass "…and the cleanup is that one rmdir, with nothing else in it" \
+    || die "the cleanup body has $_cl_n rmdir calls; it is meant to have exactly one"
 
 # ── the creates are exclusive, so nothing is truncated through them ───────
 # A PLAIN `>` OPENS WITH O_TRUNC AND FOLLOWS SYMLINKS. This directory's name is

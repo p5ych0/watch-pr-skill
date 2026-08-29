@@ -293,10 +293,16 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+                # A SQUATTED PIN NAME COSTS A SECOND NAME, NOT THE SESSION.
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 RB_PIN_SEEN=
                 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin"; then
                     { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                         && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin/pin"
+                elif [[ $? -eq 2 ]] \
+                     && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin2"; then
+                    { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                        && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin2/pin"
                 fi
                 # THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
