@@ -683,6 +683,42 @@ for _order in "[$_pair_run,$_pair_pend]" "[$_pair_pend,$_pair_run]"; do
         || die "a passing record answered for an unfinished one: '$got'"
 done
 
+# ── A RECORD IS IDENTIFIED BY THE FIELD ITS KIND HAS ───────────────────────
+# A check run is named by `name` and a legacy status by `context`. Taking whichever
+# of the two is present let a `StatusContext` carrying a `name` — which is not its
+# identifier — match a requirement whose own `context` was absent, and be classified
+# green from a body this does not understand.
+for _x in '{"__typename":"StatusContext","name":"build","state":"SUCCESS"}' '{"__typename":"CheckRun","context":"build","status":"COMPLETED","conclusion":"SUCCESS"}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' "[$_x]"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "a record carrying the other kind's identifier is unreadable" \
+        || die "a cross-shaped record was accepted: '$got'"
+done
+# …AND A WELL-FORMED RECORD IS MATCHED ON ITS OWN FIELD, which is the half the
+# validation above cannot catch: this status is perfectly shaped for its kind, and
+# its `context` is not the required one. Only its `name` is, and a status is not
+# named by `name` — so the requirement is unmet and the answer is pending.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"StatusContext","context":"other","name":"build","state":"SUCCESS"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "…and a status whose own context is not the required one does not answer for it" \
+    || die "a status was matched on a field that does not identify it: '$got'"
+
+# …AND IT IS THE WHOLE ROLLUP THAT IS UNREADABLE, not that one record passed over.
+# A body of a shape this does not understand may mis-read the next record too, and
+# that one might be the one that matters.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}},{"__typename":"StatusContext","name":"other","state":"SUCCESS"}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "…even where the required context itself was answered properly" \
+    || die "a malformed record elsewhere in the rollup was passed over: '$got'"
+
 # ── A REQUIREMENT THAT MOVES BETWEEN THE TWO READS IS NOT LOST ─────────────
 # The branch read and the rules read are not one snapshot. Add the context to
 # classic protection after the branch read and remove it from the ruleset before

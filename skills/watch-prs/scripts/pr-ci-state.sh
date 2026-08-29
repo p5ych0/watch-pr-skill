@@ -492,6 +492,15 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
 # would read as one that has not reported, and this loop would wait for a check
 # that had already passed.
 #
+# THE IDENTIFIER IS THE ONE THAT RECORD KIND HAS. A check run is named by `name`
+# and a legacy status by `context`, and taking the first of the two that is present
+# let a `StatusContext` carrying a `name` — which is not its identifier — match a
+# requirement whose own `context` field was absent, and be classified green. So the
+# match is made per `__typename`, and a record missing the field its kind is
+# identified by makes the whole rollup malformed rather than being passed over: it
+# is a body of a shape this does not understand, and the next record it mis-reads
+# might be the one that matters.
+#
 # EVERY RECORD SHARING THE NAME IS EVALUATED, not the first one found. A name can
 # arrive as a check run AND as a legacy status — an integration posting both, or two
 # apps using the same name where the requirement is unbound — and GitHub requires
@@ -570,10 +579,15 @@ required_checks_verdict() {   # <oid> <base> ; prints green|failed|pending|none|
                elif (.data.repository.object.statusCheckRollup.contexts.nodes | type) != "array" then null
                else .data.repository.object.statusCheckRollup.contexts.nodes end ) as $ctx
           | if $ctx == null then "malformed"
-            elif any($ctx[]; type != "object" or (.__typename | type) != "string") then "malformed"
+            elif any($ctx[]; type != "object"
+                             or (.__typename | type) != "string"
+                             or (.__typename == "CheckRun" and (.name | type) != "string")
+                             or (.__typename == "StatusContext" and (.context | type) != "string")) then "malformed"
             else [ $req[] as $want
                    | ( [ $ctx[]
-                         | select((.name // .context) == $want.context)
+                         | select(if .__typename == "CheckRun" then .name == $want.context
+                                  elif .__typename == "StatusContext" then .context == $want.context
+                                  else false end)
                          | select($want.app == null
                                   or (.__typename == "CheckRun"
                                       and (.checkSuite.app.databaseId == $want.app))) ] ) as $cs

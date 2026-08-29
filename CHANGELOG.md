@@ -56,6 +56,12 @@
   would look for a check suite whose app id is `-1`, find none, and report
   `pending` for ever on a context that had passed.
 
+  **A record is identified by the field its own kind has.** A check run is named by
+  `name` and a legacy status by `context`; taking whichever was present let a status
+  carrying a `name` answer for a requirement its own `context` did not name, and be
+  classified green. A record missing the field its kind is identified by makes the
+  whole rollup unreadable rather than being passed over.
+
   **Every record sharing a required name is evaluated**, not the first one found. A
   name can arrive as a check run and as a legacy status at once, and GitHub requires
   all of them; taking the first match let whichever the rollup happened to list
