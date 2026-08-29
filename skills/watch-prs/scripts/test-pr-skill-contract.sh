@@ -931,7 +931,7 @@ FORGE
         && pass "…refusing by the expansion's own message" \
         || die "the empty-parent refusal is silent: '$_ep_out'"
 
-    # ── what the source brings in is re-proved ────────────────────────────
+    # ── what the read brings in is re-proved ──────────────────────────────
     # A MISSING ENV FILE IS A REFUSAL, not a session with no values. The helper
     # reported success here, which is the state a source can be the only thing to
     # catch.
@@ -954,8 +954,8 @@ FORGE
             printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
         ' 2>&1)" || _mt=$?
     { [ "$_mt" -ne 0 ] && case "$_mt_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "…and a sourced origin that is empty is refused" \
-        || die "an empty sourced origin was accepted (rc=$_mt out='$_mt_out')"
+        && pass "…and an origin that was read back empty is refused" \
+        || die "an empty origin was accepted (rc=$_mt out='$_mt_out')"
     # …A MULTI-LINE ONE IS REFUSED. An interior newline means something wrote to that
     # file between the helper and this shell; the value is not an origin.
     _ml=0
@@ -967,7 +967,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         ' 2>&1)" || _ml=$?
     { [ "$_ml" -ne 0 ] && case "$_ml_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…and one spanning more than one line is refused" \
-        || die "a multi-line sourced origin was accepted (rc=$_ml out='$_ml_out')"
+        || die "a multi-line origin was accepted (rc=$_ml out='$_ml_out')"
     # …AND ONE THAT IS NOT AN IDENTITY IS REFUSED BY THE PARSER, which is the check
     # the helper already made — made again here because a file is not a promise.
     _bd=0
@@ -977,8 +977,8 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
             printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
         ' 2>&1)" || _bd=$?
     { [ "$_bd" -ne 0 ] && case "$_bd_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "…and a sourced value the identity parser refuses stops the session" \
-        || die "an unusable sourced origin was accepted (rc=$_bd out='$_bd_out')"
+        && pass "…and a value the identity parser refuses stops the session" \
+        || die "an unusable origin was accepted (rc=$_bd out='$_bd_out')"
     # …AND A HOSTILE ORIGIN IS A STRING, WHICH IS WHAT REMOVING THE SOURCE BOUGHT.
     # While this file was SOURCED, a value carrying a `$(…)` or a backtick had to be
     # single-quoted into safety and the escape was load-bearing. Nothing evaluates the
@@ -1079,7 +1079,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         *) pass "…and a pin no child can see is refused" ;;
     esac
     # …AND A PIN THE CHILD ANSWERS DIFFERENTLY IS REFUSED. `FORGE_PIN_VALUE` makes the
-    # child answer with another repository while everything the driver sourced is
+    # child answer with another repository while everything the driver read is
     # correct, which is the mismatch this comparison exists for — and it is a separate
     # name from `FORGE_VALUE` because a forge that answered the pin with the value it
     # wrote into the env file could never disagree with it.
@@ -1258,11 +1258,11 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     else
         pass "this shell has no declare -n, so the pin-alias state is skipped by name"
     fi
-    # …AND THE REVIEWER LOGINS ARE PROVED AGAINST THEIR LITERALS. They arrive through
-    # the same source as everything else, and a `readonly CODEX_BOT` already in the
-    # driving shell makes that one assignment fail while the file's LAST assignment
-    # decides the source's status — so setup announced success and every later `WHO`,
-    # watch and signoff named an account the operator chose.
+    # …AND THE REVIEWER LOGINS ARE PROVED AGAINST THEIR LITERALS. They are constants
+    # this shell assigns, and an assignment to a readonly name fails in SILENCE — it
+    # prints a complaint and the list it is in reports success — so without the
+    # read-back setup announced ready and every later `WHO`, watch and signoff named an
+    # account the operator chose.
     for _bn in CODEX_BOT COPILOT_BOT; do
         _bot=0
         _bot_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
