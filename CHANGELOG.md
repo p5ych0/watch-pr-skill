@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.0.83] — 2026-08-29
+
+- **Setup runs in a process now, and `SKILL.md` is 9,843 characters shorter.** The
+  block that starts a session was 178 executable lines and 105 comment lines of the
+  document — 18,450 characters, about a fifth of everything the driver reads on every
+  invocation — and nothing executed them. It is 96 and 47 now, 8,607 characters, and
+  the work happens in `pr-setup.sh`, which has tests.
+
+  What made that possible was noticing that an old measurement proved less than it
+  said. #26 asked whether this code could move into a script and answered no, because
+  setup EXPORTS into the driving session and a child cannot export into its parent.
+  That is true of a child's environment and false of a file the driver SOURCES: an
+  assignment in a sourced file happens in the sourcing shell, which is the one
+  property the block needed. So the helper writes `env` and the driver sources it.
+
+  Nothing about what the driver checks was given up. The origin still comes back
+  through `pr-origin.sh`, privileged; the identity is still re-derived from what was
+  sourced, because a file is not a promise; the four working paths are still proved
+  against their literals and proved to be empty files; and the pin is still proved by
+  a real child of the driving shell — that one cannot move, because proving it inside
+  the helper would prove only that the helper exports.
+
+- **A value in that file cannot become a command.** A remote URL is not this
+  repository's text — a checkout can carry any origin, and a `git` config nobody read
+  can put a quote, a `$(…)`, a backtick or a semicolon in it. Every value is written
+  single-quoted with `'` escaped, which has no expansion of any kind inside it, and
+  `test-pr-setup.sh` stages six such shapes against the real helper: each round-trips
+  byte-exact through the source and none of them executes.
+
+- **The pre-push gate could not see through a source, and said so.** `pr-selfcheck.sh`
+  scans `SKILL.md` for names used and never assigned, and the twelve setup values are
+  now assigned in a file that does not exist at scan time — so all twelve were
+  reported as undefined. It reads a declaration instead, the same mechanism a shared
+  library already used there and for the same reason: inferring what a run assigns is
+  a reachability analysis, and a wrong answer reads as "this variable is fine". The
+  binding is derived at both ends — the document names the leaf it sources, the helper
+  declares which leaf it writes — so neither side is a list. A leaf nothing claims, one
+  two helpers claim, and a claimant that declares nothing are all errors rather than
+  empty sets.
+
 ## [2.0.82] — 2026-08-29
 
 - **The plugin works on the repository in the current directory, and names no

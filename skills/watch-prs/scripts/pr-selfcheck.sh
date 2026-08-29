@@ -419,6 +419,63 @@ if [ -f "$SKILL" ]; then
         fi
         assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
     done
+    # …AND THE VALUES A HELPER HANDS BACK THROUGH A FILE THE SKILL SOURCES. Setup
+    # runs in a process now, and a child cannot export into its parent — so it
+    # writes assignments and the driver sources them. Those names are assigned
+    # nowhere in the document, exactly as `rb_identity`'s are, and reading only the
+    # skill's own text reported all twelve as undefined.
+    #
+    # BOUND AT BOTH ENDS, and neither end is a list. The document names the LEAF it
+    # sources — `. "$RB_SETUP_DIR/env"` — and the helper declares which leaf it
+    # writes with `# rb-writes:` and which names go into it with `# rb-assigns:`.
+    # The scan matches one to the other. A leaf nothing claims, or one that two
+    # helpers claim, is an ERROR rather than an empty set: crediting nothing would
+    # reinstate the false findings, and crediting two is a question this cannot
+    # answer.
+    #
+    # THE SOURCE LINE'S OWN SHAPE IS WHAT DISTINGUISHES THESE. A library is sourced
+    # from `$RB_SCRIPTS`, which is a directory of files that exist right now; these
+    # come from a directory made at runtime, so the file cannot be read here at all
+    # and the declaration is the only thing there is to read.
+    # INDENTED, AND AS AN `if` CONDITION, because that is where this one is: the
+    # source has to be branched on — a file that could not be read is a session with
+    # no values — and everything after it is inside its success arm. The two
+    # positions are spelled out rather than generalised to "a `.` anywhere": `.` is
+    # a character a pattern matches inside prose and inside quoted text, and reading
+    # shell out of text without a shell is what this file already records deleting a
+    # checker over. A source in a third position is a false POSITIVE — loud and
+    # fixable in one line — not a silent miss.
+    srcfiles="$(printf '%s\n' "$code" \
+        | nomatch grep -oE '^[[:space:]]*(if[[:space:]]+)?\.[[:space:]]+"\$[A-Z][A-Z0-9_]*/[A-Za-z0-9_.-]+"' \
+        | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk srcfiles $?
+    for leaf in $srcfiles; do
+        [ -f "$SCRIPTS/$leaf" ] && continue
+        # NOT THROUGH `nomatch` HERE, and that is the difference between this loop
+        # and every other grep in this file. `nomatch` turns "no matches" into
+        # success so a status check can tell a failed grep from an empty result —
+        # correct where the OUTPUT is the answer, and wrong where the STATUS is:
+        # under it every helper claimed the leaf, and the scan reported sixteen
+        # claimants for a file one of them writes.
+        claimants=""
+        for h in "$SCRIPTS"/pr-*.sh; do
+            [ -f "$h" ] || continue
+            grep -qxE "# rb-writes:[[:space:]]*$leaf" "$h" \
+                && claimants="$claimants $(basename "$h")"
+        done
+        set -- $claimants
+        if [ "$#" -ne 1 ]; then
+            echo "PR_SELFCHECK status=error reason=sourced_file_unclaimed leaf=$leaf claimants=$#" >&2
+            exit 2
+        fi
+        writerassigned="$(nomatch grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "$SCRIPTS/$1" \
+            | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' \
+            | nomatch grep -vE '^$' | sort -u)"; chk writer_assigned $?
+        if [ -z "$writerassigned" ]; then
+            echo "PR_SELFCHECK status=error reason=writer_declares_no_assignments writer=$1" >&2
+            exit 2
+        fi
+        assigned="$(printf '%s\n%s\n' "$assigned" "$writerassigned" | sort -u)"; chk merge_writer $?
+    done
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #

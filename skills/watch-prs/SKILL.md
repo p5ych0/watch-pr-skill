@@ -188,248 +188,108 @@ unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
 # THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-RB_REMOTE=
-# THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS ARM.
+# THE SETUP WORK RUNS IN A PROCESS AND COMES BACK AS A FILE THIS SHELL SOURCES.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-if [[ -z $RB_REMOTE ]]; then
-    # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
+# ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
+     && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
+   && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
+     && [[ -z ${!RB_TMPPARENT2:-} ]] ) 2>/dev/null \
+   && ( RB_SETUP_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_SETUP_DIR = RbProbe* ]] \
+     && [[ -z ${!RB_SETUP_DIR:-} ]] ) 2>/dev/null; then
+    # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
-         && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
-       && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
-         && [[ -z ${!RB_TMPPARENT2:-} ]] ) 2>/dev/null \
-       && ( RB_ORIGIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
-         && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null \
-       && ( RB_ORIGIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR2 = RbProbe* ]] \
-         && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null; then
-        # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
+    RB_TMPPARENT=
+    [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
+        && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
+    RB_TMPPARENT2=
+    [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
+        && [[ -x ${HOME:-} ]] && RB_TMPPARENT2="$HOME"
+    # THE SAME PARENT TWICE IS NOT DEDUPLICATED, because two random leaves are two usable names.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    [[ -n $RB_TMPPARENT ]] \
+        || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
+    RB_SETUP_DIR=
+    RB_SETUP_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-setup.$$.$RANDOM$RANDOM$RANDOM"
+    # THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # EVERYTHING AFTER THE CALL IS INSIDE ITS SUCCESS ARM, so nothing walks past a refusal.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
+       || { [[ $? -eq 2 ]] && [[ -n $RB_TMPPARENT2 ]] \
+            && RB_SETUP_DIR="$RB_TMPPARENT2/watch-pr-setup-2.$$.$RANDOM$RANDOM$RANDOM" \
+            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
+            && { RB_TMPPARENT="$RB_TMPPARENT2"; }; }
+    then
+        # THE SOURCE IS THE ONLY WAY THE VALUES REACH THIS SHELL.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        RB_TMPPARENT=
-        [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
-            && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
-        RB_TMPPARENT2=
-        [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
-            && [[ -x ${HOME:-} ]] && RB_TMPPARENT2="$HOME"
-        # AND `HOME` MOVES UP WHERE `TMPDIR` IS UNUSABLE, so the FIRST attempt is
-        # always the one that exists and the second is simply absent.
-        [[ -n $RB_TMPPARENT ]] \
-            || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
-        # THE SAME PARENT TWICE IS NOT DEDUPLICATED, because two random leaves are two usable names.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        RB_ORIGIN_DIR=
-        RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-        # THE SECOND CANDIDATE IS EMPTY WHERE THERE IS NO SECOND PARENT.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        RB_ORIGIN_DIR2=
-        [[ -n $RB_TMPPARENT2 ]] \
-            && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr-2.$$.$RANDOM$RANDOM$RANDOM"
-        # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements after a guard.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"; then
-            # THE READ-BACK IS THE CALLER'S HALF AND STAYS HERE, where the descriptor can be checked.
+        if . "$RB_SETUP_DIR/env"; then
+            # WHAT WAS READ DOES NOT STAY ON DISK; the work directory does, being the session's.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin"; then
-                /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
-                /usr/bin/env rmdir "$RB_ORIGIN_DIR"
-            else
-                # THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
-                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
-                /usr/bin/env rmdir "$RB_ORIGIN_DIR"
-                # THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT.
-                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                : "${RB_REMOTE:?the transport file is not the one this setup created. Setup refuses to pin from it, and the directory it was in has been removed.}"
-                echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
-                exit 1
-                [[ -n "" ]]
-            fi
-        # THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]] \
-            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
-            # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, or the session dies one step later.
+            /usr/bin/env rm -f "$RB_SETUP_DIR/env" 2>/dev/null
+            # WHAT WAS SOURCED IS RE-PROVED HERE, because a file is not a promise.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            RB_TMPPARENT2="$RB_TMPPARENT"
-            RB_TMPPARENT="${RB_ORIGIN_DIR2%/*}"
-            if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR2/origin"; then
-                /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
-                /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
-            else
-                /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
-                /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
-                # THE EXPANSION IS FIRST HERE TOO, for the reason spelled out on
-                # the arm above: a shadowed `echo` that forges a value and neuters
-                # `exit` is past every statement that follows it, and the shell
-                # refusing to expand is reached before any command runs. #178.
-                : "${RB_REMOTE:?the transport file is not the one this setup created. Setup refuses to pin from it, and the directory it was in has been removed.}"
-                echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
-                exit 1
-                [[ -n "" ]]
-            fi
-        else
-            # THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it cannot tell them apart.
+            RB_REMOTE="${RB_REMOTE:?the sourced environment carries no origin; there is no repository to pin this session to}"
+            # ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            : "${RB_REMOTE:?could not read the origin for this session. Setup could not get a transport directory it could use, and each ABORT line above is one attempt and its reason. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with or a checkout with no usable origin.}"
-            echo "ABORT: could not read this session's origin"
-            exit 1
-            [[ -n "" ]]
-        fi
-    else
-        # THE EXPANSION IS FIRST HERE TOO. Nothing has read the origin on this
-        # path, so `RB_REMOTE` is still the value the clear left, and the shell
-        # refusing to expand runs before the `echo` a startup file can have
-        # replaced with one that forges a URL and neuters `exit`. #178.
-        : "${RB_REMOTE:?one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen}"
-        echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
-        exit 1
-        [[ -n "" ]]
-    fi
-    # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    RB_REMOTE="${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
-    # ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
-    RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
-    # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
-    RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
-    CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
-    # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
-        [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
-    done
-    unset _rb_knob
-    # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    export REVIEW_BUS_REMOTE="$RB_REMOTE" \
-        || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
-    # THE PIN NAMES GET THE SAME GENERIC TEST, for the reason the transport probe gives.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
-         && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
-       && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \
-         && [[ -z ${!RB_PIN_DIR2:-} ]] ) 2>/dev/null \
-       && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
-         && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
-        # THE PIN PARENT IS REQUIRED BY THE EXPANSION, or an empty one builds a path from nothing.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        RB_PIN_DIR=
-        RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
-        # AND THE SECOND, for the same reason and because half a retry is none:
-        # the origin read succeeding under `HOME` while this probe still refused on
-        # `TMPDIR` would end the session one step later, on the pin instead of on
-        # the origin. #161.
-        RB_PIN_DIR2=
-        [[ -n $RB_TMPPARENT2 ]] \
-            && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin-2.$$.$RANDOM$RANDOM$RANDOM"
-        RB_PIN_SEEN=
-        # THE PIN REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read above states.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"; then
-            { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
-            /usr/bin/env rm -f "$RB_PIN_DIR/pin"
-            /usr/bin/env rmdir "$RB_PIN_DIR"
-        # THE SAME SECOND CALL AS THE ORIGIN READ, and for the same reasons: an
-        # `elif` reads the first call's status in its own condition, which is inside
-        # the same `if`, and each arm names the directory the helper just created
-        # rather than guessing between two.
-        elif [[ $? -eq 2 ]] && [[ -n $RB_PIN_DIR2 ]] \
-            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR2"; then
-            # THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary
-            # filesystem can fill between the origin read and this probe, and
-            # without the swap the working directory is still allocated from the
-            # one that just refused — so a pin that recovered would be followed by
-            # a session that could not start.
-            RB_TMPPARENT2="$RB_TMPPARENT"
-            RB_TMPPARENT="${RB_PIN_DIR2%/*}"
-            { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR2/pin"
-            /usr/bin/env rm -f "$RB_PIN_DIR2/pin"
-            /usr/bin/env rmdir "$RB_PIN_DIR2"
-        fi
-        # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
-            # THE SESSION'S FOUR WORKING FILES COME FROM ONE ALLOCATION.
+            [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
+            RB_REMOTE="${RB_REMOTE:?the sourced origin spans more than one line; something wrote to that file between the helper and this shell}"
+            # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            if { ( RB_WORK_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
-                    && [[ -z ${!RB_WORK_DIR:-} ]] ) \
-                 || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
-               && {
-                    # THE WORKING-DIRECTORY PARENT IS REQUIRED TOO, and is not redundant with the two above.
-                    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                    RB_WORK_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
-                    [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
-                 || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
-               && { /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
-                 || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; [[ -n "" ]]; }; }
+            REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
+            RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
+            # THE FOUR WORKING PATHS ARE PROVED TO BE THE ONES THIS SETUP MADE.
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+            if [[ $SUMMARY_FILE = "$RB_SETUP_DIR"/work/summary.md ]] \
+               && [[ $REQUEST_FILE = "$RB_SETUP_DIR"/work/request.md ]] \
+               && [[ $PRIOR_FILE = "$RB_SETUP_DIR"/work/prior.txt ]] \
+               && [[ $HEAD_FILE = "$RB_SETUP_DIR"/work/head.txt ]] \
+               && [[ -f $SUMMARY_FILE ]] && [[ ! -s $SUMMARY_FILE ]] \
+               && [[ -f $REQUEST_FILE ]] && [[ ! -s $REQUEST_FILE ]] \
+               && [[ -f $PRIOR_FILE ]] && [[ ! -s $PRIOR_FILE ]] \
+               && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]]
             then
-                # Where each round's summary is written before it is posted.
-                SUMMARY_FILE="$RB_WORK_DIR/summary.md"
-                # THE OPENING ACCOUNT IS NOT THE ROUND SUMMARY, and they must not share a file.
+                # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                REQUEST_FILE="$RB_WORK_DIR/request.md"
-                # Where the review baseline comes back. A capture written as
-                # `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a name a startup file
-                # has already made readonly makes it fail — which abandons the `if` without
-                # either branch running, so a refusal falls through into the wait. A plain
-                # command with its output redirected has no assignment to fail.
-                PRIOR_FILE="$RB_WORK_DIR/prior.txt"
-                # THE GATED HEAD TRAVELS IN A FILE, and this is where it lands.
+                for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
+                    [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
+                done
+                unset _rb_knob
+                # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                HEAD_FILE="$RB_WORK_DIR/head.txt"
-                # READ BACK AGAINST THE LITERALS, and again as a CONDITION whose body is the
-                # work: this is what catches a readonly name still pointing somewhere else,
-                # and it has to exclude the writes rather than merely precede them.
-                if [[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
-                   && [[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
-                   && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]] \
-                   && [[ $HEAD_FILE = "$RB_WORK_DIR/head.txt" ]]
-                then
-                    # THE WORKING FILES ARE CREATED EMPTY BY REDIRECTION ALONE, so there is no command name to shadow.
-                    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                    > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE" ; > "$HEAD_FILE"
-                    # AND THE COMPLETION LINE IS THE INNERMOST SUCCESS ARM. It is how the
-                    # driver knows setup finished, so every refusal above has to be unable to
-                    # REACH it — and with `exit` replaced by a function that returns, "the
-                    # abort ran" does not mean "the line did not". Only containment does.
-                    if [[ -f "$SUMMARY_FILE" ]] && [[ ! -s "$SUMMARY_FILE" ]] \
-                       && [[ -f "$REQUEST_FILE" ]] && [[ ! -s "$REQUEST_FILE" ]] \
-                       && [[ -f "$PRIOR_FILE" ]] && [[ ! -s "$PRIOR_FILE" ]] \
-                       && [[ -f "$HEAD_FILE" ]] && [[ ! -s "$HEAD_FILE" ]]; then
-                        echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
-                    else
-                        echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
-                        exit 1
-                        [[ -n "" ]]
-                    fi
+                # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+                RB_PIN_SEEN=
+                if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin"; then
+                    { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                        && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin/pin"
+                fi
+                /usr/bin/env rm -rf "$RB_SETUP_DIR/pin" 2>/dev/null
+                if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+                    echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
                 else
-                    echo "ABORT: one of SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE and HEAD_FILE is readonly in this shell; the session's working paths cannot be set"
+                    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
                     exit 1
                     [[ -n "" ]]
                 fi
             else
+                echo "ABORT: the sourced working paths are not the four empty files this setup created"
                 exit 1
                 [[ -n "" ]]
             fi
         else
-            echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+            echo "ABORT: the setup helper's environment file could not be sourced"
             exit 1
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
+        echo "ABORT: could not set this session up; each ABORT line above is one attempt and its reason"
         exit 1
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"
+    echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2 and RB_SETUP_DIR is readonly, value-transforming, or aimed at another name; the setup directory cannot be chosen"
     exit 1
     [[ -n "" ]]
 fi

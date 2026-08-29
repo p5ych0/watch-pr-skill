@@ -926,25 +926,31 @@ plugin docs and open an issue.
   requests, and a `cd` into a second checkout used to send those to whatever pull
   request of *that* repository shared the number. If you genuinely need to switch
   repositories, start a new session rather than unsetting the pin.
-- **`RB_REMOTE: could not read the origin for this session`:** `pr-origin.sh`
-  refused, for any of the reasons it refuses for — it could not create the private directory
-  the value travels in, it would not trust an ancestor of that directory, it could
-  not resolve the path, or it could not read a usable `origin` from the checkout.
-  **The helper's own line above says which**, and it is the one to read first.
-  Several of them are things you can repair — a checkout with no `origin` gets a
-  remote added, an ancestor another account owns gets a different parent — and the
-  one documented here is the storage case, because that is the one the abort itself
-  can tell you how to get past.
+- **`ABORT: could not set this session up`:** `pr-setup.sh` refused, for any of the
+  reasons it refuses for — it could not create the private directory it works in,
+  it could not read a usable `origin` from the checkout, the origin is not one the
+  identity parser accepts, or the storage would not take the working files.
+  **The helper's own `PR_SETUP status=error reason=…` line above says which**, and
+  it is the one to read first. Several of them are things you can repair — a
+  checkout with no `origin` gets a remote added, an ancestor another account owns
+  gets a different parent — and the one documented here is the storage case, because
+  that is the one the abort itself can tell you how to get past.
 
-  The line begins with your shell's name and `RB_REMOTE:` because setup emits it
-  as a parameter expansion the shell refuses rather than through `echo`, which in
-  your own shell may be a function that prints nothing — or one that forges a
-  value and then stops `exit` from working. Every refusal that comes from READING
-  the origin looks like that — the transport itself, and the three checks on the
-  value that follow it: your shell's name, a line number, `RB_REMOTE:`, and the
-  reason. What comes after, the pin and the working files, still announces itself
-  with a plain `ABORT:` line; nothing runs after those, so there is nowhere for a
-  neutralised `exit` to carry on to.
+  The driver's line says only that each `ABORT:` above it is one attempt and its
+  reason, and that is deliberate: it handed over a name and got back a status, so it
+  cannot tell a squatted name from a filesystem with no room. The helper can, and
+  says so.
+
+  The refusals AFTER the source read differently, and that is not cosmetic. Setup
+  sources a file the helper wrote, and the three checks on what arrived — the origin
+  is there, it is one line, it parses as an identity — are parameter expansions the
+  shell REFUSES rather than `echo` lines, so they begin with your shell's name, a
+  line number and `RB_REMOTE:`. In your own shell `echo` may be a function that
+  prints nothing, or one that forges a value and then stops `exit` from working; an
+  expansion has no command in it to shadow. What comes after — the working-path
+  check and the pin — announces itself with a plain `ABORT:` line, and correctly:
+  every one of those is an arm the block cannot walk past, so position is what
+  contains them and there is nowhere for a neutralised `exit` to carry on to.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.

@@ -240,6 +240,97 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a library SKILL.md sources but does not ship is an error" \
     || die "a missing sourced library did not fail closed (rc=$rc out=$out)"
 
+# ── a variable a HELPER hands back through a sourced file is assigned ──────
+# Setup runs in a process now, and a child cannot export into its parent — so it
+# writes assignments into a file and the driver sources them. Those names are
+# assigned nowhere in the document, and reading only the skill's own text reported
+# every one of them undefined: the same shape as the library case above, reached by
+# the other route.
+#
+# THE FILE DOES NOT EXIST AT SCAN TIME, and that is what makes this different from
+# a library: the directory is made at runtime, so the declaration is the only thing
+# there is to read. The binding is `# rb-writes:` naming the LEAF the document
+# sources, so neither end is a list.
+WRITER_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+RB_SETUP_DIR=/tmp/d
+if . "$RB_SETUP_DIR/env"; then
+    echo "$OWNER/$REPO $SUMMARY_FILE"
+fi
+```
+'
+R="$(mkroot "$WRITER_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: env
+# rb-assigns: OWNER REPO SUMMARY_FILE
+exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "a variable a helper writes into a sourced file is not reported undefined" \
+    || die "a helper's declared assignment was not seen (rc=$rc out=$out)"
+
+# …and BOUNDED to what that helper declares, exactly as the library reach is. A
+# branch that suppressed every unassigned name once anything was sourced would pass
+# the case above while removing the check this script exists for.
+BWRITER_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+RB_SETUP_DIR=/tmp/d
+if . "$RB_SETUP_DIR/env"; then
+    echo "$OWNER $HEAD_FILE"
+fi
+```
+'
+R="$(mkroot "$BWRITER_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: env
+# rb-assigns: OWNER
+exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'HEAD_FILE' <<<"$out"; } \
+    && pass "…and a name that helper does not declare is still a finding" \
+    || die "sourcing a helper's file suppressed an unrelated undefined variable (rc=$rc out=$out)"
+
+# ── a sourced leaf NOTHING claims is an ERROR ─────────────────────────────
+# Crediting nothing would reinstate exactly the false findings the declaration
+# removes, and report them as defects in the skill rather than in the helper that
+# forgot to say what it writes.
+R="$(mkroot "$WRITER_SKILL")"
+addscript "$R" pr-setup.sh 'exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=sourced_file_unclaimed' <<<"$out"; } \
+    && pass "a leaf the skill sources and no helper claims is an error" \
+    || die "an unclaimed sourced leaf did not fail closed (rc=$rc out=$out)"
+
+# …AND SO IS A LEAF TWO HELPERS CLAIM, which is a question this cannot answer:
+# taking either one credits a set the other may not write, and taking the union
+# credits names nothing assigns.
+R="$(mkroot "$WRITER_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: env
+# rb-assigns: OWNER REPO SUMMARY_FILE
+exit 0'
+addscript "$R" pr-other.sh '# rb-writes: env
+# rb-assigns: OWNER
+exit 0'
+addtest "$R" test-pr-setup.sh
+addtest "$R" test-pr-other.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=sourced_file_unclaimed' <<<"$out"; } \
+    && pass "…and a leaf two helpers claim is an error too" \
+    || die "two claimants did not fail closed (rc=$rc out=$out)"
+
+# …AND A CLAIMANT THAT DECLARES NO NAMES IS AN ERROR, for the library's reason.
+R="$(mkroot "$WRITER_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: env
+exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=writer_declares_no_assignments' <<<"$out"; } \
+    && pass "…and a claimant that declares no assignments is an error" \
+    || die "an undeclared writer did not fail closed (rc=$rc out=$out)"
+
 # ── a shared library with no matching test ────────────────────────────────
 # The gate listed the libraries it covered, so `identitylib.sh` — added after that
 # list was written, and the file that decides which repository every `gh` call

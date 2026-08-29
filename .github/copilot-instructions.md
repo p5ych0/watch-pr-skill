@@ -176,13 +176,22 @@ When reviewing a change here:
 **What the driver cannot do is make the reply instructions unreachable.** They are
 prose between two fences, so a shell whose `exit` returns reads them whatever the
 fence above did. That is a limit of the driving-shell design, not a deferred
-refactor: #26 measured whether this code could move into `.sh` files and answered
-no — the setup block exports into the operator's shell and a child cannot export
-into its parent, and the read-backs exist to catch a readonly name or a nameref
-defeating the driver's own assignment, which the helper process cannot observe. Do
-not raise "this should move into a script" here, and do not treat the residue as a
-reason to add another guard: two were built for it and both were removed for
-costing more than they closed.
+refactor, and the boundary has been measured twice. #26 asked whether this code
+could move into `.sh` files and answered no, on the grounds that the setup block
+EXPORTS into the operator's shell and a child cannot export into its parent. #228
+found that argument true of a child's ENVIRONMENT and false of a file the driver
+SOURCES — an assignment in a sourced file happens in the sourcing shell — and moved
+the setup work into `pr-setup.sh`, leaving the document 96 executable lines where it
+had 178.
+
+What did NOT move is what a helper process cannot do for this one: finding the
+scripts at all, choosing the parent directory to hand over, the source itself, and
+the read-backs after it, which exist to catch a readonly name or a nameref defeating
+the driver's own assignment — a helper cannot observe that, and neither can it prove
+the pin, since `pr-origin.sh pin` answers whether a CHILD OF THE DRIVER sees this
+repository. So do not raise "this should move into a script" against what is left,
+and do not treat the residue as a reason to add another guard: two were built for it
+and both were removed for costing more than they closed.
 
 ## Claims and their arguments in `SKILL.md`
 
@@ -327,8 +336,11 @@ repository as an EXAMPLE, as EVIDENCE, or as HISTORY. The one exception is the o
 session, which does not survive into a file.
 
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
-reads `git remote get-url origin` in its setup block, checks that read's status,
-and exports it as `REVIEW_BUS_REMOTE`; `rb_identity` prefers that over deriving.
+has `pr-setup.sh` read the origin — through `pr-origin.sh`, privileged — and write
+both the assignment and its `export REVIEW_BUS_REMOTE` into the file the driver
+SOURCES, which is how a child's value reaches the parent at all; the driver then
+re-derives the identity from what it sourced, because a file is not a promise.
+`rb_identity` prefers that pin over deriving.
 Every helper runs `rb_identity` in its own process against its own current
 directory, so without the pin a `cd` into a second checkout retargets every stage
 that POSTS — a signoff, a revocation, a review request — at whatever pull request

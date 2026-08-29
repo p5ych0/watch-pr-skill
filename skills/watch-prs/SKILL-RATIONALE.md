@@ -427,8 +427,11 @@ why.
 
 THE NAMES THAT ARE LEFT ARE PROVED ASSIGNABLE BEFORE ANYTHING USES THEM. There
 were five — `RB_TMPPARENT`, `RB_TRY`, `RB_TMPDIR`, `RB_ORIGIN_OUT` and
-`RB_PIN_OUT` — each with a probe and each a thing this shell had to defend; two
-remain per stage, because the helper owns the rest. A readonly or
+`RB_PIN_OUT` — each with a probe and each a thing this shell had to defend, and
+there were two stages with a probe apiece. Three remain, in ONE probe:
+`RB_TMPPARENT`, `RB_TMPPARENT2` and `RB_SETUP_DIR`. The helper owns the rest, and
+since #228 it owns the whole second stage as well — there is one call now, so
+there is one probe. A readonly or
 value-transforming one in the long-lived driving shell survives an assignment and
 leaves a STALE value behind, and a stale `/somewhere/owned` then passes every
 check: its `origin` is read as this session's remote and the cleanup deletes it.
@@ -440,11 +443,11 @@ failure is contained, which a bare assignment is not: under `errexit` a failed
 readonly assignment ends the session where it stands. #151.
 
 AND IT READS ANOTHER NAME BACK, because reading its OWN back cannot see an
-ALIAS. `declare -n RB_ORIGIN_DIR=RB_REMOTE` passes an assign-and-read-back probe
+ALIAS. `declare -n RB_SETUP_DIR=RB_REMOTE` passes an assign-and-read-back probe
 perfectly: the assignment works and the value returns. The two are then the SAME
-VARIABLE, so the origin read — which sets `RB_REMOTE` — silently changes
-`RB_ORIGIN_DIR` before the cleanups run. For a local origin such as
-`/tmp/victim` they remove `/tmp/victim/origin` and try to remove `/tmp/victim`.
+VARIABLE, so the source — which sets `RB_REMOTE` — silently changes
+`RB_SETUP_DIR` under the checks that follow, and the working paths are then
+proved against a literal built from a directory that is now the remote URL.
 
 DISTINCT VALUES ARE WHAT MAKES IT VISIBLE, which is the pattern `clocklib.sh`
 already uses and states: one value says nothing about whether two names are one
@@ -479,100 +482,6 @@ proved out here, the arm contains no assignment a startup file can have frozen.
 NOTHING TO CLEAN UP, EITHER. This used to sit after the directory existed, so
 its refusal removed the transport file and the directory; up here there is
 neither, which is two fewer commands taking a path from a variable.
-
-## THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS ARM.
-
-AND THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS
-ARM. Written as a guard it prints and RETURNS once `exit` has been replaced —
-the descriptor assignment further down cannot overwrite a readonly either, and
-its refusal returns the same way, so the stale non-empty URL reaches the
-identity parser, passes it, and is exported. Every request, signoff, revocation
-and merge for that session is then addressed at a repository the operator's
-environment chose. #155.
-
-THE CLEAR ITSELF STAYS OUTSIDE IT. Inside a compound command a failed readonly
-assignment ends the shell BEFORE the test that would have named the variable —
-measured, and a containment reverted over it — so the assignment is out here
-where its own diagnostic survives, and the TEST is the condition.
-
-THE ARM RUNS TO THE END OF SETUP, because the pin is the last thing here and
-what it pins is this value. With the continuation contained there is nothing
-after the final `fi` at all.
-
-## ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
-
-ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
-found one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`,
-`PATH`, `HOST`, `OWNER`, `REPO`, `IFS`, the operator knobs, the reviewer
-logins, `GIT_DIR`, `CDPATH` — and the last two showed the list could never be
-completed: it would have to union what this driver reads, what its tools read,
-and what the SHELL ITSELF consults, and the last grows with the shell version.
-
-`${!name}` IS THE ANSWER, and it is portable. For a NAMEREF it expands to the
-TARGET'S NAME; for an ordinary variable it is indirect expansion — the value
-of the variable NAMED by this one. So assign a value that is a legal variable
-name and cannot be a set one, and ask whether `${!name}` is empty: an ordinary
-variable names nothing and gives nothing, and a nameref gives whatever it
-points at, whether that is `HOME`, `GIT_DIR`, `CDPATH` or something no list
-here would ever have carried.
-
-AND IT WORKS WHERE `[[ -R ]]` CANNOT. `-R` answers the same question in one
-word and is bash 4.3+, and on 3.2 an unknown unary operator inside `[[ ]]` is
-a PARSE error, so the whole block would fail to parse on the shell
-`macos-shell` exists to cover. Indirect expansion is bash 2, and on a shell
-with no namerefs it simply reports nothing — which is the right answer there,
-since nothing can be one.
-
-THE VALUE IS BUILT FROM `$$` AND `$RANDOM`, not fixed. A fixed sentinel
-COLLIDES: with two fixed pairs and an operator holding one value from each,
-both pairs failed and a shell nothing had corrupted was refused.
-`RbProbe$$$RANDOM$RANDOM` is a legal variable name, and the only way to
-collide is to have a variable of exactly that name already set.
-
-`$$` IS THERE BECAUSE `RANDOM` CAN BE UNSET. `unset RANDOM` removes its
-special behaviour and every later `$RANDOM` is empty, which would leave a
-FIXED `RbProbe` — back to a value an operator can hold. `$$` is the shell's
-own pid and cannot be unset, so the sentinel stays per-session whatever has
-been done to `RANDOM`.
-
-AND WHAT THAT STILL DOES NOT STOP, STATED RATHER THAN CHASED. A startup file
-runs IN THIS SHELL, so it knows `$$` and it can read this file: with `RANDOM`
-unset it can pre-seed `RbProbe$$` and the probe reads their value through
-`${!name}`, concludes "nameref", and refuses. No mechanism here can close
-that, because every input to the sentinel is either public or something the
-same file can unset — which is the boundary `CLAUDE.md` records as "nothing
-inside a process can distinguish the honest version of something it
-inherited", and #102 and #91 draw in the same place.
-
-WHAT IT COSTS IS A REFUSAL, WHICH IS WHY IT IS ACCEPTABLE. The failure is
-fail-CLOSED: setup stops, nothing is forged, nothing is pinned. A startup
-file that wants to stop this session can call `exit` in its first line, so
-the attack buys an adversary nothing they did not already have — and the
-honest version of the same state, an operator who happens to hold that
-variable, is vanishingly unlikely to have a name shaped like this one.
-
-AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
-old value, `declare -i` stores `0`, `declare -l` lower-cases it and
-`declare -u` upper-cases it — and an ALL-CAPS sentinel survives `declare -u`
-unchanged, which is how that one attribute got through. `RbProbe*` matches
-neither transformation, so the same two lines catch every attribute as well as
-the alias.
-
-## THE PIN NAMES GET THE SAME GENERIC TEST, for the reason the transport probe gives.
-
-The argument is the one above, not a second copy of it: the pin probe guards
-`RB_PIN_DIR`, `RB_PIN_DIR2` and `RB_PIN_SEEN` exactly as the transport probe
-guards its four, and for the same reason — a list of names is wrong by
-omission, and `${!name}` answers generically what an enumeration cannot.
-
-It has its own claim because it is its own SITE. Sharing one claim between two
-places in the block meant a claim could be deleted from one of them and added
-anywhere else, and every count still balanced; with one claim per site the
-mapping to this document is one-to-one, and a claim that moves or goes is a
-number that no longer matches.
-
-See the transport probe's section above for what the test does and what it still
-cannot stop.
 
 ## `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
 
@@ -627,79 +536,13 @@ only its own command, which leaves the variable unset and the helper
 refusing an empty argument — the same answer one step later.
 CLEARED FIRST, BECAUSE AN ABANDONED ASSIGNMENT LEAVES THE OLD VALUE.
 INTERACTIVELY `${VAR:?}` abandons only the command it is in — the shell
-survives — so with a STALE `RB_ORIGIN_DIR` from an earlier run in the
+survives — so with a STALE `RB_SETUP_DIR` from an earlier run in the
 same long-lived shell, the refusal fired and the helper was then invoked
 with the previous session's path. Clearing it immediately before means an
 abandoned assignment leaves EMPTY, and an empty argument is one the helper
 refuses by name. That is a removal rather than a guard: there is no
 condition here for a shadowed `exit` to walk past, because there is no
 value left to walk past it WITH.
-
-## THE SECOND CANDIDATE IS EMPTY WHERE THERE IS NO SECOND PARENT.
-
-AND THE SECOND, EMPTY WHERE THERE IS NO SECOND PARENT. Cleared first for
-the reason the first one is: an abandoned assignment leaves the OLD
-value, and a stale path from an earlier run in the same long-lived shell
-would become this session's retry.
-A LITERAL DISCRIMINATOR IN THE LEAF, so the two names differ without
-`$RANDOM`. `unset RANDOM` removes its special behaviour — it expands to
-nothing thereafter — and with `TMPDIR` and `HOME` naming one directory
-both candidates then reduce to the same `watch-pr.$$.` path, so a retry
-after a taken name submits the name that was taken.
-
-## THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements after a guard.
-
-THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
-after a guard. `mkdir` is what proves this shell's helper created that
-directory, and it is the helper that runs it — so a REFUSED call means
-the name was already something, and something is not ours. Written as a
-guard the refusal was walked past by a shadowed `exit` and the lines
-below then read a pre-existing `origin` owned by this user, which passes
-`-O` and `-f`, and pinned the session from it — and removed the
-operator's file and directory on the way out. Containment is what a
-neutralised `exit` cannot step over.
-
-## THE READ-BACK IS THE CALLER'S HALF AND STAYS HERE, where the descriptor can be checked.
-
-THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
-of the OPEN DESCRIPTOR, so they describe the object this shell is
-about to read rather than a name it could be talked into looking up
-twice.
-AND A REFUSED READ REMOVES WHAT THE HELPER LEFT. The helper cleans up
-after its OWN refusals — it created the directory — but a read this
-side rejects leaves a written file in a directory nothing else will
-remove. The obligation follows whoever the refusal belongs to.
-AND THE TWO CLEANUPS ARE DISJOINT ARMS, not a rejection arm followed
-by an unconditional one. Written that way the rejected path removed
-the leaf and the directory, then `exit` — a name — returned, and the
-lines below removed them AGAIN: on a shared sticky parent a watcher
-that learned the candidate from the helper's argv can put a symlink
-at the freed name between the two, and the second `rm -f` follows it
-into a file this run never created. Same defect the helper's own
-cleanup had, on this side of the call.
-
-## THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT.
-
-THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT. `echo`
-is a NAME, and one that both forges a value and neuters `exit`
-walks straight past everything below it:
-
-    echo() { RB_REMOTE=git@github.com:attacker/other.git
-             exit() { return 0; }; }
-
-`echo` runs, the assignment has happened, `exit` returns, and
-`[[ -n "" ]]` ends this `if` list false — which is containment
-doing exactly its job and still leaving the forged URL in hand
-for the identity parser, which validates FORM and not origin.
-Reached before any of that, `${RB_REMOTE:?…}` is the shell
-refusing to expand: no command runs, so there is nothing to
-shadow, and a non-interactive shell ends there. #178.
-
-AND IT ALWAYS FIRES HERE, which is what makes the order enough.
-This arm is the read-backs failure, and the read-back is the
-only thing that assigns `RB_REMOTE` — the clear far above is a
-CONDITION with this whole block as its arm, so a value a startup
-file pre-set never reaches here at all.
 
 ## THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
 
@@ -740,8 +583,8 @@ happened; the helper's line above says what it is retrying past.
 NOTHING RUNS IN THIS ARM THAT IS NOT A REDIRECTION OR AN EXPANSION, and
 the announcement that used to is why it is stated. A note here is an
 `echo`, and `echo` is a NAME. In the CONDITION, a function by that name
-runs immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded
-for the call and can point both at a script and a directory of its own.
+runs immediately before `$RB_SCRIPTS` and `$RB_TMPPARENT2` are expanded
+for the retry and can point both at a script and a parent of its own.
 Moved after the read it is no better: it then runs before the non-empty,
 single-line, identity and export checks, and a function that assigns
 `RB_REMOTE` replaces the value that was just authenticated. There is no
@@ -770,134 +613,6 @@ is a shell parameter, so neither is a name anything can take.
 
 AND `$?` IS TAKEN BEFORE ANYTHING ELSE RUNS, which is why the emptiness
 test comes second: a command between the two would replace it.
-
-## THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, or the session dies one step later.
-
-THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
-this a fix rather than a partial one. `RB_TMPPARENT` is what the pin
-probe and the working directory are built from further down, so
-leaving it on the parent that just refused meant the origin was read
-from `HOME` and the session then died allocating its working directory
-under the same full `TMPDIR` — the exact state this retry exists for.
-The refused one stays as the second candidate: retrying there later is
-pointless where the filesystem is full and correct where the first
-name was simply taken.
-
-## THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it cannot tell them apart.
-
-THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it
-cannot tell them apart — the first call refused and the second either
-was not made or refused as well. The helper has named each attempt it
-made on stderr, so the message points at those lines rather than
-counting them; see IT DOES NOT COUNT THE ATTEMPTS below, which is the
-whole of why. The advice that used to live here — unset `TMPDIR` and
-re-run — is what the retry now does where there IS a second parent and
-the first refusal was retryable, so repeating it would send the
-operator to do again what already happened. #161.
-
-THE EXPANSION IS THE MESSAGE, because `echo` is a NAME and this line is
-the whole of what the change does: an `echo` that returns without
-printing leaves the arm silent, and the operator back where they
-started. `${VAR:?…}` is the shell refusing to expand — no command runs,
-so there is nothing to shadow — and it is the same form the parent
-selection above already uses. `RB_REMOTE` is the name because it is
-the one this arm is reached with UNSET: the read-back never assigned
-it. No new name is introduced, so nothing new has to be probed.
-
-AND THE EXPANSION ALWAYS FIRES HERE, which is worth stating because
-the obvious reason to keep the `echo` behind it is wrong: a startup
-file that pre-set `RB_REMOTE` never reaches this arm at all. The clear
-far above is a CONDITION with this whole block as its arm, so a value
-that survives it takes the readonly refusal instead, and one that does
-not leaves `RB_REMOTE` empty — which is what `:?` fires on. The `echo`
-and the `exit` stay as the shape every other arm in this block has,
-and would carry the refusal if a later change ever left a value here;
-they are not a second channel for a state that exists today.
-
-QUALIFIED, BECAUSE THIS ARM IS EVERY REFUSAL. The helper refuses for an
-unreadable `origin`, an ancestry another account owns and an
-unresolvable path as well as for storage it could not use, and the
-storage one is the only one this line is about. So it names the REPORT
-it applies to and leaves the rest to the helper's own line above.
-
-ON WHAT THE REPORT NAMES, NOT ON `TMPDIR` BEING SET. Selection can
-REJECT a set `TMPDIR` — a relative one, or one the mode bits refuse —
-and choose `HOME`; the failure is then under `HOME`, and "if TMPDIR is
-set" sends the operator to unset something already ignored.
-
-CREATE OR WRITE, because the helper refuses on both and the storage
-failure is the same one: a filesystem that accepts the directory can
-fill, hit quota or go read-only while the leaf is written. Enumerating
-the two diagnostics was the alternative and it is the shape this
-repository has paid for twice — the advice keys on what the report
-NAMES rather than on which of the helper's sentences produced it.
-
-AND EXHAUSTION IS NOT INFERRED FROM THEM. Both of those refusals also
-cover a name another account got to first, where the filesystem has
-room and re-running is the whole fix. So the cheap answer comes first
-and storage is what to look at when re-running keeps failing —
-asserting a full filesystem from a diagnostic that does not say so
-sends the operator to change storage for a race.
-
-A NEW SESSION, NOT `unset TMPDIR` IN THIS ONE. `unset` is a name, the
-variable may be readonly, and on bash 4.3+ a `declare -n TMPDIR=HOME`
-makes `unset TMPDIR` destroy `HOME` in the operator's long-lived shell
-— after which the re-run aborts one step earlier than before. Starting
-a session without the override needs none of that to be true.
-
-AND `HOME` IS NOT AUTOMATICALLY AN ESCAPE. `/tmp` and a home directory
-share the root filesystem on many machines, so a full one or a
-filesystem-wide quota is not something falling through to `HOME`
-escapes. The line says so rather than promising a recovery that
-re-runs into the same storage.
-AND NO APOSTROPHE IN IT. Inside `${…}` bash treats a single quote as
-a QUOTE even within double quotes, so one apostrophe in this message
-leaves the brace expansion unterminated and the whole block fails to
-parse — five hundred lines below, where nothing points back here.
-`test-pr-skill-contract.sh` parses the lifted block, which is what
-caught it; the phrasing avoids the character rather than escaping it.
-AND IT DOES NOT COUNT THE ATTEMPTS, because it cannot. Reaching this
-arm means the first call failed and the second either was not made or
-failed too — and the three reasons it was not made are different: there
-was no second candidate, or the first refusal was TERMINAL and the
-status gate skipped it, or it ran and refused as well. Telling them
-apart here needs the first call's status carried in a variable, which
-is another name for a startup file to make readonly, for a claim the
-operator can read off the lines above anyway.
-
-TWO MESSAGES CHOSEN ON `RB_ORIGIN_DIR2` WAS THE PREVIOUS SHAPE, and it
-was wrong for exactly the middle case: a terminal first refusal with a
-second candidate present said two attempts were made when the gate had
-correctly skipped the second.
-
-## THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
-
-THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE. This was
-`[[ -n $RB_REMOTE ]] || { echo …; exit 1; }`, and a startup file that defines
-`exit` as a function which RETURNS makes that group print and carry on — with
-an empty origin, into the identity parse, the export and the pin. There is no
-containment on a `||` group: it is a statement, and the statement after it
-simply runs.
-
-`${RB_REMOTE:?…}` fires on exactly the state the guard tested — unset or
-EMPTY — so the check and the refusal are one thing the shell does. #181.
-
-AND IT IS AN ASSIGNMENT, NOT `: "${…}"`. `:` IS A NAME — a startup file can
-define a function called `:`, and on the ORDINARY path the expansion SUCCEEDS
-and that function then runs with the value as its argument, free to replace
-`RB_REMOTE` before the identity parse. The refusal path was never the exposed
-one; the success path is, and there is one on every session. An assignment is
-handled by the parser, so there is no command to invoke, and assigning the
-value back to the name it came from introduces nothing new to be readonly or
-transforming — `RB_ORIGIN_DIR="${RB_TMPPARENT:?…}/…"` above is the same idiom.
-
-## THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
-
-THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
-public information, so this is tidiness rather than secrecy — but the setup block
-already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
-leaves behind, so a second one that survives a refusal would be a leak the suite
-reports and nobody meant.
 
 ## ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
 
@@ -1028,24 +743,6 @@ already lying about its output. What survives a forged `echo` is the STATUS: the
 branch still ends non-zero. Removing the dependency means not composing this
 message here, which is #84 along with `git` and `bash`.
 
-## THE PIN PARENT IS REQUIRED BY THE EXPANSION, or an empty one builds a path from nothing.
-
-AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
-origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
-CLEARED FIRST, for the reason the origin read gives: interactively the
-expansion abandons its own command and a stale `RB_PIN_DIR` from an
-earlier run in the same shell would otherwise be what the helper is
-handed.
-
-## THE PIN REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read above states.
-
-THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
-above states: a refused call means the `mkdir` inside the helper found
-the name already taken, so the directory and the file in it are the
-OPERATOR'S — and `rm -f` deletes that file while `rmdir` deletes the
-directory whenever it is empty, which an operator's directory often is.
-Written after the call they ran on every path, including that one.
-
 ## WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
 
 WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
@@ -1082,109 +779,6 @@ A refusal walked past with `exit` shadowed leaves `RB_REMOTE` empty, the pin
 probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
 setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
 stage derived its identity from wherever the session happened to stand.
-
-## THE SESSION'S FOUR WORKING FILES COME FROM ONE ALLOCATION.
-
-THE SESSION'S FOUR WORKING FILES, FROM ONE ALLOCATION. Files rather than
-shell variables: the text is long, contains backticks and quotes, and passing
-it inline mangles it — and the baseline comes back in one because a variable is
-a name a startup file can have made readonly, which `pr-origin.sh` settled the
-same way. Freshly created per PR and per session, because a reused path is how
-a stale summary from another round — or another PR — gets posted as if it were
-this one's.
-
-ONE DIRECTORY, AND THE FOUR PATHS DERIVED FROM IT. Four `mktemp` calls would make
-them four separate answers, and `mktemp` is a NAME: a function returning the
-same existing empty path each time passes every validation and leaves all four
-ALIASED. Writing the opening account would then populate the round-summary
-file, and a first round that missed its own summary write would post that
-account as the summary and request another pass — the exact regression the
-separate files exist to prevent. `pr-close-round.sh` refuses the head file and the
-summary file being one file for the same reason, from the other end: there the
-head would overwrite the account and be posted as the round summary. Derived by literal suffixes there is nothing to
-make equal: the distinctness is in the source, not in what a command returned.
-
-AND NO `mktemp` AT ALL, WHICH IS THE SAME ANSWER THE TRANSPORT DIRECTORY ABOVE
-ALREADY GIVES. The path is BUILT by expansion — `$$` and `$RANDOM` are the
-shell's own, so nothing runs and a driving shell tracing to fd 1 has nothing to
-write into the value. `mkdir` IS THE EXCLUSION: it fails if the name exists, so
-an account on this machine that guesses the name gets nothing rather than a
-file this session then writes through, and `-m 700` is applied by `mkdir`
-itself, so all four files inherit that protection rather than each needing its
-own. It runs through `/usr/bin/env` for the reason every other command in this
-block does.
-
-THE PARENT IS THE ONE ALREADY PROVEN — absolute, a directory, and one this user
-could create under. Choosing it a second time would be a second copy of the
-loop above, which is the defect this document keeps deleting.
-ASSIGNABLE FIRST, AND ASKED IN A SUBSHELL — the probe the transport parent
-above already uses, and for the reason it gives. ONE value, because the
-subshell is where the assignment happens: a readonly pre-seeded with the
-probe's own value makes it fail outright there, so the comparison inside
-is never reached. Two unequal values were what a comparison in THIS shell
-needed, and that comparison is gone.
-
-THE SHAPE CHECK BELOW IS NOT WHAT STOPS ONE. It matches a PREFIX, and a readonly
-value such as `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while
-naming a directory under a parent nothing proved — `mkdir` resolves the `..`,
-and another account owning that parent could then replace the directory and with
-it the account this session posts and the baseline it waits on. It stays as a
-statement of the shape; the probes are what make the value this session's.
-EVERY FAILURE ARM EXCLUDES THE WORK STRUCTURALLY, rather than ending it. `exit`
-is a builtin a startup file can replace with one that RETURNS, and this bash
-runs in the operator's own shell — so a guard written as
-`… || { echo …; exit 1; }` prints and then carries straight on to the next
-line. With `RB_WORK_DIR` readonly to an existing directory that meant reaching
-the three redirections below and truncating `summary.md`, `request.md` and
-`prior.txt` inside it. `[[ -n "" ]]` is not the answer here either: it makes the
-LIST report non-zero, which nothing reads. The allocation is one condition and
-the files are its `then`, so a failed arm cannot reach them whatever `exit` was
-made to do. Each cause still names itself, from inside the condition, ending in
-a reserved word so the arm is false however `echo` was replaced.
-ASKED IN A SUBSHELL, WHICH IS WHAT MAKES IT SAFE TO ASK. It was two
-unequal assignments read back here, because one proves nothing against a
-readonly holding the probe's own value — and both were assignments in
-THIS shell, which is the operator's, where a failed readonly assignment
-under `errexit` is FATAL. The probe ended the session in exactly the
-state it exists to detect. A subshell inherits the attribute, fails for
-the same reason, and as a condition is exempt. The value is compared
-INSIDE it, because a TRANSFORMING attribute — `declare -i` — lets the
-assignment succeed and stores something else, which a status-only probe
-accepts. One value is enough: a readonly pre-seeded with the probe's own
-value makes the subshell's assignment fail outright, so the comparison
-is never reached. #148.
-
-## THE WORKING-DIRECTORY PARENT IS REQUIRED TOO, and is not redundant with the two above.
-
-THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, and it is
-not redundant with the two above: the prefix check on the
-next line compares against `$RB_TMPPARENT`, so with an EMPTY
-one it reads `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and
-AGREES — the check that exists to keep this under the proven
-parent is the check an empty parent satisfies. Reaching here
-with one requires the pin to have succeeded, which the clears
-above make impossible; stating the requirement locally means
-that argument does not have to be re-derived three blocks
-away.
-
-## THE OPENING ACCOUNT IS NOT THE ROUND SUMMARY, and they must not share a file.
-
-The opening account, which is NOT the round summary. Sharing one file meant
-that a first round whose summary write did not happen left the OPENING
-account sitting there — non-empty, well-formed, and about the right PR — so
-`pr-close-round.sh` posted it as the round summary and requested the next
-pass instead of refusing to close. The round-summary file has to be empty
-until that round writes it, and that is only true if nothing else writes it.
-
-## THE WORKING FILES ARE CREATED EMPTY BY REDIRECTION ALONE, so there is no command name to shadow.
-
-CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is
-none to shadow, and a redirection that cannot be made reports it:
-measured, a `> path` into a directory that does not exist is status 1.
-Each is then proven present and empty. A missing one fails closed later
-anyway — the request's `<` refuses and `pr-close-round.sh` cannot read
-its summary — but "fails closed later" is not a reason to leave setup
-unable to say so.
 
 ## THE ACCOUNT IS PROSE, AND MUST NOT BECOME A RECORD, A REQUEST, OR A FRAGMENT.
 
@@ -1693,17 +1287,6 @@ shell without `export` also reaches a function and not a child process, so readi
 it from the environment would give the script a silent default — and the default
 answer is a round closed on a mode nobody chose.
 
-## THE GATED HEAD TRAVELS IN A FILE, and this is where it lands.
-
-The fourth working file, alongside the summary, the opening account and the review
-baseline. It is created empty at setup like the others, so `post` reading it before
-any `gate` has run finds nothing rather than something stale.
-
-It is named here, in the one place the session's paths are chosen and proved
-against their literals, rather than by whichever step happens to need it first —
-which is what makes it a path the driver can hand to both stages without either of
-them agreeing on a convention.
-
 ## THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
 
 It was a string, and that is what #202 was. The driver captured `gate`'s output,
@@ -1990,3 +1573,114 @@ assignment then fails and the old value is what the arms see. That is the same l
 `CLAUDE.md` records for the whole driver — nothing inside a process can distinguish
 the honest version of something it inherited — and it is why the block's own
 guarantee is about what a shadowed COMMAND can reach.
+
+## THE SETUP WORK RUNS IN A PROCESS AND COMES BACK AS A FILE THIS SHELL SOURCES.
+
+This block was 178 executable lines and 105 of comment — 18,450 characters, about a
+fifth of `SKILL.md`, read on every invocation of the skill and executed by nothing.
+#26 closed on the finding that it could not move, because setup EXPORTS into the
+driving session and a child cannot export into its parent.
+
+That is true of a child's ENVIRONMENT and not of a file the driver SOURCES. An
+assignment in a sourced file happens in the sourcing shell, which is the one
+property the block needed, so `pr-setup.sh` does the work in a process where it can
+be tested and writes the values out; what is left here is what a helper cannot do
+for the shell that calls it.
+
+What stays, and why each has to: finding the scripts at all, which is how the helper
+is reached; choosing the parent directory to hand over, because the alternative is
+the helper choosing and reporting a path back, and
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md` records three refuted
+attempts at that channel; the source itself; and the proofs after it.
+
+## THE SOURCE IS THE ONLY WAY THE VALUES REACH THIS SHELL.
+
+A child process cannot export into its parent, so every alternative reaching for one
+— a captured stdout, a fd, a printed record the driver parses — is a value crossing
+back through text the driver then has to assign, which is the assignment problem
+`SKILL.md` has removed everywhere else.
+
+THE VALUES ARE SINGLE-QUOTED BY THE HELPER, and that is the whole safety of it. A
+remote URL is not this repository's text: a checkout can carry any origin, and a
+`git` config nobody read can put a quote, a `$(…)`, a backtick or a newline in it.
+Inside single quotes bash expands nothing at all, so each sourced line is an
+assignment and cannot become a command — measured against the real helper with all
+three of those shapes, which round-trip byte-exact and execute nothing.
+
+SOURCING IS NOT A NEW TRUST STEP HERE. This block already sources
+`identitylib.sh` from the same directory, on the same argument: `$RB_SCRIPTS` was
+proved to hold the helpers a few lines earlier, and a plugin whose scripts are
+hostile has already lost.
+
+## WHAT WAS READ DOES NOT STAY ON DISK; the work directory does, being the session's.
+
+The env file and the pin leaf are both transports: their contents are in this shell
+the moment they have been read, and a copy left at a name published in argv is one
+an account watching that name can read the origin out of afterwards. So each is
+removed as soon as it has been consumed — the env file immediately after the source,
+the pin directory immediately after the descriptor is read.
+
+THE SETUP DIRECTORY ITSELF IS NOT REMOVED, and that is the difference from the
+transport directory this replaced. It holds `work/`, which is the session's four
+working files — the round summary, the opening account, the review baseline and the
+gated head — and every stage of the loop writes into them. A cleanup here would be
+removing the thing the call was made to produce.
+
+REMOVED BY PATH, NOT BY NAME. `rm` in this shell is whatever the operator's startup
+file left it, and this is the one shell that cannot re-exec out of that. Nothing
+downstream is a postcondition on either removal, so a shadowed `rm` costs a file left
+behind rather than a wrong answer — but `/usr/bin/env rm` costs nothing either.
+
+## WHAT WAS SOURCED IS RE-PROVED HERE, because a file is not a promise.
+
+The helper proves the origin parses before it writes it. This shell proves it again,
+and the duplication is deliberate: what the helper can vouch for is the file it
+WROTE, and what this shell reads is the file that is THERE. Between the two is a
+directory under a shared parent, which is the same window
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts for the transport
+name.
+
+So the identity is re-derived from the sourced value rather than trusted, and a
+sourced value that is empty, spans a line, or is not a usable identity is refused by
+expansion — the same three refusals the block made when it read the origin itself.
+
+## THE FOUR WORKING PATHS ARE PROVED TO BE THE ONES THIS SETUP MADE.
+
+Each is compared against its literal under the directory this setup named, so a
+sourced value pointing anywhere else is refused before anything writes through it.
+That is not paranoia about the helper: it is the same check the block made when it
+derived the paths itself, kept for the same reason — these are the paths a round
+summary and a gated head travel in, and a summary written to a path this session did
+not create is one another session can read.
+
+ONE REFUSAL FOR THE FOUR, because they are one allocation. Four separate expansions
+would report which path was wrong, which is a distinction with no action behind it:
+any of them being wrong means the same thing about the file that was sourced.
+
+## ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
+
+Each name this block assigns before the helper runs is probed once, in a subshell:
+assign a sentinel, check it came back, check it is not a nameref. That catches
+`readonly`, `declare -i`, `declare -l`, `declare -u` and a nameref onto another of
+these names with one test rather than one per attribute — and an attribute nobody
+has thought of is caught too, because what is checked is whether the assignment
+took, not which attribute prevented it.
+
+The alternative was a check per attribute, which is a list, and `CLAUDE.md` records
+what a list of names costs: the first version enumerated the attributes it knew and
+was defeated by the next one.
+
+## EVERYTHING AFTER THE CALL IS INSIDE ITS SUCCESS ARM, so nothing walks past a refusal.
+
+The refusals here are arms not taken rather than statements that have to terminate.
+That is #224's answer applied to this block: `SKILL.md` runs in the operator's own
+shell, where `echo` and `exit` are both names, and a refusal written as
+`|| { echo …; exit 1; }` can be walked past by shadowing both — the arm runs, `exit`
+returns instead of terminating, and the next statement is the one the refusal
+existed to prevent.
+
+A FLAG WOULD HAVE BEEN WORSE THAN EITHER. The first version of this rewrite set
+`RB_SETUP_OK=yes` in the success arm and expanded it afterwards, which is the
+sentinel shape #225 removed for exactly this reason: with `declare -i RB_SETUP_OK`
+inherited, the clear stores `0`, the expansion finds it non-empty, and setup
+continues as though the helper had succeeded.

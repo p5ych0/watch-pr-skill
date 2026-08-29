@@ -94,6 +94,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
         "$ROOT"/pr-origin.sh
+        "$ROOT"/pr-setup.sh
         "$ROOT"/pr-selfcheck.sh
         "$ROOT"/identitylib.sh
         "$ROOT"/loadlib.sh
