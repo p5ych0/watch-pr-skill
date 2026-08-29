@@ -1,5 +1,16 @@
 # Self-Review Docs (S3) Implementation Plan
 
+> **Archived, and not written against this repository's issue numbering.** These are
+> v1-era planning documents for the `review-bus` watcher that v2 removed —
+> `review-bus-codex-watcher.sh` and the `test-review-bus-*.sh` fixtures are gone, so
+> nothing here describes code in this tree. Issue **3** below is this repository's.
+> Every other number is `p5ych0/strumok`'s, and each occurrence is written out in
+> full so that GitHub links it there: a bare `#207` in this repository renders as a
+> link to an unrelated issue here, which explaining in prose does not change. Read
+> these as a record of what was planned on 2026-08-03, not as a description of the
+> tree.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give `watch-pr-skill` the documents and arming it needs to review its own pull requests, and make "review the PR against what it set out to do" the plugin's built-in default for every repository.
@@ -19,7 +30,7 @@ Spec: `docs/superpowers/specs/2026-08-03-self-review-docs-and-phase-memory-desig
 - Test files live at `skills/watch-prs/scripts/test-review-bus-<area>.sh` and are run by the glob in `.github/workflows/tests.yml`.
 - The watcher's source guard is at `review-bus-codex-watcher.sh:1276` (`if [ "${BASH_SOURCE[0]}" = "${0}" ]; then main; fi`). Sourcing it defines functions without starting the daemon loop.
 - This PR does **not** document the `Review-Phase: copilot` trailer or the Copilot gate. Those ship with S1; documenting them early would describe behavior that does not exist.
-- Issue #207 stays open. Documents added here are read from the PR head by `review-bus-codex-watcher.sh:521`. Do not attempt to fix that in this PR.
+- Issue p5ych0/strumok#207 stays open. Documents added here are read from the PR head by `review-bus-codex-watcher.sh:521`. Do not attempt to fix that in this PR.
 
 ---
 
@@ -188,7 +199,7 @@ The guidance block *replaces* the built-in default (`review-bus-codex-watcher.sh
 8. **A resolved thread is not proof a finding was fixed.** The close-round workflow resolves every open thread and its summary may record a finding as intentionally skipped, so `isResolved` alone means only that the thread was closed. Use it to avoid repeating a point that was *answered*, and say what you relied on.
 9. **Non-blocking channel workaround.** Verbatim marker required so it cannot outlive the bug:
 
-   > **(Issue #212 — delete this paragraph when it lands.)** There is no channel for a non-blocking note, so do not invent one. `summary` reaches the PR only when there are ZERO findings; with one or more the watcher overwrites it and the model's text is discarded. `findings[]` is not an alternative: every entry becomes a review thread that the merge gate requires resolved, so a note filed there blocks the merge however it is labelled. On a review with no findings, put the observation in `summary`. On a review WITH findings, leave it out.
+   > **(Issue p5ych0/strumok#212 — delete this paragraph when it lands.)** There is no channel for a non-blocking note, so do not invent one. `summary` reaches the PR only when there are ZERO findings; with one or more the watcher overwrites it and the model's text is discarded. `findings[]` is not an alternative: every entry becomes a review thread that the merge gate requires resolved, so a note filed there blocks the merge however it is labelled. On a review with no findings, put the observation in `summary`. On a review WITH findings, leave it out.
 
 10. **Test commands.** Run focused tests only to validate a finding or a prior fix claim:
 
@@ -226,7 +237,7 @@ git commit -m "docs(review-bus): review policy for this repository
 Adds the trusted base-ref guidance channel, which also opts this repo
 into the SessionStart hook. Cites CLAUDE.md sections rather than
 restating the engineering rules, so there is one place to change them.
-Carries the issue #212 non-blocking-note workaround with an explicit
+Carries the issue p5ych0/strumok#212 non-blocking-note workaround with an explicit
 delete-when-fixed marker."
 ```
 
@@ -512,7 +523,7 @@ git push -u origin feat/self-review-docs
 gh pr create --fill --title "feat: review this plugin with its own bus, and make scope awareness the default"
 ```
 
-The PR body must state the intended scope explicitly — this repository's own reviewers now judge relevance against it. Cover: what the four documents own, that the prompt change is the only behavior change, and that issues #207 and #212 remain open by design.
+The PR body must state the intended scope explicitly — this repository's own reviewers now judge relevance against it. Cover: what the four documents own, that the prompt change is the only behavior change, and that issues p5ych0/strumok#207 and p5ych0/strumok#212 remain open by design.
 
 - [ ] **Step 7: Watch the bus review its own PR**
 
@@ -520,16 +531,16 @@ This PR is the first one the bus reviews here. Follow the `watch-prs` skill from
 
 Expect one property to be visibly true and one visibly false:
 - The reviewer should cite `.review-bus.md` policy — it is read from the base ref, where this PR has **not** yet added it, so the *first* review runs on the built-in default guidance. Later rounds on this branch still read the base ref, so `.review-bus.md` only takes effect for the *next* PR. Do not treat its absence as a bug.
-- `CLAUDE.md` and `.github/copilot-instructions.md` **are** read from the head (`review-bus-codex-watcher.sh:521`), so this PR does steer its own review through them. That is issue #207, accepted for this PR and fixed separately.
+- `CLAUDE.md` and `.github/copilot-instructions.md` **are** read from the head (`review-bus-codex-watcher.sh:521`), so this PR does steer its own review through them. That is issue p5ych0/strumok#207, accepted for this PR and fixed separately.
 
 ---
 
 ## Self-Review
 
-**Spec coverage.** Every S3 requirement maps to a task: ownership table → Tasks 2-5; trust-boundary note → Task 6 Step 7 and the Global Constraints; task awareness → Task 1; repo arming → Task 5; the #212 workaround with expiry → Task 2 Step 1 item 9; release → Task 6. The spec's S1 and S2 sections are deliberately out of scope and get their own plans.
+**Spec coverage.** Every S3 requirement maps to a task: ownership table → Tasks 2-5; trust-boundary note → Task 6 Step 7 and the Global Constraints; task awareness → Task 1; repo arming → Task 5; the p5ych0/strumok#212 workaround with expiry → Task 2 Step 1 item 9; release → Task 6. The spec's S1 and S2 sections are deliberately out of scope and get their own plans.
 
 **Placeholders.** None. Every doc task lists its required content item by item; every verification step is a runnable command with an expected result.
 
 **Naming consistency.** The four `CLAUDE.md` headings cited by `.review-bus.md` (Task 2) are the same strings created and verified in Task 3 Steps 1-3: *Bash conventions*, *Repo-agnostic invariant*, *Tests*, *Release*. Task 3 adds two more headings (*Documentation sync*, *Stating the task*) that no other file cites.
 
-**Known gap, stated rather than papered over.** The `.review-bus.md` content in Task 2 has no automated test — a doc-content gate would be new machinery for one file. Task 3 Step 3 does check that its citations into `CLAUDE.md` resolve, which is the failure mode most likely to bite. The `(Issue #212 — delete this paragraph when it lands)` marker is a convention, not an enforced gate; the S2 plan carries the deletion as an explicit step.
+**Known gap, stated rather than papered over.** The `.review-bus.md` content in Task 2 has no automated test — a doc-content gate would be new machinery for one file. Task 3 Step 3 does check that its citations into `CLAUDE.md` resolve, which is the failure mode most likely to bite. The `(Issue p5ych0/strumok#212 — delete this paragraph when it lands)` marker is a convention, not an enforced gate; the S2 plan carries the deletion as an explicit step.
