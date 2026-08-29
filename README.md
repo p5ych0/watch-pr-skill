@@ -516,8 +516,8 @@ Then:
    rather than of a commit, so a protection rule changed between that read and the
    merge is a race GitHub has as well. The "require branches to be up to date"
    policy is read where it can be, and enforced there: a **ruleset** carries it in
-   a field this loop can read, so a head behind its base is refused with
-   `reason=behind_base` rather than merged. **Classic** branch protection keeps that
+   a field this loop can read, so a head behind its base is refused rather than
+   merged, with a message saying to bring the base in. **Classic** branch protection keeps that
    flag on an administrator-only endpoint, so it cannot be read at all — and on the
    default path nothing else enforces it, since `--admin` bypasses protection. Under
    `REVIEW_MERGE_STRICT=1` GitHub enforces both. And on the default `--admin` path the merge bypasses branch

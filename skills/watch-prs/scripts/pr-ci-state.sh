@@ -6,12 +6,14 @@
 #   pr-ci-state.sh <pr> [--required] [--head <oid>]
 #
 #   0  green    — every check considered passed
-#   1  failed   — at least one failed or was cancelled, or the base branch requires
-#                  its pull requests to be up to date and this head is behind it,
-#                  which `reason=behind_base` on the line tells apart
+#   1  failed   — at least one failed or was cancelled
 #   3  pending  — at least one is still running and none has failed
 #   4  none     — no checks are configured; there is nothing to be green
 #   5  stale    — the PR head is not the OID asked about; ask again shortly
+#   6  behind   — a RULESET on the base branch requires its pull requests to be up
+#                 to date and this head is behind it. `--required` only; the same
+#                 policy under CLASSIC protection is not readable here, so this
+#                 status says a branch IS behind and never that one is not
 #   2  error    — could not be established; fail closed
 #
 # WHY THIS EXISTS
@@ -858,16 +860,23 @@ case "$OUT" in
         }
         echo "PR_CI_STATE pr=$PR status=green";   exit 0 ;;
     failed)  echo "PR_CI_STATE pr=$PR status=failed";  exit 1 ;;
-    # BEHIND IS A FAILURE, NOT A WAIT. The base branch requires its pull requests to
-    # be up to date and this head is not, so no check on this commit can settle it:
-    # the head has to move. Reporting `pending` would wait for something that is not
-    # going to happen, which is a gate that never opens by another route.
+    # BEHIND HAS ITS OWN STATUS, and it is not a wait. The base branch requires its
+    # pull requests to be up to date and this head is not, so no check on this
+    # commit can settle it: the head has to move. Reporting `pending` would wait for
+    # something that is not going to happen, which is a gate that never opens by
+    # another route.
+    #
+    # AND IT IS NOT `failed` EITHER, for the reason `stale` is not: every caller
+    # branches on the STATUS, and the operator`s next action here is to rebase
+    # rather than to look for a broken check. Folded into 1 the merge gate said "a
+    # required check is not green" over a green check set, which sends someone
+    # looking for a failure that does not exist.
     behind)
         [ "$RC" -eq 0 ] || {
             echo "PR_CI_STATE pr=$PR status=error reason=behind_from_failed_probe rc=$RC" >&2
             exit 2
         }
-        echo "PR_CI_STATE pr=$PR status=failed reason=behind_base"; exit 1 ;;
+        echo "PR_CI_STATE pr=$PR status=behind"; exit 6 ;;
     pending) echo "PR_CI_STATE pr=$PR status=pending"; exit 3 ;;
     # `none` REACHES HERE AS A VALUE on the commit-addressed path, where this
     # script does the classifying and can say so directly. On the PR-addressed

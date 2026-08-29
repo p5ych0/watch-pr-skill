@@ -553,7 +553,8 @@ waived:
   protection is a property of the base branch, not of a commit — and the "require
   branches to be up to date" policy is read where it CAN be: a ruleset carries
   `strict_required_status_checks_policy` readably and the gate enforces it, refusing
-  a head behind its base with `reason=behind_base`. Classic protection keeps `strict`
+  a head behind its base as `status=behind` — its own exit status, not folded into
+  the failing-check one, since the operator'"'"'s action is to rebase. Classic protection keeps `strict`
   on the admin-only `/protection` endpoint — measured, the branch object has
   `checks`, `contexts` and `enforcement_level` and no `strict` — so there it cannot
   be read, and `--admin` means nothing else enforces it either.

@@ -729,7 +729,7 @@ mkgh_required '{"protected":false}' \
     '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
 printf '{"status":"behind","ahead_by":0,"behind_by":3}\n' > "$TMP/gh.cmp"
 got="$(run 7 --head "$WANT" --required)"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=behind_base' <<<"${got#*|}"; } \
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
     && pass "a head behind a base that requires up-to-date branches is refused" \
     || die "a behind head was not refused: '$got'"
 # …AND IT IS A FAILURE RATHER THAN A WAIT. No check on this commit can settle it —
@@ -746,7 +746,7 @@ mkgh_required '{"protected":false}' \
     '[{"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"checkSuite":{"app":{"databaseId":7}}}]'
 printf '{"status":"diverged","ahead_by":2,"behind_by":3}\n' > "$TMP/gh.cmp"
 got="$(run 7 --head "$WANT" --required)"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=behind_base' <<<"${got#*|}"; } \
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
     && pass "…and it decides ahead of a check that is still running" \
     || die "a pending check answered for a behind head: '$got'"
 # …AND THE COUNT DECIDES AS WELL AS THE SUMMARY. A real body never disagrees with
@@ -759,7 +759,7 @@ mkgh_required '{"protected":false}' \
     '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
 printf '{"status":"identical","ahead_by":0,"behind_by":5}\n' > "$TMP/gh.cmp"
 got="$(run 7 --head "$WANT" --required)"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=behind_base' <<<"${got#*|}"; } \
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
     && pass "…and a body counting commits behind is behind, whatever its summary says" \
     || die "a self-contradicting comparison was read as current: '$got'"
 
@@ -806,7 +806,7 @@ printf '[{"type":"required_status_checks","parameters":{"strict_required_status_
 printf '{"status":"behind","ahead_by":0,"behind_by":3}\n' > "$TMP/gh.cmp"
 got="$(run 7 --head "$WANT" --required)"
 rm -f "$TMP/gh.rules.2"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=behind_base' <<<"${got#*|}"; } \
+{ [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
     && pass "…and a policy switched off between the two reads still decides" \
     || die "the strict policy was lost between the reads: '$got'"
 # A COMPARISON THAT CANNOT BE READ IS AN ERROR, in every shape it can arrive in.

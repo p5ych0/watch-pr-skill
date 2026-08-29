@@ -12,11 +12,12 @@
   A **ruleset** carries the flag as `strict_required_status_checks_policy` on its
   `required_status_checks` rule, in a body this loop already reads. Where it is on,
   `pr-ci-state.sh --required` compares the base with the merge target and refuses a
-  head that is behind — `status=failed reason=behind_base`. It is a failure rather
-  than something to wait for, and that is the point: no check on that commit can
-  settle it, so `pending` would wait for something that is not going to happen. It
-  decides ahead of the context verdicts, which are all about a commit that will not
-  be merged.
+  head that is behind — `status=behind`, its own exit status 6, which the merge gate
+  reports in its own words. It is not something to wait for, and that is the point:
+  no check on that commit can settle it, so `pending` would wait for something that
+  is not going to happen. Nor is it folded into `failed`, which had the merge gate
+  saying "a required check is not green" over a green check set. It decides ahead of
+  the context verdicts, which are all about a commit that will not be merged.
 
   **Classic protection keeps that flag where this cannot reach it**, and #220 was
   filed believing otherwise. Measured: the branch object's `required_status_checks`

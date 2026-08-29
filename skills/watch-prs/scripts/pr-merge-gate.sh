@@ -669,7 +669,7 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # protection rule changed between that read and the merge is a race GitHub has too.
 # The "require branches to be up to date" policy is read where it can be. A RULESET
 # carries it readably and this gate enforces it — a head behind its base is refused
-# with `reason=behind_base`. CLASSIC protection keeps that flag on the admin-only
+# as status 6. CLASSIC protection keeps that flag on the admin-only
 # endpoint, so there it cannot be read, and on THIS path nothing else enforces it
 # either: `--admin` below bypasses protection. `REVIEW_MERGE_STRICT=1` covers both.
 # #220.
@@ -697,6 +697,7 @@ case "$CHECKS_RC" in
     0) ;;
     4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
     1) echo "merge blocked: a required check is not green"; exit 1 ;;
+    6) echo "merge blocked: the base branch requires its pull requests to be up to date and this head is behind it; bring the base in and re-run the gate"; exit 1 ;;
     3) echo "merge blocked: the required checks have not finished"; exit 1 ;;
     5) echo "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now"; exit 1 ;;
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
