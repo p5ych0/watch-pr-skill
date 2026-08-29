@@ -397,13 +397,17 @@ session, which does not survive into a file.
 
 **A FIXTURE'S PLACEHOLDER IDENTITY IS NOT A MENTION.** `rb_identity` parses a host, an
 owner and a repository, so a case proving that two identities differ needs two such
-values, and every one of them names some pair. `test-pr-identity.sh` has said since it
-was written that "a test file is where a concrete `acme/widget` is supposed to appear",
-and its scan keys on the OWNER and the shape rather than on a list precisely so those
-pass — a rule that swept them in would be one deleted rather than one that holds. The
-suite uses `acme/widget` and a handful of deliberately wrong-looking counterparts, and
-they stay consistent across it. A value a case needs is not an example, not evidence and
-not history, so do not raise one as a naming violation.
+values, and every one of them names some pair. `test-pr-identity.sh` has said in a
+comment since it was written that a test file is where a concrete placeholder identity
+is supposed to appear, and its scan keys on the OWNER and the shape rather than on a
+list precisely so those pass — a rule that swept them in would be one deleted rather
+than one that holds. The suite uses one placeholder pair throughout with a few
+deliberately wrong-looking counterparts, consistent across it. A value a case needs is
+not an example, not evidence and not history, so do not raise one as a naming violation.
+
+**This paragraph deliberately does not spell them.** The exemption is for a value a
+fixture supplies; prose about the suite is not that, so naming the placeholder here
+would be the violation it describes. The values are in `test-pr-identity.sh`.
 
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
 has `pr-setup.sh` read the origin — through `pr-origin.sh`, privileged — and write it

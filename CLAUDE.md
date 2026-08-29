@@ -262,21 +262,25 @@ rediscovering them.
   eleven on another" and never the slugs.
 
   **A FIXTURE'S PLACEHOLDER IDENTITY IS NOT A MENTION EITHER, and this is where that
-  is written down.** `test-pr-identity.sh` has said so since it was written — "a test
-  file is where a concrete `acme/widget` is supposed to appear" — and its scan keys on
-  the OWNER and the shape rather than on a list precisely so those pass. But that
-  sentence lives in a comment inside a fixture, which is not a file either required
-  reviewer reads, so the exception was invisible where the rule is enforced: Codex
-  raised it against #229 twice with the sanction sitting on the base ref the whole time.
-  Both reviewer files carry it now.
+  is written down.** `test-pr-identity.sh` has said so in a comment since it was
+  written, and its scan keys on the OWNER and the shape rather than on a list precisely
+  so those values pass. But that sentence lived in a comment inside a fixture, which is
+  not a file either required reviewer reads, so the exception was invisible where the
+  rule is enforced: it was raised twice against #229 with the sanction sitting on the
+  base ref the whole time. Both reviewer files carry it now.
 
   What makes a fixture identity exempt is that it is a VALUE the case needs, not a
   reference: `rb_identity` parses a host, an owner and a repository, so a case that
   proves two identities differ needs two of them, and every such value names some pair.
   It is not an example of anything, it is not evidence for a measurement, and it is not
-  history. The values in the suite are `acme/widget` and a handful of deliberately
+  history. The suite uses one placeholder pair throughout with a few deliberately
   wrong-looking counterparts, and they stay consistent across it — a fixture that
   invented its own spelling would be a second convention to keep in step.
+
+  **AND THIS PARAGRAPH DOES NOT SPELL THEM, which is the rule applied to its own
+  exception.** The exemption is for a value a case supplies; prose about the suite is
+  not that, so naming the placeholder here would be exactly the violation being
+  described. Read the values out of `test-pr-identity.sh` if you need them.
 
   **A functional dependency coordinate is not a mention.** `uses: actions/checkout@v4`
   in a workflow, or a package name, names something the tooling requires, and

@@ -38,12 +38,19 @@
 #     and the child that matters is one the driver starts. Proving it here would
 #     prove that this process exports, which is true by construction.
 #
-# NOTHING HERE IS EXECUTED BY THE CALLER, and that is the whole safety of the
-# arrangement. This wrote a file of assignments the driver SOURCED, which made `.` —
-# a NAME, in the one shell that cannot re-exec out of its operator's functions — the
-# thing carrying the session's identity. It hands back the ORIGIN alone now, in a
-# file read with `$(<…)`, so the worst a replaced file can do is give a wrong string,
-# which `rb_identity` and the child pin then disagree with.
+# NOTHING HERE IS EXECUTED BY THE CALLER, and that is what this arrangement buys. This
+# wrote a file of assignments the driver SOURCED, which made `.` — a NAME, in the one
+# shell that cannot re-exec out of its operator's functions — the thing carrying the
+# session's identity. It hands back the ORIGIN alone now, in a file read with `$(<…)`,
+# so a replaced file yields a STRING rather than commands running in that shell.
+#
+# WHICH IS NOT THE SAME AS THE STRING BEING CHECKED, and this comment used to imply it
+# was. `rb_identity` asks whether the value IS a usable identity, not whether it is THIS
+# checkout's, and the child pin does not re-read the checkout either — `pr-origin.sh
+# pin` reports `REVIEW_BUS_REMOTE` as a child sees it, which is the value the driver
+# just exported. A planted-but-valid remote therefore agrees with both, because both are
+# computed FROM it. That is #230, and it is a property of this handoff on `main` as much
+# as here; nothing below closes it, and a reader should not be told otherwise.
 #
 # THE OTHER ELEVEN VALUES WERE NEVER INFORMATION. `OWNER`, `REPO` and `HOST` are what
 # `rb_identity` derives from the origin, and the driver runs it anyway; the two
