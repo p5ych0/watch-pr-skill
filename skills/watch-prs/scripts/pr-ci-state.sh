@@ -341,15 +341,21 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # so they are named as unsupported and the merge stops; `REVIEW_MERGE_STRICT=1` is
 # where GitHub evaluates them itself.
 #
-# THE REFUSAL IS THE BYPASSING PATH`S, and under strict mode there is nothing to
-# refuse. `--admin` discards whatever GitHub would have enforced, so a rule this
-# cannot evaluate is a rule NOBODY evaluates and the merge proceeds past it —
-# `merge_queue` is the clearest case, since `gh pr merge --admin` bypasses a queue
-# and merges directly, and `docs/decisions/2026-08-06-merge-admin-default.md` says
-# in as many words that the waiver does not cover a base branch requiring one.
-# Under `REVIEW_MERGE_STRICT=1` GitHub evaluates every rule itself at merge time,
-# so refusing there blocks a merge that would have been checked properly — a gate
-# that never opens, for exactly the configuration that record recommends.
+# THE REFUSAL STANDS IN BOTH MODES, and `merge_queue` is the one exception. Strict
+# mode was tried as a general exemption and taken back in the same pull request:
+# `REVIEW_MERGE_STRICT=1` only stops passing `--admin`, and the decision record
+# says so — it does not make the repository`s rules non-bypassable, so a credential
+# on a ruleset`s bypass list merges past them there too. The two mistakes are not
+# symmetrical: refusing costs a merge the operator can make by hand, with the rule
+# NAMED on the line; passing costs a merge nobody evaluated, and nothing says so.
+#
+# THE QUEUE IS THE EXCEPTION BECAUSE THE RECORD MAKES IT ONE.
+# `docs/decisions/2026-08-06-merge-admin-default.md` states that the `--admin`
+# waiver does not cover a base branch requiring a merge queue and that
+# `REVIEW_MERGE_STRICT=1` is the only SUPPORTED setting there — so refusing under
+# strict would refuse the one configuration that record recommends, on the one rule
+# where `gh pr merge` without `--admin` does the right thing by queueing the
+# request, which the gate then reports as status 4 rather than as a merge.
 #
 # THE LIST COMES FROM THE SCHEMA, not from what has been seen in the wild:
 # `RepositoryRuleType` is an enum, and the entries here are the ones that cannot
@@ -470,7 +476,7 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                       "file_path_restriction","max_file_size","max_file_path_length",
                       "file_extension_restriction"
                     ) then empty
-                  elif $strict then empty
+                  elif .type == "merge_queue" and $strict then empty
                   else error("a rule type this cannot evaluate: " + .type)
                   end ] ) as $ruleset
           | ( $classic + $ruleset | unique )

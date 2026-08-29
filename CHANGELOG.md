@@ -79,13 +79,17 @@
   without saying which rule caused it leaves the operator with a merge that will not
   proceed until they change something they cannot see.
 
-  **The refusal is the bypassing path's.** `--admin` discards whatever GitHub would
-  have enforced, so a rule this cannot evaluate is a rule nobody evaluates and the
-  merge proceeds past it — `merge_queue` most clearly, since `gh pr merge --admin`
-  bypasses a queue and merges directly, and
-  `docs/decisions/2026-08-06-merge-admin-default.md` already says the waiver does
-  not cover a base branch that requires one. Under `REVIEW_MERGE_STRICT=1` GitHub
-  evaluates every rule itself at merge time, so nothing is refused there. The list
+  **The refusal stands in both modes, and `merge_queue` is the one exception.**
+  `REVIEW_MERGE_STRICT=1` only stops passing `--admin`; it does not make a
+  repository's rules non-bypassable, so a credential on a ruleset's bypass list
+  merges past them there too, and the two mistakes are not symmetrical — refusing
+  costs a merge the operator can make by hand with the rule named on the line, while
+  passing costs a merge nobody evaluated. The queue is excepted because
+  `docs/decisions/2026-08-06-merge-admin-default.md` says the `--admin` waiver does
+  not cover a base branch requiring one and that strict mode is the only supported
+  setting there — and because `gh pr merge` without `--admin` does the right thing
+  on that rule by queueing the request, which the gate reports as status 4 rather
+  than as a merge. The list
   of rules that name no check comes from the `RepositoryRuleType` schema rather than
   from what has been seen in the wild; `workflows`,
   `required_workflow_status_checks`, `code_scanning`, `secret_scanning`,

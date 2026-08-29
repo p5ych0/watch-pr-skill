@@ -556,8 +556,12 @@ waived:
   and `REVIEW_MERGE_STRICT=1` is where GitHub enforces it. The base branch IS confirmed
   either side of the read, because a retarget moves no head and
   `--match-head-commit` would see nothing; a changed base is `stale`, not an answer.
-  A ruleset `merge_queue` rule refuses on the default path, since `--admin` bypasses
-  a queue, and is skipped under `REVIEW_MERGE_STRICT=1` where GitHub enforces it;
+  A ruleset rule that gates a merge on something this cannot read — `workflows`,
+  `code_scanning`, `required_deployments` and the rest — refuses in BOTH modes, since
+  `REVIEW_MERGE_STRICT=1` only stops passing `--admin` and does not make the
+  repository's rules non-bypassable. `merge_queue` is the one exception, skipped
+  under strict mode because the `--admin` record names that as the only supported
+  setting for a queue branch;
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
 

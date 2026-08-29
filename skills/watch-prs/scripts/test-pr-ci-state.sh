@@ -760,20 +760,34 @@ done
 # record says that waiver does not cover a base branch requiring one. Under
 # `REVIEW_MERGE_STRICT=1` GitHub enforces the queue itself, so there it is skipped
 # like any other rule that names no check.
-# …AND UNDER STRICT MODE THERE IS NOTHING TO REFUSE, for any of them. `--admin`
-# discards whatever GitHub would have enforced, so a rule this cannot evaluate is a
-# rule NOBODY evaluates; without it GitHub evaluates every rule itself at merge
-# time, and refusing there blocks a merge that would have been checked properly.
-for _rt in merge_queue workflows code_scanning required_deployments future_rule_nobody_has_read; do
+# …AND STRICT MODE IS NOT A GENERAL EXEMPTION. `REVIEW_MERGE_STRICT=1` only stops
+# passing `--admin`; it does not make the repository's rules non-bypassable, so a
+# credential on a ruleset's bypass list merges past them there too. Refusing costs a
+# merge the operator can make by hand, with the rule named; passing costs a merge
+# nobody evaluated.
+for _rt in workflows code_scanning required_deployments future_rule_nobody_has_read; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":false}' '[{"type":"'"$_rt"'","parameters":{}}]' '[]'
     _mq_rc=0
     _mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
-    { [ "$_mq_rc" = 4 ] && grep -qF 'status=none' <<<"$_mq_out"; } \
-        && pass "…while under strict mode a '$_rt' rule is GitHub's to enforce" \
-        || die "a '$_rt' rule blocked strict mode: rc=$_mq_rc '$_mq_out'"
+    { [ "$_mq_rc" = 2 ] && grep -qF "rule=$_rt" <<<"$_mq_out"; } \
+        && pass "…and a '$_rt' rule is refused under strict mode too" \
+        || die "strict mode dropped a '$_rt' rule: rc=$_mq_rc '$_mq_out'"
 done
+# THE MERGE QUEUE IS THE ONE EXCEPTION, and the decision record is what makes it
+# one: it says the `--admin` waiver does not cover a base branch requiring a queue
+# and that strict mode is the only SUPPORTED setting there, so refusing under strict
+# would refuse the one configuration that record recommends — on the one rule where
+# `gh pr merge` without `--admin` does the right thing by queueing the request.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' '[{"type":"merge_queue","parameters":{}}]' '[]'
+_mq_rc=0
+_mq_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" REVIEW_MERGE_STRICT=1 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 --head "$WANT" --required 2>&1)" || _mq_rc=$?
+{ [ "$_mq_rc" = 4 ] && grep -qF 'status=none' <<<"$_mq_out"; } \
+    && pass "…while a merge-queue rule is GitHub's to enforce under strict mode" \
+    || die "a merge-queue rule blocked strict mode: rc=$_mq_rc '$_mq_out'"
 
 # THE NAME IS FILTERED, not passed through: it comes out of an API body and lands
 # on a line other programs parse.
