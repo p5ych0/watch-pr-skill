@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.0.81] — 2026-08-29
+
+- **A shadowed `echo` and `exit` could walk past the round check-in's refusals and
+  acknowledge a check-in nobody reported.** The block that records the operator's
+  permission to continue past a round boundary refused with
+  `|| { echo "ABORT: …"; exit 0; }`, four times. That bash runs in the operator's
+  own shell, where both names belong to whoever is sitting there. Measured against
+  the block lifted out of `SKILL.md`, with a probe printing a plausible
+  `PR_ROUND_PAUSE … rounds=41 …` line and then exiting 1:
+
+  | operator shell | acknowledgement posted? |
+  | --- | --- |
+  | ordinary | no |
+  | `echo() { :; }` | no |
+  | `echo() { :; }; exit() { return 0; }` | **yes** |
+
+  With both shadowed the arm runs, `exit` returns instead of terminating, execution
+  continues into the parse — which succeeds, because the forged line is well-formed
+  — and a failed probe's output becomes the recorded permission. The comment above
+  that block says permission is the one thing that must never be inferred from
+  unreadable output.
+
+  Every refusal is an expansion now. `${VAR:?…}` is the shell refusing to expand, so
+  no command runs and there is nothing to shadow; the value is cleared by an
+  assignment, which the parser handles, and the condition is `[[` or `case`, both
+  reserved words. That is the answer #181 gave for the setup block, in 2.0.65,
+  applied here. Two refusals became one on the way: a parse that failed leaves the count
+  empty, which the shape refusal already answers.
+
+  **And the block is wrapped in a brace group**, which is not decoration. How far a
+  `:?` stops execution differs by shell mode, and an operator pasting the block into
+  a terminal is the ordinary case: interactively the shell abandons the compound
+  command it was in and reads the next line, so ungrouped the refusal aborts its own
+  line and the next line is the `gh pr comment`. Inside a group everything between
+  the refusal and the post goes with it. A subshell would be worse than no group at
+  all — it dies while the parent carries on, in both modes.
+
+  Covered by the lift added in 2.0.80's cycle: the attack is asserted three ways —
+  that it was injected, that nothing was posted, and that neither shadowed name is
+  reached at all — plus an interactive pair with the ungrouped statements as the
+  control. Closes #224.
+
+- The contract test's claim scanner now sees **indented** bash fences. Two of this
+  document's blocks sit inside list items, and a column-anchored scan did not reach
+  them — which made those two the only blocks that could carry no argument at all,
+  since a pointer inside one was counted in the file total but not in the fenced
+  total and the two could never agree. Fail-closed rather than blind, which is why
+  it surfaced the moment this change put a claim there.
+
 ## [2.0.80] — 2026-08-29
 
 - **The "require branches to be up to date" policy is enforced where it can be

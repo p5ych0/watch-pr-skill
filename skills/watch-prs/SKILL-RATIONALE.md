@@ -1926,3 +1926,60 @@ match and no second field to be confused with.
 
 Anything appended after that field would be swallowed into the baseline, which is
 the same field-order rule the signoff records follow and for the same reason.
+
+## EVERY REFUSAL HERE IS AN EXPANSION, AND THE GROUP IS WHAT CONTAINS IT.
+
+These four refusals were `|| { echo "ABORT: …"; exit 0; }`, and that shape has no
+containment in the shell this block runs in. `SKILL.md` executes in the operator's
+own session, where `echo` and `exit` are both NAMES, and neither can be re-execed
+away. Measured against the block lifted out of this document, with a probe printing
+a plausible `PR_ROUND_PAUSE … rounds=41 …` line and exiting 1:
+
+    operator shell                          acknowledgement posted?
+    ordinary                                no
+    echo() { :; }                           no
+    echo() { :; }; exit() { return 0; }     YES
+
+With both shadowed the arm runs, `exit` returns instead of terminating, execution
+continues into the parse — which succeeds, because the forged line is well-formed —
+and a failed probe's output becomes the operator's recorded permission to continue
+past a check-in. That is the one thing the comment above this block says must never
+happen. #224.
+
+An expansion has no such gap: `${VAR:?…}` is the shell refusing to expand, so no
+command runs and there is nothing to shadow. The value is cleared by an ASSIGNMENT,
+which the parser handles, and the condition is `[[`, `case` or a command's own
+status — `[[` and `case` are reserved words. This is #181's answer to the same class
+in the setup block, applied here.
+
+**The clearing arm is the safe one on purpose.** `[[ $ROUNDS_RC == 3 ]] || ROUNDS_PAUSE=`
+sends every answer that is not the distinguished 3 to the clear, so an unexpected
+status refuses rather than continues. `case` does the same for the count: anything
+that is not digits empties the value the post would carry.
+
+**Two refusals became one.** The parse arm and the shape arm said the same thing: a
+pipeline that failed leaves the count empty, and empty is what the shape refusal
+already answers. Removing it is `prefer removing the dependency over guarding it`
+rather than a shortcut — there is no state the deleted arm caught that the remaining
+one does not.
+
+**THE GROUP IS NOT DECORATION, AND IT MUST NOT BE A SUBSHELL.** How far a `:?`
+expansion stops execution differs between a script and an interactive session, and
+an operator pasting this block into a terminal is the ordinary case here. Measured
+on bash 5.3:
+
+    container            non-interactive        interactive
+    top-level statements shell exits            the NEXT statement still runs
+    { … }                shell exits            the group is abandoned, then the
+                                                shell reads the line after it
+    ( … )                the rest still runs    the rest still runs
+
+Interactively the shell does not stop; it abandons the compound command it was in
+and carries on with the next line. So the container is not there to end the
+session — it is there to make sure everything between the refusal and the
+acknowledgement is inside ONE command, and goes with it. Ungrouped, the refusal
+aborts its own line and the next line is the `gh pr comment`, which is the defect
+with extra steps.
+
+A SUBSHELL is worse than no container at all: it dies and the parent carries on, in
+both modes. `{` is a reserved word, so nothing can take it.
