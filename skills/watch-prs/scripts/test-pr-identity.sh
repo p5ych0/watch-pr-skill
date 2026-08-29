@@ -29,16 +29,33 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 
 # Concrete-identity patterns that must never be hard-coded: a repo slug, a unit
-# slug, or any concrete path keyed on a repository name.
+# slug, a concrete path keyed on a repository name, or a literal owner/repo handed
+# to `gh`.
 #
 # THE SHAPES, NOT A LIST OF PROJECTS. This named two of the author's other
-# repositories, which made the guard a list to maintain and put their names in a
-# file that forbids exactly that. Keyed on the OWNER and the shape instead, it
-# catches any repository of theirs — including THIS one, which the old pattern did
-# not, though a slug baked into an installed script would route another project's
-# reviews here. Verified both ways below: no hit on this tree, and a hit on each
-# staged violation.
-PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/(p5ych0-)?[A-Za-z0-9_.-]+-review-bus|/home/[^ ]*/[a-z][A-Za-z0-9_-]*-review-bus|owner=.?p5ych0|repo=.?[A-Za-z]|[A-Z][A-Z0-9]*_REVIEW_BUS'
+# repositories, which made the guard a list to maintain and put their names in the
+# one file whose job is to forbid exactly that. Keyed on the owner and the shape
+# instead, it catches any repository of theirs — including THIS one, which the old
+# pattern did not, though an installed copy serves every project and a slug baked
+# into a script would route another project's reviews here.
+#
+# A LITERAL AFTER `owner=` OR `repo=`, NEVER AN EXPANSION. The first generalisation
+# wrote `repo=.?[A-Za-z]`, where the `.?` eats the `$` and the class eats the first
+# letter of the variable — so `repo=$REPO`, the spelling this repository REQUIRES,
+# would have failed the guard. It matched nothing here only because no script
+# happens to write it that way, which is a landmine rather than a pass. The
+# optional quote is there because `repo="$REPO"` must not match either.
+#
+# THE PATH ARMS KEEP BOTH DOCUMENTED SUFFIXES. The first generalisation required
+# every path to end `-review-bus`, which silently dropped the `-claude-worktrees`
+# shape the old comment named — a guard weakened while the change claimed only to
+# remove names. What is NOT covered, and is said rather than implied: a path keyed
+# on a project name with some third suffix. `SCRIPT_PAT` below is what catches the
+# general case in code; this scan reaches comments too, which is its own job.
+#
+# EVERY ARM HAS A PROBE, below. This scan asserts an ABSENCE, so an arm that
+# matches nothing reports the invariant holding without testing it.
+PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|/home/[^ ]*/[A-Za-z0-9_-]+-(review-bus|claude-worktrees)|owner=["'"'"']?[A-Za-z]|repo=["'"'"']?[A-Za-z]|[A-Z][A-Z0-9]*_REVIEW_BUS'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1136,7 +1153,12 @@ pat_probe_fail=0
 for _pp in 'x=p5ych0/some-other-repo' \
            'x=p5ych0/watch-pr-skill' \
            'x=p5ych0-some-other-repo' \
-           'd=/tmp/p5ych0-something-review-bus' \
+           'd=/tmp/sample-project-review-bus' \
+           'd=/tmp/sample-project-claude-worktrees' \
+           'd=/home/someone/sample-project-review-bus' \
+           'd=/home/someone/sample-project-claude-worktrees' \
+           'gh api -f owner=someowner' \
+           'gh api -f repo=somerepo' \
            'SOMETHING_REVIEW_BUS=1' \
            '# a comment naming owner=p5ych0'; do
     printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
@@ -1145,6 +1167,24 @@ for _pp in 'x=p5ych0/some-other-repo' \
     else
         echo "FAIL - the identity scan does not catch '$_pp'; its absence above proves nothing"
         pat_probe_fail=1
+    fi
+done
+# …AND THE DERIVED SPELLINGS ARE NOT CAUGHT, which is the other half. A guard that
+# flags `repo=$REPO` refuses the one form this repository requires, and it would do
+# so on a tree where nobody happens to write it — passing today and blocking the
+# next helper that does.
+for _pn in 'gh api -f repo="$REPO"' \
+           'gh api -f owner="$OWNER"' \
+           'repo=$REPO' \
+           'owner=$OWNER' \
+           'u="repos/$OWNER/$REPO/commits"' \
+           'REVIEW_BUS_REMOTE=x'; do
+    printf '%s\n' "$_pn" > "$pat_probe_dir/probe.sh"
+    if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
+        echo "FAIL - the identity scan flags the derived spelling '$_pn'"
+        pat_probe_fail=1
+    else
+        echo "ok   - …and does not flag the derived spelling: $_pn"
     fi
 done
 rm -rf "$pat_probe_dir"

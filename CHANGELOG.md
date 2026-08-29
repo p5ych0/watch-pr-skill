@@ -24,8 +24,11 @@
 
   That scan asserts an ABSENCE, and nothing had ever exercised it — a pattern
   matching nothing would have reported the invariant holding without testing it.
-  Six staged violations now prove it can still see one, and the whole set goes red
-  if the pattern is emptied.
+  Every arm now has a probe, and six DERIVED spellings have one too: the first
+  generalisation wrote `repo=.?[A-Za-z]`, where the `.?` eats the `$` and the class
+  eats the first letter, so `repo=$REPO` — the spelling this repository requires —
+  would have failed the guard. It matched nothing here only because no script
+  happens to write it that way, which is a landmine rather than a pass.
 
 ## [2.0.81] — 2026-08-29
 
