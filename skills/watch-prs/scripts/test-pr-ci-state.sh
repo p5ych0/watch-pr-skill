@@ -810,7 +810,7 @@ rm -f "$TMP/gh.rules.2"
     && pass "…and a policy switched off between the two reads still decides" \
     || die "the strict policy was lost between the reads: '$got'"
 # A COMPARISON THAT CANNOT BE READ IS AN ERROR, in every shape it can arrive in.
-for _bad in '{"status":"behind"}' '{"behind_by":0}' '{"status":"sideways","behind_by":0}' '{"status":"identical","behind_by":"0"}' '[]'; do
+for _bad in '{"status":"behind"}' '{"behind_by":0}' '{"status":"sideways","behind_by":0}' '{"status":"identical","behind_by":"0"}' '{"status":"identical","behind_by":-1}' '{"status":"identical","behind_by":1.5}' '[]'; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":false}' \
         '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \

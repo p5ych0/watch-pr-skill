@@ -606,6 +606,11 @@ required_checks_verdict() {   # <oid> <base> ; prints green|failed|behind|pendin
             _cmp="$(printf '%s' "$_cmp" | jq -r '
                 if type != "object" then "malformed"
                 elif (.behind_by | type) != "number" then "malformed"
+                # A COUNT IS A WHOLE NUMBER AND NOT NEGATIVE. `-1` is a number, so
+                # the type test passes it, and it is neither above zero nor a real
+                # count — read as `current` it opens the gate on a body nothing
+                # produced. Fractions go the same way and for the same reason.
+                elif .behind_by < 0 or (.behind_by | floor) != .behind_by then "malformed"
                 elif (.status | type) != "string" then "malformed"
                 elif (.status | IN("identical","ahead","behind","diverged") | not) then "malformed"
                 elif .behind_by > 0 then "behind"
