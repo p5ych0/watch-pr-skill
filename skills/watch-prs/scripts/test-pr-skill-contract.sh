@@ -433,7 +433,7 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
 # THE PREFIX MATCH IS THE OTHER HALF, and it is what catches a readonly or a
 # transforming attribute — MIXED CASE, because an all-caps sentinel survives
 # `declare -u` unchanged and that attribute got through once.
-for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN \
+for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN RB_REMOTE \
            CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
     grep -q "( $_tn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_setup_body" \
         || die "the setup probe does not assign a random RbProbe sentinel to \$$_tn and match it"
@@ -776,7 +776,8 @@ FORGE
     # is the identity rather than one name of it.
     if [ "$_rb_has_n" = yes ]; then
         for _al_pair in CODEX_BOT:OWNER COPILOT_BOT:REPO SUMMARY_FILE:OWNER \
-                        REQUEST_FILE:HOST PRIOR_FILE:REPO HEAD_FILE:OWNER; do
+                        REQUEST_FILE:HOST PRIOR_FILE:REPO HEAD_FILE:OWNER \
+                        RB_REMOTE:OWNER RB_REMOTE:HOST; do
             _al_src="${_al_pair%%:*}"; _al_dst="${_al_pair#*:}"
             _al_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
                 FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -1137,7 +1138,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # the status passes while the setup directory is built at a name the operator
     # chose.
     if [ "$_rb_has_n" = yes ]; then
-        for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN \
+        for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN RB_REMOTE \
                    CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
             _nr_rc=0
             _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \

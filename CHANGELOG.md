@@ -58,6 +58,13 @@
   nobody chose. All ten names the block assigns are in the generic probe now, and its
   refusal names them.
 
+- **A name the operator's shell has aliased to the identity stops setup.** `RB_REMOTE`
+  joins the ten names the generic probe already covered: declared as a nameref onto
+  `OWNER` or `HOST`, the clear and the origin read write through it, `rb_identity` then
+  replaces that target with a parsed component, and the export pins the session to a
+  fragment of its own remote — which the child pin echoes back, so the comparison agrees
+  and setup announces success on an identity every later helper rejects.
+
 - **A failed setup removes only the names it had already taken.** The cleanup knew which
   objects the helper CAN create, not which it HAD created, so a refusal early on — a
   `pr-origin.sh` that planted a file at the origin name and then failed, say — deleted a

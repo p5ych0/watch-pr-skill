@@ -45,6 +45,8 @@ the real code.
 | a file at a name this run creates LATER, or never | **survives, untouched** |
 | a file at any other name | **survives, untouched** |
 
+| a signal between a successful create and its ledger entry | this run's own file is **left behind**, in its own `work/` |
+
 The middle row is a separate case and a separate fixture. The cleanup used to remove
 every name this helper ever creates, so a `pr-origin.sh` that planted `$RB_DIR/origin`
 and then refused had that file deleted by a run which never wrote it. Each creation is
@@ -60,6 +62,26 @@ property rather than a restatement. Every one of those names is created under `s
 with `umask 077`, so the open is `O_EXCL` and refuses a symlink whether or not its target
 exists — a name this session took cannot be made to point somewhere else. That guard is
 what makes the table above the whole of it.
+
+## And the ledger is an inference, like the reservation flags above it
+
+A file goes on the removal list in the command AFTER the one that creates it, so a signal
+delivered in between leaves it untracked and the cleanup does not take it. That is the
+same measured fact `2026-08-26-reservation-inference.md` records for `RB_OWNED` — bash
+handles a signal once the external command RETURNS and before the `&&` after it — one
+level down.
+
+**What it costs is a leak of this run's own file, and that is the safe side of the
+trade.** The alternative is recording the name BEFORE the create, which moves the window
+to a create that FAILED — and under `set -C` a failed create means the name was already
+somebody's, so the cleanup would delete a planted file. That is the defect round 16 of
+#229 fixed; reintroducing it to close a leak would be trading a destruction for a leak in
+the wrong direction.
+
+**Directories do not have this window at all**, and that is why they carry no ledger
+entry. `rmdir` refuses a symlink and refuses anything with contents, so the cleanup asks
+for every one of the helper's directory names unconditionally: a name it never reached is
+either absent or somebody's non-empty directory, and both are no-ops.
 
 ## What is NOT accepted here
 

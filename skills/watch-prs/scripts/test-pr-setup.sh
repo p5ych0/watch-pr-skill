@@ -589,6 +589,46 @@ rm -rf "$_ec"
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
+# ── a signal between a create and its ledger entry ────────────────────────
+# BASH HANDLES A SIGNAL WHEN THE EXTERNAL COMMAND RETURNS, before the next command runs —
+# which `CLAUDE.md` records measuring for `RB_OWNED`. The ledger entry for a created file
+# is that next command, so a signal in between leaves the file untracked and the cleanup
+# does not remove it. What is LEFT is this run's own file; nothing of anyone else's is
+# destroyed, which is the safe side of the trade — pre-recording would delete a planted
+# file at a name whose create had FAILED, which is what round 16 fixed.
+#
+# DIRECTORIES DO NOT HAVE THIS WINDOW AT ALL, because they need no ledger: `rmdir` refuses
+# a symlink and refuses anything with contents, so the cleanup can ask for every one of
+# this helper's directory names unconditionally. That is what the case below measures
+# first — a signal delivered the instant `work/` exists must still leave nothing behind.
+if [ "$_rb_uid" != 0 ]; then
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+sed 's|^    RB_MADE_F="$RB_MADE_F work/$_f"|    kill -s TERM "$$"; RB_MADE_F="$RB_MADE_F work/$_f"|' \
+    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh.new" \
+    && mv "$_stage/pr-setup.sh.new" "$_stage/pr-setup.sh" \
+    || die "the signal-window rewrite failed; the case would run against the wrong copy"
+grep -qF 'kill -s TERM "$$"; RB_MADE_F=' "$_stage/pr-setup.sh" \
+    && pass "the signal-window stage is patched" \
+    || die "the signal-window stage did not patch pr-setup.sh; the case proves nothing"
+_sg2="$(mktemp -d "$TMP/sg2.XXXXXX")/dir"
+_sg2_rc=0
+_sg2_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sg2" 2>&1)" || _sg2_rc=$?
+[ "$_sg2_rc" -ne 0 ] \
+    && pass "a signal between a create and its ledger entry does not report success" \
+    || die "the signal-window case returned 0 (out='$_sg2_out')"
+# WHAT IS MEASURED IS THE RESIDUE, and it is the bound the record states: the file whose
+# entry was never made is left, and it is this run's own. Nothing else survives.
+_sg2_left=""; _sg2_left="$(ls -A "$_sg2" 2>/dev/null | tr '\n' ' ')" || _sg2_left="SCAN_FAILED"
+case "$_sg2_left" in
+    "" ) pass "…and nothing is left behind at all" ;;
+    *work* ) pass "…and what is left is this run's own work directory, not another's file" ;;
+    * ) die "the signal window left something unexpected: '$_sg2_left'" ;;
+esac
+rm -rf "$_sg2"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+fi
+
 # ── what a substitution AFTER the identity check can cost ─────────────────
 # THE CLEANUP CHECKS THE HELD IDENTITY AND THEN REMOVES BY NAME, and nothing in shell
 # can unlink relative to a held descriptor. A same-UID process that substitutes the tree

@@ -30,9 +30,12 @@
 #     reads is the one it wrote. The driver re-derives the identity from what it read,
 #     and assigns and proves every other value itself. WHICH object it opened is not
 #     something either side can settle today — see #230.
-#   - REMOVE THE DIRECTORY. It is the caller's, by construction: this helper is
-#     given a name and creates it, and it must survive the call for the read to happen
-#     at all — and for the working files inside it to be there when a round needs them. A helper that removed it would be removing the thing it was
+#   - KEEP THE DIRECTORY. It is the caller's, by construction: this helper is given a
+#     name and creates it, and it must outlive the call — for the read, and for the four
+#     working files inside it that every later stage writes into. The driver removes
+#     nothing under it, deliberately: unlinking through a name published in argv can take
+#     what replaced it. What THIS file removes is a refused reservation, on its failure
+#     path only, and only the names it had already created. A helper that removed it would be removing the thing it was
 #     asked to produce.
 #   - PROVE THE PIN. `pr-origin.sh pin` asks whether a CHILD sees this repository,
 #     and the child that matters is one the driver starts. Proving it here would
@@ -130,12 +133,19 @@ RB_INO=
 # wrote it, which is past the bound `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
 # accepts: the names this session HAD ALREADY TAKEN, not the ones it might have.
 #
-# TWO LISTS, because the removals differ: files come out with `rm -f`, directories with
-# `rmdir`, and the directories go in reverse so a parent is never asked for before its
-# child. The names are relative to `$RB_DIR` and contain no spaces, which is what lets
-# the lists be split on whitespace.
+# ONE LIST, AND ONLY FOR FILES. A file comes out with `rm -f`, which resolves whatever is
+# at the name and destroys it, so it may only be used on a name this run is known to have
+# written. A DIRECTORY comes out with `rmdir`, which refuses a symlink and refuses
+# anything with contents — so the worst it can take is an empty directory at one of this
+# helper's own names, which is the cost
+# `docs/decisions/2026-08-26-reservation-inference.md` already accounts for. Directories
+# therefore need no ledger, and that is not a shortcut: it is what closes the window
+# between an external `mkdir` returning and the next command, where a signal is handled
+# and a ledger entry has not yet been made.
+#
+# THE NAMES ARE RELATIVE TO `$RB_DIR` and contain no spaces, which is what lets the list
+# be split on whitespace.
 RB_MADE_F=
-RB_MADE_D=
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
 # AND THE OBJECT ITSELF IS HELD, because ownership is not identity. `-O` refuses a
 # name another ACCOUNT holds and that is the boundary the record is about — but a
@@ -229,14 +239,14 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
     # anything and leaves a directory behind at worst.
     if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
-        # ONLY WHAT WAS RECORDED, and nothing else. The files first, then the
-        # directories in reverse, so a parent is never asked for before its child.
+        # THE FILES THIS RUN RECORDED WRITING, and nothing else.
         for _g in $RB_MADE_F; do
             /usr/bin/env rm -f "$RB_DIR/$_g" 2>/dev/null
         done
-        _rb_rev=
-        for _g in $RB_MADE_D; do _rb_rev="$_g $_rb_rev"; done
-        for _g in $_rb_rev; do
+        # THEN THE DIRECTORIES, IN REVERSE, and unconditionally — `rmdir` refuses a
+        # symlink and refuses anything with contents, so a name this helper never got to
+        # is either absent or somebody's non-empty directory, and both are no-ops.
+        for _g in pinprobe2 pinprobe work o; do
             /usr/bin/env rmdir "$RB_DIR/$_g" 2>/dev/null
         done
     fi
@@ -311,9 +321,8 @@ RB_PHASE=written
     [ "$_rc" -eq 2 ] && rb_setup_stop origin_storage 2
     rb_setup_stop origin_unreadable 1
 }
-# THE READ SUCCEEDED, so `o` and its leaf are this run's — `pr-origin.sh` gives its own
-# directory back on a refusal, so they exist only on this path.
-RB_MADE_D="$RB_MADE_D o"
+# THE READ SUCCEEDED, so the leaf is this run's — `pr-origin.sh` gives its own directory
+# back on a refusal, so it exists only on this path.
 RB_MADE_F="$RB_MADE_F o/origin"
 RB_REMOTE=""
 RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transport 1
@@ -401,7 +410,6 @@ umask 077
 set -C
 RB_WORK_DIR="$RB_DIR/work"
 /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" 2>/dev/null || rb_setup_stop work_dir 2
-RB_MADE_D="$RB_MADE_D work"
 for _f in summary.md request.md prior.txt head.txt; do
     : > "$RB_WORK_DIR/$_f" || rb_setup_stop work_files 2
     RB_MADE_F="$RB_MADE_F work/$_f"
@@ -471,9 +479,7 @@ RB_MADE_F="$RB_MADE_F origin"
 # processes apart and cannot be closed from either. The abort the driver prints there
 # says to re-run, which relocates the session as a whole.
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
-RB_MADE_D="$RB_MADE_D pinprobe"
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
-RB_MADE_D="$RB_MADE_D pinprobe2"
 /usr/bin/env rmdir "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
 /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 
