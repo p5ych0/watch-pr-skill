@@ -7,7 +7,8 @@
   and in both reviewer files, so a slug added to a comment or a changelog entry is a
   blocking finding rather than something to notice later.
 
-- **Thirty such mentions are gone.** The
+- **Thirty such mentions are gone**, and the identity guard no longer keeps a list
+  of the author's projects. The
   measurements behind the required-checks work cited the public repositories they
   were taken on, and two archived v1 planning documents discussed another project of
   the same author. Every one of those names is gone: the measurements keep their
@@ -22,10 +23,19 @@
 
 - **And the identity guard no longer keeps a list of the author's projects.**
   `test-pr-identity.sh` forbade two repository names by spelling them out — a list to
-  maintain, in the one file whose job is to forbid exactly that. It is keyed on the
-  owner and the shape now, which catches any repository of theirs **including this
-  one**: the old pattern did not, though an installed copy serves every project, so
-  a slug baked into a script would send another project's reviews here.
+  maintain, in the one file whose job is to forbid exactly that. It is two fixed
+  strings now: the owner, in any spelling, and a project-prefixed bus variable.
+
+  **It was a pattern language for four review rounds first, and that is the part
+  worth recording.** Generalising the list into arms that told a literal from an
+  expansion after `owner=` and `repo=` produced a finding per round, each fixing the
+  last: a name may start with a digit, then with a dot, then `[` is a glob and
+  `--repo=[A-Za-z]*)` is legal code, then `+(` is one too and `$'…'` is a literal
+  beginning with `$`. Every one was a fact about shell syntax, and reading shell
+  syntax out of text needs a shell. What the fixed strings cannot see is said where
+  the code is: an identity belonging to neither this repository nor its owner, and a
+  path keyed on the plugin's own name — which cannot be forbidden, because setup's
+  second discovery mode globs it to find the scripts at all.
 
   That scan asserts an ABSENCE, and nothing had ever exercised it — a pattern
   matching nothing would have reported the invariant holding without testing it.
@@ -5693,7 +5703,7 @@ longer read; move anything project-specific in it into `AGENTS.md`.
 ## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
-  findings** (another repository of the same author#212). `process_review` read `.summary` from the
+  findings**. `process_review` read `.summary` from the
   model result only in the zero-findings branch; with one or more findings it was
   overwritten by a status line and never reached the PR or the bus response. The
   prompt asks for a summary on *every* review — including the verification

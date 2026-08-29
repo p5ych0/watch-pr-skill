@@ -28,49 +28,38 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # fields exactly as silently.
 unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 
-# Concrete-identity patterns that must never be hard-coded: a repo slug, a unit
-# slug, a concrete path keyed on a repository name, or a literal owner/repo handed
-# to `gh`.
+# Concrete-identity patterns that must never be hard-coded, as THREE FIXED STRINGS.
 #
-# THE SHAPES, NOT A LIST OF PROJECTS. This named two of the author's other
-# repositories, which made the guard a list to maintain and put their names in the
-# one file whose job is to forbid exactly that. Keyed on the owner and the shape
-# instead, it catches any repository of theirs — including THIS one, which the old
-# pattern did not, though an installed copy serves every project and a slug baked
-# into a script would route another project's reviews here.
+# WHAT THIS CATCHES: this repository's OWNER and a project-prefixed bus variable, in
+# any spelling, anywhere in the file, comments included. `p5ych0/other`,
+# `p5ych0-other`, `/tmp/p5ych0-x-review-bus`, `owner=p5ych0` and
+# `repo=$'p5ych0-x'` are each one substring away, and none of them needs the text to
+# be parsed.
 #
-# A LITERAL AFTER `owner=` OR `repo=`, NEVER AN EXPANSION, and the literal is
-# whatever a name can START with rather than a list of what it may contain. Two
-# rounds narrowed this twice for the same reason: `[A-Za-z]` misses `repo=123`, and
-# `acme/123` is legal — this suite reads a numeric repository name end to end —
-# while `[A-Za-z0-9]` misses `repo=.github`, and a leading dot is how GitHub's own
-# special repositories are named. So the first character is anything that is not an
-# expansion, a quote, whitespace, or a glob metacharacter: `$` keeps `repo=$REPO`
-# out, and `*`, `?` and `[` keep a `case` pattern out — `*" --repo="*)` is a real
-# line in `pr-selfcheck.sh`, and `--repo=[A-Za-z]*)` is the shape a future one would
-# take. Both are staged below, because the arm that is too wide blocks the
-# self-check on legal code, which is the same defect as the arm that is too narrow
-# pointing the other way.
+# THE PLUGIN'S OWN NAME IS NOT ONE OF THEM, and cannot be: setup's second discovery
+# mode globs `~/.claude/plugins/cache/*/watch-pr-skill/*/skills/...` to find the
+# scripts at all, so the literal is how the driver locates itself. An arm on it
+# flags that line, which is the exemption `CLAUDE.md` already grants the plugin's
+# own metadata and install path.
 #
-# THE PATH ARMS TAKE A DOT IN THE NAME for the same reason the literal arms do: a
-# repository may be called `.github`, so `/home/<user>/.github-review-bus` is a
-# hard-coded path and the `/home` arm was the one class that had not been told. The first generalisation
-# wrote `repo=.?[A-Za-z]`, where the `.?` eats the `$` and the class eats the first
-# letter of the variable — so `repo=$REPO`, the spelling this repository REQUIRES,
-# would have failed the guard. It matched nothing here only because no script
-# happens to write it that way, which is a landmine rather than a pass. The
-# optional quote is there because `repo="$REPO"` must not match either.
+# WHY IT IS NOT A PATTERN LANGUAGE ANY MORE. This began as a list of two of the
+# author's other repositories and was generalised into arms that tried to tell a
+# LITERAL from an expansion after `owner=` and `repo=`, and a repository-keyed path
+# from any other path. Four review rounds followed, each fixing the last and finding
+# the next: a name may start with a digit (`repo=123`), then with a dot
+# (`repo=.github`), then `[` is a glob and `--repo=[A-Za-z]*)` is legal code, then
+# `+(` is one too under `extglob` and `$'…'` is a literal whose first character is
+# `$`. Every one was a fact about SHELL SYNTAX, and reading shell syntax out of text
+# needs a shell — which `CLAUDE.md` records this repository paying 2,200 lines and
+# fifty-two rounds to learn once already.
 #
-# THE PATH ARMS KEEP BOTH DOCUMENTED SUFFIXES. The first generalisation required
-# every path to end `-review-bus`, which silently dropped the `-claude-worktrees`
-# shape the old comment named — a guard weakened while the change claimed only to
-# remove names. What is NOT covered, and is said rather than implied: a path keyed
-# on a project name with some third suffix. `SCRIPT_PAT` below is what catches the
-# general case in code; this scan reaches comments too, which is its own job.
-#
-# EVERY ARM HAS A PROBE, below. This scan asserts an ABSENCE, so an arm that
-# matches nothing reports the invariant holding without testing it.
-PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|/home/[^ ]*/[A-Za-z0-9_.-]+-(review-bus|claude-worktrees)|owner=["'"'"']?[^$*?["'"'"'[:space:]]|repo=["'"'"']?[^$*?["'"'"'[:space:]]|[A-Z][A-Z0-9]*_REVIEW_BUS'
+# WHAT IS NOT CAUGHT, said rather than implied: a hard-coded identity belonging to
+# NEITHER this repository nor its owner — `gh api -f owner=someone-else` — and a
+# path keyed on this plugin's own name or some third project's. The first needs the literal-vs-expansion
+# distinction above; the second was only ever caught by listing two project names,
+# which is the list this change removes. `SCRIPT_PAT` below still catches a bare
+# `owner/repo` slug in code, which is how a hard-coded target is actually written.
+PAT='p5ych0|[A-Z][A-Z0-9]*_REVIEW_BUS'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1168,19 +1157,9 @@ pat_probe_fail=0
 for _pp in 'x=p5ych0/some-other-repo' \
            'x=p5ych0/watch-pr-skill' \
            'x=p5ych0-some-other-repo' \
-           'd=/tmp/sample-project-review-bus' \
-           'd=/tmp/sample-project-claude-worktrees' \
-           'd=/home/someone/sample-project-review-bus' \
-           'd=/home/someone/sample-project-claude-worktrees' \
-           'gh api -f owner=someowner' \
-           'gh api -f repo=somerepo' \
-           'gh api -f repo=123' \
-           'gh api -f repo="123"' \
-           'gh api -f owner=42' \
-           'gh api -f repo=.github' \
-           'gh api -f repo=_internal' \
-           'd=/home/someone/.github-review-bus' \
-           'd=/tmp/.github-claude-worktrees' \
+           'gh api -f owner=p5ych0' \
+           'd=/tmp/p5ych0-x-review-bus' \
+           'gh api -f repo=$'"'"'p5ych0-x'"'"'' \
            'SOMETHING_REVIEW_BUS=1' \
            '# a comment naming owner=p5ych0'; do
     printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
@@ -1191,24 +1170,27 @@ for _pp in 'x=p5ych0/some-other-repo' \
         pat_probe_fail=1
     fi
 done
-# …AND THE DERIVED SPELLINGS ARE NOT CAUGHT, which is the other half. A guard that
-# flags `repo=$REPO` refuses the one form this repository requires, and it would do
-# so on a tree where nobody happens to write it — passing today and blocking the
-# next helper that does.
+# …AND LEGAL CODE IS LEFT ALONE. Every one of these was produced by a review round
+# against the pattern language this replaced: an arm too WIDE blocks the self-check
+# on code that hard-codes nothing, which is the same defect as one too narrow. They
+# stay because a future arm would reintroduce exactly them.
 for _pn in 'gh api -f repo="$REPO"' \
-           'gh api -f owner="$OWNER"' \
            'repo=$REPO' \
            'owner=$OWNER' \
            'u="repos/$OWNER/$REPO/commits"' \
            'case "$c" in *" --repo="*) ;; esac' \
            'case "$a" in --repo=[A-Za-z]*) ;; esac' \
-           'REVIEW_BUS_REMOTE=x'; do
+           'case "$a" in --repo=+([A-Za-z])*) ;; esac' \
+           'gh api -f repo=.github' \
+           'gh api -f repo=123' \
+           'REVIEW_BUS_REMOTE=x' \
+           'ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills'; do
     printf '%s\n' "$_pn" > "$pat_probe_dir/probe.sh"
     if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
-        echo "FAIL - the identity scan flags the derived spelling '$_pn'"
+        echo "FAIL - the identity scan flags legal code: '$_pn'"
         pat_probe_fail=1
     else
-        echo "ok   - …and does not flag the derived spelling: $_pn"
+        echo "ok   - …and does not flag: $_pn"
     fi
 done
 rm -rf "$pat_probe_dir"

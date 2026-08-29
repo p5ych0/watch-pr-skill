@@ -6,7 +6,7 @@
 #   0  clean
 #   1  findings — fix them before pushing
 #   2  the check itself could not run — fail closed
-#   3  not applicable: this repository is not a watch-pr-skill checkout, so
+#   3  not applicable: this repository is not a checkout of this plugin, so
 #      there was nothing in scope to check
 #
 # WHY THIS EXISTS
