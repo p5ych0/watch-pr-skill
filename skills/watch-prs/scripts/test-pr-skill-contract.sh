@@ -333,9 +333,18 @@ _rb_gone="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -nE 'RB_ORIGIN_DIR|RB_ORIGI
 grep -qF '/usr/bin/env rm -f "$RB_SETUP_DIR/env"' <<<"$skill_flat" \
     && pass "…the env file is removed once it has been sourced" \
     || die "the sourced env file is left on disk"
-grep -qF '/usr/bin/env rm -rf "$RB_SETUP_DIR/pin"' <<<"$skill_flat" \
-    && pass "…and the pin leaf once its descriptor has been read" \
-    || die "the pin directory is left on disk"
+# BY NAME AND THEN `rmdir`, NEVER RECURSIVELY. `$RB_SETUP_DIR` is published in argv,
+# so a `rm -rf` on a leaf under it deletes whatever a replacement holds — the same
+# regression `pr-setup.sh` already fixed, arriving by the other route, and past what
+# `docs/decisions/2026-08-26-reservation-inference.md` accepts.
+{ grep -qF '/usr/bin/env rm -f "$RB_SETUP_DIR/pin/pin"' <<<"$skill_flat" \
+  && grep -qF '/usr/bin/env rmdir "$RB_SETUP_DIR/pin"' <<<"$skill_flat"; } \
+    && pass "…and the pin leaf once its descriptor has been read, by name and then rmdir" \
+    || die "the pin directory is left on disk, or is removed recursively"
+case "$skill_flat" in
+    *'rm -rf "$RB_SETUP_DIR'*) die "SKILL.md removes something under the setup directory recursively" ;;
+    *) pass "…with no recursive removal anywhere under the published setup path" ;;
+esac
 case "$skill_flat" in
     *'rm -rf "$RB_SETUP_DIR"'[!/]*|*'rm -rf "$RB_SETUP_DIR"')
         die "SKILL.md removes the setup directory, which holds the session's working files" ;;
@@ -459,9 +468,9 @@ if [ -n "$_forge_dir" ]; then
     # whether the names are cleared or not.
     _fe_log="$_forge_dir/forge-log-that-must-not-exist"
     export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' \
-           FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
+           FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_PIN_EXTRA=1 FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
            FORGE_NOENV=1 FORGE_PATHS=elsewhere FORGE_NONEMPTY=1 FORGE_ENV_EXTRA=x
-    unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_SETUP_RC \
+    unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_PIN_EXTRA FORGE_SETUP_RC \
           FORGE_SETUP_LOG FORGE_NOENV FORGE_PATHS FORGE_NONEMPTY FORGE_ENV_EXTRA
     cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
@@ -473,6 +482,13 @@ case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 # opens it, `[[ -O ]]` passes because this run made it, and `[[ -f ]]` is false — so
 # the rejection comes from the check the arm exists for rather than from a missing
 # file, which any earlier step would have refused first.
+# AND IT CAN LEAVE MORE THAN THE LEAF, which is what a REPLACEMENT of the published
+# pin directory looks like from the caller's side: the name it removes is one another
+# process may have put its own contents at.
+if [ -n "${FORGE_PIN_EXTRA:-}" ] && [ "$1" = pin ]; then
+    mkdir "$2/squatter-subdir" || exit 1
+    printf 'not the drivers\n' > "$2/witness" || exit 1
+fi
 if [ -n "${FORGE_LEAF_DIR:-}" ]; then
     mkdir "$2/$_leaf" || exit 1
 else
@@ -947,6 +963,32 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         *'OWNER=acme REPO=widget'*) die "a pre-seeded readonly RB_PIN_SEEN certified a pin: '$_sn_out'" ;;
         *) pass "…and a pre-seeded readonly RB_PIN_SEEN certifies nothing" ;;
     esac
+
+    # …AND THE PIN TRANSPORT IS REMOVED WITHOUT TOUCHING WHAT IT DID NOT PUT THERE.
+    # `$RB_SETUP_DIR` is published in argv, so the pin directory under it is a name
+    # another process can act on. A `rm -rf` there deletes a replacement's contents,
+    # which is past what `docs/decisions/2026-08-26-reservation-inference.md` accepts
+    # — its bound is one EMPTY directory, and it rests on `rmdir` refusing anything
+    # with contents in it.
+    _px_dir=""
+    _px_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 FORGE_PIN_EXTRA=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            '"$_setup_body"'
+            printf "D=[%s]\n" "$RB_SETUP_DIR"
+        ' 2>&1)" || true
+    _px_dir="${_px_out#*D=[}"; _px_dir="${_px_dir%%]*}"
+    { [ -n "$_px_dir" ] && [ -d "$_px_dir" ]; } \
+        && pass "the pin case ran and its setup directory can be inspected" \
+        || die "the pin-extra case did not report a setup directory: '$_px_out'"
+    if [ -n "$_px_dir" ] && [ -d "$_px_dir" ]; then
+        { [ -f "$_px_dir/pin/witness" ] && [ -d "$_px_dir/pin/squatter-subdir" ]; } \
+            && pass "…and a replacement's contents under the pin name survive the removal" \
+            || die "the pin removal destroyed contents it did not create"
+        [ ! -e "$_px_dir/pin/pin" ] \
+            && pass "…while the leaf the driver read is gone" \
+            || die "the pin leaf was left on disk"
+        rm -rf "$_px_dir"
+    fi
 
     # ── the probed names, attacked ────────────────────────────────────────
     # A NAMEREF ONTO ONE OF THEM IS REFUSED. This is what `${!name}` is for: the

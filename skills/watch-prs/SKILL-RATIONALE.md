@@ -1612,7 +1612,7 @@ SOURCING IS NOT A NEW TRUST STEP HERE. This block already sources
 proved to hold the helpers a few lines earlier, and a plugin whose scripts are
 hostile has already lost.
 
-## WHAT WAS READ DOES NOT STAY ON DISK; the work directory does, being the session's.
+## WHAT WAS READ DOES NOT STAY ON DISK.
 
 The env file and the pin leaf are both transports: their contents are in this shell
 the moment they have been read, and a copy left at a name published in argv is one
@@ -1620,16 +1620,35 @@ an account watching that name can read the origin out of afterwards. So each is
 removed as soon as it has been consumed — the env file immediately after the source,
 the pin directory immediately after the descriptor is read.
 
-THE SETUP DIRECTORY ITSELF IS NOT REMOVED, and that is the difference from the
-transport directory this replaced. It holds `work/`, which is the session's four
-working files — the round summary, the opening account, the review baseline and the
-gated head — and every stage of the loop writes into them. A cleanup here would be
-removing the thing the call was made to produce.
-
 REMOVED BY PATH, NOT BY NAME. `rm` in this shell is whatever the operator's startup
 file left it, and this is the one shell that cannot re-exec out of that. Nothing
 downstream is a postcondition on either removal, so a shadowed `rm` costs a file left
 behind rather than a wrong answer — but `/usr/bin/env rm` costs nothing either.
+
+## THE WORK DIRECTORY IS KEPT, being the session's own.
+
+This is the difference from the transport directory it replaced, and it is a separate
+obligation from removing the transports rather than the other half of one sentence:
+an edit that dropped either would leave the other's argument standing over it.
+
+`$RB_SETUP_DIR` holds `work/`, which is the session's four working files — the round
+summary, the opening account, the review baseline and the gated head — and every
+stage of the loop writes into them. A cleanup here would be removing the thing the
+call was made to produce, which is why `pr-setup.sh` does not remove it either: its
+header states that giving the directory back is the CALLER's, by construction.
+
+## THE PIN TRANSPORT GOES BY NAME AND THEN `rmdir`, never recursively.
+
+`$RB_SETUP_DIR` is published in argv, so the name is one another process can act on,
+and `pr-origin.sh pin` creates the leaf directory under it. A `rm -rf` there deletes
+whatever a replacement holds — the same regression this loop already fixed inside
+`pr-setup.sh`, arriving by the other route, and past what
+`docs/decisions/2026-08-26-reservation-inference.md` accepts: that record's bound is
+one EMPTY directory, and it rests on `rmdir` refusing anything with contents.
+
+So the leaf goes by its own name and the directory goes with `rmdir`, which refuses a
+replacement carrying anything else and leaves it for its owner. Neither removal is a
+postcondition for anything below, so a failure costs a file left behind.
 
 ## WHAT WAS SOURCED IS RE-PROVED HERE, because a file is not a promise.
 

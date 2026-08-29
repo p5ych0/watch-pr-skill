@@ -225,7 +225,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         # THE SOURCE IS THE ONLY WAY THE VALUES REACH THIS SHELL.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         if . "$RB_SETUP_DIR/env"; then
-            # WHAT WAS READ DOES NOT STAY ON DISK; the work directory does, being the session's.
+            # WHAT WAS READ DOES NOT STAY ON DISK.
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+            # THE WORK DIRECTORY IS KEPT, being the session's own.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             /usr/bin/env rm -f "$RB_SETUP_DIR/env" 2>/dev/null
             # WHAT WAS SOURCED IS RE-PROVED HERE, because a file is not a promise.
@@ -265,7 +267,10 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                     { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                         && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin/pin"
                 fi
-                /usr/bin/env rm -rf "$RB_SETUP_DIR/pin" 2>/dev/null
+                # THE PIN TRANSPORT GOES BY NAME AND THEN `rmdir`, never recursively.
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+                /usr/bin/env rm -f "$RB_SETUP_DIR/pin/pin" 2>/dev/null
+                /usr/bin/env rmdir "$RB_SETUP_DIR/pin" 2>/dev/null
                 if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
                     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
                 else

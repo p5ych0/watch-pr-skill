@@ -105,35 +105,68 @@ case "$RB_DIR" in
 esac
 [ "$#" -eq 1 ] || { echo "PR_SETUP status=error reason=usage" >&2; exit 1; }
 
-# THE DIRECTORY IS THE RESERVATION. `mkdir` without `-p` fails if anything is
-# already at the name — a file, a symlink or another account's directory — so the
-# exclusion is the create, not a test before it. Same rule as `pr-origin.sh`, and
-# for the same reason: a check-then-use here is a window somebody else can stand in.
-/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null || {
-    echo "PR_SETUP status=error reason=dir_not_reserved dir=$RB_DIR" >&2; exit 2; }
-
-# FROM HERE A FAILURE TAKES THE DIRECTORY WITH IT. The caller retries under another
-# parent on status 2 and stops on 1; either way what this leaves behind must not be
-# a half-written env file that a later source would read.
+# ── the reservation, and giving it back ────────────────────────────────────
 #
-# NOT `rm -rf`, AND THAT IS THE WHOLE SHAPE OF THIS FUNCTION. The name is published
-# in argv before the `mkdir` reserves it, and under a parent without the sticky bit
-# another account can replace the directory AFTER the reservation. A recursive
-# removal then deletes the replacement and everything in it — which is far past what
-# `docs/decisions/2026-08-26-reservation-inference.md` accepts, and that record rests
-# on `rmdir` REFUSING anything with contents in it. So this removes the objects this
-# run named, one at a time, and takes directories away with `rmdir` alone: a
-# replacement carrying anything else survives, and is left for its owner.
+# EVERYTHING HERE IS `pr-origin.sh`'s SHAPE, and that is deliberate rather than
+# convenient: the two helpers take the same kind of argument, publish it in argv the
+# same way, and rest on the same accepted record — so a second answer to one question
+# would be a second thing to keep true. What that file worked out, and what
+# `docs/decisions/2026-08-26-reservation-inference.md` accepts, is reproduced below
+# with its reasoning kept short; the long form is there.
 #
-# `RB_PHASE` PICKS BETWEEN TWO SHAPES, as `pr-origin.sh` does and for the same
-# reason. Until a write has happened nothing can be inside, so `rmdir` ALONE is
-# correct and is what the accepted record describes — it refuses a symlink outright,
-# which is what makes it safe on a name this run may no longer own. Once a write has
-# happened `rmdir` necessarily fails on a directory holding its leaf, so the leaves
-# go first, by name.
+# THE CLEANUP IS ARMED BEFORE THE RESERVATION IS ATTEMPTED, because `mkdir` is an
+# external command: a signal delivered while it runs is handled once it RETURNS, and
+# arming afterwards leaves a window where this shell dies with the directory made.
+#
+# WHICH MEANS THE CLEANUP CAN RUN WHEN THE NAME IS NOT OURS, so it proves that first
+# and three facts are needed. `RB_OWNED` is certain and late — set after a successful
+# `mkdir`. `RB_PREEXISTED` covers the window before that: a name that held nothing
+# when this run began is one this run made. And `-O` refuses a name another ACCOUNT
+# holds, which neither flag can see — that is what stops a replacement's own `env` or
+# `o/origin` being unlinked through a path this run no longer owns.
 RB_PHASE=reserved
-rb_setup_give_back() {
-    if [ "$RB_PHASE" = written ]; then
+RB_OWNED=no
+RB_PREEXISTED=no
+RB_INO=
+[[ -e $RB_DIR ]] && RB_PREEXISTED=yes
+# AND THE OBJECT ITSELF IS RECORDED, because ownership is not identity. `-O` refuses
+# a name another ACCOUNT holds and that is the boundary the record is about — but a
+# replacement made by this same account passes every test above, and the cleanup
+# would then unlink `env` and `o/origin` THROUGH a path that no longer names what
+# this run created. There is no directory handle in shell to hold, so what is held
+# is the inode: recorded when the `mkdir` reports success, and required to still be
+# there before anything is removed.
+#
+# `ls -di`, NOT `stat`. `stat -c` is GNU and `stat -f` is BSD, and the `macos-shell`
+# job runs this suite with the GNU tools taken off `PATH`. `ls -di` prints the inode
+# first on both, and the value is taken by word splitting rather than by `read`.
+rb_setup_ino() {   # <path> ; its inode number, or nothing
+    set -- $(/usr/bin/env ls -di "$1" 2>/dev/null)
+    printf '%s' "${1-}"
+    return 0
+}
+# `[[`, NOT `[`, in every one of these. The condition decides whether files are
+# DELETED, and `[` is a name; `[[` is a reserved word the parser handles and nothing
+# can stand in for.
+#
+# `RB_PHASE` PICKS BETWEEN TWO SHAPES. Until a write has happened nothing can be
+# inside, so `rmdir` ALONE is correct — it refuses a symlink outright, and it is what
+# the accepted record describes when it says the cost is one EMPTY directory. Once a
+# write has happened `rmdir` necessarily fails on a directory holding its leaf, so
+# the leaves this run named go first. Never `rm -rf`: a recursive removal on a
+# replaced name deletes whatever is under it, which is past what any record accepts.
+rb_setup_give_back() {   # give back what this run created, for the phase it is in
+    [[ $RB_OWNED = yes ]] \
+        || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
+        || return 0
+    [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
+    # THE SAME OBJECT, or there is nothing here this run made. Where the inode was
+    # never recorded the `mkdir` had not reported success, and the three tests above
+    # are what stands; where it was, the name must still resolve to it.
+    if [[ -n $RB_INO ]]; then
+        [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
+    fi
+    if [[ $RB_PHASE = written ]]; then
         /usr/bin/env rm -f "$RB_DIR/env" "$RB_DIR/o/origin" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
         for _g in summary.md request.md prior.txt head.txt; do
@@ -144,11 +177,48 @@ rb_setup_give_back() {
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
+# THE HANDLERS RE-RAISE. A trap REPLACES a signal's terminating action, so one that
+# merely returned would leave this shell resuming the work it was killed during — and,
+# after a successful write, reporting 0 for a run somebody killed. All four traps are
+# IGNORED before the first removal, in one statement: `trap -` restores the DEFAULT,
+# which for these is to terminate, so a second signal between two removals would kill
+# the shell mid-cleanup; and disarming after the cleanup rather than before leaves it
+# re-entrant.
+#
+# WHAT THEY ADD OVER THE `EXIT` TRAP ALONE IS SMALL, AND SAYING SO IS THE POINT.
+# Measured on bash 5: an untrapped fatal `TERM` still runs the `EXIT` trap and still
+# reports 143, so on these paths the two shapes are indistinguishable — and
+# `test-pr-setup.sh` asserts the INVARIANT, that nothing is left behind and the run
+# does not report success, rather than which route produced it. They are here because
+# `pr-origin.sh` has them and the two helpers should not differ on a question this
+# file has already answered once. Do not read this as a claim that removing them
+# changes an outcome.
+rb_setup_on_signal() {   # <signal-name> ; give the reservation back and die of it
+    trap '' EXIT HUP INT TERM
+    rb_setup_give_back
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+# SO THE REFUSALS ONLY SAY WHY AND STOP. Cleaning up in them as well meant a refusal
+# cleaned and then `exit` fired the trap and cleaned again — and the second pass is
+# the dangerous one, because an account watching the published path can recreate it
+# between the two.
 rb_setup_stop() {   # <reason> <status>
     echo "PR_SETUP status=error reason=$1" >&2
-    rb_setup_give_back
     exit "$2"
 }
+trap 'trap "" EXIT HUP INT TERM; rb_setup_give_back' EXIT
+trap 'rb_setup_on_signal HUP' HUP
+trap 'rb_setup_on_signal INT' INT
+trap 'rb_setup_on_signal TERM' TERM
+
+# THE DIRECTORY IS THE RESERVATION. `mkdir` without `-p` fails if anything is
+# already at the name — a file, a symlink or another account's directory — so the
+# exclusion is the create, not a test before it. Same rule as `pr-origin.sh`, and
+# for the same reason: a check-then-use here is a window somebody else can stand in.
+/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
+    || { echo "PR_SETUP status=error reason=dir_not_reserved dir=$RB_DIR" >&2; exit 2; }
+RB_INO="$(rb_setup_ino "$RB_DIR")"
 
 # ── the origin, through the helper that reads it privileged ────────────────
 # NOT `git remote get-url` HERE. `pr-origin.sh` is where that read is hardened, and
@@ -182,7 +252,6 @@ RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transp
 # should never reach a file the driver will source.
 REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
     echo "PR_SETUP status=error reason=origin_unusable detail=${RB_IDENTITY_REASON:-}" >&2
-    rb_setup_give_back
     exit 1
 }
 
@@ -288,6 +357,14 @@ _want="$(grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "${BASH_SOURCE[0]}" 2>/dev/null
 _got="$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$RB_DIR/env" 2>/dev/null \
     | sed 's/=$//' | sort -u)" || _got=""
 [ "$_want" = "$_got" ] || rb_setup_stop env_truncated 2
+
+# THE EXIT TRAP IS RESET AND THE SIGNAL HANDLERS ARE NOT. Success means the caller
+# gets the directory, so the cleanup must not fire on the way out — but a `TERM`
+# arriving before the ready line is printed means the caller never sources anything,
+# and giving the reservation back is still the right answer there. `pr-origin.sh`
+# resets `EXIT` alone for the same reason: disarming the signals too left a window
+# where the helper was terminated with no cleanup at all.
+trap - EXIT
 
 echo "PR_SETUP status=ready env=$RB_DIR/env"
 exit 0

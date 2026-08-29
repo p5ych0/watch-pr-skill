@@ -44,7 +44,19 @@
   past what `docs/decisions/2026-08-26-reservation-inference.md` accepts, and the
   record rests on `rmdir` refusing anything with contents. The cleanup takes the
   objects this run named, one at a time, and uses `rmdir` for the directories, so a
-  replacement carrying anything else survives and is left for its owner.
+  replacement carrying anything else survives and is left for its owner. It refuses to
+  remove anything at all unless the name still resolves to the object the reservation
+  made — `-O` for a directory another account holds, and the recorded inode for one
+  this account replaced, since a name that has been swapped is not a path to unlink
+  nested leaves through. `SKILL.md`'s own removal of the pin transport had the same
+  shape and is named-leaf-then-`rmdir` now.
+
+- **A setup killed part-way gives its directory back.** `HUP`, `INT` and `TERM` had
+  no handler, so a signal arriving after the working files and the env file existed
+  left a published directory behind carrying the session's origin — and the driver
+  deliberately cleans up nothing after a non-zero helper status, because it cannot
+  know who created the path. The cleanup is armed before the reservation is attempted
+  and disarmed only on success.
 
 - **An env file with a line missing is refused rather than announced ready.**
   `{ a; b; c; } > file` reports only the last command's status, so a write that

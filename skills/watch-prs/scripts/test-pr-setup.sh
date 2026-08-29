@@ -443,6 +443,29 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "…and the replacement directory itself, which rmdir refuses to take" \
     || die "the replacement directory was removed although it had contents"
 rm -rf "$_rr"
+# …AND A REPLACEMENT CARRYING THE SAME NAMES IS NOT UNLINKED THROUGH EITHER. The
+# case above used witnesses this run never names, so it passed on a cleanup that
+# still removed `env` and `o/origin` by path. `-O` refuses a directory another
+# ACCOUNT holds — which is the boundary the record is about — but a fixture runs as
+# one account, so what this reaches is the other guard: the inode recorded when the
+# `mkdir` reported success, which a replacement does not carry.
+_forge_origin 'p="$(dirname "$2")"
+rm -rf "$p"
+mkdir -m 700 "$p"
+mkdir -m 700 "$p/o"
+printf "not this runs\n" > "$p/env"
+printf "not this runs\n" > "$p/o/origin"
+exit 1'
+_rc2="$(mktemp -d "$TMP/rc.XXXXXX")/dir"
+_rc2_rc=0
+_rc2_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_rc2" 2>&1)" || _rc2_rc=$?
+[ "$_rc2_rc" -ne 0 ] \
+    && pass "a replacement carrying the declared leaf names still ends in a refusal" \
+    || die "the name-collision case did not refuse (out='$_rc2_out')"
+{ [ -f "$_rc2/env" ] && [ -f "$_rc2/o/origin" ]; } \
+    && pass "…and neither declared leaf is unlinked through the replaced path" \
+    || die "the cleanup unlinked a replacement's own leaf (env=$([ -e "$_rc2/env" ] && echo yes || echo no) origin=$([ -e "$_rc2/o/origin" ] && echo yes || echo no))"
+rm -rf "$_rc2"
 
 # ── an incomplete env file is refused ─────────────────────────────────────
 # `{ a; b; c; } > f` REPORTS ONLY C'S STATUS. A `printf` that failed in the middle
@@ -467,6 +490,40 @@ _mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
 [ ! -e "$_mw" ] \
     && pass "…and that refusal gives its directory back" \
     || die "the incomplete-env refusal left its directory behind"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
+# ── a signal after the env write gives the reservation back ───────────────
+# THE DEFAULT ACTION FOR `HUP`, `INT` AND `TERM` IS TO TERMINATE, so without a
+# handler a signal arriving after `work/` and `env` exist leaves a non-empty
+# published directory behind — carrying the session's origin — and the driver
+# deliberately performs no cleanup after a non-zero helper status, because it cannot
+# know who created the path. So the helper arms the cleanup before the reservation is
+# attempted and disarms only on success.
+#
+# SELF-DELIVERED, so there is no timing in the fixture. The staged copy sends itself
+# the signal at exactly the point the case is about — after the env write, before the
+# `trap - EXIT` that a successful run reaches — which no `sleep`-and-`kill` can pin
+# down as precisely.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+for _sig in HUP INT TERM; do
+    sed "s|^trap - EXIT\$|kill -s $_sig \"\$\$\"|" "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+    grep -q "kill -s $_sig" "$_stage/pr-setup.sh" \
+        || { die "the $_sig stage did not patch pr-setup.sh; the case proves nothing"; continue; }
+    _sg="$(mktemp -d "$TMP/sg.XXXXXX")/dir"
+    _sg_rc=0
+    _sg_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sg" 2>&1)" || _sg_rc=$?
+    # THE STATUS SAYS IT DIED OF THE SIGNAL rather than returning from a handler. A
+    # trap REPLACES a signal's terminating action, so one that merely returned would
+    # leave the shell finishing the work it was killed during and reporting 0.
+    [ "$_sg_rc" -ne 0 ] \
+        && pass "a $_sig after the env write does not report success" \
+        || die "the $_sig case returned 0 (out='$_sg_out')"
+    [ ! -e "$_sg" ] \
+        && pass "…and the reservation is given back rather than left with the origin in it" \
+        || die "a $_sig left the published directory behind: $(ls -A "$_sg" 2>/dev/null | tr '\n' ' ')"
+    rm -rf "$_sg"
+done
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
 # ── the streams are separate ───────────────────────────────────────────────
