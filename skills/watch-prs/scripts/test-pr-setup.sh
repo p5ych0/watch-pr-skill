@@ -453,6 +453,31 @@ rm -rf "$_rr"
 grep -qF 'exec 8<"$RB_DIR"' "$SCRIPT" \
     && pass "the reservation is held open, so its inode cannot be reused" \
     || die "pr-setup.sh does not hold a descriptor on the directory it reserved"
+# AND THE RECORDED NUMBER IS THE OTHER HALF. The descriptor stops the inode being
+# reused; the number is what the comparison is against, and `ls -di` can fail or print
+# nothing — after which the comparison is skipped and the held descriptor alone would
+# let the leaf removals run against a name this run cannot vouch for. An empty record
+# is the same answer as a failed open.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'p="$(dirname "$2")"
+rm -rf "$p"
+mkdir -m 700 "$p"
+mkdir -m 700 "$p/o"
+printf "not this runs\n" > "$p/env"
+printf "not this runs\n" > "$p/o/origin"
+exit 1'
+grep -vF 'RB_INO="$(rb_setup_ino "$RB_DIR")"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'RB_INO="$(rb_setup_ino' "$_stage/pr-setup.sh" \
+    && die "the no-inode stage did not patch pr-setup.sh; the case proves nothing" \
+    || pass "the no-inode stage is patched"
+_ni="$(mktemp -d "$TMP/ni.XXXXXX")/dir"
+_ni_rc=0
+_ni_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ni" 2>&1)" || _ni_rc=$?
+{ [ -f "$_ni/env" ] && [ -f "$_ni/o/origin" ]; } \
+    && pass "…and with no recorded inode the cleanup unlinks nothing either" \
+    || die "a cleanup with no recorded inode still unlinked leaves (rc=$_ni_rc out='$_ni_out')"
+rm -rf "$_ni"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # AND WITHOUT IT NOTHING IS UNLINKED, which is the fallback rather than a weaker
 # version of the same removal.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done

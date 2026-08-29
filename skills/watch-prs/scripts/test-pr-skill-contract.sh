@@ -429,7 +429,7 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
 # THE PREFIX MATCH IS THE OTHER HALF, and it is what catches a readonly or a
 # transforming attribute — MIXED CASE, because an all-caps sentinel survives
 # `declare -u` unchanged and that attribute got through once.
-for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR; do
+for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN; do
     grep -q "( $_tn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_setup_body" \
         || die "the setup probe does not assign a random RbProbe sentinel to \$$_tn and match it"
     grep -q "\[\[ -z \${!$_tn:-} \]\]" <<<"$_setup_body" \
@@ -487,9 +487,9 @@ if [ -n "$_forge_dir" ]; then
     _fe_log="$_forge_dir/forge-log-that-must-not-exist"
     export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' \
            FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_PIN_EXTRA=1 FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
-           FORGE_NOENV=1 FORGE_ENV_DIR=1 FORGE_PATHS=elsewhere FORGE_NONEMPTY=1 FORGE_ENV_EXTRA=x
+           FORGE_NOENV=1 FORGE_ENV_DIR=1 FORGE_CODEX=x FORGE_COPILOT=x FORGE_PATHS=elsewhere FORGE_NONEMPTY=1 FORGE_ENV_EXTRA=x
     unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_PIN_EXTRA FORGE_SETUP_RC \
-          FORGE_SETUP_LOG FORGE_NOENV FORGE_ENV_DIR FORGE_PATHS FORGE_NONEMPTY FORGE_ENV_EXTRA
+          FORGE_SETUP_LOG FORGE_NOENV FORGE_ENV_DIR FORGE_CODEX FORGE_COPILOT FORGE_PATHS FORGE_NONEMPTY FORGE_ENV_EXTRA
     cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
 [ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
@@ -563,6 +563,11 @@ elif [ -z "${FORGE_NOENV:-}" ]; then
         printf "OWNER='%s'\n"        "${FORGE_OWNER-acme}"
         printf "REPO='%s'\n"         "${FORGE_REPO-widget}"
         printf "HOST='%s'\n"         "${FORGE_HOST-github.com}"
+        # THE REVIEWER LOGINS TOO, because the driver proves them against their
+        # literals: a forge that omitted them made every case refuse for that reason
+        # instead of its own.
+        printf "CODEX_BOT='%s'\n"   "${FORGE_CODEX-chatgpt-codex-connector[bot]}"
+        printf "COPILOT_BOT='%s'\n" "${FORGE_COPILOT-copilot-pull-request-reviewer[bot]}"
         printf "SUMMARY_FILE='%s'\n" "$_w/summary.md"
         printf "REQUEST_FILE='%s'\n" "$_w/request.md"
         printf "PRIOR_FILE='%s'\n"   "$_w/prior.txt"
@@ -1055,7 +1060,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # the status passes while the setup directory is built at a name the operator
     # chose.
     if [ "$_rb_has_n" = yes ]; then
-        for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR; do
+        for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN; do
             _nr_rc=0
             _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
                 FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -1075,7 +1080,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # what catches. `declare -i` is the one that matters most: it makes the sentinel
     # arithmetic, so a clear stores `0` and every later `${VAR:?…}` passes on a value
     # nothing set.
-    _rb_attrs="readonly RB_TMPPARENT=x|readonly RB_TMPPARENT2=x|readonly RB_SETUP_DIR=x|declare -i RB_SETUP_DIR=1"
+    _rb_attrs="readonly RB_TMPPARENT=x|readonly RB_TMPPARENT2=x|readonly RB_SETUP_DIR=x|declare -i RB_SETUP_DIR=1|readonly RB_PIN_SEEN=x|declare -i RB_PIN_SEEN=1"
     if [ "$_rb_has_l" = yes ]; then
         _rb_attrs="$_rb_attrs|declare -l RB_SETUP_DIR=x|declare -u RB_SETUP_DIR=x"
     fi
@@ -1123,7 +1128,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # through to the call, where a transformed `RB_SETUP_DIR` names a directory the
     # operator chose.
     case "$_setup_body" in
-        *'ABORT: one of RB_TMPPARENT, RB_TMPPARENT2 and RB_SETUP_DIR is readonly'*)
+        *'ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR and RB_PIN_SEEN is readonly'*)
             pass "…and the probe's refusal is an arm that says which names it is about" ;;
         *)  die "the probe refusal is not an arm with an abort" ;;
     esac
@@ -1148,6 +1153,63 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     grep -q 'readonly, value-transforming, or aimed at another' <<<"$_ps_out" \
         && pass "…refusing by the probe's own message, so an operator is told which names it is about" \
         || die "the pre-seeded case refused for some other reason: '$_ps_out'"
+
+    # …AND A NAMEREF FROM `RB_PIN_SEEN` ONTO AN ALREADY-VALIDATED NAME IS REFUSED.
+    # This is the state the probe list exists for, reached from the one name that is
+    # both CLEARED and ASSIGNED after the working paths have been proved: declared as
+    # a nameref to `SUMMARY_FILE`, the clear empties that path and the pin read then
+    # writes the origin into it — after which the comparison passes through the alias
+    # and setup announces success with `SUMMARY_FILE` no longer naming its work file.
+    if [ "$_rb_has_n" = yes ]; then
+        _al=0
+        _al_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+            FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+                declare -n RB_PIN_SEEN=SUMMARY_FILE
+                '"$_setup_body"'
+                printf "S=[%s]\n" "${SUMMARY_FILE-}"
+            ' 2>&1)" || _al=$?
+        case "$_al_out" in
+            *'OWNER=acme REPO=widget'*) die "a nameref from RB_PIN_SEEN onto SUMMARY_FILE reached a session: '$_al_out'" ;;
+            *) pass "a nameref from RB_PIN_SEEN onto a validated name is refused before it can destroy it" ;;
+        esac
+        case "$_al_out" in
+            *'S=[git@'*) die "the pin read wrote the origin into SUMMARY_FILE through the alias: '$_al_out'" ;;
+            *) pass "…and the working path it aliases is never overwritten by the pin read" ;;
+        esac
+    else
+        pass "this shell has no declare -n, so the pin-alias state is skipped by name"
+    fi
+    # …AND THE REVIEWER LOGINS ARE PROVED AGAINST THEIR LITERALS. They arrive through
+    # the same source as everything else, and a `readonly CODEX_BOT` already in the
+    # driving shell makes that one assignment fail while the file's LAST assignment
+    # decides the source's status — so setup announced success and every later `WHO`,
+    # watch and signoff named an account the operator chose.
+    for _bn in CODEX_BOT COPILOT_BOT; do
+        _bot=0
+        _bot_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+            FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+                readonly '"$_bn"'="attacker[bot]"
+                '"$_setup_body"'
+                printf "BOT=[%s]\n" "${'"$_bn"'-}"
+            ' 2>&1)" || _bot=$?
+        case "$_bot_out" in
+            *'OWNER=acme REPO=widget'*) die "a readonly $_bn reached a session: '$_bot_out'" ;;
+            *) pass "a readonly $_bn stops setup rather than reviewing as that account" ;;
+        esac
+    done
+
+    # …AND SO IS A LOGIN THE FILE SIMPLY GOT WRONG, which is the other half: the
+    # readonly case proves the check is reached, this one proves it is about the VALUE
+    # rather than about the assignment having failed.
+    _wb=0
+    _wb_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 FORGE_CODEX='attacker[bot]' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            '"$_setup_body"'
+        ' 2>&1)" || _wb=$?
+    case "$_wb_out" in
+        *'OWNER=acme REPO=widget'*) die "a sourced CODEX_BOT naming another account reached a session: '$_wb_out'" ;;
+        *) pass "…and a sourced reviewer login that is not this loop's account is refused" ;;
+    esac
 
     # ── the success line, and where it may appear ─────────────────────────
     # IN THE INNERMOST ARM AND NOWHERE ELSE. Every refusal above it is an `else`, so

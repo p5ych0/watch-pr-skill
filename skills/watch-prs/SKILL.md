@@ -197,7 +197,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
    && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
      && [[ -z ${!RB_TMPPARENT2:-} ]] ) 2>/dev/null \
    && ( RB_SETUP_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_SETUP_DIR = RbProbe* ]] \
-     && [[ -z ${!RB_SETUP_DIR:-} ]] ) 2>/dev/null; then
+     && [[ -z ${!RB_SETUP_DIR:-} ]] ) 2>/dev/null \
+   && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
+     && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
     # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     RB_TMPPARENT=
@@ -252,7 +254,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                && [[ -f $SUMMARY_FILE ]] && [[ ! -s $SUMMARY_FILE ]] \
                && [[ -f $REQUEST_FILE ]] && [[ ! -s $REQUEST_FILE ]] \
                && [[ -f $PRIOR_FILE ]] && [[ ! -s $PRIOR_FILE ]] \
-               && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]]
+               && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]] \
+               && [[ $CODEX_BOT = 'chatgpt-codex-connector[bot]' ]] \
+               && [[ $COPILOT_BOT = 'copilot-pull-request-reviewer[bot]' ]]
             then
                 # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -276,12 +280,14 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                 if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
                     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
                 else
-                    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+                    # A PIN FAILURE IS TERMINAL, because the work files are already on this parent.
+                    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+                    echo "ABORT: the repository pin did not take; every stage would route by the current directory. Re-run setup: this session's working files are already under the parent that failed, so the retry has to start over rather than pin somewhere else"
                     exit 1
                     [[ -n "" ]]
                 fi
             else
-                echo "ABORT: the sourced working paths are not the four empty files this setup created"
+                echo "ABORT: the sourced working paths are not the four empty files this setup created, or a reviewer login is not the account this loop reviews with"
                 exit 1
                 [[ -n "" ]]
             fi
@@ -296,7 +302,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2 and RB_SETUP_DIR is readonly, value-transforming, or aimed at another name; the setup directory cannot be chosen"
+    echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR and RB_PIN_SEEN is readonly, value-transforming, or aimed at another name; the setup directory cannot be chosen"
     exit 1
     [[ -n "" ]]
 fi

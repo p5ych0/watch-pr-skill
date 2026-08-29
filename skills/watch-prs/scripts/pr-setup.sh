@@ -179,10 +179,14 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     if [[ -n $RB_INO ]]; then
         [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
     fi
-    # LEAVES ONLY WHERE THE IDENTITY IS DURABLE. Without the held descriptor the inode
-    # comparison can be satisfied by a reused number, so this falls back to `rmdir`
-    # alone rather than unlinking through a name it cannot vouch for.
-    if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]]; then
+    # LEAVES ONLY WHERE THE IDENTITY IS DURABLE, AND THAT NEEDS BOTH HALVES. The held
+    # descriptor is what stops the inode being reused; the recorded NUMBER is what the
+    # comparison is against, and `ls -di` can fail or print nothing — after which the
+    # comparison above is skipped entirely and `RB_HELD=yes` alone would let the leaf
+    # removals run against a name this run cannot vouch for. So an empty record is the
+    # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
+    # anything and leaves a directory behind at worst.
+    if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
         /usr/bin/env rm -f "$RB_DIR/env" "$RB_DIR/o/origin" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
         for _g in summary.md request.md prior.txt head.txt; do

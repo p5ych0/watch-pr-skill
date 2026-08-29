@@ -55,6 +55,20 @@
   nothing, leaving a directory behind instead: the cost the record already covers. `SKILL.md`'s own removal of the pin transport had the same
   shape and is named-leaf-then-`rmdir` now.
 
+- **A reviewer login the driving shell fixed no longer survives setup.** The two bot
+  accounts arrive through the same sourced file as everything else, and a `readonly
+  CODEX_BOT` already in the operator's shell makes that one assignment fail while the
+  file's LAST assignment decides the source's status — so setup announced success and
+  every later watch, `WHO` and signoff named an account the operator chose rather than
+  the reviewer. Both are proved against their literals now, beside the four working
+  paths.
+
+- **`RB_PIN_SEEN` is probed like the other names it sits with.** Declared as a nameref
+  onto `SUMMARY_FILE`, the clear that precedes the pin read emptied that path and the
+  read then wrote the origin into it — after which the comparison passed through the
+  alias and setup announced success with a working file that no longer named anything
+  usable. The generic probe covers it again, as it did before the setup block moved.
+
 - **The env file is bound before it is evaluated.** Sourcing is the one step that
   EXECUTES what it reads, the setup path is published in argv, and no check afterwards
   helps — re-deriving the identity cannot un-run a `$(…)` that has already run in the
