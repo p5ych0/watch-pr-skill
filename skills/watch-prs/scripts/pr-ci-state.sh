@@ -434,6 +434,10 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                    or ($b.protection | has("required_status_checks") | not) then []
                 elif ($b.protection.required_status_checks | type) != "object"
                   then error("required_status_checks is not an object")
+                elif ($b.protection.required_status_checks | has("checks"))
+                     and ($b.protection.required_status_checks.checks != null)
+                     and (($b.protection.required_status_checks.checks | type) != "array")
+                  then error("the classic checks are not an array")
                 elif ($b.protection.required_status_checks.checks | type) == "array" then
                   [ $b.protection.required_status_checks.checks[]
                     | if type != "object" or (.context | type) != "string"
@@ -517,6 +521,13 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
 # a passing run of the same name from ANOTHER app satisfy this gate, which on the
 # default `--admin` path is the merge. So a bound requirement is matched on the
 # app too, read from the run`s own check suite.
+#
+# `checks` IS PREFERRED AND ITS ABSENCE IS THE ONLY REASON TO FALL BACK. Older
+# bodies carry only the flat `contexts` list, which names no app, so that fallback
+# has to exist — but a `checks` field that is PRESENT and of another shape is a
+# truncated or unfamiliar body, and reading past it into `contexts` turns every
+# app-bound requirement into an unbound one. A run from the wrong app then satisfies
+# it. Present and not an array is refused.
 #
 # `-1` IS NOT AN APP, IT IS THE WILDCARD. GitHub writes `app_id: -1` where the
 # requirement explicitly allows ANY app to provide the check, so keeping it as a

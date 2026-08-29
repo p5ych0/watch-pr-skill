@@ -610,6 +610,37 @@ for _n in '{"__typename":"CheckRun","name":"any","status":"COMPLETED","conclusio
         && pass "…while an unbound requirement is met whichever kind reports it" \
         || die "an unbound requirement was not met: '$got'"
 done
+# A `checks` FIELD OF ANOTHER SHAPE IS NOT AN ABSENT ONE. Falling back to the flat
+# `contexts` list there turns every app-bound requirement into an unbound one, and a
+# run from the wrong app then satisfies it — from a body that was truncated or
+# unfamiliar rather than old.
+for _cs in '"truncated"' '{"0":{"context":"build"}}' '7'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":'"$_cs"',"contexts":["build"]}}}' '[]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+        && pass "a checks field of another shape is unreadable, not an absent one" \
+        || die "a malformed checks field fell back to the flat list: '$got'"
+done
+# …WHILE AN ABSENT ONE STILL FALLS BACK, which is why that path exists: older bodies
+# carry only the flat list, and refusing them would be a gate that never opens.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "…while a body carrying only the flat list is read as unbound" \
+    || die "a body with no checks field was refused: '$got'"
+# …AND SO DOES AN EXPLICIT NULL, which GitHub sends for a branch with none.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":null,"contexts":["build"]}}}' '[]' \
+    '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "…and so does an explicit null" \
+    || die "a null checks field was refused: '$got'"
+
 # `-1` IS THE WILDCARD, NOT AN APP. GitHub writes `app_id: -1` where the
 # requirement explicitly allows any app to provide the check, so keeping it as a
 # binding would look for a check suite whose app id is `-1`, find none, and report
