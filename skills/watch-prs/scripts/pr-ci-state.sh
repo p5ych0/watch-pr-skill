@@ -380,6 +380,15 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # object is missing or of another shape is `malformed`, because the contexts
 # cannot be listed and a merge would then be gated on an empty set.
 #
+# THE RULES READ IS PAGINATED, at thirty a page by default, so a branch with more
+# rules than that could carry its `required_status_checks` on the second — parsed
+# as a well-formed array with the requirement simply absent. `--paginate` and every
+# page is read; each is validated as an array of its own, since `jq -s` slurps them
+# as separate documents and a `.[][]` over an error body would walk its values.
+# That the pages are not one snapshot is already answered above: both sources are
+# read twice and everything is unioned, so a rule that moved between pages is
+# honoured rather than lost.
+#
 # THE BRANCH READ IS ALSO WHAT PROVES THE NAME. `rules/branches/{b}` answers `[]`
 # for a branch that does not exist — a misspelling would arrive as "nothing is
 # required" — while `branches/{b}` 404s, so the read that can be wrong is the one
@@ -399,16 +408,16 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
         "repos/$OWNER/$REPO/branches/$base" 2>/dev/null)" || return 2
     _left="$(rb_left)" || return 2
     _rules="$(run_limited "$_left" gh api --hostname "$HOST" \
-        "repos/$OWNER/$REPO/rules/branches/$base" 2>/dev/null)" || return 2
+        "repos/$OWNER/$REPO/rules/branches/$base" --paginate 2>/dev/null)" || return 2
     # EVERY FIELD IS TYPED BEFORE IT IS USED. An absent or oddly-shaped one read as
     # "no contexts" is a merge gated on an empty required set, which is the
     # direction that opens the gate rather than the one that closes it.
     printf '%s\n%s\n' "$_branch" "$_rules" | jq -c -s --argjson strict \
         "$(if [ "${REVIEW_MERGE_STRICT:-}" = "1" ]; then printf 'true'; else printf 'false'; fi)" '
-        if length != 2 then error("two documents are expected")
+        if length < 2 then error("a branch and at least one rules page are expected")
         elif (.[0] | type) != "object" then error("the branch is not an object")
         elif (.[0].protected | type) != "boolean" then error("protected is not a boolean")
-        elif (.[1] | type) != "array" then error("the rules are not an array")
+        elif any(.[1:][]; type != "array") then error("a rules page is not an array")
         else
           ( .[0] as $b
             | if ($b.protection | type) == "object" then
@@ -431,7 +440,7 @@ required_contexts() {   # <base ref> ; prints a JSON array of {context, app} ent
                 else [ $b.protection.required_status_checks.contexts[] | {context: ., app: null} ] end
               elif $b.protected then error("the branch is protected and its protection is unreadable")
               else [] end ) as $classic
-          | ( [ .[1][]
+          | ( [ .[1:][][]
                 | if type != "object" then error("a rule is not an object")
                   elif (.type | type) != "string" then error("a rule has no type")
                   elif .type == "required_status_checks" then

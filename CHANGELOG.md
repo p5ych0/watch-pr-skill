@@ -90,7 +90,10 @@
   from what has been seen in the wild; `workflows`,
   `required_workflow_status_checks`, `code_scanning`, `secret_scanning`,
   `license_compliance_scanning`, `required_deployments` and `merge_queue` are
-  deliberately not on it.
+  deliberately not on it. The rules read is paginated, at thirty a page by default:
+  a branch with more rules than that could otherwise carry its
+  `required_status_checks` on a page nobody read, parsed as a well-formed array
+  with the requirement simply absent.
 
   **And the base branch is confirmed after the read as well as before.** A pull
   request can be retargeted without its head moving, so `--match-head-commit` sees

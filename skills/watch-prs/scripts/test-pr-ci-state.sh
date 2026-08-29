@@ -216,7 +216,7 @@ mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <rollup bucket | ra
     printf '{"protected":false}\n' > "$TMP/gh.branch"
     printf '[]\n' > "$TMP/gh.rules"
     printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}}\n' > "$TMP/gh.ctx"
-    rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/gh.base.2" \
+    rm -f "$TMP/gh.branch.2" "$TMP/gh.rules.2" "$TMP/gh.base.2" "$TMP/gh.rules.page2" \
           "$TMP/branch.n" "$TMP/rules.n" "$TMP/base.n"
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
@@ -242,6 +242,9 @@ case "\$*" in
         if [ -f "$TMP/rules.n" ]; then n="\$(cat "$TMP/rules.n")"; n=\$((n + 1)); fi
         printf '%s' "\$n" > "$TMP/rules.n"
         if [ -f "$TMP/gh.rules.\$n" ]; then cat "$TMP/gh.rules.\$n"; else cat "$TMP/gh.rules"; fi
+        # \`gh api --paginate\` concatenates the pages it fetched; the stub does the
+        # same, so a helper that parses only the first is visible here.
+        if [ -f "$TMP/gh.rules.page2" ]; then cat "$TMP/gh.rules.page2"; fi
         exit 0 ;;
     *branches/*)
         if [ -f "$TMP/gh.branch.fail" ]; then cat "$TMP/gh.branch"; exit 1; fi
@@ -794,6 +797,32 @@ for _rt in deletion non_fast_forward pull_request copilot_code_review required_s
         && pass "…while a '$_rt' rule names no check and is skipped" \
         || die "a '$_rt' rule was treated as a requirement: '$got'"
 done
+
+# ── EVERY PAGE OF THE RULES IS READ ────────────────────────────────────────
+# `rules/branches/{b}` pages at thirty by default, so a branch with more rules than
+# that can carry its `required_status_checks` on the second — parsed as a
+# well-formed array with the requirement simply absent, which is a merge with
+# nothing asserted about it.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":true,"protection":{"required_status_checks":{"contexts":[]}}}' '[]' '[]'
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build"}]}}]\n' > "$TMP/gh.rules.page2"
+got="$(run 7 --head "$WANT" --required)"
+{ [ "${got%%|*}" = 3 ] && grep -qF 'status=pending' <<<"${got#*|}"; } \
+    && pass "a requirement on the second page of the rules is still required" \
+    || die "a later rules page was not read: '$got'"
+grep -qE 'rules/branches/main .*--paginate' "$TMP/args" \
+    && pass "…because that read is paginated" \
+    || die "the rules read is not paginated: $(cat "$TMP/args")"
+# …AND A LATER PAGE THAT IS NOT AN ARRAY IS UNREADABLE, since `jq -s` slurps the
+# pages as separate documents and a `.[][]` over an error body walks its values.
+mkgh_head "$WANT" green
+mkgh_required '{"protected":false}' '[]' '[]'
+printf '{"message":"Server Error"}\n' > "$TMP/gh.rules.page2"
+got="$(run 7 --head "$WANT" --required)"
+rm -f "$TMP/gh.rules.page2"
+{ [ "${got%%|*}" = 2 ] && ! grep -qE 'status=(none|green)' <<<"${got#*|}"; } \
+    && pass "…and a later page of another shape is unreadable" \
+    || die "an error body on a later rules page was accepted: '$got'"
 
 # ── A PULL REQUEST RETARGETED MID-READ IS STALE, NOT ANSWERED ──────────────
 # A PR can be retargeted without its head moving, so `--match-head-commit` sees
