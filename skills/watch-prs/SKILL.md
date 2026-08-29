@@ -318,7 +318,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: could not set this session up; each ABORT line above is one attempt and its reason"
+        echo "ABORT: could not set this session up; each PR_SETUP status=error line above is one attempt and its reason"
         exit 1
         [[ -n "" ]]
     fi

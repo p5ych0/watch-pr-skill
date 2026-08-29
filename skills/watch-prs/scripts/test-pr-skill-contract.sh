@@ -342,7 +342,7 @@ done
 # …AND THE HELPER IS REACHED BY PATH AND STARTED PRIVILEGED, with its status taken.
 # `pr-setup.sh` reached bare would leave the kernel to process its shebang, putting
 # the `env -S` requirement back through the side door — and a helper that writes a
-# plausible env file and then fails must not be sourced.
+# plausible origin file and then fails must not be trusted.
 grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"' <<<"$skill_flat" \
     && pass "…from a helper reached by path and started privileged" \
     || die "the setup helper is not invoked as /usr/bin/env bash -p by pathname"
@@ -389,7 +389,7 @@ _setup_body="$(awk '/^if \( RB_TMPPARENT="RbProbe/, /^fi$/' "$SKILL")" || _setup
   && case "$_setup_body" in *'9<"$RB_SETUP_DIR/origin"'*) true ;; *) false ;; esac \
   && case "$_setup_body" in *'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity'*) true ;; *) false ;; esac \
   && case "$_setup_body" in *'/pr-origin.sh pin "$RB_SETUP_DIR/pin"'*) true ;; *) false ;; esac; } \
-    && pass "…and the setup block lifts out with the call, the source and the pin" \
+    && pass "…and the setup block lifts out with the call, the read and the pin" \
     || die "the setup block is truncated or has lost what it is about: '$_setup_body'"
 printf '%s\n' "$_setup_body" | bash -n 2>/dev/null \
     && pass "…and the lift parses on its own" \
@@ -584,10 +584,10 @@ FORGE
     { [ "$_su_ok" -eq 0 ] \
       && case "$_su_out" in *'OWNER=acme REPO=widget'*) true ;; *) false ;; esac \
       && case "$_su_out" in *'PINNED=[git@github.com:acme/widget.git]'*) true ;; *) false ;; esac; } \
-        && pass "a good setup sources its values, proves the pin and announces itself" \
+        && pass "a good setup reads its origin, proves the pin and announces itself" \
         || die "the setup block refused a good run (rc=$_su_ok out='$_su_out')"
     # …AND THE FOUR WORKING PATHS REACH THE DRIVER. They are what every later stage
-    # is handed, and a block that sourced them and then lost them would satisfy the
+    # is handed, and a block that assigned them and then lost them would satisfy the
     # case above — the success line names only one of the four.
     _su_p="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
         FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -601,7 +601,7 @@ FORGE
     esac
     # …AND A HELPER THAT WRITES A USABLE FILE AND THEN FAILS PINS NOTHING. This is
     # the shape the status check exists for: one that failed to write would be refused
-    # by the source, and the block would look correct with no handler at all.
+    # by the read, and the block would look correct with no handler at all.
     _su_rc=0
     _su_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
         FORGE_SETUP_RC=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -617,10 +617,19 @@ FORGE
     # or failed too, and the three reasons differ — no second candidate, a TERMINAL
     # first refusal the status gate skipped, or a second refusal.
     case "$_su_out" in
-        *'each ABORT line above is one attempt and its reason'*)
+        *'each PR_SETUP status=error line above is one attempt and its reason'*)
             pass "…and the abort points at the helper's lines rather than counting attempts" ;;
         *)  die "the setup abort does not point at the helper's lines: '$_su_out'" ;;
     esac
+    # …AND IT NAMES LINES THE HELPER ACTUALLY EMITS, which is the half a grep of the
+    # document cannot check. `pr-setup.sh` refuses with `PR_SETUP status=error reason=…`,
+    # one per attempt; the `ABORT:` lines an operator can see come from `pr-origin.sh`
+    # running INSIDE it, so there may be none, one or two of those per attempt. Telling
+    # an operator to count them defeated the one-versus-two diagnosis in `README.md`.
+    _diag=0; _diag="$(grep -c 'PR_SETUP status=error' <<<"$_su_out")" || _diag=0
+    [ "$_diag" -ge 1 ] \
+        && pass "…and the refusal an operator is told to count is one the helper emits" \
+        || die "the abort names PR_SETUP lines but the run produced none: '$_su_out'"
     # …AND IT SURVIVES A SHADOWED `echo`. The refusal is an arm the block cannot walk
     # past; a silenced `echo` costs the operator the reason, never the refusal.
     _su_e=0
@@ -666,8 +675,8 @@ FORGE
     # …AND A PARENT CONTAINING A SPACE IS AN ORDINARY PARENT. The driver builds the
     # setup directory's name under `$TMPDIR` or `$HOME`, and an operator's home
     # directory can contain one — this is the driver-to-helper half of that, because
-    # the name crosses a process boundary in argv and comes back inside a sourced
-    # path. A character class in the helper refused it once, terminally, so the
+    # the name crosses a process boundary in argv and comes back inside a path the
+    # driver builds from it. A character class in the helper refused it once, terminally, so the
     # second parent was never tried and the session ended on a path that works.
     _sp_dir="$_forge_dir/parent with space"
     mkdir -p "$_sp_dir"
@@ -680,7 +689,7 @@ FORGE
     { [ "$_sp" -eq 0 ] \
       && case "$_sp_out" in *'OWNER=acme REPO=widget'*) true ;; *) false ;; esac \
       && case "$_sp_out" in *"S=[$_sp_dir/"*'/work/summary.md]'*) true ;; *) false ;; esac; } \
-        && pass "a parent containing a space starts a session and the paths survive the source" \
+        && pass "a parent containing a space starts a session and the paths survive the read" \
         || die "a spaced parent was refused or its paths were mangled (rc=$_sp out='$_sp_out')"
     rm -rf "$_sp_dir"
 
@@ -1286,16 +1295,39 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # …AND A REFUSED RUN DOES NOT REMOVE WHAT THE HELPER LEFT BEHIND. The contract is
     # a directory the helper created, so a refusal here cannot know whether it is
     # looking at that one or at something an operator's transformed name pointed at.
-    _pex="$_forge_dir/preexisting"
-    rm -rf "$_pex"; mkdir -p "$_pex"; : > "$_pex/witness"
+    #
+    # THE WITNESS GOES IN THE DIRECTORY THE RUN ACTUALLY MADE, which is the only way
+    # this case is about anything. It used to sit at a fixed path the block never
+    # names — the block chooses a randomised `$RB_SETUP_DIR` — so a regression that
+    # removed the real directory left the witness untouched and the case passed. The
+    # forge logs the name it was given, and the witness is placed there afterwards.
+    rm -f "$_forge_dir/setup-log"
     env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
-        FORGE_SETUP_RC=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+        FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_forge_dir/setup-log" \
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_setup_body"'
         ' >/dev/null 2>&1 || true
-    [ -e "$_pex/witness" ] \
-        && pass "…and a refused run removes nothing it did not create" \
-        || die "a refused setup deleted what it did not create"
-    rm -rf "$_pex" "$_unw_dir"
+    _pex=""; _pex="$(cat "$_forge_dir/setup-log" 2>/dev/null)" || _pex=""
+    _pex="${_pex%%$'\n'*}"
+    { [ -n "$_pex" ] && [ -d "$_pex" ]; } \
+        && pass "the refused run left the directory the helper made, so the case has a subject" \
+        || die "the refused run left no directory to inspect (logged='$_pex')"
+    if [ -n "$_pex" ] && [ -d "$_pex" ]; then
+        : > "$_pex/witness"
+        env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+            FORGE_SETUP_RC=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+                '"$_setup_body"'
+            ' >/dev/null 2>&1 || true
+        [ -e "$_pex/witness" ] \
+            && pass "…and a refused run removes nothing it did not create" \
+            || die "a refused setup deleted what it did not create"
+        rm -rf "$_pex"
+    fi
+    # GUARDED, NOT DEFAULTED. Under the UID-0 skip `_unw_dir` is never assigned, and
+    # this file runs `set -u`: expanding it bare aborted the whole suite at this line
+    # when the test was run directly as root. `rm -rf ""` is a no-op on GNU and on BSD,
+    # but an `if` says what is meant and does not rest on that.
+    if [ -n "${_unw_dir:-}" ]; then rm -rf "$_unw_dir"; fi
 fi
 [ -n "$_forge_dir" ] && rm -rf "$_forge_dir"
 unset RB_TMPBASE
@@ -2805,7 +2837,7 @@ SQUAT
                 *) die "the both-squatted case did not reach the helper's refusal: '$_sq_out2'" ;;
             esac
             case "$_sq_out2" in
-                *'each ABORT line above is one attempt and its reason'*)
+                *'each PR_SETUP status=error line above is one attempt and its reason'*)
                     pass "…and the driver refusing on the status it was given" ;;
                 *) die "the both-squatted case did not reach the driver's refusal: '$_sq_out2'" ;;
             esac

@@ -936,10 +936,16 @@ plugin docs and open an issue.
   gets a different parent — and the one documented here is the storage case, because
   that is the one the abort itself can tell you how to get past.
 
-  The driver's line says only that each `ABORT:` above it is one attempt and its
-  reason, and that is deliberate: it handed over a name and got back a status, so it
-  cannot tell a squatted name from a filesystem with no room. The helper can, and
-  says so.
+  The driver's line says only that each `PR_SETUP status=error` line above it is one
+  attempt and its reason, and that is deliberate: it handed over a name and got back a
+  status, so it cannot tell a squatted name from a filesystem with no room. The helper
+  can, and says so — one such line per attempt, carrying the reason.
+
+  **Count those lines, not the `ABORT:` ones.** `pr-origin.sh` runs inside the helper
+  and prints its own `ABORT:` lines when the checkout or an ancestor is the problem, so
+  those do not correspond to attempts at all — there may be none, one, or two per
+  attempt. The `PR_SETUP status=error` lines are one per call, which is what the
+  one-versus-two diagnosis below rests on.
 
   The refusals AFTER the read differently, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds
@@ -976,7 +982,8 @@ plugin docs and open an issue.
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, look at storage — and count the `ABORT:` lines.
+  If re-running keeps failing, look at storage — and count the
+  `PR_SETUP status=error` lines.
   **Two** means setup has already used both parents, so `unset TMPDIR` is not the
   answer: that selects one it just tried. Point `TMPDIR` at storage with room
   instead, on a filesystem `HOME` is not on. **One** means either that only one of
