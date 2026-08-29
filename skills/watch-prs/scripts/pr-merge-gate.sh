@@ -667,10 +667,12 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # WHAT IS STILL NOT BOUND IS THE REQUIRED SET ITSELF, and it cannot be: branch
 # protection is a property of the base branch rather than of a commit, so a
 # protection rule changed between that read and the merge is a race GitHub has too.
-# The "require branches to be up to date" policy is not read either, and on THIS
-# path nothing enforces it: `--admin` below bypasses branch protection, so a branch
-# behind its base merges with its checks never having run against the merged state.
-# Under `REVIEW_MERGE_STRICT=1` GitHub enforces it. #220.
+# The "require branches to be up to date" policy is read where it can be. A RULESET
+# carries it readably and this gate enforces it — a head behind its base is refused
+# with `reason=behind_base`. CLASSIC protection keeps that flag on the admin-only
+# endpoint, so there it cannot be read, and on THIS path nothing else enforces it
+# either: `--admin` below bypasses protection. `REVIEW_MERGE_STRICT=1` covers both.
+# #220.
 #
 # STRICT MODE IS WHAT CLOSES IT. With `REVIEW_MERGE_STRICT=1` on a repository whose
 # required checks are NON-BYPASSABLE — configured, and with bypassing disallowed or

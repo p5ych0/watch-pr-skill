@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.0.80] — 2026-08-29
+
+- **The "require branches to be up to date" policy is enforced where it can be
+  read, and #219 said nothing enforced it at all.** That policy makes a pull request
+  merge only when its head is current with the base, so the required checks are the
+  ones that ran against what actually lands. On the default path `--admin` bypasses
+  branch protection, so nothing else enforces it: a branch behind its base merged
+  with its checks never having run against the merged state.
+
+  A **ruleset** carries the flag as `strict_required_status_checks_policy` on its
+  `required_status_checks` rule, in a body this loop already reads. Where it is on,
+  `pr-ci-state.sh --required` compares the base with the merge target and refuses a
+  head that is behind — `status=failed reason=behind_base`. It is a failure rather
+  than something to wait for, and that is the point: no check on that commit can
+  settle it, so `pending` would wait for something that is not going to happen. It
+  decides ahead of the context verdicts, which are all about a commit that will not
+  be merged.
+
+  **Classic protection keeps that flag where this cannot reach it**, and #220 was
+  filed believing otherwise. Measured: the branch object's `required_status_checks`
+  holds `checks`, `contexts` and `enforcement_level` and no `strict`; GraphQL's
+  `branchProtectionRule` is null without admin; and `RefUpdateRule` has no such
+  field at all. So that half is unreadable, and unenforced on the default path.
+  `REVIEW_MERGE_STRICT=1` covers both halves, because GitHub evaluates the policy
+  itself there.
+
+  **`mergeStateStatus` was measured as the way to cover the classic half and
+  rejected.** `BEHIND` is one of its values and needs no admin, but it is computed
+  lazily — every open pull request on two of the five repositories sampled reported
+  `UNKNOWN` — and it is a single value with a precedence, so `BLOCKED` masks
+  `BEHIND` whenever a review is also outstanding, which for this loop is most of the
+  time. Absence of `BEHIND` proves nothing, and a gate cannot rest on a signal that
+  is usually absent for another reason.
+
+  A repository with no such policy pays nothing: the comparison is only requested
+  where the flag is on, and the fixture asserts that. The flag is unioned across the
+  two required-set reads exactly as the contexts are — on at either sample is on —
+  and a value that is present and not a boolean is unreadable rather than absent,
+  since read as absent it is the whole gate switched off by a body of another shape.
+
+  Closes #220.
+
 ## [2.0.79] — 2026-08-28
 
 - **The required-checks gate is bound to the commit it merges, and the read that

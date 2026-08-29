@@ -73,9 +73,11 @@ union everything, which cannot lose a requirement; what it cannot do is freeze t
 branch.
 
 Still bounded rather than closed, then: the `--admin` bypass itself, below; that
-mutable required set; and the "require branches to be up to date" policy, which is
-not read at all and which nothing on this path enforces, since `--admin` bypasses
-it along with everything else — #220.
+mutable required set; and the CLASSIC half of the "require branches to be up to
+date" policy, whose flag lives on the admin-only protection endpoint and cannot be
+read here at all. The ruleset half is read and enforced (#220), and on this path
+nothing else enforces either, since `--admin` bypasses protection along with
+everything else.
 
 **Strict mode is what closes it.** With `REVIEW_MERGE_STRICT=1` on a repository
 whose required checks are non-bypassable — configured, and with bypassing
