@@ -5636,16 +5636,20 @@ chmod +x "$_rb_ack/bin/gh"
 # case that asks for it gets it.
 printf '#!/bin/sh\nprintf "not-a-count\\n"\n' > "$_rb_ack/sedbin/sed"
 chmod +x "$_rb_ack/sedbin/sed"
-rb_ack_run() {   # rb_ack_run <helper stdout> <helper rc> [extra PATH dir] ; prints the driver's output
+rb_ack_run() {   # rb_ack_run <helper stdout> <helper rc> [extra PATH dir] [shell attack] ; prints the driver's output
     printf '%s' "$1" > "$_rb_ack/count.out"
     printf '%s' "$2" > "$_rb_ack/count.rc"
     : > "$_rb_ack/gh.log"
     local _p="$_rb_ack/bin:$PATH"
     [ -n "${3:-}" ] && _p="$3:$_p"
-    run_limited 25 env PATH="$_p" RB_ACK_DIR="$_rb_ack" \
+    # THE ATTACK IS DEFINED IN THE CHILD, before the block is sourced, because that
+    # is where the driver's own bash runs: `SKILL.md` executes in the operator's
+    # shell and cannot re-exec, so a function defined there is in scope for it.
+    run_limited 25 env PATH="$_p" RB_ACK_DIR="$_rb_ack" RB_ACK_ATTACK="${4:-}" \
         bash --noprofile --norc -c '
 HOST=github.com; OWNER=acme; REPO=widget
 WHO="chatgpt-codex-connector[bot]"
+eval "${RB_ACK_ATTACK:-}"
 RB_SCRIPTS="$RB_ACK_DIR/scripts"
 . "$RB_ACK_DIR/ack.sh"
 ' 2>&1 || true
@@ -5661,16 +5665,42 @@ esac
 # …WITH THE COUNT THE GATE REPORTED, not one retyped into the body. An
 # acknowledgement naming the wrong number pauses again at once or skips a later
 # check-in, and both are silent.
-case "$(cat "$_rb_ack/gh.log")" in
-    *'`41`'*) pass "…carrying the count the gate itself reported" ;;
-    *) die "the acknowledgement does not carry the gate's count: $(cat "$_rb_ack/gh.log")" ;;
-esac
+#
+# TWO COUNTS, because ONE proves nothing about propagation: with a single
+# successful pause the body could carry that number as a LITERAL and every case
+# here would still pass — the refusal cases never post, so they cannot tell. Two
+# different counts through the same block is what makes it dynamic.
+for _rb_ack_n in 41 7; do
+    _rb_ack_out="$(rb_ack_run "PR_ROUND_PAUSE pr=7 rounds=$_rb_ack_n threshold=10 acknowledged=0" 3)"
+    case "$(cat "$_rb_ack/gh.log")" in
+        *"\`$_rb_ack_n\`"*) pass "…carrying the count the gate itself reported ($_rb_ack_n)" ;;
+        *) die "the acknowledgement does not carry the gate's count $_rb_ack_n: $(cat "$_rb_ack/gh.log")" ;;
+    esac
+done
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 3)"
 # …AND THE REVIEWER, because the count is per reviewer: an unscoped acknowledgement
 # of 41 Codex rounds is read by a Copilot invocation with 5.
 case "$(cat "$_rb_ack/gh.log")" in
     *'chatgpt-codex-connector[bot]'*) pass "…and the reviewer it is about" ;;
     *) die "the acknowledgement is unscoped: $(cat "$_rb_ack/gh.log")" ;;
 esac
+# A NEUTERED `echo` DOES NOT REACH THE POST, which is the half of the
+# operator-shell case that holds today: `SKILL.md` runs in a shell where `echo` is
+# a NAME, and with it silenced the refusal says nothing — but `exit 0` still fires
+# and nothing is acknowledged.
+#
+# THE OTHER HALF IS #224 AND IS NOT ASSERTED HERE. Measured against this same lift:
+# with `echo` AND `exit` both shadowed the refusal arm runs, `exit` returns instead
+# of terminating, and the forged line is acknowledged. That is a defect in the
+# block rather than in this fixture, so it is filed; asserting the behaviour it has
+# today would bake it into the suite, and asserting the behaviour it should have
+# would be red.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1 "" 'echo() { :; }')"
+case "$(cat "$_rb_ack/gh.log")" in
+    *'pr comment'*) die "a failed probe was acknowledged with echo shadowed: $(cat "$_rb_ack/gh.log")" ;;
+    *) pass "a failed probe is not acknowledged even with \`echo\` shadowed" ;;
+esac
+
 # A PROBE THAT PRINTED A PLAUSIBLE PAUSE AND THEN DIED IS NOT PERMISSION. This is
 # the case the greps cannot see: the output parses, the count is digits, and the
 # only thing saying the probe failed is the status.
