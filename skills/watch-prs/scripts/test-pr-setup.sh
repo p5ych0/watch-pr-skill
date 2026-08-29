@@ -1,28 +1,34 @@
 #!/usr/bin/env bash
 # Unit tests for pr-setup.sh.
 #
-# THE CONTRACT UNDER TEST: the caller starts it with `/usr/bin/env bash -p` and
-# names a DIRECTORY that must not exist. The helper creates it exclusively at mode
-# 700, reads the origin through `pr-origin.sh`, proves it parses, allocates
-# `work/` and the four working files, and writes `<dir>/env` — a file of
-# single-quoted assignments the DRIVER sources. Statuses: 0 ready, 1 stopped, 2 the
-# storage would not take it, which is the only one the caller retries.
+# THE CONTRACT UNDER TEST: the caller starts it with `/usr/bin/env bash -p` and names a
+# DIRECTORY that must not exist. The helper creates it exclusively at mode 700, reads
+# the origin through `pr-origin.sh`, proves it parses, allocates `work/` and the four
+# working files, and writes the origin into `<dir>/origin` — ONE VALUE, which the driver
+# READS with `$(<…)`. Statuses: 0 ready, 1 stopped, 2 the storage would not take it,
+# which is the only one the caller retries.
 #
-# WHAT THIS FILE IS ABOUT, and what `test-pr-skill-contract.sh` is about, are two
-# ends of one arrangement. The contract file runs the DRIVER's block against a
-# forged helper: whether a refusal is walked past, whether the source is what
-# brings the values in, whether the pin is proved. This file runs the REAL helper:
-# whether the directory is a reservation, whether a value carrying `$(…)` comes
-# back as data, whether a refusal leaves anything behind. Neither can answer the
-# other's question, and putting both in one file was tried in `SKILL.md` — the 178
-# lines #228 moved out.
+# IT USED TO HAND BACK TWELVE ASSIGNMENTS IN A FILE THE DRIVER SOURCED, and that is
+# worth knowing here because half these cases were written against it. `.` is a name,
+# and in the driving shell a function by that name could read the genuine assignments
+# and hand back a different origin — after which everything agreed with it. Eleven of
+# the twelve were never information: three the identity parser derives from the origin,
+# two are constants, and the working paths are a literal suffix under a directory the
+# driver named. So the transport is one value now, nothing the helper writes is
+# evaluated, and the quoting that made a sourced line an assignment is gone with it.
 #
-# THE QUOTING IS THE PART TO READ FIRST. A remote URL is not this repository's
-# text: a checkout can carry any origin, and a `git` config nobody read can put a
-# quote, a `$(…)`, a backtick or a semicolon in it. The env file is SOURCED, so a
-# value that escapes its quoting is a command in the driving shell. Every shape is
-# staged here against the real helper and asserted to round-trip byte-exact and to
-# execute nothing.
+# WHAT THIS FILE IS ABOUT, and what `test-pr-skill-contract.sh` is about, are two ends
+# of one arrangement. The contract file runs the DRIVER's block against a forged helper:
+# whether a refusal is walked past, whether the value is read rather than sourced,
+# whether the pin is proved. This file runs the REAL helper: whether the directory is a
+# reservation, whether a hostile origin comes back byte-exact, whether a refusal leaves
+# anything behind. Neither can answer the other's question.
+#
+# THE CLEANUP IS THE PART TO READ FIRST. This directory's name is published in argv, and
+# `docs/decisions/2026-08-26-reservation-inference.md` accepts a same-UID race on it —
+# bounded at one EMPTY directory lost or left behind, on the strength of one sentence:
+# `rmdir` refuses anything with contents in it. Several cases here exist to keep that
+# sentence true.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"
@@ -100,15 +106,15 @@ r="$(run --)"
 ok_dir="$(dir_of "$r")"
 { [ "$(rc_of "$r")" = 0 ] \
   && case "$(out_of "$r")" in *"PR_SETUP status=ready origin=$ok_dir/origin work=$ok_dir/work"*) true ;; *) false ;; esac; } \
-    && pass "a good checkout gives status=ready and names the file to source" \
+    && pass "a good checkout gives status=ready and names what it wrote" \
     || die "the ordinary run failed: '$r'"
 # THE DIRECTORY SURVIVES THE CALL, which is the whole point of it: the caller
-# sources the file and then uses `work/` for the rest of the session. A helper that
+# reads the origin out of it and then uses `work/` for the rest of the session. A helper that
 # cleaned up on success would be removing what it was asked to produce.
 { [ -d "$ok_dir" ] && [ -f "$ok_dir/origin" ]; } \
     && pass "…and the directory it made is left for the caller" \
     || die "the successful run did not leave its directory behind"
-# AT MODE 700, because the env file inside it carries the session's origin and the
+# AT MODE 700, because the file inside it carries the session's origin and the
 # work files carry the round's account before it is posted.
 _mode="$(ls -ld "$ok_dir" 2>/dev/null | cut -c1-10)" || _mode=""
 case "$_mode" in
@@ -251,7 +257,7 @@ _sp_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_sp_d" 
     && pass "…while a parent containing a space is set up rather than refused" \
     || die "a path with a space was refused (rc=$_sp_rc out='$_sp_out')"
 # AND THE VALUES IN IT SURVIVE THE SOURCE, which is the half a shape check cannot
-# see: the paths are written into the env file and read back by the driver.
+# see: the working files have to be where the driver builds their paths.
 _sp_got="$(cat "$_sp_d/origin" 2>/dev/null)" || _sp_got="READ_FAILED"
 { [ "$_sp_got" = "$REAL" ] && [ -f "$_sp_d/work/head.txt" ]; } \
     && pass "…and the origin and the working files under it are where the driver will look" \
@@ -278,7 +284,7 @@ _nr_out="$(cd "$_noremote" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_n
     || die "a refused run left its directory behind"
 # AND A REMOTE THAT IS NOT AN IDENTITY IS REFUSED BY THE PARSER, with the parser's
 # own reason carried through — the helper proves the origin parses before it writes
-# it, so a value that cannot be an identity never reaches a file the driver sources.
+# it, so a value that cannot be an identity never reaches a file the driver reads.
 ( cd "$REPO" && git remote set-url origin 'not-a-remote' ) 2>/dev/null || true
 _bd_d="$(mktemp -d "$TMP/bd.XXXXXX")/dir"
 _bd=0
@@ -643,37 +649,31 @@ case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
     *)  pass "the pin probe creates and removes directories, so every removal is an rmdir" ;;
 esac
 
-# AND THE LEAF IS PROBED AS WELL AS THE DIRECTORY, which is what `pr-origin.sh pin`
-# actually creates. A filesystem or quota with room for ONE more inode passes a
-# directory-only probe — it releases the inode before the real call — and then the pin
-# creates its directory and fails to write `pin`, returning 2 after setup has announced
-# ready, where the driver has nowhere to put the retry.
-#
-# STAGED BY MAKING THE PROBE DIRECTORY UNWRITABLE THE MOMENT IT EXISTS, which is the
-# state that leaves room for the directory and none for the leaf.
+# AND A REPLACEMENT AT THE PROBE'S NAME IS NOT DESTROYED. The probe is ONE directory
+# created and removed by ONE `mkdir` and ONE `rmdir`, and that shape is what
+# `docs/decisions/2026-08-26-reservation-inference.md` rests on: "no data is destroyed,
+# because `rmdir` refuses anything with contents in it". A PAIR broke it — probing the
+# pin's leaf meant `rmdir leaf` then `rmdir pinprobe`, and the first EMPTIES a
+# replacement so the second succeeds on a directory that had contents a moment earlier.
+case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
+    *'pinprobe/'*) die "the pin probe creates a nested object; removing it takes two steps, which empties a replacement first" ;;
+    *) pass "the pin probe is one directory, so its removal is a single rmdir on a single name" ;;
+esac
+# STAGED: a replacement carrying contents must survive the cleanup intact.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe/leaf"|chmod 500 "$RB_DIR/pinprobe"; &|' \
+sed 's|^/usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null .. rb_setup_stop pin_storage 2|mkdir -p "$RB_DIR/pinprobe/theirs"; &|' \
     "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'chmod 500 "$RB_DIR/pinprobe"; /usr/bin/env mkdir' "$_stage/pr-setup.sh" \
-    && pass "the pin-leaf stage is patched" \
-    || die "the pin-leaf stage did not patch pr-setup.sh; the case proves nothing"
-_pl="$(mktemp -d "$TMP/pl.XXXXXX")/dir"
-_pl_rc=0
-_pl_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_pl" 2>&1)" || _pl_rc=$?
-chmod -R 700 "$_pl" 2>/dev/null || true
-{ [ "$_pl_rc" -eq 2 ] && case "$_pl_out" in *'reason=pin_storage'*) true ;; *) false ;; esac; } \
-    && pass "…so storage that takes the directory but not the leaf is a retryable refusal too" \
-    || die "the pin-leaf probe did not report a retryable refusal (rc=$_pl_rc out='$_pl_out')"
-# AND THE CANDIDATE IS GONE. A refusal between creating the probe's objects and removing
-# them leaves an empty child under the reserved directory, after which the final `rmdir`
-# trips over it and the caller is left a NON-empty published directory — more than the
-# one empty directory the accepted bound permits, and on the path the driver takes when
-# it retries elsewhere and cleans nothing.
-[ ! -e "$_pl" ] \
-    && pass "…and the candidate it refused is given back rather than left behind" \
-    || die "the pin-leaf refusal left '$(ls -A "$_pl" 2>/dev/null | tr '\n' ' ')' behind"
-rm -rf "$_pl"
+grep -qF 'mkdir -p "$RB_DIR/pinprobe/theirs";' "$_stage/pr-setup.sh" \
+    && pass "the probe-replacement stage is patched" \
+    || die "the probe-replacement stage did not patch pr-setup.sh; the case proves nothing"
+_pr="$(mktemp -d "$TMP/pr.XXXXXX")/dir"
+_pr_rc=0
+_pr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_pr" 2>&1)" || _pr_rc=$?
+[ -d "$_pr/pinprobe/theirs" ] \
+    && pass "…and a replacement carrying contents survives the probe's removal intact" \
+    || die "the probe removal destroyed a replacement that had contents (rc=$_pr_rc out='$_pr_out')"
+rm -rf "$_pr"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # …AND IT LEAVES NOTHING BEHIND, because the probe directory is this run's and is
 # removed the moment it has answered.

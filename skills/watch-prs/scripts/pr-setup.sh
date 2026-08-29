@@ -192,11 +192,10 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
     # anything and leaves a directory behind at worst.
     if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
-        # THE PIN PROBE'S OBJECTS FIRST, and by `rmdir` alone. A refusal between
-        # creating them and removing them leaves an empty child under `$RB_DIR`, which
-        # the final `rmdir` then trips over — the caller is left a NON-empty published
-        # directory where the accepted bound is one empty one.
-        /usr/bin/env rmdir "$RB_DIR/pinprobe/leaf" 2>/dev/null
+        # THE PIN PROBE'S DIRECTORY FIRST, by one `rmdir`. A refusal between creating
+        # it and removing it leaves an empty child under `$RB_DIR`, which the final
+        # `rmdir` then trips over — the caller is left a NON-empty published directory
+        # where the accepted bound is one empty one.
         /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null
         /usr/bin/env rm -f "$RB_DIR/origin" "$RB_DIR/o/origin" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
@@ -379,21 +378,29 @@ done
 # WHAT IT DOES NOT CLOSE is a filesystem that fills between this probe and the pin,
 # and nothing can: the two are in different processes. The abort the driver prints
 # there says to re-run, which relocates the session as a whole.
-# THE WHOLE OPERATION, NOT HALF OF IT. `pr-origin.sh pin` creates a directory AND puts
-# an object inside it, so a filesystem or quota with room for one more inode passes a
-# directory-only probe and fails the real call — after setup has announced ready, where
-# the driver has nowhere to put the retry. The probe creates both and removes both.
+# ONE DIRECTORY, CREATED AND REMOVED BY ONE `mkdir` AND ONE `rmdir`, and the shape is
+# what matters rather than the count. `docs/decisions/2026-08-26-reservation-inference.md`
+# accepts a same-UID race on these names, and the whole of what it accepts rests on one
+# sentence: "no data is destroyed, because `rmdir` refuses anything with contents in it".
+# A single `rmdir` on a single name keeps that true — a replacement carrying anything
+# survives intact, and a replacement that is empty costs the empty directory the record
+# already accounts for.
 #
-# BOTH OBJECTS ARE DIRECTORIES, so every removal here is an `rmdir`. A file leaf would
-# have to come back out with `rm -f`, and that resolves the name AGAIN: the held
-# descriptor authenticates `$RB_DIR` and says nothing about a nested name, so a `rm -f`
-# on one deletes whatever is there by then. `rmdir` refuses a symlink outright and
-# refuses a directory with anything in it, which is the same reason the cleanup below
-# uses it. A directory costs an inode exactly as the pin's leaf does, so the storage
-# question is unchanged.
+# A PAIR BREAKS IT, WHICH IS WHY THERE ISN'T ONE. Probing the pin's leaf as well meant
+# creating `pinprobe/leaf` and removing both, and a two-step removal EMPTIES a
+# replacement before it removes it: `rmdir leaf` takes the racer's leaf, after which
+# `rmdir pinprobe` succeeds on a directory that had contents a moment earlier. Two
+# objects destroyed, where the record permits one empty one lost. A file leaf is worse
+# still — it needs `rm -f`, which resolves a nested name the held descriptor says
+# nothing about.
+#
+# SO THE LEAF IS NOT PROBED, AND THAT IS A TRADE RATHER THAN AN OVERSIGHT. What goes
+# undetected is a filesystem with room for exactly one more inode: it passes here and
+# fails the pin's second object. What precedes this probe is `work/` and four files and
+# — a few lines below — the origin, six allocations that a filesystem that tight fails
+# first. Buying that last case costs the guarantee a base-ref record rests on, and the
+# record wins.
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
-/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe/leaf" 2>/dev/null || rb_setup_stop pin_storage 2
-/usr/bin/env rmdir "$RB_DIR/pinprobe/leaf" 2>/dev/null || rb_setup_stop pin_storage 2
 /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 
 # ── the one value that has to cross ────────────────────────────────────────

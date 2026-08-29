@@ -460,10 +460,18 @@ rediscovering them.
   MOVING IT INTO `.sh` FILES IS THE ANSWER WHERE A FILE CAN CARRY THE VALUES BACK,
   and #26 and #228 are the two halves of that measurement. #26 answered NO on the
   grounds that the setup block exports `REVIEW_BUS_REMOTE` and a child cannot export
-  into its parent — true of a child's ENVIRONMENT, and false of a file the driver
-  SOURCES, since an assignment in a sourced file happens in the sourcing shell.
-  #228 moved the setup work into `pr-setup.sh` on that reading: 178 executable lines
-  became 96, and 18,450 characters became 8,607.
+  into its parent — true of a child's ENVIRONMENT, and settling less than it looks,
+  since what has to cross is a VALUE and a value can cross in a file. #228 moved the
+  setup work into `pr-setup.sh` on that reading: 178 executable lines became 108, and
+  18,450 characters became 10,058.
+
+  WHAT CROSSES IS THE ORIGIN AND NOTHING ELSE, and the file is READ rather than
+  SOURCED. Sourcing was the first answer and it was wrong: `.` is a name, and in the
+  driving shell a function by that name could hand back another origin that every later
+  check agrees with, because the identity and the pin are both computed FROM it. Eleven
+  of the twelve values were never information — three the identity parser derives, two
+  are constants, and the working paths are a literal suffix under a directory the driver
+  named itself — so they are assigned in the document and proved by reading back.
 
   WHAT STAYS IS WHAT A HELPER CANNOT DO FOR THE DRIVER, and it is four things:
   finding the scripts at all, since the identity parser is one of them; choosing the
