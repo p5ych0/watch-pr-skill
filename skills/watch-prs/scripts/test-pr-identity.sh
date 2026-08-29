@@ -28,10 +28,17 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # fields exactly as silently.
 unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 
-# Concrete-identity patterns that must never be hard-coded: a repo slug
-# (p5ych0/pulse), a unit slug (p5ych0-pulse), or any concrete /tmp path keyed on
-# the repo name (…/pulse-review-bus, …/pulse-claude-worktrees, …).
-PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok)-|/home/[^ ]*/(pulse|strumok)\b|owner=.?p5ych0|repo=.?(pulse|strumok)|(PULSE|STRUMOK)_REVIEW'
+# Concrete-identity patterns that must never be hard-coded: a repo slug, a unit
+# slug, or any concrete path keyed on a repository name.
+#
+# THE SHAPES, NOT A LIST OF PROJECTS. This named two of the author's other
+# repositories, which made the guard a list to maintain and put their names in a
+# file that forbids exactly that. Keyed on the OWNER and the shape instead, it
+# catches any repository of theirs — including THIS one, which the old pattern did
+# not, though a slug baked into an installed script would route another project's
+# reviews here. Verified both ways below: no hit on this tree, and a hit on each
+# staged violation.
+PAT='p5ych0/[A-Za-z0-9_.-]+|p5ych0-[A-Za-z0-9_.-]+|/tmp/(p5ych0-)?[A-Za-z0-9_.-]+-review-bus|/home/[^ ]*/[a-z][A-Za-z0-9_-]*-review-bus|owner=.?p5ych0|repo=.?[A-Za-z]|[A-Z][A-Z0-9]*_REVIEW_BUS'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1113,6 +1120,35 @@ if [ -n "$hits" ]; then
     exit 1
 fi
 echo "ok   - no hard-coded owner/repo/bus identity in scripts or skill"
+
+# ── …AND THE SCAN CAN STILL SEE ONE ───────────────────────────────────────
+# The check above asserts an ABSENCE, so a pattern that matches nothing reports
+# the invariant holding without having tested it — the shape this repository calls
+# worse than no check. Nothing exercised it until the pattern was generalised away
+# from a list of project names, at which point there was no way to tell a wider
+# pattern from a broken one.
+#
+# ONE STAGED FILE PER SHAPE the pattern claims to catch, including this
+# repository's own slug: an installed copy serves every project, so a slug baked
+# into a script sends another project's reviews here.
+pat_probe_dir="$(mktemp -d)" || { echo "FAIL - no scratch dir for the identity-scan control"; echo "RESULT: FAIL"; exit 1; }
+pat_probe_fail=0
+for _pp in 'x=p5ych0/some-other-repo' \
+           'x=p5ych0/watch-pr-skill' \
+           'x=p5ych0-some-other-repo' \
+           'd=/tmp/p5ych0-something-review-bus' \
+           'SOMETHING_REVIEW_BUS=1' \
+           '# a comment naming owner=p5ych0'; do
+    printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
+    if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
+        echo "ok   - the identity scan still catches: $_pp"
+    else
+        echo "FAIL - the identity scan does not catch '$_pp'; its absence above proves nothing"
+        pat_probe_fail=1
+    fi
+done
+rm -rf "$pat_probe_dir"
+[ "$pat_probe_fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
 
 # ── the scan itself fails closed on an input it cannot read ────────────────
 # The invariant this file owns is "no runtime script hard-codes an identity", and

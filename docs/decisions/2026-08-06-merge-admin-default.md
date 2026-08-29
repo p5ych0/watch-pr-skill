@@ -56,11 +56,11 @@ indistinguishable from "not protected". That was measured on
 OBJECT — `repos/{o}/{r}/branches/{b}` — carries the same answer and is readable
 with the `repo` scope this loop runs under: measured on ten repositories none of
 which the measuring account administers, three required contexts came back for
-`cli/cli`, eleven for `kubernetes/kubernetes`, twenty-three for `microsoft/vscode`,
+one, eleven for another, twenty-three for a third,
 while the dedicated endpoint 404s on the same repository with the same token. A
 ruleset's contexts come from `repos/{o}/{r}/rules/branches/{b}`, and the required
-set is the union: `home-assistant/core` requires eight contexts through a ruleset
-with `protection.enabled` false, `cli/cli` the other way round.
+set is the union: one of them requires eight contexts through a ruleset with
+`protection.enabled` false, another the other way round.
 
 **What that leaves for this record**, and the distinction matters. What is bound is
 the EVALUATION: which contexts the base branch requires is now checked against the

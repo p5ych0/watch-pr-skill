@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.82] — 2026-08-29
+
+- **No repository other than this one is named anywhere in the tree.** The
+  measurements behind the required-checks work cited the public repositories they
+  were taken on, and two archived v1 planning documents discussed another project of
+  the same author. Every one of those names is gone: the measurements keep their
+  force — "three required contexts on one, eleven on another, twenty-three on a
+  third", "a commit with thirteen check runs and no statuses reports SUCCESS" — and
+  say nothing about whose repositories they were.
+
+  The two archived documents were **deleted** rather than edited. They planned the
+  v1 `review-bus` watcher, which v2 removed: `review-bus-codex-watcher.sh` and the
+  `test-review-bus-*.sh` fixtures no longer exist, nothing in the tree referenced
+  them, and every issue number in them belonged to the other project.
+
+- **And the identity guard no longer keeps a list of the author's projects.**
+  `test-pr-identity.sh` forbade two repository names by spelling them out — a list to
+  maintain, in the one file whose job is to forbid exactly that. It is keyed on the
+  owner and the shape now, which catches any repository of theirs **including this
+  one**: the old pattern did not, though an installed copy serves every project, so
+  a slug baked into a script would send another project's reviews here.
+
+  That scan asserts an ABSENCE, and nothing had ever exercised it — a pattern
+  matching nothing would have reported the invariant holding without testing it.
+  Six staged violations now prove it can still see one, and the whole set goes red
+  if the pattern is emptied.
+
 ## [2.0.81] — 2026-08-29
 
 - **A shadowed `echo` and `exit` could walk past the round check-in's refusals and
@@ -125,12 +152,12 @@
   `repo` scope this loop runs under.
 
   Measured on ten repositories, none of which the measuring account administers:
-  three required contexts came back for `cli/cli`, eleven for
-  `kubernetes/kubernetes`, twenty-three for `microsoft/vscode`, while the dedicated
+  three required contexts came back for a sampled repository, eleven for
+  a sampled repository, twenty-three for a sampled repository, while the dedicated
   protection endpoint 404s on the same repository with the same token. Rulesets are
-  the other source and neither subsumes the other — `home-assistant/core` reports
+  the other source and neither subsumes the other — one sampled repository reports
   `protection.enabled: false` with `protected: true` and its eight contexts appear
-  only under `rules/branches/{b}`, `cli/cli` is the other way round — so the
+  only under `rules/branches/{b}`, a sampled repository is the other way round — so the
   required set is the **union**, and a helper reading one alone reports a
   requirement as absent.
 
@@ -265,9 +292,8 @@
   sources in one response addressed by the OID, so there are no pages to reconcile
   and no fold to get wrong.
 
-  Measured against the live API rather than assumed: a `cli/cli` commit with
-  thirteen check runs and no legacy statuses reports SUCCESS, and a
-  `pandas-dev/pandas` commit with one failed run, six still in progress and a
+  Measured against the live API rather than assumed: a commit with
+  thirteen check runs and no legacy statuses reports SUCCESS, and another with one failed run, six still in progress and a
   passing legacy status reports FAILURE — the server's precedence agreeing with
   this file's own contract, that a failed check decides while others are still
   running. `EXPECTED` is treated as pending, being the state of a required context
@@ -5659,7 +5685,7 @@ longer read; move anything project-specific in it into `AGENTS.md`.
 ## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
-  findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
+  findings** (another repository of the same author#212). `process_review` read `.summary` from the
   model result only in the zero-findings branch; with one or more findings it was
   overwritten by a status line and never reached the PR or the bus response. The
   prompt asks for a summary on *every* review — including the verification
