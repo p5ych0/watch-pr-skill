@@ -261,8 +261,11 @@ rediscovering them.
   eleven on another" and never the slugs.
 
   **A functional dependency coordinate is not a mention.** `uses: actions/checkout@v4`
-  in a workflow, a package name, an API path — each names something the tooling
-  requires, and bumping one must not read as a violation. The rule is about naming a
+  in a workflow, or a package name, names something the tooling requires, and
+  bumping one must not read as a violation. An API path is exempt only in its
+  GENERIC form — `repos/{owner}/{repo}/commits`, or one built from derived variables
+  — never with a literal owner and repository in it, which is the thing being
+  forbidden. The rule is about naming a
   repository as an EXAMPLE, as EVIDENCE, or as HISTORY. The other exception is the
   operator asking, in the session, about a named repository; it does not survive
   into a file.

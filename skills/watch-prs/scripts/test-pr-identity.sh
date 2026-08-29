@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Re-drift guard: the review-bus scripts + skill must stay repo-agnostic —
-# identity is derived from `git remote get-url origin`, never hard-coded. Fails
-# if a concrete owner/repo slug or bus path appears. (Bare `p5ych0` is allowed —
-# it names the shared review token in comments, not an identity to derive.)
+# Re-drift guard: the helper scripts + skill must stay repo-agnostic — identity is
+# derived from `git remote get-url origin`, never hard-coded. Fails if a concrete
+# owner/repo slug appears, in code or in a comment.
+#
+# THE BARE OWNER IS NOT EXEMPT, and this header said it was until #227. The
+# exemption read "it names the shared review token in comments, not an identity to
+# derive", which was a v1 idea: that token went with the bus, and what is left is
+# the owner of this repository appearing in a file that must work for every other.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Portable watchdog: stock macOS ships no GNU `timeout`, and the suite is a
@@ -28,10 +32,10 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # fields exactly as silently.
 unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 
-# Concrete-identity patterns that must never be hard-coded, as TWO FIXED STRINGS.
+# The concrete identity that must never be hard-coded, as ONE FIXED STRING.
 #
-# WHAT THIS CATCHES: this repository's OWNER and a project-prefixed bus variable, in
-# any spelling, anywhere in the file, comments included. `p5ych0/other`,
+# WHAT THIS CATCHES: this repository's OWNER, in any spelling, anywhere in the file,
+# comments included. `p5ych0/other`,
 # `p5ych0-other`, `/tmp/p5ych0-x-review-bus`, `owner=p5ych0` and
 # `repo=$'p5ych0-x'` are each one substring away, and none of them needs the text to
 # be parsed.
@@ -68,7 +72,7 @@ unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 # distinction above; the second was only ever caught by listing two project names,
 # which is the list this change removes. `SCRIPT_PAT` below still catches a bare
 # `owner/repo` slug in code, which is how a hard-coded target is actually written.
-PAT='p5ych0|[A-Z][A-Z0-9]*_REVIEW_BUS'
+PAT='p5ych0'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1169,7 +1173,6 @@ for _pp in 'x=p5ych0/some-other-repo' \
            'gh api -f owner=p5ych0' \
            'd=/tmp/p5ych0-x-review-bus' \
            'gh api -f repo=$'"'"'p5ych0-x'"'"'' \
-           'SOMETHING_REVIEW_BUS=1' \
            '# a comment naming owner=p5ych0' \
            '# this only ever worked for p5ych0'; do
     printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
@@ -1194,6 +1197,8 @@ for _pn in 'gh api -f repo="$REPO"' \
            'gh api -f repo=.github' \
            'gh api -f repo=123' \
            'REVIEW_BUS_REMOTE=x' \
+           'DISABLE_REVIEW_BUS=1' \
+           'CODEX_REVIEW_BUS=x' \
            'ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills'; do
     printf '%s\n' "$_pn" > "$pat_probe_dir/probe.sh"
     if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then

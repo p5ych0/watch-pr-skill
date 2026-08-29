@@ -23,8 +23,11 @@
 
 - **And the identity guard no longer keeps a list of the author's projects.**
   `test-pr-identity.sh` forbade two repository names by spelling them out — a list to
-  maintain, in the one file whose job is to forbid exactly that. It is two fixed
-  strings now: the owner, in any spelling, and a project-prefixed bus variable.
+  maintain, in the one file whose job is to forbid exactly that. It is ONE fixed
+  string now: the owner, in any spelling, anywhere in a scanned file. Its header used
+  to exempt the bare owner — "it names the shared review token in comments" — which
+  was a v1 idea that went with the bus; what is left is this repository's owner
+  appearing in files that must work for every other.
 
   **It was a pattern language for four review rounds first, and that is the part
   worth recording.** Generalising the list into arms that told a literal from an
