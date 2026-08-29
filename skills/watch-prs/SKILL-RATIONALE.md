@@ -1649,30 +1649,25 @@ later stage writes into.
 ## A PIN FAILURE IS TERMINAL, because the work files are already on this parent.
 
 `pr-origin.sh pin` reports 2 where the STORAGE would not take what it asked, and every
-other call in this block that can report 2 is retried under the second parent. This
-one is not, and the reason is the ORDER the work moved into: `pr-setup.sh` allocates
-`work/` and the four files BEFORE the driver pins, so by the time the pin runs this
-session is already committed to one parent.
+other call in this block that can report 2 is retried under the second parent. This one
+is not, and the reason is the ORDER the work moved into: `pr-setup.sh` allocates `work/`
+and the four files BEFORE the driver pins, so by the time the pin runs this session is
+already committed to one parent. Those files and `$RB_SETUP_DIR/pin` are in the same
+directory and therefore on the same filesystem, so pinning under the second parent while
+they stay where they are produces a session that looks set up and dies at its first
+write — after it has posted.
 
-`$RB_SETUP_DIR/pin` and `$RB_SETUP_DIR/work` are in the same directory, so they are on
-the same filesystem. A pin that reports "the storage would not take a directory" is
-therefore reporting it about the filesystem holding the round summary, the opening
-account, the review baseline and the gated head — every one of which is written to
-before the first round can close. Pinning under the second parent while those stay
-where they are produces a session that looks set up and dies at its first write, after
-it has posted.
+THE QUESTION IS ASKED EARLIER INSTEAD, WHERE IT CAN BE ACTED ON. `pr-setup.sh` creates
+and removes a probe directory beside where the pin will go, and a parent that cannot
+take it fails there with status 2 — inside the unit this block already retries, so the
+whole session moves, files and all. That is the recovery the pin used to have on its
+own, back when the work allocation came after it, restored without writing this block
+twice.
 
-BEFORE #228 THE PIN DID HAVE ITS OWN FALLBACK, and it worked because the work
-allocation came AFTER it: moving the pin moved everything. It cannot be preserved by
-moving the pin alone now, and preserving it properly means re-running `pr-setup.sh`
-under the second parent and repeating the source and every proof after it — which,
-with no function to hold them, is this whole block written twice.
-
-SO THE RECOVERY IS A RE-RUN, and the abort says so. On that run `pr-setup.sh` is
-offered the failing parent first, reports 2 for the same reason, and the retry that
-already exists moves the whole session — files and all — to the parent that works.
-That is the same recovery, one step later, and it costs the operator a command rather
-than the document a second copy of itself.
+WHAT IS LEFT IS A FILESYSTEM THAT FILLS BETWEEN THAT PROBE AND THE PIN, which is two
+processes apart and cannot be closed from either. The abort says to re-run, and a re-run
+relocates the session as a whole: `pr-setup.sh` is offered the failing parent first,
+reports 2 for the same reason, and the retry moves everything.
 
 ## THE FILE IS BOUND BEFORE IT IS READ, because a name can be replaced between the two.
 

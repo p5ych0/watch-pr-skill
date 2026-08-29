@@ -412,7 +412,7 @@ mkdir -m 700 "$p/o"
 printf "not this runs\n" > "$p/env"
 printf "not this runs\n" > "$p/o/origin"
 exit 1'
-grep -vF 'RB_INO="$(rb_setup_ino "$RB_DIR")"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -vF 'RB_INO="$(rb_setup_ino_held)"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
 grep -qF 'RB_INO="$(rb_setup_ino' "$_stage/pr-setup.sh" \
     && die "the no-inode stage did not patch pr-setup.sh; the case proves nothing" \
     || pass "the no-inode stage is patched"
@@ -446,6 +446,19 @@ _nh_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     || die "a cleanup with no durable identity still unlinked leaves (rc=$_nh_rc out='$_nh_out')"
 rm -rf "$_nh"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
+# AND THE IDENTITY IS RECORDED FROM THE DESCRIPTOR, NOT FROM THE NAME, which closes
+# the window one level down: a swap between the `exec` and the record would capture the
+# REPLACEMENT's inode, after which the comparison is replacement against replacement,
+# agrees, and the cleanup unlinks the replacement's own files. Staged by making the
+# forged reader do the swap — it runs after the reservation and after the hold, which
+# is exactly that window.
+grep -qF 'RB_INO="$(rb_setup_ino_held)"' "$SCRIPT" \
+    && pass "the recorded inode comes from the held descriptor rather than the path" \
+    || die "pr-setup.sh records its inode through the published name, which a swap replaces"
+grep -qF 'ls -diL /dev/fd/8' "$SCRIPT" \
+    && pass "…read with -L, so it is the directory's inode and not the /proc link's" \
+    || die "the held-object read omits -L; on Linux that reports the symlink's inode"
 
 # …AND A REPLACEMENT CARRYING THE SAME NAMES IS NOT UNLINKED THROUGH EITHER. The
 # case above used witnesses this run never names, so it passed on a cleanup that
@@ -530,6 +543,41 @@ for _sig in HUP INT TERM; do
     rm -rf "$_sg"
 done
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
+# ── the storage the pin will need is proved here ──────────────────────────
+# THE DRIVER CANNOT ACT ON A PIN THAT REPORTS A STORAGE FAILURE. By the time it calls
+# `pr-origin.sh pin`, `work/` and its four files are already on this parent, so pinning
+# under the other one leaves a session whose files are on a filesystem that has just
+# refused a directory — it dies at its first round summary instead, after posting. The
+# question is asked here instead, inside the unit the driver already retries.
+#
+# STAGED BY MAKING THE DIRECTORY UNWRITABLE IMMEDIATELY BEFORE THE PROBE, which is the
+# state a full filesystem produces for it: the directory exists and another cannot be
+# created inside it. The forged reader cannot do it — it runs before `work/` is made,
+# so the allocation fails first and the case would be measuring that instead — so the
+# copy under test is patched at the line the case is about, as the signal cases are.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null|chmod 500 "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null|' \
+    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'chmod 500 "$RB_DIR"; /usr/bin/env mkdir' "$_stage/pr-setup.sh" \
+    && pass "the pin-storage stage is patched" \
+    || die "the pin-storage stage did not patch pr-setup.sh; the case proves nothing"
+_ps="$(mktemp -d "$TMP/ps.XXXXXX")/dir"
+_ps_rc=0
+_ps_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ps" 2>&1)" || _ps_rc=$?
+chmod 700 "$_ps" 2>/dev/null || true
+{ [ "$_ps_rc" -eq 2 ] && case "$_ps_out" in *'reason=pin_storage'*) true ;; *) false ;; esac; } \
+    && pass "a parent that cannot take another directory is a storage refusal, which the driver retries" \
+    || die "the pin-storage probe did not report a retryable refusal (rc=$_ps_rc out='$_ps_out')"
+rm -rf "$_ps"
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+# …AND IT LEAVES NOTHING BEHIND, because the probe directory is this run's and is
+# removed the moment it has answered.
+[ ! -e "$ok_dir/pinprobe" ] \
+    && pass "…and the probe directory does not survive a successful run" \
+    || die "the pin-storage probe left its directory behind"
 
 # ── the streams are separate ───────────────────────────────────────────────
 # NOTHING BUT THE READY LINE ON STDOUT, and every reason on stderr. The driver

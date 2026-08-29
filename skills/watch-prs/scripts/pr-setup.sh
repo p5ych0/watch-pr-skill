@@ -21,8 +21,8 @@
 # is a VALUE, and a value can cross in a file.
 #
 # WHAT STAYS IN THE DOCUMENT is what this cannot do for it: finding the scripts at
-# all, choosing the parent directory to hand over, and the sourcing itself with the
-# checks that follow it. See `SKILL.md` § Derive identity.
+# all, choosing the parent directory to hand over, the READ itself, and the checks and
+# assignments that follow it. See `SKILL.md` § Derive identity.
 #
 # WHAT THE CALLER MUST STILL DO, and the reason it is not done here:
 #
@@ -31,8 +31,8 @@
 #     and assigns and proves every other value itself. WHICH object it opened is not
 #     something either side can settle today — see #230.
 #   - REMOVE THE DIRECTORY. It is the caller's, by construction: this helper is
-#     given a name and creates it, and it must survive the call for the source to
-#     happen at all. A helper that removed it would be removing the thing it was
+#     given a name and creates it, and it must survive the call for the read to happen
+#     at all — and for the working files inside it to be there when a round needs them. A helper that removed it would be removing the thing it was
 #     asked to produce.
 #   - PROVE THE PIN. `pr-origin.sh pin` asks whether a CHILD sees this repository,
 #     and the child that matters is one the driver starts. Proving it here would
@@ -136,11 +136,28 @@ RB_INO=
 # accepted record already covers. Nothing unsafe happens on a platform this has not
 # been measured on; something is left behind instead.
 #
+# AND IT IS READ THROUGH THE DESCRIPTOR, NOT THROUGH THE NAME. Recording it as
+# `rb_setup_ino "$RB_DIR"` reopened the window one level down: a swap between the
+# `exec` and that read records the REPLACEMENT's inode, after which the comparison
+# below is replacement against replacement, agrees, and the cleanup unlinks the
+# replacement's own files. `/dev/fd/8` names the object this run holds however the
+# path has been rearranged since — measured: with the directory removed and recreated
+# under it, the held inode is unchanged and the path's is not.
+#
+# `-L`, AND IT IS LOAD-BEARING. On Linux `/dev/fd/8` is a symlink into `/proc`, so
+# without it `ls -di` reports the LINK's inode — a number that has nothing to do with
+# the directory and would never match the path's.
+#
 # `ls -di`, NOT `stat`. `stat -c` is GNU and `stat -f` is BSD, and the `macos-shell`
 # job runs this suite with the GNU tools taken off `PATH`. `ls -di` prints the inode
 # first on both, and the value is taken by word splitting rather than by `read`.
 rb_setup_ino() {   # <path> ; its inode number, or nothing
     set -- $(/usr/bin/env ls -di "$1" 2>/dev/null)
+    printf '%s' "${1-}"
+    return 0
+}
+rb_setup_ino_held() {   # the inode of the object descriptor 8 holds, or nothing
+    set -- $(/usr/bin/env ls -diL /dev/fd/8 2>/dev/null)
     printf '%s' "${1-}"
     return 0
 }
@@ -236,7 +253,10 @@ trap 'rb_setup_on_signal TERM' TERM
 # opened is not.
 RB_HELD=no
 { exec 8<"$RB_DIR"; } 2>/dev/null && RB_HELD=yes
-RB_INO="$(rb_setup_ino "$RB_DIR")"
+# RECORDED FROM THE DESCRIPTOR, and only where there is one: without the hold there is
+# nothing to record an identity FROM, and an inode read through the name would be the
+# number of whatever is there now.
+[[ $RB_HELD = yes ]] && RB_INO="$(rb_setup_ino_held)"
 
 # ── the origin, through the helper that reads it privileged ────────────────
 # NOT `git remote get-url` HERE. `pr-origin.sh` is where that read is hardened, and
@@ -265,9 +285,9 @@ RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transp
 # checkout before it had a fixture.
 [[ $RB_REMOTE == *$'\n'* ]] && rb_setup_stop origin_multiline 1
 
-# THE IDENTITY IS PROVEN HERE, so the driver sources a value that already parses.
-# It re-derives it anyway — see the header — but a remote that cannot be an identity
-# should never reach a file the driver will source.
+# THE IDENTITY IS PROVEN HERE, so the driver reads a value that already parses. It
+# re-derives it anyway — see the header — but a remote that cannot be an identity should
+# never reach a file the driver will act on.
 REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
     echo "PR_SETUP status=error reason=origin_unusable detail=${RB_IDENTITY_REASON:-}" >&2
     exit 1
@@ -277,10 +297,10 @@ REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
 # child see this repository as its identity", and the child that matters is one the
 # DRIVER starts — every stage of the loop is a process the driving shell forks. A
 # pin proved inside this helper would be proving that THIS process exports, which is
-# true by construction and says nothing about the shell that sources the file.
+# true by construction and says nothing about the shell that reads the file.
 #
-# So it stays in `SKILL.md`, immediately after the source, where the export it is
-# about has just happened. It is one call and one comparison there rather than the
+# So it stays in `SKILL.md`, immediately after the export it is about, which that shell
+# makes itself. It is one call and one comparison there rather than the
 # probe-and-retry it used to be, because this helper has already made the directory
 # it needs.
 
@@ -318,6 +338,26 @@ for _f in summary.md request.md prior.txt head.txt; do
     { [ -f "$RB_WORK_DIR/$_f" ] && [ ! -s "$RB_WORK_DIR/$_f" ]; } \
         || rb_setup_stop work_files_not_empty 2
 done
+
+# ── the storage the pin will need ──────────────────────────────────────────
+#
+# THE DRIVER CALLS `pr-origin.sh pin` AFTER THIS RETURNS, and that call creates a
+# directory under the one reserved here. It reports 2 where the storage would not take
+# it — and the driver cannot act on that: `work/` and its four files are already
+# allocated on THIS parent, so pinning under the other one would leave a session whose
+# files are on a filesystem that has just refused a directory, which dies at its first
+# round summary rather than here.
+#
+# SO THE QUESTION IS ASKED INSIDE THE UNIT THAT RETRIES. A parent that cannot take
+# another directory fails here, with status 2, and the driver's existing retry moves
+# the WHOLE session — files and all — to the second parent. That is the recovery the
+# pin used to have on its own, back when the work allocation came after it.
+#
+# WHAT IT DOES NOT CLOSE is a filesystem that fills between this probe and the pin,
+# and nothing can: the two are in different processes. The abort the driver prints
+# there says to re-run, which relocates the session as a whole.
+/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
+/usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 
 # ── the one value that has to cross ────────────────────────────────────────
 #

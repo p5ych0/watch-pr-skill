@@ -44,9 +44,11 @@
   nested leaves through. A bare inode number is not a durable identity — one freed by
   a `rmdir` can be handed straight to the next `mkdir` — so the helper holds a
   descriptor open on the directory it reserved, which stops the inode being freed at
-  all. Where that open fails, or the number was never
-  recorded, there is no durable identity and the cleanup unlinks nothing, leaving a
-  directory behind instead: the cost the record already covers.
+  all. The number is read THROUGH that
+  descriptor rather than through the published name, since one read through the name is
+  the replacement's the moment the name has been swapped. Where the open fails, or the
+  number was never recorded, there is no durable identity and the cleanup unlinks
+  nothing, leaving a directory behind instead: the cost the record already covers.
 
 - **A name your shell has aliased stops setup instead of steering it.** The reviewer
   logins and the four working paths are the driver's own assignments now, and a
@@ -55,6 +57,15 @@
   it resolves through the same alias, and every later `gh` call is addressed at a slug
   nobody chose. All ten names the block assigns are in the generic probe now, and its
   refusal names them.
+
+- **A parent that cannot take another directory is found before the session commits to
+  it.** `pr-origin.sh pin` creates a directory, and by the time the driver calls it the
+  working files are already allocated on that parent — so a storage failure there could
+  not be recovered from: pinning under the second parent while the round summary and the
+  gated head stay on a filesystem that has just refused a directory produces a session
+  that looks set up and dies at its first write, after posting. `pr-setup.sh` asks the
+  question itself now, with a probe directory beside where the pin will go, so the
+  refusal happens inside the unit the driver already retries and the whole session moves.
 
 - **The setup values are read, not sourced, and only one of them crosses.** The helper
   wrote a file of twelve assignments the driver sourced, and `.` is a name: in the

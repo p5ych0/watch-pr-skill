@@ -159,9 +159,9 @@ the identity parser derives three of the other values, two are constants, and th
 working paths are a literal suffix under a directory the driver named itself.
 
 What did NOT move is what a helper process cannot do for this one: finding the
-scripts at all, choosing the parent directory to hand over, the source itself, and
-the read-backs after it, which exist to catch a readonly name or a nameref defeating
-the driver's own assignment — a helper cannot observe that, and neither can it prove
+scripts at all, choosing the parent directory to hand over, the READ itself, and the
+assignments and read-backs after it, which exist to catch a readonly name or a nameref
+defeating the driver's own assignment — a helper cannot observe that, and neither can it prove
 the pin, since `pr-origin.sh pin` answers whether a CHILD OF THE DRIVER sees this
 repository. So do not raise "this should move into a script" against what is left,
 and do not treat the residue as a reason to add another guard: two were built for it

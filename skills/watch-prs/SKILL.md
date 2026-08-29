@@ -303,7 +303,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                 else
                     # A PIN FAILURE IS TERMINAL, because the work files are already on this parent.
                     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                    echo "ABORT: the repository pin did not take; every stage would route by the current directory. Re-run setup: this session's working files are already under the parent that failed, so the retry has to start over rather than pin somewhere else"
+                    echo "ABORT: the repository pin did not take; every stage would route by the current directory. Re-run setup: this session's working files are already under this parent, so a retry has to start over rather than pin somewhere else"
                     exit 1
                     [[ -n "" ]]
                 fi
