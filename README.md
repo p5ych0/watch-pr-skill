@@ -515,8 +515,10 @@ Then:
    **What is still not bound.** The required set is a property of the base branch
    rather than of a commit, so a protection rule changed between that read and the
    merge is a race GitHub has as well. The "require branches to be up to date"
-   policy is not read: a branch behind its base with that policy on is blocked by
-   GitHub, not by this. And on the default `--admin` path the merge bypasses branch
+   policy is not read, and on the default path nothing enforces it — `--admin`
+   bypasses branch protection, so a branch behind its base merges with its checks
+   never having run against the merged state. Under `REVIEW_MERGE_STRICT=1` GitHub
+   enforces it. Tracked as issue #220. And on the default `--admin` path the merge bypasses branch
    protection regardless, so this gate is the client-side stand-in for it —
    **`REVIEW_MERGE_STRICT=1` on non-bypassable protection** is still where GitHub
    evaluates the requirement itself, at merge time, atomically.

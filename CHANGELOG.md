@@ -113,7 +113,8 @@
   this gate are what made #214 expensive: the required set is a property of the
   base branch rather than of a commit, so a protection rule changed between that
   read and the merge is a race GitHub has too; the "require branches to be up to
-  date" policy is not read; and on the default path the merge still uses `--admin`,
+  date" policy is not read, and nothing enforces it on the default path either,
+  since `--admin` bypasses protection — filed as #220; and on the default path the merge still uses `--admin`,
   which bypasses protection outright, so this gate is the client-side stand-in for
   it. `REVIEW_MERGE_STRICT=1` on non-bypassable protection is still where GitHub
   evaluates the requirement itself, at merge time.

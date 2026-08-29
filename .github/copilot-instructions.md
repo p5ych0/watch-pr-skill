@@ -551,7 +551,9 @@ waived:
   read is an ERROR, because a merge gated on an empty required set is the direction
   that opens the gate. What is still not bound is the required SET itself —
   protection is a property of the base branch, not of a commit — and the "require
-  branches to be up to date" policy is not read at all. The base branch IS confirmed
+  branches to be up to date" policy is not read at all, and nothing enforces it on
+  the default path either, since `--admin` bypasses protection — that gap is #220,
+  and `REVIEW_MERGE_STRICT=1` is where GitHub enforces it. The base branch IS confirmed
   either side of the read, because a retarget moves no head and
   `--match-head-commit` would see nothing; a changed base is `stale`, not an answer.
   A ruleset `merge_queue` rule refuses on the default path, since `--admin` bypasses

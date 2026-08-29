@@ -399,8 +399,11 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # WHAT IS NOT COVERED, stated because the comment beside the code is where a
 # reader looks: the "require branches to be up to date" policy (`strict` in
 # classic protection, `strict_required_status_checks_policy` in a ruleset) is not
-# read. A branch behind its base with that policy on is blocked by GitHub and not
-# by this. #214 is about which contexts are required.
+# read. Nothing enforces it on the DEFAULT path — `--admin` bypasses branch
+# protection outright, so a branch behind its base merges with its checks never
+# having run against the merged state — and under `REVIEW_MERGE_STRICT=1` GitHub
+# enforces it, as it enforces everything else there. #214 is about which contexts
+# are required; that gap is #220.
 required_contexts() {   # <base ref> ; prints a JSON array of {context, app} entries
     local base="$1" _left _branch _rules
     _left="$(rb_left)" || return 2

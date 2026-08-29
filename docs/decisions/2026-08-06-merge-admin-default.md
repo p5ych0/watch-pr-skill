@@ -74,7 +74,8 @@ branch.
 
 Still bounded rather than closed, then: the `--admin` bypass itself, below; that
 mutable required set; and the "require branches to be up to date" policy, which is
-not read at all.
+not read at all and which nothing on this path enforces, since `--admin` bypasses
+it along with everything else — #220.
 
 **Strict mode is what closes it.** With `REVIEW_MERGE_STRICT=1` on a repository
 whose required checks are non-bypassable — configured, and with bypassing
