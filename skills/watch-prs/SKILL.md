@@ -186,9 +186,7 @@ unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
-# THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# THE SETUP WORK RUNS IN A PROCESS AND COMES BACK AS A FILE THIS SHELL SOURCES.
+# THE SETUP WORK RUNS IN A PROCESS AND WHAT COMES BACK IS ONE VALUE IN A FILE.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -224,39 +222,48 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
             && { RB_TMPPARENT="$RB_TMPPARENT2"; }; }
     then
-        # THE SOURCE IS THE ONLY WAY THE VALUES REACH THIS SHELL.
+        # NOTHING THE HELPER WROTE IS EXECUTED HERE; ONE VALUE IS READ.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        # THE FILE IS BOUND BEFORE IT IS EVALUATED, because a name can be replaced and code cannot be un-run.
+        # THE FILE IS BOUND BEFORE IT IS READ, because a name can be replaced between the two.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] && . /dev/fd/9; } 9<"$RB_SETUP_DIR/env"; then
-            # WHAT WAS READ DOES NOT STAY ON DISK.
+        RB_REMOTE=
+        if [[ -z $RB_REMOTE ]] \
+           && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/origin"; then
+            # WHAT WAS READ IS PROVED HERE, because a file is not a promise.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            # THE WORK DIRECTORY IS KEPT, being the session's own.
-            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            /usr/bin/env rm -f "$RB_SETUP_DIR/env" 2>/dev/null
-            # WHAT WAS SOURCED IS RE-PROVED HERE, because a file is not a promise.
-            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            RB_REMOTE="${RB_REMOTE:?the sourced environment carries no origin; there is no repository to pin this session to}"
+            RB_REMOTE="${RB_REMOTE:?the file the setup helper wrote carries no origin; there is no repository to pin this session to}"
             # ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
-            RB_REMOTE="${RB_REMOTE:?the sourced origin spans more than one line; something wrote to that file between the helper and this shell}"
+            RB_REMOTE="${RB_REMOTE:?the origin read back spans more than one line; something wrote to that file between the helper and this shell}"
             # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
             RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
-            # THE FOUR WORKING PATHS ARE PROVED TO BE THE ONES THIS SETUP MADE.
+            # THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-            if [[ $SUMMARY_FILE = "$RB_SETUP_DIR"/work/summary.md ]] \
+            export REVIEW_BUS_REMOTE="$RB_REMOTE"
+            # EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL AND PROVED.
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+            CODEX_BOT='chatgpt-codex-connector[bot]'
+            COPILOT_BOT='copilot-pull-request-reviewer[bot]'
+            SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"
+            REQUEST_FILE="$RB_SETUP_DIR/work/request.md"
+            PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"
+            HEAD_FILE="$RB_SETUP_DIR/work/head.txt"
+            # THE ASSIGNMENTS ARE READ BACK, because a readonly name fails one in silence.
+            # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+            if [[ $CODEX_BOT = 'chatgpt-codex-connector[bot]' ]] \
+               && [[ $COPILOT_BOT = 'copilot-pull-request-reviewer[bot]' ]] \
+               && [[ $SUMMARY_FILE = "$RB_SETUP_DIR"/work/summary.md ]] \
                && [[ $REQUEST_FILE = "$RB_SETUP_DIR"/work/request.md ]] \
                && [[ $PRIOR_FILE = "$RB_SETUP_DIR"/work/prior.txt ]] \
                && [[ $HEAD_FILE = "$RB_SETUP_DIR"/work/head.txt ]] \
                && [[ -f $SUMMARY_FILE ]] && [[ ! -s $SUMMARY_FILE ]] \
                && [[ -f $REQUEST_FILE ]] && [[ ! -s $REQUEST_FILE ]] \
                && [[ -f $PRIOR_FILE ]] && [[ ! -s $PRIOR_FILE ]] \
-               && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]] \
-               && [[ $CODEX_BOT = 'chatgpt-codex-connector[bot]' ]] \
-               && [[ $COPILOT_BOT = 'copilot-pull-request-reviewer[bot]' ]]
+               && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]]
             then
                 # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -273,10 +280,8 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                     { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                         && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin/pin"
                 fi
-                # THE PIN TRANSPORT GOES BY NAME AND THEN `rmdir`, never recursively.
+                # THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                /usr/bin/env rm -f "$RB_SETUP_DIR/pin/pin" 2>/dev/null
-                /usr/bin/env rmdir "$RB_SETUP_DIR/pin" 2>/dev/null
                 if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
                     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
                 else
@@ -287,12 +292,12 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                     [[ -n "" ]]
                 fi
             else
-                echo "ABORT: the sourced working paths are not the four empty files this setup created, or a reviewer login is not the account this loop reviews with"
+                echo "ABORT: an assignment this shell made did not take; a name it needs is readonly or value-transforming, or the four working files are not the empty ones this setup created"
                 exit 1
                 [[ -n "" ]]
             fi
         else
-            echo "ABORT: the setup helper's environment file could not be sourced"
+            echo "ABORT: the setup helper's origin file could not be read"
             exit 1
             [[ -n "" ]]
         fi

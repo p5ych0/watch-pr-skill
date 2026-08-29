@@ -2,32 +2,25 @@
 
 ## [2.0.83] — 2026-08-29
 
-- **Setup runs in a process now, and `SKILL.md` is 9,843 characters shorter.** The
+- **Setup runs in a process now, and `SKILL.md` is 8,392 characters shorter.** The
   block that starts a session was 178 executable lines and 105 comment lines of the
   document — 18,450 characters, about a fifth of everything the driver reads on every
-  invocation — and nothing executed them. It is 96 and 47 now, 8,607 characters, and
+  invocation — and nothing executed them. It is 108 and 53 now, 10,058 characters, and
   the work happens in `pr-setup.sh`, which has tests.
 
   What made that possible was noticing that an old measurement proved less than it
   said. #26 asked whether this code could move into a script and answered no, because
   setup EXPORTS into the driving session and a child cannot export into its parent.
-  That is true of a child's environment and false of a file the driver SOURCES: an
-  assignment in a sourced file happens in the sourcing shell, which is the one
-  property the block needed. So the helper writes `env` and the driver sources it.
+  That is true of a child's environment, and the values that actually have to cross
+  turn out to be one: the origin. Everything else the driver derives from it, holds as
+  a constant, or builds from a literal under a directory it named itself.
 
   Nothing about what the driver checks was given up. The origin still comes back
   through `pr-origin.sh`, privileged; the identity is still re-derived from what was
-  sourced, because a file is not a promise; the four working paths are still proved
-  against their literals and proved to be empty files; and the pin is still proved by
-  a real child of the driving shell — that one cannot move, because proving it inside
-  the helper would prove only that the helper exports.
-
-- **A value in that file cannot become a command.** A remote URL is not this
-  repository's text — a checkout can carry any origin, and a `git` config nobody read
-  can put a quote, a `$(…)`, a backtick or a semicolon in it. Every value is written
-  single-quoted with `'` escaped, which has no expansion of any kind inside it, and
-  `test-pr-setup.sh` stages six such shapes against the real helper: each round-trips
-  byte-exact through the source and none of them executes.
+  read, because a file is not a promise; the working paths are still proved to be
+  empty files; and the pin is still proved by a real child of the driving shell —
+  that one cannot move, because proving it inside the helper would prove only that the
+  helper exports.
 
 - **A `HOME` or `TMPDIR` containing a space works.** The helper's argument check
   restricted the characters a path may hold, which the inline setup it replaced never
@@ -51,59 +44,52 @@
   nested leaves through. A bare inode number is not a durable identity — one freed by
   a `rmdir` can be handed straight to the next `mkdir` — so the helper holds a
   descriptor open on the directory it reserved, which stops the inode being freed at
-  all. Where that open fails there is no durable identity and the cleanup unlinks
-  nothing, leaving a directory behind instead: the cost the record already covers. `SKILL.md`'s own removal of the pin transport had the same
-  shape and is named-leaf-then-`rmdir` now.
+  all. Where that open fails, or the number was never
+  recorded, there is no durable identity and the cleanup unlinks nothing, leaving a
+  directory behind instead: the cost the record already covers.
 
-- **A reviewer login the driving shell fixed no longer survives setup.** The two bot
-  accounts arrive through the same sourced file as everything else, and a `readonly
-  CODEX_BOT` already in the operator's shell makes that one assignment fail while the
-  file's LAST assignment decides the source's status — so setup announced success and
-  every later watch, `WHO` and signoff named an account the operator chose rather than
-  the reviewer. Both are proved against their literals now, beside the four working
-  paths.
+- **The setup values are read, not sourced, and only one of them crosses.** The helper
+  wrote a file of twelve assignments the driver sourced, and `.` is a name: in the
+  operator's long-lived shell — the one place this loop cannot re-exec out of an
+  inherited function — a function by that name could read the genuine assignments and
+  hand back a different origin, after which the identity derivation and the child pin
+  both agree with the forged value, because both are computed from it. The session
+  could then post, sign off and merge in another repository with every check passing.
 
-- **`RB_PIN_SEEN` is probed like the other names it sits with.** Declared as a nameref
-  onto `SUMMARY_FILE`, the clear that precedes the pin read emptied that path and the
-  read then wrote the origin into it — after which the comparison passed through the
-  alias and setup announced success with a working file that no longer named anything
-  usable. The generic probe covers it again, as it did before the setup block moved.
+  What made the source unnecessary is that eleven of the twelve values were never
+  information: `OWNER`, `REPO` and `HOST` are what the identity parser derives from the
+  origin, the two reviewer logins are constants, and the working directory and its four
+  files are a literal suffix under a directory the driver named itself. Only the origin
+  crosses now, in a file read with `$(<…)`, and everything else the driver assigns and
+  proves by reading back. Nothing the helper writes is evaluated, so the quoting that
+  made a sourced line an assignment is gone with the source that needed it.
 
-- **The env file is bound before it is evaluated.** Sourcing is the one step that
-  EXECUTES what it reads, the setup path is published in argv, and no check afterwards
-  helps — re-deriving the identity cannot un-run a `$(…)` that has already run in the
-  operator's long-lived shell. The object is bound once by a redirection now, and the
-  ownership and regularity tests and the source all go through that descriptor rather
-  than through the name, so a file swapped in after the helper returns is never the
-  file that runs. The accepted transport records cover a squat before the reservation
-  and a bounded cleanup race; they do not cover code execution, which is why this is
-  closed rather than recorded.
+- **A setup killed part-way gives its directory back.** `HUP`, `INT` and `TERM` had no
+  handler, so a signal arriving after the working files and the origin existed left a
+  published directory behind carrying the session's remote — and the driver
+  deliberately cleans up nothing after a non-zero helper status, because it cannot know
+  who created the path. The cleanup is armed before the reservation is attempted and
+  disarmed only on success.
 
-- **A setup killed part-way gives its directory back.** `HUP`, `INT` and `TERM` had
-  no handler, so a signal arriving after the working files and the env file existed
-  left a published directory behind carrying the session's origin — and the driver
-  deliberately cleans up nothing after a non-zero helper status, because it cannot
-  know who created the path. The cleanup is armed before the reservation is attempted
-  and disarmed only on success.
+- **A name the operator's shell has fixed stops the session instead of steering it.**
+  The two reviewer logins and the four working paths are the driver's own assignments
+  now, and an assignment to a readonly name fails in silence — it prints a complaint
+  and the list it is in reports success. Each is read back against the literal it was
+  just given, and `RB_PIN_SEEN` joins the three names the generic probe already covered:
+  declared as a nameref onto `SUMMARY_FILE`, the clear before the pin read emptied that
+  path and the read then wrote the remote into it, after which the comparison passed
+  through the alias and setup announced success with a working file naming nothing
+  usable.
 
-- **An env file with a line missing is refused rather than announced ready.**
-  `{ a; b; c; } > file` reports only the last command's status, so a write that
-  failed in the middle while a later one succeeded passed — and the read-back could
-  not see it either, because the line it checked for was the last one. Every write's
-  status is preserved now, and the complete key set is read back against the helper's
-  own declaration. Losing the reviewer login that way let setup announce ready with
-  no bot name, after which the watch polls for a reviewer nobody named.
+- **The setup directory's transports are no longer unlinked by the driver.** Removing
+  the file it had just read meant unlinking through a name published in argv, which
+  takes a replacement's own file with it — the same defect the helper answers with a
+  held descriptor and a recorded inode, neither of which the driving shell has. What
+  the removals were for does not survive examination: the origin is
+  `git remote get-url origin`, which anyone who can reach the checkout can read, and
+  the directory is mode 700.
 
-- **The pre-push gate could not see through a source, and said so.** `pr-selfcheck.sh`
-  scans `SKILL.md` for names used and never assigned, and the twelve setup values are
-  now assigned in a file that does not exist at scan time — so all twelve were
-  reported as undefined. It reads a declaration instead, the same mechanism a shared
-  library already used there and for the same reason: inferring what a run assigns is
-  a reachability analysis, and a wrong answer reads as "this variable is fine". The
-  binding is derived at both ends — the document names the leaf it sources, the helper
-  declares which leaf it writes — so neither side is a list. A leaf nothing claims, one
-  two helpers claim, and a claimant that declares nothing are all errors rather than
-  empty sets.
+
 
 ## [2.0.82] — 2026-08-29
 

@@ -99,13 +99,13 @@ out_of() { local r="${1#*|}"; printf '%s' "${r#*|}"; }
 r="$(run --)"
 ok_dir="$(dir_of "$r")"
 { [ "$(rc_of "$r")" = 0 ] \
-  && case "$(out_of "$r")" in *"PR_SETUP status=ready env=$ok_dir/env"*) true ;; *) false ;; esac; } \
+  && case "$(out_of "$r")" in *"PR_SETUP status=ready origin=$ok_dir/origin work=$ok_dir/work"*) true ;; *) false ;; esac; } \
     && pass "a good checkout gives status=ready and names the file to source" \
     || die "the ordinary run failed: '$r'"
 # THE DIRECTORY SURVIVES THE CALL, which is the whole point of it: the caller
 # sources the file and then uses `work/` for the rest of the session. A helper that
 # cleaned up on success would be removing what it was asked to produce.
-{ [ -d "$ok_dir" ] && [ -f "$ok_dir/env" ]; } \
+{ [ -d "$ok_dir" ] && [ -f "$ok_dir/origin" ]; } \
     && pass "…and the directory it made is left for the caller" \
     || die "the successful run did not leave its directory behind"
 # AT MODE 700, because the env file inside it carries the session's origin and the
@@ -116,94 +116,48 @@ case "$_mode" in
     *) die "the setup directory is $_mode, not drwx------" ;;
 esac
 
-# ── what the driver gets by sourcing it ────────────────────────────────────
-# SOURCED IN A CHILD, AND EVERY VALUE READ BACK. This is the driver's own use of
-# the file, and the assertion is on the values rather than on the text: a `grep`
-# for `OWNER=` passes against a line the shell would refuse to parse.
-_src="$(env -u REVIEW_BUS_REMOTE bash -c '
-    . "$1/env" || exit 9
-    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" "$RB_REMOTE" "$OWNER" "$REPO" "$HOST" \
-        "$CODEX_BOT" "$COPILOT_BOT" "$SUMMARY_FILE" "$REQUEST_FILE" "$PRIOR_FILE" "$HEAD_FILE"
-' _ "$ok_dir" 2>&1)" || _src="SOURCE_FAILED:$_src"
-case "$_src" in
-    "$REAL|acme|widget|github.com|chatgpt-codex-connector[bot]|copilot-pull-request-reviewer[bot]|$ok_dir/work/summary.md|$ok_dir/work/request.md|$ok_dir/work/prior.txt|$ok_dir/work/head.txt")
-        pass "…and sourcing it yields the identity, both bot names and the four working paths" ;;
-    *)  die "the sourced values are not what the helper wrote: '$_src'" ;;
+# ── what the driver gets back ──────────────────────────────────────────────
+# ONE VALUE, READ AS DATA. This wrote a file of twelve assignments the driver SOURCED,
+# and `.` is a NAME — in the operator's long-lived shell a function by that name could
+# hand back a different origin, after which the identity derivation and the child pin
+# both agree with it because both are computed FROM it. Eleven of the twelve were
+# never information: three the identity parser derives, two are constants, and the
+# working paths are a literal suffix under a directory the driver named.
+_got="$(cat "$ok_dir/origin" 2>/dev/null)" || _got="READ_FAILED"
+[ "$_got" = "$REAL" ] \
+    && pass "…and the origin it hands back is the remote of the checkout it read" \
+    || die "the origin file does not carry the remote: '$_got'"
+# RAW, NOT QUOTED, because nothing evaluates it. The quoting existed to make a sourced
+# line an assignment rather than a command; with no source there is nothing to escape
+# into safety, and a value that arrived escaped would be a value the driver has to
+# unescape.
+case "$_got" in
+    *"'"*) die "the origin file carries quoting the driver would have to undo: '$_got'" ;;
+    *) pass "…written raw, because the caller reads it rather than evaluating it" ;;
 esac
-# THE FOUR PATHS ARE PAIRWISE DISTINCT, which is where the no-aliasing invariant is
-# actually established. Two names given the same suffix would alias every later
-# check into agreement — `pr-close-round.sh` refuses a head file that IS the
-# summary file, and that refusal is only meaningful if the literals differ.
-_four="$(env -u REVIEW_BUS_REMOTE bash -c '
-    . "$1/env" || exit 9
-    printf "%s\n%s\n%s\n%s\n" "$SUMMARY_FILE" "$REQUEST_FILE" "$PRIOR_FILE" "$HEAD_FILE"
-' _ "$ok_dir" 2>/dev/null)" || _four=""
-_fn="$(grep -c . <<<"$_four")" || _fn=0
-_fu="$(sort -u <<<"$_four" | grep -c .)" || _fu=0
-{ [ "$_fn" -eq 4 ] && [ "$_fu" -eq 4 ]; } \
-    && pass "…and the four are pairwise distinct paths" \
-    || die "the working paths are not four distinct names ($_fn found, $_fu distinct)"
-# AND EACH IS A FILE THAT EXISTS AND IS EMPTY. The round summary must be empty
-# until the round writes it: sharing one file with the opening account meant a
-# first round whose summary write did not happen left the opening account there —
-# non-empty, well-formed and about the right PR — and it was posted as the summary.
+# AND THE FOUR WORKING FILES EXIST AND ARE EMPTY. The driver builds their paths from a
+# literal suffix under the directory it named, so what the helper owes it is the files
+# themselves: the round summary must be EMPTY until the round writes it, or a first
+# round whose summary write did not happen posts whatever was there.
 _wf_bad=""
 for _f in summary.md request.md prior.txt head.txt; do
     { [ -f "$ok_dir/work/$_f" ] && [ ! -s "$ok_dir/work/$_f" ]; } || _wf_bad="$_wf_bad $_f"
 done
 [ -z "$_wf_bad" ] \
-    && pass "…each created as a file that exists and is empty" \
+    && pass "…and each working file is created as a file that exists and is empty" \
     || die "a working file is missing or not empty:$_wf_bad"
-# AND `HEAD_FILE` IS THE LAST LINE, which is what the helper's own truncation check
-# rests on: `printf` can fail part-way through a redirection that reports success
-# overall, and a truncated env file is one whose last assignment is missing — which
-# the driver would source without noticing, ending up with a path it never set.
-_last="$(tail -1 "$ok_dir/env" 2>/dev/null)" || _last=""
-case "$_last" in
-    HEAD_FILE=*) pass "…and HEAD_FILE is the file's last line, which is what the truncation check reads" ;;
-    *) die "the env file does not end with HEAD_FILE; the helper's truncation check no longer proves the write completed: '$_last'" ;;
-esac
-# AND THE `rb-assigns:` DECLARATION MATCHES WHAT WAS ACTUALLY WRITTEN. That line is
-# what `pr-selfcheck.sh` credits when it scans `SKILL.md` for names used and never
-# assigned — the file being sourced does not exist at scan time, so the declaration
-# is the only thing there is to read. A declaration that drifts widens what the scan
-# accepts, silently, in the direction that reports a real defect as fine; comparing
-# it against the keys of a real run is what stops that.
-#
-# BOTH DIRECTIONS. A missing name reinstates a false finding, which is loud; an
-# EXTRA one is the quiet half — it credits `SKILL.md` with a variable nothing
-# assigns, which is exactly the P1 that scan exists to catch.
-_decl="$(grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "$SCRIPT" \
-    | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' | grep -v '^$' | sort -u)" || _decl=""
-_keys="$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$ok_dir/env" | sed 's/=$//' | sort -u)" || _keys=""
-{ [ -n "$_decl" ] && [ "$_decl" = "$_keys" ]; } \
-    && pass "…and its rb-assigns declaration is exactly the set of names it wrote" \
-    || die "the rb-assigns declaration has drifted from the env file: declared='$(tr '\n' ' ' <<<"$_decl")' written='$(tr '\n' ' ' <<<"$_keys")'"
-# AND IT DECLARES THE LEAF, which is what binds a `. "$X/env"` in the document to
-# this helper rather than to a list somebody has to keep in the scanner.
-grep -qxE '# rb-writes:[[:space:]]*env' "$SCRIPT" \
-    && pass "…and declares that it is the helper writing 'env'" \
-    || die "pr-setup.sh does not declare the leaf it writes; pr-selfcheck.sh cannot bind the source to it"
-# AND THE PIN IS BOTH AN ASSIGNMENT AND AN EXPORT. The assignment is what the
-# driver's own re-derivation reads; the export is what every child inherits. The
-# driver cannot supply the export itself — a child cannot export into its parent,
-# and that is the whole reason this file is sourced rather than captured.
-_child="$(env -u REVIEW_BUS_REMOTE bash -c '
-    . "$1/env" || exit 9
-    bash -c '"'"'printf "child=[%s]" "${REVIEW_BUS_REMOTE-unset}"'"'"'
-' _ "$ok_dir" 2>&1)" || _child="FAILED:$_child"
-[ "$_child" = "child=[$REAL]" ] \
-    && pass "…and a grandchild of the sourcing shell inherits the pin" \
-    || die "the pin does not survive into a child: '$_child'"
+# AND THE WORK DIRECTORY IS WHERE THE DRIVER WILL LOOK, which is the one thing about
+# it the helper must agree with: a literal `work` under the directory it was given.
+[ -d "$ok_dir/work" ] \
+    && pass "…under the literal the driver builds its paths from" \
+    || die "the helper did not create work/ under the directory it was given"
 
-# ── a value is data, whatever is in it ─────────────────────────────────────
-# EVERY SHAPE THAT ESCAPES A NAIVE QUOTING, against the real helper. The env file
-# is SOURCED, so a value that breaks out of its quotes is a command in the driving
-# shell — and a remote is not this repository's text.
-#
-# THE WITNESS IS A FILE, not a marker in the output: a substitution that ran would
-# leave its trace whether or not anything printed, and a case reading only stdout
-# would miss `$(rm …)` entirely.
+# ── a hostile origin is a string ───────────────────────────────────────────
+# EVERY SHAPE THAT USED TO NEED ESCAPING, against the real helper. While the driver
+# SOURCED this file, a value carrying `\'`, a `$(…)` or a backtick had to be
+# single-quoted into safety and the escape was load-bearing — one mistake in it was a
+# command in the operator's shell. Nothing evaluates the value now, so what these
+# cases assert is that it arrives BYTE-EXACT and that nothing ran on the way.
 _inj_i=0
 for _bad in \
     "git@github.com:acme/w'x.git" \
@@ -214,8 +168,7 @@ for _bad in \
     'git@github.com:acme/w${IFS}x.git'
 do
     _inj_i=$((_inj_i + 1))
-    _w="$TMP/witness.$_inj_i"
-    rm -f "$_w"
+    rm -f "$TMP/WITNESS"
     ( cd "$REPO" && git remote set-url origin "$_bad" ) 2>/dev/null \
         || { die "git would not hold the staged remote #$_inj_i"; continue; }
     r="$(run --)"
@@ -224,17 +177,10 @@ do
         die "the helper refused a legal-if-hostile remote #$_inj_i: '$r'"
         continue
     fi
-    # SOURCED WITH THE WITNESS NAME IN SCOPE, so a substitution that escaped the
-    # quoting creates the file this case then looks for.
-    _got="$(env -u REVIEW_BUS_REMOTE WITNESS="$_w" bash -c '
-        cd "$2" || exit 9
-        . "$1/env" || exit 9
-        printf "%s" "$RB_REMOTE"
-    ' _ "$_d" "$TMP" 2>&1)" || _got="SOURCE_FAILED:$_got"
+    _got="$(cat "$_d/origin" 2>/dev/null)" || _got="READ_FAILED"
     { [ "$_got" = "$_bad" ] && [ ! -e "$TMP/WITNESS" ]; } \
-        && pass "a remote carrying #$_inj_i round-trips byte-exact and executes nothing" \
+        && pass "a remote carrying #$_inj_i comes back byte-exact and executes nothing" \
         || die "remote #$_inj_i came back as '$_got' (witness-exists=$([ -e "$TMP/WITNESS" ] && echo yes || echo no))"
-    rm -f "$TMP/WITNESS"
 done
 ( cd "$REPO" && git remote set-url origin "$REAL" ) 2>/dev/null || true
 
@@ -301,15 +247,15 @@ _sp="$TMP/parent with space"; mkdir -p "$_sp"
 _sp_d="$_sp/dir"
 _sp_rc=0
 _sp_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_sp_d" 2>&1)" || _sp_rc=$?
-{ [ "$_sp_rc" -eq 0 ] && [ -f "$_sp_d/env" ] && [ -f "$_sp_d/work/summary.md" ]; } \
+{ [ "$_sp_rc" -eq 0 ] && [ -f "$_sp_d/origin" ] && [ -f "$_sp_d/work/summary.md" ]; } \
     && pass "…while a parent containing a space is set up rather than refused" \
     || die "a path with a space was refused (rc=$_sp_rc out='$_sp_out')"
 # AND THE VALUES IN IT SURVIVE THE SOURCE, which is the half a shape check cannot
 # see: the paths are written into the env file and read back by the driver.
-_sp_got="$(env -u REVIEW_BUS_REMOTE bash -c '. "$1/env" || exit 9; printf "%s" "$SUMMARY_FILE"' _ "$_sp_d" 2>&1)" || _sp_got="SOURCE_FAILED:$_sp_got"
-[ "$_sp_got" = "$_sp_d/work/summary.md" ] \
-    && pass "…and the spaced path round-trips through the source intact" \
-    || die "the spaced working path came back as '$_sp_got'"
+_sp_got="$(cat "$_sp_d/origin" 2>/dev/null)" || _sp_got="READ_FAILED"
+{ [ "$_sp_got" = "$REAL" ] && [ -f "$_sp_d/work/head.txt" ]; } \
+    && pass "…and the origin and the working files under it are where the driver will look" \
+    || die "the spaced setup did not produce a usable directory: origin='$_sp_got'"
 # A TERMINAL REFUSAL IS `1` AND NOT `2`, and that distinction is the one the driver
 # acts on: it retries a `2` under a second parent and stops on a `1`, because
 # another parent fixes none of these.
@@ -390,7 +336,7 @@ _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
 _sd="$(mktemp -d "$TMP/sok.XXXXXX")/dir"
 _so=0
 _so_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sd" 2>&1)" || _so=$?
-{ [ "$_so" -eq 0 ] && [ -f "$_sd/env" ]; } \
+{ [ "$_so" -eq 0 ] && [ -f "$_sd/origin" ]; } \
     && pass "the staged copy with a working reader is ready, so the cases below reach their states" \
     || die "the staged copy failed on a good read (rc=$_so out='$_so_out')"
 _forge_origin ': > "$2/origin"'
@@ -525,34 +471,35 @@ _rc2_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.
     || die "the cleanup unlinked a replacement's own leaf (env=$([ -e "$_rc2/env" ] && echo yes || echo no) origin=$([ -e "$_rc2/o/origin" ] && echo yes || echo no))"
 rm -rf "$_rc2"
 
-# ── an incomplete env file is refused ─────────────────────────────────────
-# `{ a; b; c; } > f` REPORTS ONLY C'S STATUS. A `printf` that failed in the middle
-# while a later one succeeded was a group that reported success, and checking for the
-# LAST line could not see it either — `HEAD_FILE=` is that line. Losing `CODEX_BOT`
-# that way lets setup announce ready with no reviewer login, after which the watch
-# polls for a bot nobody named.
+# ── an origin file that does not hold the value is refused ────────────────
+# THE WRITE'S STATUS IS NOT ENOUGH ON ITS OWN. `printf` can report success and the
+# write fail at the flush when the redirection is closed, so the file can be empty or
+# short while the status says the write worked — and a caller reading a truncated
+# origin would pin the session to it. The value is read back and compared.
 #
-# STAGED BY REMOVING ONE WRITE from a copy of the subject, which is the state a
-# part-way failure leaves: the declaration still names the key and the file does not.
-# A flush that fails at close produces the same shape and no status in the chain sees
-# it, which is why the read-back is a key SET rather than a last line.
+# STAGED BY MAKING THE WRITE GO NOWHERE, which is the state a failed flush leaves:
+# the copy under test writes to `/dev/null` instead of the leaf, so the status is
+# clean and the file is not there.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-grep -v 'rb_setup_put CODEX_BOT' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+sed 's|> "\$RB_DIR/origin" |> /dev/null |' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -q '> /dev/null || rb_setup_stop origin_write' "$_stage/pr-setup.sh" \
+    && pass "the lost-write stage is patched" \
+    || die "the lost-write stage did not patch pr-setup.sh; the case proves nothing"
 _mw="$(mktemp -d "$TMP/mw.XXXXXX")/dir"
 _mw_rc=0
 _mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_mw" 2>&1)" || _mw_rc=$?
-{ [ "$_mw_rc" -eq 2 ] && case "$_mw_out" in *'reason=env_truncated'*) true ;; *) false ;; esac; } \
-    && pass "an env file missing a declared key is refused, not announced ready" \
-    || die "a missing middle key was announced ready (rc=$_mw_rc out='$_mw_out')"
+{ [ "$_mw_rc" -eq 2 ] && case "$_mw_out" in *'reason=origin_write'*) true ;; *) false ;; esac; } \
+    && pass "an origin file that does not hold the value is refused, not announced ready" \
+    || die "a lost origin write was announced ready (rc=$_mw_rc out='$_mw_out')"
 [ ! -e "$_mw" ] \
     && pass "…and that refusal gives its directory back" \
-    || die "the incomplete-env refusal left its directory behind"
+    || die "the lost-write refusal left its directory behind"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
-# ── a signal after the env write gives the reservation back ───────────────
+# ── a signal after the write gives the reservation back ───────────────────
 # THE DEFAULT ACTION FOR `HUP`, `INT` AND `TERM` IS TO TERMINATE, so without a
-# handler a signal arriving after `work/` and `env` exist leaves a non-empty
+# handler a signal arriving after `work/` and the origin exist leaves a non-empty
 # published directory behind — carrying the session's origin — and the driver
 # deliberately performs no cleanup after a non-zero helper status, because it cannot
 # know who created the path. So the helper arms the cleanup before the reservation is
@@ -575,7 +522,7 @@ for _sig in HUP INT TERM; do
     # trap REPLACES a signal's terminating action, so one that merely returned would
     # leave the shell finishing the work it was killed during and reporting 0.
     [ "$_sg_rc" -ne 0 ] \
-        && pass "a $_sig after the env write does not report success" \
+        && pass "a $_sig after the write does not report success" \
         || die "the $_sig case returned 0 (out='$_sg_out')"
     [ ! -e "$_sg" ] \
         && pass "…and the reservation is given back rather than left with the origin in it" \
@@ -591,7 +538,7 @@ cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 _od="$(mktemp -d "$TMP/od.XXXXXX")/dir"
 _out_only="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_od" 2>/dev/null)" || true
 case "$_out_only" in
-    "PR_SETUP status=ready env=$_od/env") pass "stdout carries the ready line and nothing else" ;;
+    "PR_SETUP status=ready origin=$_od/origin work=$_od/work") pass "stdout carries the ready line and nothing else" ;;
     *) die "stdout carried something other than the ready line: '$_out_only'" ;;
 esac
 _err_d="$(mktemp -d "$TMP/ed.XXXXXX")/dir"

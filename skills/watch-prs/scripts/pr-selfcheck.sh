@@ -419,89 +419,12 @@ if [ -f "$SKILL" ]; then
         fi
         assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
     done
-    # …AND THE VALUES A HELPER HANDS BACK THROUGH A FILE THE SKILL SOURCES. Setup
-    # runs in a process now, and a child cannot export into its parent — so it
-    # writes assignments and the driver sources them. Those names are assigned
-    # nowhere in the document, exactly as `rb_identity`'s are, and reading only the
-    # skill's own text reported all twelve as undefined.
-    #
-    # BOUND AT BOTH ENDS, and neither end is a list. The document names the LEAF it
-    # sources — `. "$RB_SETUP_DIR/env"` — and the helper declares which leaf it
-    # writes with `# rb-writes:` and which names go into it with `# rb-assigns:`.
-    # The scan matches one to the other. A leaf nothing claims, or one that two
-    # helpers claim, is an ERROR rather than an empty set: crediting nothing would
-    # reinstate the false findings, and crediting two is a question this cannot
-    # answer.
-    #
-    # THE SOURCE LINE'S OWN SHAPE IS WHAT DISTINGUISHES THESE. A library is sourced
-    # from `$RB_SCRIPTS`, which is a directory of files that exist right now; these
-    # come from a directory made at runtime, so the file cannot be read here at all
-    # and the declaration is the only thing there is to read.
-    # INDENTED, AND AS AN `if` CONDITION, because that is where this one is: the
-    # source has to be branched on — a file that could not be read is a session with
-    # no values — and everything after it is inside its success arm. The two
-    # positions are spelled out rather than generalised to "a `.` anywhere": `.` is
-    # a character a pattern matches inside prose and inside quoted text, and reading
-    # shell out of text without a shell is what this file already records deleting a
-    # checker over. A source in a third position is a false POSITIVE — loud and
-    # fixable in one line — not a silent miss.
-    # TWO SPELLINGS, BOTH NAMED. A runtime file is sourced either directly —
-    # `. "$X/leaf"` — or through a descriptor BOUND to it first, which is what
-    # `SKILL.md` does: `{ … . /dev/fd/9; } 9<"$X/leaf"`. The second is not a
-    # refinement of the first, it is a different construct, and reading only one of
-    # them credited nothing and reported every sourced name undefined.
-    #
-    # THE LEAF COMES FROM THE REDIRECTION in that case, because the `.` operand is
-    # `/dev/fd/9` and says nothing about which file was bound. The line is required to
-    # carry the source as well, so an ordinary input redirection somewhere else in the
-    # document is not read as one.
-    srcfiles="$(printf '%s\n' "$code" \
-        | nomatch grep -oE '^[[:space:]]*(if[[:space:]]+)?\.[[:space:]]+"\$[A-Z][A-Z0-9_]*/[A-Za-z0-9_.-]+"' \
-        | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk srcfiles $?
-    srcbound="$(printf '%s\n' "$code" \
-        | nomatch grep -E '\. /dev/fd/[0-9]' \
-        | nomatch grep -oE '[0-9]<"\$[A-Z][A-Z0-9_]*/[A-Za-z0-9_.-]+"' \
-        | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk srcbound $?
-    srcfiles="$(printf '%s\n%s\n' "$srcfiles" "$srcbound" | nomatch grep -vE '^$' | sort -u)"; chk merge_src $?
-    for leaf in $srcfiles; do
-        [ -f "$SCRIPTS/$leaf" ] && continue
-        # THE DECLARATION IS PARSED AND COMPARED AS A STRING, never interpolated
-        # into a pattern. `grep -qxE "# rb-writes:[[:space:]]*$leaf"` was the first
-        # shape and it made the leaf a REGEX: the extractor allows a dot, and a dot
-        # in an ERE matches any character, so `# rb-writes: setupXenv` claimed a
-        # document sourcing `setup.env` — the scan then credited a different
-        # helper's names and reported clean while nothing claimed the real file.
-        # Escaping the leaf would work and would be a guard; reading the declared
-        # value out and testing `=` removes the pattern altogether.
-        #
-        # NOT THROUGH `nomatch` EITHER, and that is the difference between this loop
-        # and every other grep in this file. `nomatch` turns "no matches" into
-        # success so a status check can tell a failed grep from an empty result —
-        # correct where the OUTPUT is the answer, and wrong where the STATUS is:
-        # under it every helper claimed the leaf, and the scan reported sixteen
-        # claimants for a file one of them writes.
-        claimants=""
-        for h in "$SCRIPTS"/pr-*.sh; do
-            [ -f "$h" ] || continue
-            claimed="$(grep -oE '^# rb-writes:[[:space:]]*[^[:space:]]+' "$h" \
-                | sed -E 's/^# rb-writes:[[:space:]]*//')" || claimed=""
-            [ "$claimed" = "$leaf" ] \
-                && claimants="$claimants $(basename "$h")"
-        done
-        set -- $claimants
-        if [ "$#" -ne 1 ]; then
-            echo "PR_SELFCHECK status=error reason=sourced_file_unclaimed leaf=$leaf claimants=$#" >&2
-            exit 2
-        fi
-        writerassigned="$(nomatch grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "$SCRIPTS/$1" \
-            | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' \
-            | nomatch grep -vE '^$' | sort -u)"; chk writer_assigned $?
-        if [ -z "$writerassigned" ]; then
-            echo "PR_SELFCHECK status=error reason=writer_declares_no_assignments writer=$1" >&2
-            exit 2
-        fi
-        assigned="$(printf '%s\n%s\n' "$assigned" "$writerassigned" | sort -u)"; chk merge_writer $?
-    done
+    # NO HELPER HANDS VALUES BACK BY BEING SOURCED, and the branch that credited one
+    # is gone with the arrangement. `pr-setup.sh` wrote a file of assignments
+    # `SKILL.md` sourced, which made `.` — a NAME, in the one shell that cannot re-exec
+    # out of its operator's functions — the thing carrying the session's identity. It
+    # hands back the origin alone now, read with `$(<…)`, and every other value the
+    # document ASSIGNS, so the scan sees them where it always looked.
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #

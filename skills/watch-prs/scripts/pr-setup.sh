@@ -4,7 +4,7 @@
 #
 #   pr-setup.sh <dir>
 #
-#   0  <dir>/env is written and can be sourced
+#   0  <dir>/origin holds the remote and <dir>/work holds the session's four files
 #   1  stopped — the reason is on stderr; nothing was written
 #   2  the STORAGE would not take it — the directory could not be created
 #      exclusively, or a write inside it failed. The caller retries under a second
@@ -39,29 +39,18 @@
 #     and the child that matters is one the driver starts. Proving it here would
 #     prove that this process exports, which is true by construction.
 #
-# WHAT THE SOURCED FILE ASSIGNS IS DECLARED, not deduced. `pr-selfcheck.sh` scans
-# `SKILL.md` for names it uses and never assigns, and since the setup values arrive
-# by SOURCING they are assigned nowhere in that document — every one of them was
-# reported as undefined. The declaration is the same mechanism a shared library
-# uses there and for the same reason: reading a body and inferring what a
-# successful run sets is a reachability analysis, and a wrong answer reads as "this
-# variable is fine", which is the quiet direction. `rb-writes:` names the LEAF, so
-# the scan binds a `. "$X/env"` in the document to this file rather than to a list
-# somebody has to keep. `test-pr-setup.sh` proves the declaration matches the keys
-# this actually writes, so a drifted one fails the suite instead of silently
-# widening what the scan accepts.
+# NOTHING HERE IS EXECUTED BY THE CALLER, and that is the whole safety of the
+# arrangement. This wrote a file of assignments the driver SOURCED, which made `.` —
+# a NAME, in the one shell that cannot re-exec out of its operator's functions — the
+# thing carrying the session's identity. It hands back the ORIGIN alone now, in a
+# file read with `$(<…)`, so the worst a replaced file can do is give a wrong string,
+# which `rb_identity` and the child pin then disagree with.
 #
-# rb-writes: env
-# rb-assigns: REVIEW_BUS_REMOTE RB_REMOTE OWNER REPO HOST CODEX_BOT COPILOT_BOT RB_WORK_DIR SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE
-#
-# THE VALUES ARE QUOTED, and that is the whole safety of the arrangement. A remote
-# URL is not this repository's text — a checkout can carry any origin, and a `git`
-# config a driver never read can put a quote, a `$(…)`, a backtick or a newline in
-# it. Every value is written single-quoted with `'` escaped as `'\''`, which has no
-# expansion of any kind inside it, so the sourced line is an assignment and cannot
-# be a command. `test-pr-setup.sh` stages each of those shapes against the real
-# helper and asserts that what comes back through the source is the bytes that went
-# in.
+# THE OTHER ELEVEN VALUES WERE NEVER INFORMATION. `OWNER`, `REPO` and `HOST` are what
+# `rb_identity` derives from the origin, and the driver runs it anyway; the two
+# reviewer logins are constants it proves against their literals; the working
+# directory and its four files are a literal suffix under a directory it named
+# itself. See `SKILL.md` § Derive identity, which assigns each of them and proves it.
 set -uo pipefail
 
 case "$-" in
@@ -122,8 +111,8 @@ esac
 # and three facts are needed. `RB_OWNED` is certain and late — set after a successful
 # `mkdir`. `RB_PREEXISTED` covers the window before that: a name that held nothing
 # when this run began is one this run made. And `-O` refuses a name another ACCOUNT
-# holds, which neither flag can see — that is what stops a replacement's own `env` or
-# `o/origin` being unlinked through a path this run no longer owns.
+# holds, which neither flag can see — that is what stops a replacement's own `origin`
+# or `o/origin` being unlinked through a path this run no longer owns.
 RB_PHASE=reserved
 RB_OWNED=no
 RB_PREEXISTED=no
@@ -187,7 +176,7 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
     # anything and leaves a directory behind at worst.
     if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
-        /usr/bin/env rm -f "$RB_DIR/env" "$RB_DIR/o/origin" 2>/dev/null
+        /usr/bin/env rm -f "$RB_DIR/origin" "$RB_DIR/o/origin" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
         for _g in summary.md request.md prior.txt head.txt; do
             /usr/bin/env rm -f "$RB_DIR/work/$_g" 2>/dev/null
@@ -331,70 +320,44 @@ for _f in summary.md request.md prior.txt head.txt; do
         || rb_setup_stop work_files_not_empty 2
 done
 
-# ── the file the driver sources ────────────────────────────────────────────
-# SINGLE QUOTES WITH `'` ESCAPED, and nothing else. Inside single quotes bash
-# expands nothing at all — no `$`, no backtick, no backslash — so a value containing
-# any of them is data. The escape is the one sequence single quotes cannot hold:
-# close, an escaped quote, reopen.
-rb_setup_q() {   # <value> ; prints it single-quoted for a shell to read back
-    local _v="${1-}"
-    printf "'%s'" "${_v//\'/\'\\\'\'}"
-    return 0
-}
-# EVERY WRITE'S STATUS IS PRESERVED, and that needs the `&&` chain rather than a
-# list of commands in a group. `{ a; b; c; } > f` reports only C's status: a
-# `printf` that failed in the middle while a later one succeeded was a group that
-# reported SUCCESS, and the read-back below could not see it either, because the
-# line it checks for is the last one. Losing `CODEX_BOT` that way lets setup
-# announce ready with no reviewer login, after which the watch polls for a bot
-# nobody named.
-rb_setup_put() {   # <name> <value> ; one assignment line, with its status
-    printf '%s=%s\n' "$1" "$(rb_setup_q "$2")" || return 1
-    return 0
-}
-{
-    rb_setup_put REVIEW_BUS_REMOTE "$RB_REMOTE" \
-    && printf 'export REVIEW_BUS_REMOTE\n' \
-    && rb_setup_put RB_REMOTE    "$RB_REMOTE" \
-    && rb_setup_put OWNER        "$OWNER" \
-    && rb_setup_put REPO         "$REPO" \
-    && rb_setup_put HOST         "$HOST" \
-    && rb_setup_put CODEX_BOT    'chatgpt-codex-connector[bot]' \
-    && rb_setup_put COPILOT_BOT  'copilot-pull-request-reviewer[bot]' \
-    && rb_setup_put RB_WORK_DIR  "$RB_WORK_DIR" \
-    && rb_setup_put SUMMARY_FILE "$RB_WORK_DIR/summary.md" \
-    && rb_setup_put REQUEST_FILE "$RB_WORK_DIR/request.md" \
-    && rb_setup_put PRIOR_FILE   "$RB_WORK_DIR/prior.txt" \
-    && rb_setup_put HEAD_FILE    "$RB_WORK_DIR/head.txt"
-} > "$RB_DIR/env" || rb_setup_stop env_write 2
-
-# AND THE COMPLETE KEY SET IS READ BACK, because taking the statuses is not enough
-# on its own: stdio buffers, so a `printf` can report success and the write fail at
-# the flush when the redirection is closed — which no status in the chain sees.
-# Checking for the LAST line alone was the previous shape and it has the same hole
-# from the other end: any earlier line can be missing while `HEAD_FILE=` is present.
+# ── the one value that has to cross ────────────────────────────────────────
 #
-# THE EXPECTED SET IS THE `rb-assigns:` DECLARATION IN THIS FILE, not a list written
-# out a second time. That declaration is already the contract `pr-selfcheck.sh`
-# credits `SKILL.md` with, and `test-pr-setup.sh` proves it equals the keys a real
-# run writes — so a name added to the writes above and not to the declaration fails
-# the suite, and one added to neither is a name the driver was never promised.
-[ -s "$RB_DIR/env" ] || rb_setup_stop env_empty 2
-_want="$(grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "${BASH_SOURCE[0]}" 2>/dev/null \
-    | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' | grep -vE '^$' | sort -u)" \
-    || _want=""
-[ -n "$_want" ] || rb_setup_stop env_undeclared 1
-_got="$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$RB_DIR/env" 2>/dev/null \
-    | sed 's/=$//' | sort -u)" || _got=""
-[ "$_want" = "$_got" ] || rb_setup_stop env_truncated 2
+# THE ORIGIN, AND NOTHING ELSE. This wrote twelve assignments into a file the driver
+# SOURCED, and the source was the defect: `.` is a NAME, and `SKILL.md`'s bash runs in
+# the operator's long-lived shell where a function by that name can delegate the load,
+# read the genuine assignments and hand back a different origin — after which the
+# identity derivation and the child pin both agree with the forged value, because both
+# are computed from it.
+#
+# WHAT MADE THE SOURCE UNNECESSARY is that eleven of those twelve values were never
+# information: `OWNER`, `REPO` and `HOST` are what `rb_identity` derives from the
+# origin and the driver runs it anyway; the two reviewer logins are constants the
+# driver already proves against their literals; the working directory and its four
+# files are a literal suffix under a directory the driver named. Only the ORIGIN
+# crosses a boundary the driver cannot see across — and a single value comes back the
+# way `pr-origin.sh` has always sent one, in a file the caller reads with `$(<…)`,
+# which is an expansion with no command in it to shadow.
+#
+# SO THERE IS NO QUOTING HERE, and that whole class is gone with it. The value is
+# written raw and read as data; nothing evaluates it, so a remote carrying a quote, a
+# `$(…)` or a backtick is a string rather than a thing that must be escaped into
+# safety. `pr-origin.sh` writes its answer the same way and for the same reason.
+printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
+
+# THE WRITE'S STATUS IS TAKEN AND THE RESULT IS READ BACK. `printf` can report
+# success and the write fail at the flush when the redirection is closed, so the
+# status alone does not prove the file holds the value; and a caller reading an empty
+# or truncated origin would pin the session to it.
+[ -s "$RB_DIR/origin" ] || rb_setup_stop origin_write 2
+[ "$(cat "$RB_DIR/origin" 2>/dev/null)" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
 
 # THE EXIT TRAP IS RESET AND THE SIGNAL HANDLERS ARE NOT. Success means the caller
 # gets the directory, so the cleanup must not fire on the way out — but a `TERM`
-# arriving before the ready line is printed means the caller never sources anything,
-# and giving the reservation back is still the right answer there. `pr-origin.sh`
+# arriving before the ready line is printed means the caller never reads anything, and
+# giving the reservation back is still the right answer there. `pr-origin.sh`
 # resets `EXIT` alone for the same reason: disarming the signals too left a window
 # where the helper was terminated with no cleanup at all.
 trap - EXIT
 
-echo "PR_SETUP status=ready env=$RB_DIR/env"
+echo "PR_SETUP status=ready origin=$RB_DIR/origin work=$RB_WORK_DIR"
 exit 0

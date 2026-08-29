@@ -296,33 +296,49 @@ rb_close_call_present \
 # the grep that used to find it in `SKILL.md` finds nothing and would have to be
 # deleted rather than moved. What replaced it is stronger: the pin is proved by a
 # CHILD further down, which is the question the export exists to answer.
-# BOUND BEFORE IT IS EVALUATED. Sourcing is the one step that EXECUTES what it reads,
-# `$RB_SETUP_DIR` is published in argv, and no check afterwards helps — re-deriving
-# the identity cannot un-run a `$(…)` that has already run in the operator's shell.
-# So the object is bound by a redirection and the tests and the source all go through
-# the descriptor rather than the name.
-{ grep -qF '9<"$RB_SETUP_DIR/env"' <<<"$skill_flat" \
-  && grep -qF '. /dev/fd/9' <<<"$skill_flat"; } \
-    && pass "the session's values arrive by sourcing a descriptor bound to the helper's file" \
-    || die "SKILL.md does not source the setup helper's environment file through a bound descriptor"
+# BOUND BEFORE IT IS READ, AND NOT SOURCED AT ALL. This block SOURCED a file of
+# twelve assignments, and `.` is a NAME: in the operator's long-lived shell a function
+# by that name could delegate the earlier library load, read the genuine assignments
+# and hand back a different origin — after which `rb_identity` and the child pin both
+# agree with the forged value, because both are computed FROM it. Eleven of the twelve
+# were never information: the identity parser derives three, two are constants, and
+# the working directory and its four files are a literal suffix under a directory this
+# shell named itself. So the helper hands back the ORIGIN alone, in a file read with
+# `$(<…)` — a substitution the parser performs with no fork and no command name.
+{ grep -qF '9<"$RB_SETUP_DIR/origin"' <<<"$skill_flat" \
+  && grep -qF 'RB_REMOTE="$(<"/dev/fd/9")"' <<<"$skill_flat"; } \
+    && pass "the session's origin arrives through a descriptor bound to the helper's file" \
+    || die "SKILL.md does not read the origin through a bound descriptor"
 case "$skill_flat" in
-    *'. "$RB_SETUP_DIR/env"'*)
-        die "SKILL.md sources the env file by NAME; a replacement between the write and the source is executed" ;;
-    *)  pass "…and never by the name, which is what a replacement can change" ;;
+    *'. /dev/fd/'*|*'. "$RB_SETUP_DIR'*)
+        die "SKILL.md sources a file the setup helper wrote; a shadowed . would carry the session's identity" ;;
+    *)  pass "…and sources nothing the helper wrote, so a shadowed . cannot carry the identity" ;;
 esac
-# AND THE DESCRIPTOR IS WHAT THE CHECKS ARE ABOUT TOO. Testing `$RB_SETUP_DIR/env`
-# and then sourcing the descriptor would be two different objects on a replaced name,
-# which is the check-then-use this whole block is shaped to avoid.
+# AND THE CHECKS ARE ABOUT THAT SAME DESCRIPTOR. Testing the path and then reading the
+# descriptor would be two different objects on a replaced name, which is the
+# check-then-use this whole block is shaped to avoid.
 { grep -qF '[[ -O /dev/fd/9 ]]' <<<"$skill_flat" \
   && grep -qF '[[ -f /dev/fd/9 ]]' <<<"$skill_flat"; } \
     && pass "…with ownership and regularity tested on that same descriptor" \
-    || die "the env descriptor is sourced without -O and -f on it"
-if [ -f "$SCRIPT_DIR/pr-setup.sh" ]; then
-    { grep -qF 'rb_setup_put REVIEW_BUS_REMOTE' "$SCRIPT_DIR/pr-setup.sh" \
-      && grep -qF "printf 'export REVIEW_BUS_REMOTE" "$SCRIPT_DIR/pr-setup.sh"; } \
-        && pass "…and that file carries the pin as an assignment and an export" \
-        || die "pr-setup.sh does not write REVIEW_BUS_REMOTE and its export"
-fi
+    || die "the origin descriptor is read without -O and -f on it"
+# AND THE PIN IS AN EXPORT THIS SHELL MAKES, which is the one value a child must
+# inherit and the one the helper cannot hand over.
+grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
+    && pass "…and the session is pinned by an export this shell makes" \
+    || die "SKILL.md does not export REVIEW_BUS_REMOTE"
+# AND EVERY OTHER VALUE IS ASSIGNED HERE FROM A LITERAL, not received.
+_rb_lit=""
+for _l in "CODEX_BOT='chatgpt-codex-connector[bot]'" \
+          "COPILOT_BOT='copilot-pull-request-reviewer[bot]'" \
+          'SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"' \
+          'REQUEST_FILE="$RB_SETUP_DIR/work/request.md"' \
+          'PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"' \
+          'HEAD_FILE="$RB_SETUP_DIR/work/head.txt"'; do
+    grep -qF "$_l" <<<"$skill_flat" || _rb_lit="$_rb_lit [$_l]"
+done
+[ -z "$_rb_lit" ] \
+    && pass "…and every other value is assigned in this shell from a literal" \
+    || die "a value the driver should assign is still received:$_rb_lit"
 # …AND THE HELPER IS REACHED BY PATH AND STARTED PRIVILEGED, with its status taken.
 # `pr-setup.sh` reached bare would leave the kernel to process its shebang, putting
 # the `env -S` requirement back through the side door — and a helper that writes a
@@ -344,29 +360,17 @@ _rb_gone="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -nE 'RB_ORIGIN_DIR|RB_ORIGI
 [ -z "$_rb_gone" ] \
     && pass "…and the driver's old transport names are gone from the document" \
     || die "a name the helper now owns is back in SKILL.md: $_rb_gone"
-# WHAT WAS READ IS REMOVED AND THE WORK DIRECTORY IS NOT. The env file and the pin
-# leaf are transports whose contents are in this shell the moment they are read; the
-# setup directory holds `work/`, which is the session's four working files and the
-# thing the call was made to produce. Removing it would be removing the product.
-grep -qF '/usr/bin/env rm -f "$RB_SETUP_DIR/env"' <<<"$skill_flat" \
-    && pass "…the env file is removed once it has been sourced" \
-    || die "the sourced env file is left on disk"
-# BY NAME AND THEN `rmdir`, NEVER RECURSIVELY. `$RB_SETUP_DIR` is published in argv,
-# so a `rm -rf` on a leaf under it deletes whatever a replacement holds — the same
-# regression `pr-setup.sh` already fixed, arriving by the other route, and past what
-# `docs/decisions/2026-08-26-reservation-inference.md` accepts.
-{ grep -qF '/usr/bin/env rm -f "$RB_SETUP_DIR/pin/pin"' <<<"$skill_flat" \
-  && grep -qF '/usr/bin/env rmdir "$RB_SETUP_DIR/pin"' <<<"$skill_flat"; } \
-    && pass "…and the pin leaf once its descriptor has been read, by name and then rmdir" \
-    || die "the pin directory is left on disk, or is removed recursively"
+# NOTHING THE DRIVER READ IS UNLINKED, and that is a removal rather than an omission.
+# `$RB_SETUP_DIR` is published in argv, so `rm -f "$RB_SETUP_DIR/pin/pin"` unlinks a
+# REPLACEMENT's own `pin` when the directory it names has been swapped — the same
+# defect `pr-setup.sh` answers with a held descriptor and a recorded inode, neither of
+# which this shell has. What the removals were for does not survive examination: the
+# origin is `git remote get-url origin`, which anyone who can reach the checkout can
+# read anyway, and the directory is mode 700.
 case "$skill_flat" in
-    *'rm -rf "$RB_SETUP_DIR'*) die "SKILL.md removes something under the setup directory recursively" ;;
-    *) pass "…with no recursive removal anywhere under the published setup path" ;;
-esac
-case "$skill_flat" in
-    *'rm -rf "$RB_SETUP_DIR"'[!/]*|*'rm -rf "$RB_SETUP_DIR"')
-        die "SKILL.md removes the setup directory, which holds the session's working files" ;;
-    *)  pass "…while the setup directory itself is kept, being the session's own" ;;
+    *'rm -f "$RB_SETUP_DIR'*|*'rm -rf "$RB_SETUP_DIR'*|*'rmdir "$RB_SETUP_DIR'*)
+        die "SKILL.md unlinks something under the published setup path" ;;
+    *)  pass "the driver unlinks nothing under the published setup path" ;;
 esac
 
 # THE BLOCK LIFTS OUT WHOLE, from the probe that opens it to the `fi` that closes
@@ -382,7 +386,7 @@ _setup_body="$(awk '/^if \( RB_TMPPARENT="RbProbe/, /^fi$/' "$SKILL")" || _setup
 '"$_setup_body"
 { [ -n "$_setup_body" ] \
   && case "$_setup_body" in *'/pr-setup.sh "$RB_SETUP_DIR"'*) true ;; *) false ;; esac \
-  && case "$_setup_body" in *'9<"$RB_SETUP_DIR/env"'*) true ;; *) false ;; esac \
+  && case "$_setup_body" in *'9<"$RB_SETUP_DIR/origin"'*) true ;; *) false ;; esac \
   && case "$_setup_body" in *'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity'*) true ;; *) false ;; esac \
   && case "$_setup_body" in *'/pr-origin.sh pin "$RB_SETUP_DIR/pin"'*) true ;; *) false ;; esac; } \
     && pass "…and the setup block lifts out with the call, the source and the pin" \
@@ -487,9 +491,9 @@ if [ -n "$_forge_dir" ]; then
     _fe_log="$_forge_dir/forge-log-that-must-not-exist"
     export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' \
            FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_PIN_EXTRA=1 FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
-           FORGE_NOENV=1 FORGE_ENV_DIR=1 FORGE_CODEX=x FORGE_COPILOT=x FORGE_PATHS=elsewhere FORGE_NONEMPTY=1 FORGE_ENV_EXTRA=x
+           FORGE_NOORIGIN=1 FORGE_ORIGIN_DIR=1 FORGE_NONEMPTY=1
     unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_PIN_EXTRA FORGE_SETUP_RC \
-          FORGE_SETUP_LOG FORGE_NOENV FORGE_ENV_DIR FORGE_CODEX FORGE_COPILOT FORGE_PATHS FORGE_NONEMPTY FORGE_ENV_EXTRA
+          FORGE_SETUP_LOG FORGE_NOORIGIN FORGE_ORIGIN_DIR FORGE_NONEMPTY
     cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
 [ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
@@ -543,37 +547,15 @@ mkdir -m 700 "$1/work" || exit 1
 for _f in summary.md request.md prior.txt head.txt; do
     if [ -n "${FORGE_NONEMPTY:-}" ]; then printf 'stale\n' > "$1/work/$_f"; else : > "$1/work/$_f"; fi
 done
-if [ -n "${FORGE_ENV_DIR:-}" ]; then
-    # A DIRECTORY AT THE ENV NAME, which opens like a file and is not one — the state
-    # only a test on the BOUND object can refuse.
-    mkdir "$1/env" || exit 1
-elif [ -z "${FORGE_NOENV:-}" ]; then
-    _w="$1/work"
-    [ -n "${FORGE_PATHS:-}" ] && _w="${FORGE_PATHS}"
-    # QUOTED THE WAY THE REAL HELPER QUOTES, because a forge that writes its values
-    # more naively is testing its own escaping rather than the driver's source: a
-    # value carrying `'` would break out of the assignment here and the case would
-    # report the document executing something the helper would never have written.
-    _q() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
-    _fv="${FORGE_VALUE-git@github.com:acme/widget.git}"
-    {
-        printf 'REVIEW_BUS_REMOTE=%s\n' "$(_q "$_fv")"
-        printf 'export REVIEW_BUS_REMOTE\n'
-        printf 'RB_REMOTE=%s\n'    "$(_q "$_fv")"
-        printf "OWNER='%s'\n"        "${FORGE_OWNER-acme}"
-        printf "REPO='%s'\n"         "${FORGE_REPO-widget}"
-        printf "HOST='%s'\n"         "${FORGE_HOST-github.com}"
-        # THE REVIEWER LOGINS TOO, because the driver proves them against their
-        # literals: a forge that omitted them made every case refuse for that reason
-        # instead of its own.
-        printf "CODEX_BOT='%s'\n"   "${FORGE_CODEX-chatgpt-codex-connector[bot]}"
-        printf "COPILOT_BOT='%s'\n" "${FORGE_COPILOT-copilot-pull-request-reviewer[bot]}"
-        printf "SUMMARY_FILE='%s'\n" "$_w/summary.md"
-        printf "REQUEST_FILE='%s'\n" "$_w/request.md"
-        printf "PRIOR_FILE='%s'\n"   "$_w/prior.txt"
-        printf "HEAD_FILE='%s'\n"    "$_w/head.txt"
-        [ -n "${FORGE_ENV_EXTRA:-}" ] && printf '%s\n' "$FORGE_ENV_EXTRA"
-    } > "$1/env"
+# THE ORIGIN, RAW, which is the whole transport now. There is no quoting to get right
+# because nothing evaluates it: the driver reads it with `$(<…)` and hands it to the
+# identity parser.
+if [ -n "${FORGE_ORIGIN_DIR:-}" ]; then
+    # A DIRECTORY AT THE ORIGIN NAME, which opens like a file and is not one — the
+    # state only a test on the BOUND object can refuse.
+    mkdir "$1/origin" || exit 1
+elif [ -z "${FORGE_NOORIGIN:-}" ]; then
+    printf '%s\n' "${FORGE_VALUE-git@github.com:acme/widget.git}" > "$1/origin"
 fi
 exit "${FORGE_SETUP_RC:-0}"
 FORGE
@@ -583,8 +565,8 @@ FORGE
     # what makes this a proof rather than a restatement of the `unset` above it.
     _fe_dir="$_forge_dir/envproof"
     _fe_rc=0; bash "$_forge_dir/pr-setup.sh" "$_fe_dir" || _fe_rc=$?
-    _fe_val=""; _fe_val="$(grep '^RB_REMOTE=' "$_fe_dir/env" 2>/dev/null)" || _fe_val=""
-    { [ "$_fe_rc" -eq 0 ] && [ "$_fe_val" = "RB_REMOTE='git@github.com:acme/widget.git'" ] \
+    _fe_val=""; _fe_val="$(cat "$_fe_dir/origin" 2>/dev/null)" || _fe_val=""
+    { [ "$_fe_rc" -eq 0 ] && [ "$_fe_val" = 'git@github.com:acme/widget.git' ] \
       && [ ! -e "$_fe_log" ]; } \
         && pass "the forged helpers inherit none of the FORGE_ names this file seeds" \
         || die "a forge saw an inherited value (rc=$_fe_rc value='$_fe_val' log-exists=$([ -e "$_fe_log" ] && echo yes || echo no))"
@@ -706,13 +688,13 @@ FORGE
     # name opens, so only the test on the bound object catches it.
     _nf=0
     _nf_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
-        FORGE_PIN_ECHO=1 FORGE_ENV_DIR=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+        FORGE_PIN_ECHO=1 FORGE_ORIGIN_DIR=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_setup_body"'
             printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
         ' 2>&1)" || _nf=$?
     { [ "$_nf" -ne 0 ] && case "$_nf_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "…and an env path that is not a regular file is refused" \
-        || die "a non-regular env object was sourced (rc=$_nf out='$_nf_out')"
+        && pass "…and an origin path that is not a regular file is refused" \
+        || die "a non-regular origin object was read (rc=$_nf out='$_nf_out')"
     # …AND THE BINDING ITSELF IS STAGED, WITH THE SWAP THIS CANNOT STAGE IN PLACE.
     # The window the finding is about is between `pr-setup.sh` exiting and the
     # redirection opening, and putting a process in that window is a RACER — which
@@ -723,20 +705,56 @@ FORGE
     # uses, with a replacement that tries to create a witness.
     _bd_dir="$_forge_dir/bindcase"
     rm -rf "$_bd_dir"; mkdir -p "$_bd_dir"
-    printf 'V=original\n' > "$_bd_dir/env"
+    printf 'original\n' > "$_bd_dir/env"
     _bd_out="$(cd "$_bd_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
         exec 9<"env"
         rm -f env
-        printf "V=REPLACED\ntouch WITNESS\n" > env
-        { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] && . /dev/fd/9; } 9<&9
+        printf 'REPLACED\n' > env; touch WITNESS.attempt
+        { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] && V="$(<"/dev/fd/9")"; } 9<&9
         printf "V=[%s] witness=[%s]\n" "${V-unset}" "$([ -e WITNESS ] && echo yes || echo no)"
     ' 2>&1)" || true
     case "$_bd_out" in
         *'V=[original] witness=[no]'*)
-            pass "a descriptor bound before a swap sources the original, and the replacement never runs" ;;
+            pass "a descriptor bound before a swap reads the original, not the replacement" ;;
         *)  die "the bound-descriptor property does not hold here: '$_bd_out'" ;;
     esac
     rm -rf "$_bd_dir"
+
+    # …AND A SHADOWED `.` REACHES NOTHING, which is what removing the source bought.
+    # `SKILL.md`'s bash runs in the operator's long-lived shell and cannot re-exec out
+    # of its functions, so `.` is a name like any other: while the setup values arrived
+    # by sourcing, a function by that name could read the genuine assignments and hand
+    # back a different origin — and everything after agreed with it, because
+    # `rb_identity` derives `OWNER` and `REPO` FROM the value and the child pin reports
+    # back the export made FROM it. The transport is a `$(<…)` now, which the parser
+    # performs with no command name in it, so the function is never invoked.
+    _dot=0
+    _dot_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            # THE PARSER IS LOADED BEFORE THE FUNCTION IS DEFINED, because the LIFT
+            # carries its own `. "$RB_SCRIPTS/identitylib.sh"` scaffolding — that line
+            # is this fixture'"'"'s, not the block'"'"'s, and shadowing it would make the
+            # case fail on the staging instead of on its subject. The real document
+            # loads the library far above this range.
+            . "$RB_SCRIPTS/identitylib.sh"
+            .() { RB_REMOTE="git@github.com:WRONG/other.git"; REVIEW_BUS_REMOTE="$RB_REMOTE"; export REVIEW_BUS_REMOTE; return 0; }
+            '"$_setup_body"'
+            printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
+        ' 2>&1)" || _dot=$?
+    case "$_dot_out" in
+        *'PINNED=[git@github.com:WRONG/other.git]'*)
+            die "a shadowed . replaced the session's origin: '$_dot_out'" ;;
+        *'PINNED=[git@github.com:acme/widget.git]'*)
+            pass "a function named . cannot replace the session's origin, because nothing sources" ;;
+        *)  die "the shadowed-dot case did not start a session at all: '$_dot_out'" ;;
+    esac
+    # …AND THE IDENTITY IT DERIVES IS THE REAL ONE TOO, which is the half a pin
+    # comparison cannot see: both sides of that comparison are computed from whatever
+    # `RB_REMOTE` holds, so a forged value agrees with itself.
+    case "$_dot_out" in
+        *'OWNER=acme REPO=widget'*) pass "…and the identity it announces is the checkout's" ;;
+        *) die "the shadowed-dot case announced another identity: '$_dot_out'" ;;
+    esac
 
     # ── the retry, and what it is gated on ────────────────────────────────
     # A STORAGE REFUSAL IS RETRIED UNDER THE OTHER PARENT. Status 2 means both
@@ -867,13 +885,13 @@ FORGE
     # catch.
     _ne=0
     _ne_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
-        FORGE_NOENV=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+        FORGE_NOORIGIN=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_setup_body"'
             printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
         ' 2>&1)" || _ne=$?
     { [ "$_ne" -ne 0 ] && case "$_ne_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "a helper that reports success with no env file is refused" \
-        || die "a missing env file was walked past (rc=$_ne out='$_ne_out')"
+        && pass "a helper that reports success with no origin file is refused" \
+        || die "a missing origin file was walked past (rc=$_ne out='$_ne_out')"
     # …AN EMPTY ORIGIN IS REFUSED. `rb_identity` falls back to `git remote get-url`
     # with an empty `REVIEW_BUS_REMOTE`, so this is the state where the session looks
     # entirely successful while every child routes by the current directory.
@@ -909,67 +927,75 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     { [ "$_bd" -ne 0 ] && case "$_bd_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…and a sourced value the identity parser refuses stops the session" \
         || die "an unusable sourced origin was accepted (rc=$_bd out='$_bd_out')"
-    # …AND THE VALUES ARRIVE AS DATA, WHATEVER IS IN THEM. A remote URL is not this
-    # repository's text: a `git` config nobody read can put a quote, a `$(…)` or a
-    # backtick in it, and the helper's single-quoting is what makes the sourced line
-    # an assignment rather than a command. Asserted through the REAL quoting, since
-    # the forge writes its values the same way the helper does.
+    # …AND A HOSTILE ORIGIN IS A STRING, WHICH IS WHAT REMOVING THE SOURCE BOUGHT.
+    # While this file was SOURCED, a value carrying a `$(…)` or a backtick had to be
+    # single-quoted into safety and the escape was load-bearing. Nothing evaluates the
+    # value now: it is read with `$(<…)` and handed to the identity parser, so the
+    # worst it can be is a remote nobody can use. The witness is a FILE, because a
+    # substitution that ran would leave its trace whether or not anything printed.
     _inj="$_forge_dir/injected-file-that-must-not-exist"
     rm -f "$_inj"
     _iv='git@github.com:acme/w'"'"'$(touch '"$_inj"')`touch '"$_inj"'`.git'
-    _ij=0
     _ij_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
-        FORGE_VALUE="$_iv" TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+        FORGE_PIN_ECHO=1 FORGE_VALUE="$_iv" TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_setup_body"'
-        ' 2>&1)" || _ij=$?
+            printf "R=[%s]\n" "${RB_REMOTE-}"
+        ' 2>&1)" || true
     [ ! -e "$_inj" ] \
-        && pass "a hostile origin round-trips through the source as data and executes nothing" \
-        || die "a value in the env file was executed by the source"
-    # …AND THE HELPER'S OWN QUOTING IS WHAT THAT RESTS ON, so it is asserted at the
-    # source: `'` closed, escaped and reopened, which is the one sequence single
-    # quotes cannot hold.
-    if [ -f "$SCRIPT_DIR/pr-setup.sh" ]; then
-        # BOTH HALVES, on one line: the single-quoted format, and the substitution
-        # that closes, escapes and reopens. Either alone is a quoting that a value
-        # carrying `'` walks straight out of.
-        _q_line=""
-        _q_line="$(grep -F "printf \"'%s'\"" "$SCRIPT_DIR/pr-setup.sh")" || _q_line=""
-        { [ -n "$_q_line" ] && case "$_q_line" in *'${_v//'*) true ;; *) false ;; esac; } \
-            && pass "…and pr-setup.sh writes every value single-quoted with ' escaped" \
-            || die "pr-setup.sh does not single-quote its values with ' escaped: '$_q_line'"
-    fi
+        && pass "a hostile origin is read as data and executes nothing" \
+        || die "a value in the helper's file was executed by the driver"
+    case "$_ij_out" in
+        *"R=[$_iv]"*) pass "…and arrives byte-exact, because nothing had to escape it" ;;
+        *) die "the hostile origin did not arrive intact: '$_ij_out'" ;;
+    esac
 
-    # ── the four working paths are proved to be the ones setup made ───────
-    # A PATH POINTING SOMEWHERE ELSE IS REFUSED. The env file is a file, and a file
-    # is not a promise: one tampered with between the helper and this shell would hand
-    # every later stage a summary file under somebody else's directory.
-    _elsewhere="$_forge_dir/elsewhere"
-    mkdir -p "$_elsewhere"
-    for _f in summary.md request.md prior.txt head.txt; do : > "$_elsewhere/$_f"; done
-    _pw=0
-    _pw_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
-        FORGE_PIN_ECHO=1 FORGE_PATHS="$_elsewhere" TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+    # ── the working paths are this shell's own, and are proved ────────────
+    # THEY ARE NOT RECEIVED ANY MORE. The helper hands back the origin alone, so the
+    # four paths are assigned here from a literal suffix under a directory this shell
+    # chose — which is what removed the transport they used to travel in, and the `.`
+    # that carried it. What can still go wrong is the ASSIGNMENT: a readonly name in
+    # the operator's shell fails one in silence, keeping whatever value it had.
+    #
+    # THE ASSERTION IS THE ABSENCE OF THE SUCCESS LINE, not a status, and the reason is
+    # measured rather than assumed. A failed readonly assignment at the TOP LEVEL
+    # prints its complaint and carries on — but inside a compound command it ABANDONS
+    # that command, so the read-back below never runs, no `ABORT:` is printed and the
+    # shell reports 0. Both routes reach the same invariant, that no session is
+    # announced; requiring the abort, or a non-zero status, would be requiring one of
+    # the two routes.
+    for _wp in SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE CODEX_BOT COPILOT_BOT; do
+        _wp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+            FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+                readonly '"$_wp"'="/tmp/somewhere-else"
+                '"$_setup_body"'
+            ' 2>&1)" || true
+        case "$_wp_out" in
+            *'OWNER=acme REPO=widget'*) die "a readonly $_wp reached a session: '$_wp_out'" ;;
+        esac
+    done
+    pass "a readonly name among the ones this shell assigns stops the session"
+    # …AND AN ORDINARY SHELL STILL REACHES THE SUCCESS LINE, or the loop above passes
+    # against a block that announces nothing at all.
+    _wp_ok="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_setup_body"'
-            printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
-        ' 2>&1)" || _pw=$?
-    { [ "$_pw" -ne 0 ] && case "$_pw_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "a working path pointing outside the setup directory is refused" \
-        || die "a working path outside the setup directory was accepted (rc=$_pw out='$_pw_out')"
-    grep -q 'the sourced working paths are not the four empty files' <<<"$_pw_out" \
-        && pass "…by the check that is about exactly that" \
-        || die "the path refusal came from somewhere else: '$_pw_out'"
-    # …AND SO IS ONE THAT IS NOT EMPTY. A round summary that already holds text is a
-    # stale one from another round, or another pull request, and `pr-close-round.sh`
-    # would post it as this round's.
+        ' 2>&1)" || true
+    case "$_wp_ok" in
+        *'OWNER=acme REPO=widget'*) pass "…while a shell with none of them readonly does" ;;
+        *) die "the working-path proof refuses an ordinary shell: '$_wp_ok'" ;;
+    esac
+    # …AND A WORKING FILE THAT IS NOT EMPTY IS REFUSED. A round summary that already
+    # holds text is a stale one from another round, or another pull request, and
+    # `pr-close-round.sh` would post it as this round's.
     _nz=0
     _nz_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
         FORGE_PIN_ECHO=1 FORGE_NONEMPTY=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_setup_body"'
-            printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
         ' 2>&1)" || _nz=$?
-    { [ "$_nz" -ne 0 ] && case "$_nz_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "…and a working file that is not empty is refused" \
-        || die "a non-empty working file was accepted (rc=$_nz out='$_nz_out')"
+    case "$_nz_out" in
+        *'OWNER=acme REPO=widget'*) die "a non-empty working file reached a session: '$_nz_out'" ;;
+        *) pass "…and a working file that is not empty is refused" ;;
+    esac
 
     # ── the pin, which is the postcondition the export exists for ─────────
     # THE PIN GOES THROUGH THE HELPER, and the helper is a real child: that is what
@@ -1028,7 +1054,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         *) pass "…and a pre-seeded readonly RB_PIN_SEEN certifies nothing" ;;
     esac
 
-    # …AND THE PIN TRANSPORT IS REMOVED WITHOUT TOUCHING WHAT IT DID NOT PUT THERE.
+    # …AND THE PIN TRANSPORT IS LEFT ALONE, INCLUDING WHAT IT DID NOT PUT THERE.
     # `$RB_SETUP_DIR` is published in argv, so the pin directory under it is a name
     # another process can act on. A `rm -rf` there deletes a replacement's contents,
     # which is past what `docs/decisions/2026-08-26-reservation-inference.md` accepts
@@ -1048,9 +1074,9 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         { [ -f "$_px_dir/pin/witness" ] && [ -d "$_px_dir/pin/squatter-subdir" ]; } \
             && pass "…and a replacement's contents under the pin name survive the removal" \
             || die "the pin removal destroyed contents it did not create"
-        [ ! -e "$_px_dir/pin/pin" ] \
-            && pass "…while the leaf the driver read is gone" \
-            || die "the pin leaf was left on disk"
+        [ -f "$_px_dir/pin/pin" ] \
+            && pass "…and the leaf it read is left alone too, being under the same published name" \
+            || die "the pin leaf was unlinked through a name that may have been replaced"
         rm -rf "$_px_dir"
     fi
 
@@ -1198,19 +1224,6 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         esac
     done
 
-    # …AND SO IS A LOGIN THE FILE SIMPLY GOT WRONG, which is the other half: the
-    # readonly case proves the check is reached, this one proves it is about the VALUE
-    # rather than about the assignment having failed.
-    _wb=0
-    _wb_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
-        FORGE_PIN_ECHO=1 FORGE_CODEX='attacker[bot]' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
-            '"$_setup_body"'
-        ' 2>&1)" || _wb=$?
-    case "$_wb_out" in
-        *'OWNER=acme REPO=widget'*) die "a sourced CODEX_BOT naming another account reached a session: '$_wb_out'" ;;
-        *) pass "…and a sourced reviewer login that is not this loop's account is refused" ;;
-    esac
-
     # ── the success line, and where it may appear ─────────────────────────
     # IN THE INNERMOST ARM AND NOWHERE ELSE. Every refusal above it is an `else`, so
     # the only route to the announcement is through all of them — that is what
@@ -1239,7 +1252,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     [ -e "$_pex/witness" ] \
         && pass "…and a refused run removes nothing it did not create" \
         || die "a refused setup deleted what it did not create"
-    rm -rf "$_pex" "$_elsewhere" "$_unw_dir"
+    rm -rf "$_pex" "$_unw_dir"
 fi
 [ -n "$_forge_dir" ] && rm -rf "$_forge_dir"
 unset RB_TMPBASE
@@ -2696,6 +2709,12 @@ SQUAT
                     pass "…and the parent that worked becomes the one the session uses" ;;
                 *) die "the session kept the squatted parent for its working files: '$_sq_out'" ;;
             esac
+            # THE SESSION THE CASE ABOVE STARTED IS CLEARED FIRST, because the
+            # scan below is about what a REFUSED run left and both cases share these
+            # parents. That successful run keeps its directory by design — it holds
+            # `work/`, and the driver unlinks nothing under a published name — so its
+            # `origin` leaf is a survivor of the wrong run.
+            rm -rf "$_sq_root"/a/watch-pr-setup* "$_sq_root"/b/watch-pr-setup* 2>/dev/null || true
             # BOTH PARENTS SQUATTED: setup REFUSES. Nothing is pinned and nothing
             # is forged — which is the whole severity claim for #160, and the
             # reason it is a denial of service rather than a compromise.

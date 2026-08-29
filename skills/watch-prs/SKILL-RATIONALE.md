@@ -1574,7 +1574,7 @@ assignment then fails and the old value is what the arms see. That is the same l
 the honest version of something it inherited — and it is why the block's own
 guarantee is about what a shadowed COMMAND can reach.
 
-## THE SETUP WORK RUNS IN A PROCESS AND COMES BACK AS A FILE THIS SHELL SOURCES.
+## THE SETUP WORK RUNS IN A PROCESS AND WHAT COMES BACK IS ONE VALUE IN A FILE.
 
 This block was 178 executable lines and 105 of comment — 18,450 characters, about a
 fifth of `SKILL.md`, read on every invocation of the skill and executed by nothing.
@@ -1593,37 +1593,51 @@ the helper choosing and reporting a path back, and
 `docs/decisions/2026-08-26-transport-candidate-in-argv.md` records three refuted
 attempts at that channel; the source itself; and the proofs after it.
 
-## THE SOURCE IS THE ONLY WAY THE VALUES REACH THIS SHELL.
+## NOTHING THE HELPER WROTE IS EXECUTED HERE; ONE VALUE IS READ.
 
-A child process cannot export into its parent, so every alternative reaching for one
-— a captured stdout, a fd, a printed record the driver parses — is a value crossing
-back through text the driver then has to assign, which is the assignment problem
-`SKILL.md` has removed everywhere else.
+This block SOURCED a file of twelve assignments, and the source was the defect. `.` is
+a NAME. `SKILL.md`'s bash runs in the operator's long-lived shell, which nothing
+controls and which cannot re-exec out of its own functions — so a function named `.`
+could delegate the earlier `identitylib.sh` load, read the genuine assignments, and
+hand back a different origin. Everything after that agrees with it: `rb_identity`
+derives `OWNER` and `REPO` FROM the forged value, and the child pin reports the forged
+value back because it inherits the forged export. The session then posts, signs off
+and merges in another repository, with every check passing.
 
-THE VALUES ARE SINGLE-QUOTED BY THE HELPER, and that is the whole safety of it. A
-remote URL is not this repository's text: a checkout can carry any origin, and a
-`git` config nobody read can put a quote, a `$(…)`, a backtick or a newline in it.
-Inside single quotes bash expands nothing at all, so each sourced line is an
-assignment and cannot become a command — measured against the real helper with all
-three of those shapes, which round-trip byte-exact and execute nothing.
+WHAT MADE THE SOURCE UNNECESSARY is that eleven of the twelve values were never
+information. `OWNER`, `REPO` and `HOST` are what `rb_identity` derives from the origin,
+and this block runs it anyway. The two reviewer logins are constants. The working
+directory and its four files are a literal suffix under a directory this shell named
+itself. Only the ORIGIN crosses a boundary this shell cannot see across.
 
-SOURCING IS NOT A NEW TRUST STEP HERE. This block already sources
-`identitylib.sh` from the same directory, on the same argument: `$RB_SCRIPTS` was
-proved to hold the helpers a few lines earlier, and a plugin whose scripts are
-hostile has already lost.
+SO ONE VALUE COMES BACK, in a file read with `$(<…)` — a substitution the parser
+performs with no fork and no command name, which is how `pr-origin.sh` has always sent
+one and how the pin already comes back four lines below. A replaced file can now give
+a wrong string and nothing else, and `rb_identity` and the child pin are what refuse
+it.
 
-## WHAT WAS READ DOES NOT STAY ON DISK.
+#228 ASKED FOR THE SOURCE, and its reasoning was sound on the premise that many values
+had to cross. The premise was wrong, and finding that out is what removed the
+dependency rather than guarding it.
 
-The env file and the pin leaf are both transports: their contents are in this shell
-the moment they have been read, and a copy left at a name published in argv is one
-an account watching that name can read the origin out of afterwards. So each is
-removed as soon as it has been consumed — the env file immediately after the source,
-the pin directory immediately after the descriptor is read.
+## THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
 
-REMOVED BY PATH, NOT BY NAME. `rm` in this shell is whatever the operator's startup
-file left it, and this is the one shell that cannot re-exec out of that. Nothing
-downstream is a postcondition on either removal, so a shadowed `rm` costs a file left
-behind rather than a wrong answer — but `/usr/bin/env rm` costs nothing either.
+This block removed the env file after sourcing it and the pin leaf after reading it,
+and both removals were the same defect one level up from the one `pr-setup.sh` was
+fixed for: `$RB_SETUP_DIR` is published in argv, so `rm -f "$RB_SETUP_DIR/pin/pin"`
+unlinks a REPLACEMENT's own `pin` when the directory it names has been swapped. The
+helper answers that with a held descriptor and a recorded inode; this shell has
+neither, and `exec` is a name besides.
+
+WHAT THE REMOVALS WERE FOR does not survive examination. The argument was that a copy
+left at a published name is one an account watching that name can read the origin out
+of — but the origin is `git remote get-url origin`, which anyone who can reach the
+checkout can read anyway, and the directory is mode 700. It was hygiene, and hygiene
+is not worth a class of defect that has now been found twice.
+
+SO NOTHING IS REMOVED, and the whole class goes with it. The setup directory is the
+session's and outlives the block regardless — it holds `work/`, the four files every
+later stage writes into.
 
 ## A PIN FAILURE IS TERMINAL, because the work files are already on this parent.
 
@@ -1653,61 +1667,28 @@ already exists moves the whole session — files and all — to the parent that 
 That is the same recovery, one step later, and it costs the operator a command rather
 than the document a second copy of itself.
 
-## THE FILE IS BOUND BEFORE IT IS EVALUATED, because a name can be replaced and code cannot be un-run.
+## THE FILE IS BOUND BEFORE IT IS READ, because a name can be replaced between the two.
 
-`$RB_SETUP_DIR` is published in argv, and sourcing is the one step here that EXECUTES
-what it reads. Everything else this block does to the sourced values is a check
-afterwards — and no check afterwards helps: re-deriving the identity cannot un-run a
-`$(…)` that has already run, in the operator's long-lived shell, with whatever that
-shell can reach.
+`$RB_SETUP_DIR` is published in argv, so the name is one another process can act on.
+The object is bound ONCE, by a redirection, and the tests and the read all go through
+the descriptor rather than through the name: `9<"$RB_SETUP_DIR/origin"` opens what is
+there at that instant, `-O` refuses a file another ACCOUNT owns, `-f` refuses anything
+that is not a regular file, and `$(<"/dev/fd/9")` reads the object those two just
+examined. A replacement arriving after the open changes the NAME and cannot change
+what the descriptor refers to — measured directly.
 
-So the object is bound ONCE, by a redirection, and the tests and the source all go
-through the descriptor rather than through the name. `9<"$RB_SETUP_DIR/env"` opens
-what is there at that instant; `-O` refuses a file another ACCOUNT owns, `-f` refuses
-anything that is not a regular file, and `. /dev/fd/9` evaluates the object those two
-just examined. A replacement arriving after the open changes the NAME and cannot
-change what the descriptor refers to — measured directly: with the path swapped
-between the open and the source for a file that tries to create a witness, the
-original values arrive and the witness is never created.
+WHAT THIS DOES NOT CLOSE is the window between `pr-setup.sh` exiting and the open, and
+nothing inside this shell can: a file already replaced when the descriptor is bound is
+the file that gets bound. `-O` is what stands there, so the residue is a replacement by
+the SAME account — which is not a boundary, since that account can edit this session's
+files directly.
 
-WHAT THIS DOES NOT CLOSE is the window between `pr-setup.sh` exiting and the open,
-and nothing inside this shell can: a file already replaced when the descriptor is
-bound is the file that gets bound. `-O` is what stands there, so the residue is a
-replacement by the SAME account — which is not a boundary, since that account can
-edit this session's files directly.
+IT MATTERS LESS THAN IT DID, and that is worth saying rather than leaving the reader to
+work out. While this file was SOURCED, a replacement was arbitrary code in the
+operator's shell. It is a string now, and the identity parser and the child pin are two
+independent things it has to satisfy.
 
-THE ACCEPTED TRANSPORT RECORDS DO NOT COVER THIS, and that is why it is closed rather
-than recorded. `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a
-squat BEFORE the reservation, costing a denial of service; the reservation record
-accepts a bounded cleanup race, costing an empty directory. Code executing in the
-operator's shell is neither.
-
-## THE WORK DIRECTORY IS KEPT, being the session's own.
-
-This is the difference from the transport directory it replaced, and it is a separate
-obligation from removing the transports rather than the other half of one sentence:
-an edit that dropped either would leave the other's argument standing over it.
-
-`$RB_SETUP_DIR` holds `work/`, which is the session's four working files — the round
-summary, the opening account, the review baseline and the gated head — and every
-stage of the loop writes into them. A cleanup here would be removing the thing the
-call was made to produce, which is why `pr-setup.sh` does not remove it either: its
-header states that giving the directory back is the CALLER's, by construction.
-
-## THE PIN TRANSPORT GOES BY NAME AND THEN `rmdir`, never recursively.
-
-`$RB_SETUP_DIR` is published in argv, so the name is one another process can act on,
-and `pr-origin.sh pin` creates the leaf directory under it. A `rm -rf` there deletes
-whatever a replacement holds — the same regression this loop already fixed inside
-`pr-setup.sh`, arriving by the other route, and past what
-`docs/decisions/2026-08-26-reservation-inference.md` accepts: that record's bound is
-one EMPTY directory, and it rests on `rmdir` refusing anything with contents.
-
-So the leaf goes by its own name and the directory goes with `rmdir`, which refuses a
-replacement carrying anything else and leaves it for its owner. Neither removal is a
-postcondition for anything below, so a failure costs a file left behind.
-
-## WHAT WAS SOURCED IS RE-PROVED HERE, because a file is not a promise.
+## WHAT WAS READ IS PROVED HERE, because a file is not a promise.
 
 The helper proves the origin parses before it writes it. This shell proves it again,
 and the duplication is deliberate: what the helper can vouch for is the file it
@@ -1720,18 +1701,22 @@ So the identity is re-derived from the sourced value rather than trusted, and a
 sourced value that is empty, spans a line, or is not a usable identity is refused by
 expansion — the same three refusals the block made when it read the origin itself.
 
-## THE FOUR WORKING PATHS ARE PROVED TO BE THE ONES THIS SETUP MADE.
+## EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL AND PROVED.
 
-Each is compared against its literal under the directory this setup named, so a
-sourced value pointing anywhere else is refused before anything writes through it.
-That is not paranoia about the helper: it is the same check the block made when it
-derived the paths itself, kept for the same reason — these are the paths a round
-summary and a gated head travel in, and a summary written to a path this session did
-not create is one another session can read.
+The helper hands back the origin and nothing else, so the rest is assigned here: the
+two reviewer logins, which are constants, and the four working paths, which are a
+literal suffix under a directory this shell chose. Assigning them here rather than
+receiving them removes the transport they used to travel in, and with it the `.` that
+carried it.
 
-ONE REFUSAL FOR THE FOUR, because they are one allocation. Four separate expansions
-would report which path was wrong, which is a distinction with no action behind it:
-any of them being wrong means the same thing about the file that was sourced.
+## THE ASSIGNMENTS ARE READ BACK, because a readonly name fails one in silence.
+
+An assignment to a readonly name prints a complaint and does NOT fail the list it is
+in — measured on bash 5, `VAR=value || abort` reports SUCCESS with the variable keeping
+its old value. So the postcondition is the assertion: each name is compared against the
+literal it was just given, and the four files are required to exist and be empty
+besides. A `readonly SUMMARY_FILE` pointing somewhere else is what that catches, and it
+is the same shape this block uses for `RB_REMOTE` — assign, then prove by reading back.
 
 ## ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
 
