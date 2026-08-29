@@ -1948,9 +1948,19 @@ happen. #224.
 
 **The answer is where the post SITS, not what guards it.** Every proof is a reserved
 word — `if`, `[[`, `case` — and the `gh pr comment` is inside the innermost success
-arm of all three. No shadowed name can reach it, because reaching it means taking
-arms that only a proof opens. A shadowed `echo` silences the diagnostics and changes
-nothing else; `exit` is not used at all, so shadowing it has nothing to act on.
+arm of all three. A refusal is now an arm NOT TAKEN rather than a statement that has
+to terminate, so there is nothing for a shadowed `echo` or `exit` to walk past: the
+first silences the diagnostics and changes nothing else, and the second is not used
+at all.
+
+**THAT IS THE WHOLE OF THE GUARANTEE, AND IT IS NARROWER THAN "NO SHADOWED NAME".**
+`printf`, `sed` and `gh` are still names in this shell, and a `sed` that prints `41`
+and exits 0 on unparseable output takes every arm honestly and posts. What this
+shape closes is a refusal PATH being walked past; what it cannot close is a forged
+VALUE, which is the same class as a forged helper — and the same one `CLAUDE.md`
+records the driver living with, since nothing inside a process can distinguish the
+honest version of something it inherited. Claiming more than this was a finding on
+the first round of the change.
 
 **A REFUSAL SENTINEL WAS TRIED FIRST AND IS WORSE.** The first version of this fix
 cleared a variable and expanded it with `${VAR:?…}`, which is #181's answer for the

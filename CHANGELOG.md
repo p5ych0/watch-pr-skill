@@ -23,9 +23,16 @@
 
   **The answer is where the post SITS, not what guards it.** Every proof is now a
   reserved word — `if`, `[[`, `case` — and the `gh pr comment` is inside the
-  innermost success arm of all three. Reaching it means taking arms that only a
-  proof opens, so no shadowed name can; a shadowed `echo` silences the diagnostics
-  and changes nothing else, and `exit` is not used at all.
+  innermost success arm of all three. A refusal is an arm NOT TAKEN rather than a
+  statement that has to terminate, so **shadowing `echo` or `exit` can no longer
+  turn a refusal into an acknowledgement**: the first silences the diagnostics and
+  changes nothing else, the second is not used at all.
+
+  That is the guarantee and not a broader one. `printf`, `sed` and `gh` remain names
+  in the operator's shell, and a `sed` that prints a plausible count and exits 0
+  takes every arm honestly — a forged VALUE is the same class as a forged helper,
+  which is the limit `CLAUDE.md` records for the whole driver. What this release
+  closes is a refusal path being walked past.
 
   **A refusal sentinel was tried first and is worse**, which is why the shape is
   containment rather than #181's `${VAR:?…}`. That answer does not transfer here:

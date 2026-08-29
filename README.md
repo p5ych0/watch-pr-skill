@@ -842,8 +842,13 @@ belong to whatever your session has defined. With `echo` and `exit` shadowed
 together the refusal ran, `exit` returned instead of stopping, and a counter that
 had *died* after printing a plausible line had its output recorded as your
 permission to continue. The acknowledgement now sits inside the branch that proved
-each step, so no shadowed name can reach it; a shadowed `echo` costs you the
-diagnostic and nothing else.
+each step, so **shadowing `echo` or `exit` can no longer turn a refusal into an
+acknowledgement** — a shadowed `echo` costs you the diagnostic and nothing else.
+
+That is the guarantee, and not a broader one: `printf`, `sed` and `gh` are names in
+your shell too, and a function that fabricates a plausible count is indistinguishable
+from a real one. The same is true of every other command this loop runs on your
+machine.
 
 ## Updating
 

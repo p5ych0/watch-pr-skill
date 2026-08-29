@@ -5705,12 +5705,16 @@ esac
 # recorded permission. Measured then: an ordinary shell no, `echo` alone no, both
 # together YES.
 #
-# AN EXPANSION HAS NO SUCH GAP, and the assertions are in three parts because each
-# alone would pass for the wrong reason. The attack writes a marker WHEN IT IS
-# INJECTED, so a case that stopped staging it is not silently green; nothing is
-# posted, which is the property; and neither shadowed name is ever REACHED, which
-# is how this refusal differs from the one it replaced rather than merely surviving
-# the same attack.
+# SUCCESS-ARM CONTAINMENT HAS NO SUCH GAP: a refusal is an arm NOT TAKEN rather
+# than a statement that has to terminate, so there is nothing to walk past. The
+# assertions are in three parts because each alone would pass for the wrong reason.
+# The attack writes a marker WHEN IT IS INJECTED, so a case that stopped staging it
+# is not silently green; nothing is posted, which is the property; and `exit` is
+# never reached, which is what the old shape needed and this one does not use.
+#
+# `echo` IS STILL REACHED, deliberately: the diagnostics are `echo`, so a shadowed
+# one is called and silences them. That is why the third assertion names `exit`
+# alone — the guarantee here is about a refusal PATH, not about every name.
 _rb_ack_attack='printf "INSTALLED\n" >> "$RB_ACK_DIR/attack.log"
 echo() { printf "ECHO\n" >> "$RB_ACK_DIR/attack.log"; }
 exit() { printf "EXIT\n" >> "$RB_ACK_DIR/attack.log"; return 0; }'
@@ -5752,11 +5756,12 @@ case "$(cat "$_rb_ack/gh.log")" in
     *) pass "…and an empty parse under \`declare -i\` is refused rather than acknowledged as 0" ;;
 esac
 
-# AND THE SAME HOLDS INTERACTIVELY, which is a separate question: how far a refusal
-# stops execution differs by shell mode, and an operator pasting this block into a
-# terminal is the ordinary case. Containment by position does not depend on the
-# mode — the post is inside arms that were never taken — but that is a claim about
-# a shell, so it is run rather than argued.
+# AND THE SAME HOLDS INTERACTIVELY, which is a separate question and the reason the
+# first version of this fix needed a brace group: an expansion-based refusal stops a
+# non-interactive shell outright and abandons only the current compound command in
+# an interactive one. Containment by position does not depend on the mode at all —
+# the post is inside arms that were never taken — but that is a claim about a shell,
+# so it is run rather than argued.
 #
 # THE MARKER IS SPELLED DIFFERENTLY IN THE SOURCE THAN IN ITS OUTPUT, because an
 # interactive shell ECHOES its input: a line that prints `REACHED-THE-END` appears
