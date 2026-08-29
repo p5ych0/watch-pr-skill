@@ -1,5 +1,15 @@
 # Self-review docs, task awareness, and reviewer-phase memory
 
+> **Archived, and not written against this repository's issue numbering.** These are
+> v1-era planning documents for the `review-bus` watcher that v2 removed —
+> `review-bus-codex-watcher.sh` and the `test-review-bus-*.sh` fixtures are gone, so
+> nothing here describes code in this tree. **#3** is this repository's issue.
+> **#207** and **#212** are `p5ych0/strumok`'s: the design spec names #212 as
+> strumok's at first mention and leaves #207 unqualified, so an unqualified number
+> here resolves against the wrong repository. Read these as a record of what was
+> planned on 2026-08-03, not as a description of the tree.
+
+
 Date: 2026-08-03
 Repository: `p5ych0/watch-pr-skill`
 

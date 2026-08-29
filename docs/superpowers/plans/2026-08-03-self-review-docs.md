@@ -1,5 +1,15 @@
 # Self-Review Docs (S3) Implementation Plan
 
+> **Archived, and not written against this repository's issue numbering.** These are
+> v1-era planning documents for the `review-bus` watcher that v2 removed —
+> `review-bus-codex-watcher.sh` and the `test-review-bus-*.sh` fixtures are gone, so
+> nothing here describes code in this tree. **#3** is this repository's issue.
+> **#207** and **#212** are `p5ych0/strumok`'s: the design spec names #212 as
+> strumok's at first mention and leaves #207 unqualified, so an unqualified number
+> here resolves against the wrong repository. Read these as a record of what was
+> planned on 2026-08-03, not as a description of the tree.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give `watch-pr-skill` the documents and arming it needs to review its own pull requests, and make "review the PR against what it set out to do" the plugin's built-in default for every repository.
