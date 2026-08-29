@@ -443,6 +443,39 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "…and the replacement directory itself, which rmdir refuses to take" \
     || die "the replacement directory was removed although it had contents"
 rm -rf "$_rr"
+# THE HELD DESCRIPTOR IS WHAT MAKES THE INODE AN IDENTITY, so its absence is asserted
+# to change the outcome rather than being taken on trust. A bare inode number can be
+# handed back to the next `mkdir` once the original is freed; a descriptor held on the
+# original stops it being freed at all. Where the open fails there is no durable
+# identity, and the cleanup falls back to `rmdir` alone rather than unlinking through
+# a name it cannot vouch for — asserted here by removing the `exec` from a copy of the
+# subject and requiring the leaves to survive anyway.
+grep -qF 'exec 8<"$RB_DIR"' "$SCRIPT" \
+    && pass "the reservation is held open, so its inode cannot be reused" \
+    || die "pr-setup.sh does not hold a descriptor on the directory it reserved"
+# AND WITHOUT IT NOTHING IS UNLINKED, which is the fallback rather than a weaker
+# version of the same removal.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'p="$(dirname "$2")"
+rm -rf "$p"
+mkdir -m 700 "$p"
+mkdir -m 700 "$p/o"
+printf "not this runs\n" > "$p/env"
+printf "not this runs\n" > "$p/o/origin"
+exit 1'
+grep -vF 'exec 8<"$RB_DIR"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'exec 8<"$RB_DIR"' "$_stage/pr-setup.sh" \
+    && die "the no-descriptor stage did not patch pr-setup.sh; the case proves nothing" \
+    || pass "the no-descriptor stage is patched"
+_nh="$(mktemp -d "$TMP/nh.XXXXXX")/dir"
+_nh_rc=0
+_nh_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_nh" 2>&1)" || _nh_rc=$?
+{ [ -f "$_nh/env" ] && [ -f "$_nh/o/origin" ]; } \
+    && pass "…and with no held descriptor the cleanup unlinks nothing at all" \
+    || die "a cleanup with no durable identity still unlinked leaves (rc=$_nh_rc out='$_nh_out')"
+rm -rf "$_nh"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
 # …AND A REPLACEMENT CARRYING THE SAME NAMES IS NOT UNLINKED THROUGH EITHER. The
 # case above used witnesses this run never names, so it passed on a cleanup that
 # still removed `env` and `o/origin` by path. `-O` refuses a directory another

@@ -1625,6 +1625,35 @@ file left it, and this is the one shell that cannot re-exec out of that. Nothing
 downstream is a postcondition on either removal, so a shadowed `rm` costs a file left
 behind rather than a wrong answer — but `/usr/bin/env rm` costs nothing either.
 
+## THE FILE IS BOUND BEFORE IT IS EVALUATED, because a name can be replaced and code cannot be un-run.
+
+`$RB_SETUP_DIR` is published in argv, and sourcing is the one step here that EXECUTES
+what it reads. Everything else this block does to the sourced values is a check
+afterwards — and no check afterwards helps: re-deriving the identity cannot un-run a
+`$(…)` that has already run, in the operator's long-lived shell, with whatever that
+shell can reach.
+
+So the object is bound ONCE, by a redirection, and the tests and the source all go
+through the descriptor rather than through the name. `9<"$RB_SETUP_DIR/env"` opens
+what is there at that instant; `-O` refuses a file another ACCOUNT owns, `-f` refuses
+anything that is not a regular file, and `. /dev/fd/9` evaluates the object those two
+just examined. A replacement arriving after the open changes the NAME and cannot
+change what the descriptor refers to — measured directly: with the path swapped
+between the open and the source for a file that tries to create a witness, the
+original values arrive and the witness is never created.
+
+WHAT THIS DOES NOT CLOSE is the window between `pr-setup.sh` exiting and the open,
+and nothing inside this shell can: a file already replaced when the descriptor is
+bound is the file that gets bound. `-O` is what stands there, so the residue is a
+replacement by the SAME account — which is not a boundary, since that account can
+edit this session's files directly.
+
+THE ACCEPTED TRANSPORT RECORDS DO NOT COVER THIS, and that is why it is closed rather
+than recorded. `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a
+squat BEFORE the reservation, costing a denial of service; the reservation record
+accepts a bounded cleanup race, costing an empty directory. Code executing in the
+operator's shell is neither.
+
 ## THE WORK DIRECTORY IS KEPT, being the session's own.
 
 This is the difference from the transport directory it replaced, and it is a separate

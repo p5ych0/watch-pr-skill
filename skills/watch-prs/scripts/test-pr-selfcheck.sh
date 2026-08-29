@@ -292,6 +292,51 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "…and a name that helper does not declare is still a finding" \
     || die "sourcing a helper's file suppressed an unrelated undefined variable (rc=$rc out=$out)"
 
+# …AND THE SAME WHERE THE FILE IS BOUND TO A DESCRIPTOR FIRST. Sourcing is the one
+# step that EXECUTES what it reads, so `SKILL.md` binds the object with a redirection
+# and sources the descriptor — after which the `.` operand is `/dev/fd/9` and says
+# nothing about which file was bound. The leaf comes from the redirection, and the
+# line must carry the source too, so an ordinary input redirection elsewhere in the
+# document is not read as one.
+BOUND_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+RB_SETUP_DIR=/tmp/d
+if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] && . /dev/fd/9; } 9<"$RB_SETUP_DIR/env"; then
+    echo "$OWNER/$REPO $SUMMARY_FILE"
+fi
+```
+'
+R="$(mkroot "$BOUND_SKILL")"
+addscript "$R" pr-setup.sh '# rb-writes: env
+# rb-assigns: OWNER REPO SUMMARY_FILE
+exit 0'
+addtest "$R" test-pr-setup.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "a file bound to a descriptor and sourced through it is credited too" \
+    || die "the bound-descriptor source was not seen (rc=$rc out=$out)"
+
+# …AND AN INPUT REDIRECTION THAT IS NOT A SOURCE IS NOT ONE. Requiring the line to
+# carry `. /dev/fd/N` is what separates them; without it every `9<"$X/leaf"` in the
+# document would demand a helper claiming that leaf, and the scan would fail closed on
+# a read that has nothing to do with sourcing.
+READ_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+RB_SETUP_DIR=/tmp/d
+OWNER=acme
+{ [[ -O /dev/fd/9 ]] && OWNER="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin"
+echo "$OWNER"
+```
+'
+R="$(mkroot "$READ_SKILL")"
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…while a bound descriptor that is READ rather than sourced demands no claimant" \
+    || die "a non-source redirection was treated as a source (rc=$rc out=$out)"
+
 # ── a sourced leaf NOTHING claims is an ERROR ─────────────────────────────
 # Crediting nothing would reinstate exactly the false findings the declaration
 # removes, and report them as defects in the skill rather than in the helper that

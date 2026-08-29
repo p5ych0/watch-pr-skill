@@ -445,9 +445,24 @@ if [ -f "$SKILL" ]; then
     # shell out of text without a shell is what this file already records deleting a
     # checker over. A source in a third position is a false POSITIVE — loud and
     # fixable in one line — not a silent miss.
+    # TWO SPELLINGS, BOTH NAMED. A runtime file is sourced either directly —
+    # `. "$X/leaf"` — or through a descriptor BOUND to it first, which is what
+    # `SKILL.md` does: `{ … . /dev/fd/9; } 9<"$X/leaf"`. The second is not a
+    # refinement of the first, it is a different construct, and reading only one of
+    # them credited nothing and reported every sourced name undefined.
+    #
+    # THE LEAF COMES FROM THE REDIRECTION in that case, because the `.` operand is
+    # `/dev/fd/9` and says nothing about which file was bound. The line is required to
+    # carry the source as well, so an ordinary input redirection somewhere else in the
+    # document is not read as one.
     srcfiles="$(printf '%s\n' "$code" \
         | nomatch grep -oE '^[[:space:]]*(if[[:space:]]+)?\.[[:space:]]+"\$[A-Z][A-Z0-9_]*/[A-Za-z0-9_.-]+"' \
         | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk srcfiles $?
+    srcbound="$(printf '%s\n' "$code" \
+        | nomatch grep -E '\. /dev/fd/[0-9]' \
+        | nomatch grep -oE '[0-9]<"\$[A-Z][A-Z0-9_]*/[A-Za-z0-9_.-]+"' \
+        | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk srcbound $?
+    srcfiles="$(printf '%s\n%s\n' "$srcfiles" "$srcbound" | nomatch grep -vE '^$' | sort -u)"; chk merge_src $?
     for leaf in $srcfiles; do
         [ -f "$SCRIPTS/$leaf" ] && continue
         # THE DECLARATION IS PARSED AND COMPARED AS A STRING, never interpolated

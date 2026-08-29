@@ -296,9 +296,27 @@ rb_close_call_present \
 # the grep that used to find it in `SKILL.md` finds nothing and would have to be
 # deleted rather than moved. What replaced it is stronger: the pin is proved by a
 # CHILD further down, which is the question the export exists to answer.
-grep -qF '. "$RB_SETUP_DIR/env"' <<<"$skill_flat" \
-    && pass "the session's values arrive by sourcing the helper's file" \
-    || die "SKILL.md does not source the setup helper's environment file"
+# BOUND BEFORE IT IS EVALUATED. Sourcing is the one step that EXECUTES what it reads,
+# `$RB_SETUP_DIR` is published in argv, and no check afterwards helps — re-deriving
+# the identity cannot un-run a `$(…)` that has already run in the operator's shell.
+# So the object is bound by a redirection and the tests and the source all go through
+# the descriptor rather than the name.
+{ grep -qF '9<"$RB_SETUP_DIR/env"' <<<"$skill_flat" \
+  && grep -qF '. /dev/fd/9' <<<"$skill_flat"; } \
+    && pass "the session's values arrive by sourcing a descriptor bound to the helper's file" \
+    || die "SKILL.md does not source the setup helper's environment file through a bound descriptor"
+case "$skill_flat" in
+    *'. "$RB_SETUP_DIR/env"'*)
+        die "SKILL.md sources the env file by NAME; a replacement between the write and the source is executed" ;;
+    *)  pass "…and never by the name, which is what a replacement can change" ;;
+esac
+# AND THE DESCRIPTOR IS WHAT THE CHECKS ARE ABOUT TOO. Testing `$RB_SETUP_DIR/env`
+# and then sourcing the descriptor would be two different objects on a replaced name,
+# which is the check-then-use this whole block is shaped to avoid.
+{ grep -qF '[[ -O /dev/fd/9 ]]' <<<"$skill_flat" \
+  && grep -qF '[[ -f /dev/fd/9 ]]' <<<"$skill_flat"; } \
+    && pass "…with ownership and regularity tested on that same descriptor" \
+    || die "the env descriptor is sourced without -O and -f on it"
 if [ -f "$SCRIPT_DIR/pr-setup.sh" ]; then
     { grep -qF 'rb_setup_put REVIEW_BUS_REMOTE' "$SCRIPT_DIR/pr-setup.sh" \
       && grep -qF "printf 'export REVIEW_BUS_REMOTE" "$SCRIPT_DIR/pr-setup.sh"; } \
@@ -364,7 +382,7 @@ _setup_body="$(awk '/^if \( RB_TMPPARENT="RbProbe/, /^fi$/' "$SKILL")" || _setup
 '"$_setup_body"
 { [ -n "$_setup_body" ] \
   && case "$_setup_body" in *'/pr-setup.sh "$RB_SETUP_DIR"'*) true ;; *) false ;; esac \
-  && case "$_setup_body" in *'. "$RB_SETUP_DIR/env"'*) true ;; *) false ;; esac \
+  && case "$_setup_body" in *'9<"$RB_SETUP_DIR/env"'*) true ;; *) false ;; esac \
   && case "$_setup_body" in *'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity'*) true ;; *) false ;; esac \
   && case "$_setup_body" in *'/pr-origin.sh pin "$RB_SETUP_DIR/pin"'*) true ;; *) false ;; esac; } \
     && pass "…and the setup block lifts out with the call, the source and the pin" \
@@ -469,9 +487,9 @@ if [ -n "$_forge_dir" ]; then
     _fe_log="$_forge_dir/forge-log-that-must-not-exist"
     export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' \
            FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1 FORGE_PIN_VALUE=x FORGE_PIN_EXTRA=1 FORGE_SETUP_RC=1 FORGE_SETUP_LOG="$_fe_log" \
-           FORGE_NOENV=1 FORGE_PATHS=elsewhere FORGE_NONEMPTY=1 FORGE_ENV_EXTRA=x
+           FORGE_NOENV=1 FORGE_ENV_DIR=1 FORGE_PATHS=elsewhere FORGE_NONEMPTY=1 FORGE_ENV_EXTRA=x
     unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO FORGE_PIN_VALUE FORGE_PIN_EXTRA FORGE_SETUP_RC \
-          FORGE_SETUP_LOG FORGE_NOENV FORGE_PATHS FORGE_NONEMPTY FORGE_ENV_EXTRA
+          FORGE_SETUP_LOG FORGE_NOENV FORGE_ENV_DIR FORGE_PATHS FORGE_NONEMPTY FORGE_ENV_EXTRA
     cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
 [ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
@@ -525,7 +543,11 @@ mkdir -m 700 "$1/work" || exit 1
 for _f in summary.md request.md prior.txt head.txt; do
     if [ -n "${FORGE_NONEMPTY:-}" ]; then printf 'stale\n' > "$1/work/$_f"; else : > "$1/work/$_f"; fi
 done
-if [ -z "${FORGE_NOENV:-}" ]; then
+if [ -n "${FORGE_ENV_DIR:-}" ]; then
+    # A DIRECTORY AT THE ENV NAME, which opens like a file and is not one — the state
+    # only a test on the BOUND object can refuse.
+    mkdir "$1/env" || exit 1
+elif [ -z "${FORGE_NOENV:-}" ]; then
     _w="$1/work"
     [ -n "${FORGE_PATHS:-}" ] && _w="${FORGE_PATHS}"
     # QUOTED THE WAY THE REAL HELPER QUOTES, because a forge that writes its values
@@ -673,6 +695,43 @@ FORGE
         && pass "a parent containing a space starts a session and the paths survive the source" \
         || die "a spaced parent was refused or its paths were mangled (rc=$_sp out='$_sp_out')"
     rm -rf "$_sp_dir"
+
+    # …AND AN ENV OBJECT THAT IS NOT A REGULAR FILE IS REFUSED, which is the `-f` on
+    # the descriptor reached behaviourally rather than by grep. A directory at that
+    # name opens, so only the test on the bound object catches it.
+    _nf=0
+    _nf_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 FORGE_ENV_DIR=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            '"$_setup_body"'
+            printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
+        ' 2>&1)" || _nf=$?
+    { [ "$_nf" -ne 0 ] && case "$_nf_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…and an env path that is not a regular file is refused" \
+        || die "a non-regular env object was sourced (rc=$_nf out='$_nf_out')"
+    # …AND THE BINDING ITSELF IS STAGED, WITH THE SWAP THIS CANNOT STAGE IN PLACE.
+    # The window the finding is about is between `pr-setup.sh` exiting and the
+    # redirection opening, and putting a process in that window is a RACER — which
+    # this repository forbids in fixtures, and which would prove nothing on the runs
+    # where it lost. What can be pinned deterministically is the PROPERTY the block
+    # relies on: that a descriptor bound before a swap still names the original, so
+    # the replacement is never executed. Staged against the same construct the block
+    # uses, with a replacement that tries to create a witness.
+    _bd_dir="$_forge_dir/bindcase"
+    rm -rf "$_bd_dir"; mkdir -p "$_bd_dir"
+    printf 'V=original\n' > "$_bd_dir/env"
+    _bd_out="$(cd "$_bd_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+        exec 9<"env"
+        rm -f env
+        printf "V=REPLACED\ntouch WITNESS\n" > env
+        { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] && . /dev/fd/9; } 9<&9
+        printf "V=[%s] witness=[%s]\n" "${V-unset}" "$([ -e WITNESS ] && echo yes || echo no)"
+    ' 2>&1)" || true
+    case "$_bd_out" in
+        *'V=[original] witness=[no]'*)
+            pass "a descriptor bound before a swap sources the original, and the replacement never runs" ;;
+        *)  die "the bound-descriptor property does not hold here: '$_bd_out'" ;;
+    esac
+    rm -rf "$_bd_dir"
 
     # ── the retry, and what it is gated on ────────────────────────────────
     # A STORAGE REFUSAL IS RETRIED UNDER THE OTHER PARENT. Status 2 means both

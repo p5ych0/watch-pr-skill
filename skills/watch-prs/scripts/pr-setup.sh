@@ -129,13 +129,24 @@ RB_OWNED=no
 RB_PREEXISTED=no
 RB_INO=
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
-# AND THE OBJECT ITSELF IS RECORDED, because ownership is not identity. `-O` refuses
-# a name another ACCOUNT holds and that is the boundary the record is about — but a
-# replacement made by this same account passes every test above, and the cleanup
-# would then unlink `env` and `o/origin` THROUGH a path that no longer names what
-# this run created. There is no directory handle in shell to hold, so what is held
-# is the inode: recorded when the `mkdir` reports success, and required to still be
-# there before anything is removed.
+# AND THE OBJECT ITSELF IS HELD, because ownership is not identity. `-O` refuses a
+# name another ACCOUNT holds and that is the boundary the record is about — but a
+# replacement made by this same account passes every test above, and the cleanup would
+# then unlink `env` and `o/origin` THROUGH a path that no longer names what this run
+# created.
+#
+# AN OPEN DESCRIPTOR IS WHAT MAKES THE INODE A DURABLE IDENTITY. A bare inode number
+# is not one: an inode freed by a `rmdir` can be handed straight back to the next
+# `mkdir`, and the comparison would then accept a different object. While a descriptor
+# on the original is open the inode cannot be freed, so it cannot be reused, and the
+# number is an identity for as long as this run needs it. Measured: bash opens a
+# directory read-only on both platforms this suite runs on.
+#
+# AND THE LEAF REMOVALS ARE GATED ON HAVING IT. Where the open fails there is no
+# durable identity to compare against, so the cleanup falls back to `rmdir` ALONE —
+# which cannot unlink anything and leaves a directory behind at worst, the cost the
+# accepted record already covers. Nothing unsafe happens on a platform this has not
+# been measured on; something is left behind instead.
 #
 # `ls -di`, NOT `stat`. `stat -c` is GNU and `stat -f` is BSD, and the `macos-shell`
 # job runs this suite with the GNU tools taken off `PATH`. `ls -di` prints the inode
@@ -162,11 +173,16 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
     # THE SAME OBJECT, or there is nothing here this run made. Where the inode was
     # never recorded the `mkdir` had not reported success, and the three tests above
-    # are what stands; where it was, the name must still resolve to it.
+    # are what stands; where it was, the name must still resolve to it — and the held
+    # descriptor is what makes that number mean the same object rather than one that
+    # inherited its inode.
     if [[ -n $RB_INO ]]; then
         [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
     fi
-    if [[ $RB_PHASE = written ]]; then
+    # LEAVES ONLY WHERE THE IDENTITY IS DURABLE. Without the held descriptor the inode
+    # comparison can be satisfied by a reused number, so this falls back to `rmdir`
+    # alone rather than unlinking through a name it cannot vouch for.
+    if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]]; then
         /usr/bin/env rm -f "$RB_DIR/env" "$RB_DIR/o/origin" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
         for _g in summary.md request.md prior.txt head.txt; do
@@ -218,6 +234,16 @@ trap 'rb_setup_on_signal TERM' TERM
 # for the same reason: a check-then-use here is a window somebody else can stand in.
 /usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
     || { echo "PR_SETUP status=error reason=dir_not_reserved dir=$RB_DIR" >&2; exit 2; }
+# HELD OPEN FOR THE LIFE OF THIS PROCESS, which is what stops the inode being reused.
+# The descriptor is never read from; it exists so the object cannot be freed.
+# THE `2>/dev/null` IS ON A GROUP, NOT ON THE `exec`. Written as
+# `exec 8<"$RB_DIR" 2>/dev/null` the redirection has no command to apply to, so it
+# applies to THIS SHELL and permanently: every refusal below then printed its reason
+# into `/dev/null` and the caller got a status with no line to read. Around a group,
+# the stderr redirection is restored when the group ends and the descriptor the `exec`
+# opened is not.
+RB_HELD=no
+{ exec 8<"$RB_DIR"; } 2>/dev/null && RB_HELD=yes
 RB_INO="$(rb_setup_ino "$RB_DIR")"
 
 # ── the origin, through the helper that reads it privileged ────────────────

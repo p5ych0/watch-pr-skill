@@ -48,8 +48,22 @@
   remove anything at all unless the name still resolves to the object the reservation
   made — `-O` for a directory another account holds, and the recorded inode for one
   this account replaced, since a name that has been swapped is not a path to unlink
-  nested leaves through. `SKILL.md`'s own removal of the pin transport had the same
+  nested leaves through. A bare inode number is not a durable identity — one freed by
+  a `rmdir` can be handed straight to the next `mkdir` — so the helper holds a
+  descriptor open on the directory it reserved, which stops the inode being freed at
+  all. Where that open fails there is no durable identity and the cleanup unlinks
+  nothing, leaving a directory behind instead: the cost the record already covers. `SKILL.md`'s own removal of the pin transport had the same
   shape and is named-leaf-then-`rmdir` now.
+
+- **The env file is bound before it is evaluated.** Sourcing is the one step that
+  EXECUTES what it reads, the setup path is published in argv, and no check afterwards
+  helps — re-deriving the identity cannot un-run a `$(…)` that has already run in the
+  operator's long-lived shell. The object is bound once by a redirection now, and the
+  ownership and regularity tests and the source all go through that descriptor rather
+  than through the name, so a file swapped in after the helper returns is never the
+  file that runs. The accepted transport records cover a squat before the reservation
+  and a bounded cleanup race; they do not cover code execution, which is why this is
+  closed rather than recorded.
 
 - **A setup killed part-way gives its directory back.** `HUP`, `INT` and `TERM` had
   no handler, so a signal arriving after the working files and the env file existed

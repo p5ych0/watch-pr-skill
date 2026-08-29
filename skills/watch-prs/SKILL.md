@@ -224,7 +224,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
     then
         # THE SOURCE IS THE ONLY WAY THE VALUES REACH THIS SHELL.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        if . "$RB_SETUP_DIR/env"; then
+        # THE FILE IS BOUND BEFORE IT IS EVALUATED, because a name can be replaced and code cannot be un-run.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+        if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] && . /dev/fd/9; } 9<"$RB_SETUP_DIR/env"; then
             # WHAT WAS READ DOES NOT STAY ON DISK.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             # THE WORK DIRECTORY IS KEPT, being the session's own.
