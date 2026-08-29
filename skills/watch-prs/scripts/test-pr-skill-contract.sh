@@ -5640,6 +5640,7 @@ rb_ack_run() {   # rb_ack_run <helper stdout> <helper rc> [extra PATH dir] [shel
     printf '%s' "$1" > "$_rb_ack/count.out"
     printf '%s' "$2" > "$_rb_ack/count.rc"
     : > "$_rb_ack/gh.log"
+    : > "$_rb_ack/attack.log"
     local _p="$_rb_ack/bin:$PATH"
     [ -n "${3:-}" ] && _p="$3:$_p"
     # THE ATTACK IS DEFINED IN THE CHILD, before the block is sourced, because that
@@ -5695,11 +5696,27 @@ esac
 # block rather than in this fixture, so it is filed; asserting the behaviour it has
 # today would bake it into the suite, and asserting the behaviour it should have
 # would be red.
-_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1 "" 'echo() { :; }')"
+# THE SHADOW HAS TO BE OBSERVABLE, or the case passes without it. "Nothing was
+# posted" is equally true of the plain rc=1 case below, so an attack that stopped
+# being injected — or stopped defining `echo` — would leave this green while
+# staging nothing. The stub RECORDS that it was called, so the assertion is that
+# the refusal ran THROUGH the shadowed name and still did not reach the post.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1 "" \
+    'echo() { printf "SHADOWED\n" >> "$RB_ACK_DIR/attack.log"; }')"
+[ -s "$_rb_ack/attack.log" ] \
+    && pass "the shadowed \`echo\` is the one the refusal arm reaches" \
+    || die "the echo shadow was never installed or never called; the case below stages nothing"
 case "$(cat "$_rb_ack/gh.log")" in
     *'pr comment'*) die "a failed probe was acknowledged with echo shadowed: $(cat "$_rb_ack/gh.log")" ;;
-    *) pass "a failed probe is not acknowledged even with \`echo\` shadowed" ;;
+    *) pass "…and a failed probe is still not acknowledged" ;;
 esac
+# …AND THE MARKER MEANS SOMETHING, which it only does if an unattacked run leaves
+# the log empty: a stub that wrote unconditionally would satisfy the check above
+# whatever the child did.
+_rb_ack_out="$(rb_ack_run "$_rb_ack_pause" 1)"
+[ -s "$_rb_ack/attack.log" ] \
+    && die "the attack log is written without an attack; the evidence above proves nothing" \
+    || pass "…and an unattacked run leaves that evidence empty"
 
 # A PROBE THAT PRINTED A PLAUSIBLE PAUSE AND THEN DIED IS NOT PERMISSION. This is
 # the case the greps cannot see: the output parses, the count is digits, and the
