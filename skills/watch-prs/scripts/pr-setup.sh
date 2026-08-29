@@ -178,6 +178,23 @@ rb_setup_ino_held() {   # the inode of the object descriptor 8 holds, or nothing
 # write has happened `rmdir` necessarily fails on a directory holding its leaf, so
 # the leaves this run named go first. Never `rm -rf`: a recursive removal on a
 # replaced name deletes whatever is under it, which is past what any record accepts.
+# WHAT THE LEAF REMOVALS BELOW CAN AND CANNOT DESTROY, stated because review reaches
+# this function every round. They run only on a FAILURE path, only while the held
+# descriptor and the recorded inode still say `$RB_DIR` is the object the `mkdir` made,
+# and only on NAMES this run created — `origin`, `o/origin`, and the four under `work/`.
+#
+# A same-UID process can still substitute one of those between the identity check and
+# the removal; there is no way to unlink relative to a held descriptor in shell, and a
+# per-object descriptor is a check-then-use one level down. What it costs is bounded by
+# the names: the only thing that can be destroyed is a file a racer chose to place at a
+# name this session had already taken, which is the record's own framing of the victim —
+# another same-UID process losing a reservation. An arbitrary file of the operator's is
+# NOT reachable, because `set -C` refuses a symlink at every one of these names when it
+# creates them, so none of them can point elsewhere.
+#
+# THAT RESIDUE IS #230's BOUNDARY QUESTION, not a separate one: a same-UID process
+# writing inside a mode-700 directory this run created exclusively can also edit the
+# checkout, `SKILL.md`, and the origin file the driver reads.
 rb_setup_give_back() {   # give back what this run created, for the phase it is in
     [[ $RB_OWNED = yes ]] \
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
@@ -199,10 +216,11 @@ rb_setup_give_back() {   # give back what this run created, for the phase it is 
     # same answer as a failed open: fall back to `rmdir` alone, which cannot unlink
     # anything and leaves a directory behind at worst.
     if [[ $RB_PHASE = written ]] && [[ $RB_HELD = yes ]] && [[ -n $RB_INO ]]; then
-        # THE PIN PROBE'S DIRECTORY FIRST, by one `rmdir`. A refusal between creating
-        # it and removing it leaves an empty child under `$RB_DIR`, which the final
-        # `rmdir` then trips over — the caller is left a NON-empty published directory
-        # where the accepted bound is one empty one.
+        # THE PIN PROBES' DIRECTORIES FIRST, each by one `rmdir` on its own name. A
+        # refusal between creating one and removing it leaves an empty child under
+        # `$RB_DIR`, which the final `rmdir` then trips over — the caller is left a
+        # NON-empty published directory where the accepted bound is one empty one.
+        /usr/bin/env rmdir "$RB_DIR/pinprobe2" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null
         /usr/bin/env rm -f "$RB_DIR/origin" "$RB_DIR/o/origin" 2>/dev/null
         /usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
@@ -284,11 +302,17 @@ RB_PHASE=written
 }
 RB_REMOTE=""
 RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transport 1
-# BY NAME AND THEN `rmdir`, for the reason the cleanup gives: this path is inside a
-# directory whose name was published in argv, and a recursive removal on it deletes
-# whatever a replacement holds.
-/usr/bin/env rm -f "$RB_DIR/o/origin" 2>/dev/null
-/usr/bin/env rmdir "$RB_DIR/o" 2>/dev/null
+# AND IT IS LEFT WHERE IT IS, which is what `SKILL.md` does with its own transports and
+# for the same reason. Removing it meant `rm -f` on a nested name followed by `rmdir` on
+# its parent, and that pair is the shape that destroys a REPLACEMENT: the first takes a
+# racer's leaf, after which the second succeeds on a directory that had contents a
+# moment ago. What the removal was for does not survive examination either — the leaf
+# holds the same origin as the file written below it, the directory is mode 700, and it
+# is inside a tree this session keeps for its working files anyway.
+#
+# THE FAILURE PATH STILL REMOVES IT, and must: `rmdir "$RB_DIR"` cannot give the
+# reservation back with a child in the way. That is the cleanup's problem rather than
+# this line's, and it is bounded there by the held descriptor and the recorded inode.
 
 [ -n "$RB_REMOTE" ] || rb_setup_stop origin_empty 1
 # `$'\n'`, NOT `"$(printf '\n')"`. Command substitution strips trailing newlines, so
@@ -368,48 +392,6 @@ for _f in summary.md request.md prior.txt head.txt; do
         || rb_setup_stop work_files_not_empty 2
 done
 
-# ── the storage the pin will need ──────────────────────────────────────────
-#
-# THE DRIVER CALLS `pr-origin.sh pin` AFTER THIS RETURNS, and that call creates a
-# directory under the one reserved here. It reports 2 where the storage would not take
-# it — and the driver cannot act on that: `work/` and its four files are already
-# allocated on THIS parent, so pinning under the other one would leave a session whose
-# files are on a filesystem that has just refused a directory, which dies at its first
-# round summary rather than here.
-#
-# SO THE QUESTION IS ASKED INSIDE THE UNIT THAT RETRIES. A parent that cannot take
-# another directory fails here, with status 2, and the driver's existing retry moves
-# the WHOLE session — files and all — to the second parent. That is the recovery the
-# pin used to have on its own, back when the work allocation came after it.
-#
-# WHAT IT DOES NOT CLOSE is a filesystem that fills between this probe and the pin,
-# and nothing can: the two are in different processes. The abort the driver prints
-# there says to re-run, which relocates the session as a whole.
-# ONE DIRECTORY, CREATED AND REMOVED BY ONE `mkdir` AND ONE `rmdir`, and the shape is
-# what matters rather than the count. `docs/decisions/2026-08-26-reservation-inference.md`
-# accepts a same-UID race on these names, and the whole of what it accepts rests on one
-# sentence: "no data is destroyed, because `rmdir` refuses anything with contents in it".
-# A single `rmdir` on a single name keeps that true — a replacement carrying anything
-# survives intact, and a replacement that is empty costs the empty directory the record
-# already accounts for.
-#
-# A PAIR BREAKS IT, WHICH IS WHY THERE ISN'T ONE. Probing the pin's leaf as well meant
-# creating `pinprobe/leaf` and removing both, and a two-step removal EMPTIES a
-# replacement before it removes it: `rmdir leaf` takes the racer's leaf, after which
-# `rmdir pinprobe` succeeds on a directory that had contents a moment earlier. Two
-# objects destroyed, where the record permits one empty one lost. A file leaf is worse
-# still — it needs `rm -f`, which resolves a nested name the held descriptor says
-# nothing about.
-#
-# SO THE LEAF IS NOT PROBED, AND THAT IS A TRADE RATHER THAN AN OVERSIGHT. What goes
-# undetected is a filesystem with room for exactly one more inode: it passes here and
-# fails the pin's second object. What precedes this probe is `work/` and four files and
-# — a few lines below — the origin, six allocations that a filesystem that tight fails
-# first. Buying that last case costs the guarantee a base-ref record rests on, and the
-# record wins.
-/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
-/usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
-
 # ── the one value that has to cross ────────────────────────────────────────
 #
 # THE ORIGIN, AND NOTHING ELSE. This wrote twelve assignments into a file the driver
@@ -440,6 +422,38 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 # or truncated origin would pin the session to it.
 [ -s "$RB_DIR/origin" ] || rb_setup_stop origin_write 2
 [ "$(cat "$RB_DIR/origin" 2>/dev/null)" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
+
+# ── the storage the pin will still need ────────────────────────────────────
+#
+# THE DRIVER CALLS `pr-origin.sh pin` AFTER THIS RETURNS, and that call creates a
+# directory and writes a leaf inside it. It reports 2 where the storage would not take
+# them — and the driver cannot act on that: `work/` and its four files are already
+# allocated on THIS parent, so pinning under the other one would leave a session whose
+# files are on a filesystem that has just refused, which dies at its first round summary
+# rather than here.
+#
+# SO THE QUESTION IS ASKED INSIDE THE UNIT THAT RETRIES, and it is asked LAST. Every
+# allocation this helper makes — the reservation, `work/`, its four files, the origin —
+# is already on disk by the time these run, so what they answer is "is there room for
+# what comes NEXT" rather than "was there room a few steps ago". Probing before the
+# origin write answered the older question and a filesystem with exactly enough inodes
+# for setup and one more passed it.
+#
+# TWO OBJECTS, BECAUSE THE PIN MAKES TWO, and SIBLINGS rather than a nested pair. Each
+# is created by one `mkdir` and removed by one `rmdir` on its own name, which is the
+# shape `docs/decisions/2026-08-26-reservation-inference.md` rests on: a replacement
+# carrying anything survives, because `rmdir` refuses a directory with contents. A
+# NESTED pair breaks that — removing the child empties a replacement so that removing
+# the parent succeeds on what had contents a moment earlier — and a file leaf is worse
+# still, needing `rm -f` on a nested name.
+#
+# WHAT IS LEFT is a filesystem that fills between these probes and the pin, which is two
+# processes apart and cannot be closed from either. The abort the driver prints there
+# says to re-run, which relocates the session as a whole.
+/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
+/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
+/usr/bin/env rmdir "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
+/usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 
 # THE EXIT TRAP IS RESET AND THE SIGNAL HANDLERS ARE NOT. Success means the caller
 # gets the directory, so the cleanup must not fire on the way out — but a `TERM`

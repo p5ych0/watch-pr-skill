@@ -58,6 +58,14 @@
   nobody chose. All ten names the block assigns are in the generic probe now, and its
   refusal names them.
 
+- **The origin transport is left where it is.** The helper copied the origin out of
+  `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
+  followed by `rmdir` on its parent — a pair that destroys a REPLACEMENT, since the first
+  takes a racer's leaf and the second then succeeds on a directory that had contents a
+  moment earlier. It stays, as the driver's own transports do: the leaf holds the same
+  origin as the file beside it, and the directory is mode 700 inside a tree the session
+  keeps anyway.
+
 - **Nothing setup creates can be written through a symlink.** The four working files and
   the origin were created with a plain `>`, which opens with `O_TRUNC` and follows
   symlinks — and the directory's name is published in argv, so an account that can reach
@@ -74,7 +82,11 @@
   gated head stay on a filesystem that has just refused a directory produces a session
   that looks set up and dies at its first write, after posting. `pr-setup.sh` asks the
   question itself now, with a probe beside where the pin will go — a
-  directory, created and removed by one `mkdir` and one `rmdir`. The refusal
+  two sibling directories, each created and removed by one `mkdir` and one
+  `rmdir` on its own name — two because that is what the pin allocates, siblings because
+  a nested pair cannot be removed without emptying a replacement first. They run LAST,
+  after every allocation the helper makes, so what they answer is whether there is room
+  for what comes next rather than whether there was room a few steps ago. The refusal
   happens inside the unit the driver already retries, so the whole session moves, and the
   candidate it refused is given back rather than left holding an empty child.
 

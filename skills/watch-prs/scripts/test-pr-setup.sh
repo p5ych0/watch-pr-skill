@@ -649,6 +649,39 @@ case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
     *)  pass "the pin probe creates and removes directories, so every removal is an rmdir" ;;
 esac
 
+# THE ORIGIN TRANSPORT IS LEFT WHERE IT IS, which is what `SKILL.md` does with its own
+# and for the same reason. Removing it meant `rm -f` on a nested name followed by `rmdir`
+# on its parent, and that pair destroys a REPLACEMENT: the first takes a racer's leaf, so
+# the second succeeds on a directory that had contents a moment earlier.
+{ [ -f "$ok_dir/o/origin" ] && [ -d "$ok_dir/o" ]; } \
+    && pass "the origin transport is left in place rather than unlinked by name" \
+    || die "the successful run removed its origin transport through a replaceable name"
+
+# THE PROBE RUNS LAST, after every allocation this helper makes. What it answers is
+# "is there room for what comes NEXT" rather than "was there room a few steps ago" — a
+# filesystem with exactly enough inodes for setup and one more passed a probe that ran
+# before the origin write, and the pin then failed on storage the driver could no longer
+# retry.
+# CAPTURED AND THEN PEELED, never piped into an early-exiting reader. `grep … | head -1`
+# is racy under `pipefail`: `head` exits at the first line, `grep` takes SIGPIPE and dies
+# with 141, and that becomes the pipeline's status — so a line that IS present reads as
+# absent, at whatever rate the scheduler decides. `${v%%:*}` takes the first match's
+# number with no second process to kill.
+_probe_all=""; _probe_all="$(grep -n 'mkdir -m 700 "$RB_DIR/pinprobe"' "$SCRIPT")" || _probe_all=""
+_probe_ln="${_probe_all%%:*}"; [ -n "$_probe_ln" ] || _probe_ln=0
+_orig_all=""; _orig_all="$(grep -n 'RB_REMOTE" > "$RB_DIR/origin"' "$SCRIPT")" || _orig_all=""
+_orig_ln="${_orig_all%%:*}"; [ -n "$_orig_ln" ] || _orig_ln=0
+{ [ "$_probe_ln" -gt 0 ] && [ "$_orig_ln" -gt 0 ] && [ "$_probe_ln" -gt "$_orig_ln" ]; } \
+    && pass "the pin probe runs after the origin write, so it measures what is left" \
+    || die "the pin probe runs before the origin write (probe=$_probe_ln origin=$_orig_ln)"
+# AND IT PROBES TWO OBJECTS, because the pin creates two — a directory and a leaf inside
+# it. One object answers half the question, and the half it misses is a filesystem with
+# room for exactly one more.
+_pp=0; _pp="$(grep -c 'mkdir -m 700 "$RB_DIR/pinprobe' "$SCRIPT")" || _pp=0
+[ "$_pp" -eq 2 ] \
+    && pass "…and probes two objects, which is what the pin allocates" \
+    || die "the pin probe allocates $_pp objects, not the two the pin needs"
+
 # AND A REPLACEMENT AT THE PROBE'S NAME IS NOT DESTROYED. The probe is ONE directory
 # created and removed by ONE `mkdir` and ONE `rmdir`, and that shape is what
 # `docs/decisions/2026-08-26-reservation-inference.md` rests on: "no data is destroyed,
