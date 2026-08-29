@@ -253,8 +253,8 @@ checks_msg_is_none_configured() {
 # BOTH SOURCES, because `gh pr checks` merges them and dropping one would make
 # this laxer than what it replaces: check runs from the Checks API, and the legacy
 # commit statuses that older integrations still post. `statusCheckRollup` is over
-# BOTH — measured, a `cli/cli` commit with thirteen check runs and no statuses
-# reports SUCCESS, and a `pandas-dev/pandas` commit with one failed run, six still
+# BOTH — measured, a commit with thirteen check runs and no statuses
+# reports SUCCESS, and one with a failed run, six still
 # in progress and a passing legacy status reports FAILURE.
 #
 # ONE ROLLUP RATHER THAN TWO PAGINATED READS, and that is what closes a class this
@@ -269,7 +269,7 @@ checks_msg_is_none_configured() {
 # and no fold to get wrong. `prefer removing the dependency over guarding it`.
 #
 # THE PRECEDENCE IS THE SERVER`S TOO, and it agrees with this file`s contract: the
-# pandas commit above has a failed run and six unfinished ones and reports FAILURE,
+# second commit above has a failed run and six unfinished ones and reports FAILURE,
 # which is "at least one is still running AND NONE HAS FAILED" read the way the
 # bucket parse below reads it.
 #
@@ -326,14 +326,14 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # answer and is readable with the `repo` scope this loop runs under: measured on
 # ten repositories none of which this account administers, `repos/{o}/{r}/branches/{b}`
 # returns `protected` and, under `protection.required_status_checks`, the contexts
-# themselves — three on `cli/cli`, eleven on `kubernetes/kubernetes`,
-# twenty-three on `microsoft/vscode` — while the dedicated endpoint 404s on the
+# themselves — three on one, eleven on another, twenty-three on a
+# third — while the dedicated endpoint 404s on the
 # same repository with the same token.
 #
-# BOTH SOURCES, because either can be the whole answer. `home-assistant/core`
+# BOTH SOURCES, because either can be the whole answer. One repository
 # reports `protection.enabled: false` with `protected: true`: its protection is a
 # RULESET, and its eight required contexts appear only under
-# `repos/{o}/{r}/rules/branches/{b}`. `cli/cli` is the other way round. So the
+# `repos/{o}/{r}/rules/branches/{b}`. Another is the other way round. So the
 # required set is the UNION, and reading one alone reports a requirement as absent.
 #
 # A RULE THIS CANNOT EVALUATE IS AN ERROR, not a rule with no contexts in it. The
@@ -381,7 +381,8 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 # two directions are not symmetrical: refusing names the type in the diagnostic and
 # costs a rerun once the list grows, while ignoring it costs the gate. The listed
 # types are the ones that cannot name a check — patterns, restrictions, history and
-# review rules — and `copilot_code_review` is among them because `cli/cli` carries
+# review rules — and `copilot_code_review` is among them because a sampled
+# repository carries
 # it today and refusing there would be a gate that never opens.
 #
 # `protected: false` IS AN ANSWER; an unreadable shape is not. A branch with no
@@ -515,7 +516,7 @@ required_contexts() {   # <base ref> ; prints {contexts: [{context, app}], stric
 
 # THE CONTEXTS OF THE COMMIT, from the same rollup the all-checks question uses
 # and therefore addressed the same way. `contexts` is the rollup's own view, one
-# entry per context rather than one per run: measured, a `cli/cli` commit whose
+# entry per context rather than one per run: measured, a commit whose
 # REST check-run listing holds 302 records reports 10 here. A page boundary is
 # still refused rather than truncated — a required context on the second page
 # would read as one that has not reported, and this loop would wait for a check
@@ -565,7 +566,8 @@ required_contexts() {   # <base ref> ; prints {contexts: [{context, app}], stric
 # A BOUND REQUIREMENT CANNOT BE MET BY A LEGACY STATUS, and that is a refusal
 # rather than an omission: a `StatusContext` carries a creator, not the app id the
 # requirement names, so there is nothing to compare and the requirement reads as
-# not yet answered. An UNBOUND one — `app_id` null, which is what `cli/cli` carries
+# not yet answered. An UNBOUND one — `app_id` null, which is what a sampled
+# repository carries
 # on all three of its contexts — is met by either kind, as GitHub does it.
 required_checks_verdict() {   # <oid> <base> ; prints green|failed|behind|pending|none|malformed
     local oid="$1" base="$2" _left _req _req2 _strict _cmp _ctx_verdict _out

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Re-drift guard: the review-bus scripts + skill must stay repo-agnostic —
-# identity is derived from `git remote get-url origin`, never hard-coded. Fails
-# if a concrete owner/repo slug or bus path appears. (Bare `p5ych0` is allowed —
-# it names the shared review token in comments, not an identity to derive.)
+# Re-drift guard: the helper scripts + skill must stay repo-agnostic — identity is
+# derived from `git remote get-url origin`, never hard-coded. Fails if a concrete
+# owner/repo slug appears, in code or in a comment.
+#
+# THE BARE OWNER IS NOT EXEMPT, and this header said it was until #227. The
+# exemption read "it names the shared review token in comments, not an identity to
+# derive", which was a v1 idea: that token went with the bus, and what is left is
+# the owner of this repository appearing in a file that must work for every other.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Portable watchdog: stock macOS ships no GNU `timeout`, and the suite is a
@@ -28,10 +32,47 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # fields exactly as silently.
 unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 
-# Concrete-identity patterns that must never be hard-coded: a repo slug
-# (p5ych0/pulse), a unit slug (p5ych0-pulse), or any concrete /tmp path keyed on
-# the repo name (…/pulse-review-bus, …/pulse-claude-worktrees, …).
-PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok)-|/home/[^ ]*/(pulse|strumok)\b|owner=.?p5ych0|repo=.?(pulse|strumok)|(PULSE|STRUMOK)_REVIEW'
+# The concrete identity that must never be hard-coded, as ONE FIXED STRING.
+#
+# WHAT THIS CATCHES: this repository's OWNER, in any spelling, anywhere in the file,
+# comments included. `p5ych0/other`,
+# `p5ych0-other`, `/tmp/p5ych0-x-review-bus`, `owner=p5ych0` and
+# `repo=$'p5ych0-x'` are each one substring away, and none of them needs the text to
+# be parsed.
+#
+# THE OWNER ARM IS UNANCHORED ON PURPOSE. Anchoring it to `p5ych0/`, `p5ych0-` and
+# `owner=p5ych0` was proposed, on the ground that a bare token names no repository.
+# It is not exempt here: these files are the repo-agnostic ones, so there is no
+# legitimate reason for the owner to appear in any spelling — `CLAUDE.md` grants the
+# plugin's own metadata and install documentation an exemption, and neither is
+# scanned. Anchoring would also be three substrings where one does, and each anchor
+# is a shape somebody has to think of; the bare-token probe below says the strict
+# reading is deliberate.
+#
+# THE PLUGIN'S OWN NAME IS NOT ONE OF THEM, and cannot be: setup's second discovery
+# mode globs `~/.claude/plugins/cache/*/watch-pr-skill/*/skills/...` to find the
+# scripts at all, so the literal is how the driver locates itself. An arm on it
+# flags that line, which is the exemption `CLAUDE.md` already grants the plugin's
+# own metadata and install path.
+#
+# WHY IT IS NOT A PATTERN LANGUAGE ANY MORE. This began as a list of two of the
+# author's other repositories and was generalised into arms that tried to tell a
+# LITERAL from an expansion after `owner=` and `repo=`, and a repository-keyed path
+# from any other path. Four review rounds followed, each fixing the last and finding
+# the next: a name may start with a digit (`repo=123`), then with a dot
+# (`repo=.github`), then `[` is a glob and `--repo=[A-Za-z]*)` is legal code, then
+# `+(` is one too under `extglob` and `$'…'` is a literal whose first character is
+# `$`. Every one was a fact about SHELL SYNTAX, and reading shell syntax out of text
+# needs a shell — which `CLAUDE.md` records this repository paying 2,200 lines and
+# fifty-two rounds to learn once already.
+#
+# WHAT IS NOT CAUGHT, said rather than implied: a hard-coded identity belonging to
+# NEITHER this repository nor its owner — `gh api -f owner=someone-else` — and a
+# path keyed on this plugin's own name or some third project's. The first needs the literal-vs-expansion
+# distinction above; the second was only ever caught by listing two project names,
+# which is the list this change removes. `SCRIPT_PAT` below still catches a bare
+# `owner/repo` slug in code, which is how a hard-coded target is actually written.
+PAT='p5ych0'
 
 # The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
 # reaches no file named `*lib.sh` — so when the identity parser moved out of the
@@ -1113,6 +1154,62 @@ if [ -n "$hits" ]; then
     exit 1
 fi
 echo "ok   - no hard-coded owner/repo/bus identity in scripts or skill"
+
+# ── …AND THE SCAN CAN STILL SEE ONE ───────────────────────────────────────
+# The check above asserts an ABSENCE, so a pattern that matches nothing reports
+# the invariant holding without having tested it — the shape this repository calls
+# worse than no check. Nothing exercised it until the pattern was generalised away
+# from a list of project names, at which point there was no way to tell a wider
+# pattern from a broken one.
+#
+# ONE STAGED FILE PER SHAPE the pattern claims to catch, including this
+# repository's own slug: an installed copy serves every project, so a slug baked
+# into a script sends another project's reviews here.
+pat_probe_dir="$(mktemp -d)" || { echo "FAIL - no scratch dir for the identity-scan control"; echo "RESULT: FAIL"; exit 1; }
+pat_probe_fail=0
+for _pp in 'x=p5ych0/some-other-repo' \
+           'x=p5ych0/watch-pr-skill' \
+           'x=p5ych0-some-other-repo' \
+           'gh api -f owner=p5ych0' \
+           'd=/tmp/p5ych0-x-review-bus' \
+           'gh api -f repo=$'"'"'p5ych0-x'"'"'' \
+           '# a comment naming owner=p5ych0' \
+           '# this only ever worked for p5ych0'; do
+    printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
+    if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
+        echo "ok   - the identity scan still catches: $_pp"
+    else
+        echo "FAIL - the identity scan does not catch '$_pp'; its absence above proves nothing"
+        pat_probe_fail=1
+    fi
+done
+# …AND LEGAL CODE IS LEFT ALONE. Every one of these was produced by a review round
+# against the pattern language this replaced: an arm too WIDE blocks the self-check
+# on code that hard-codes nothing, which is the same defect as one too narrow. They
+# stay because a future arm would reintroduce exactly them.
+for _pn in 'gh api -f repo="$REPO"' \
+           'repo=$REPO' \
+           'owner=$OWNER' \
+           'u="repos/$OWNER/$REPO/commits"' \
+           'case "$c" in *" --repo="*) ;; esac' \
+           'case "$a" in --repo=[A-Za-z]*) ;; esac' \
+           'case "$a" in --repo=+([A-Za-z])*) ;; esac' \
+           'gh api -f repo=.github' \
+           'gh api -f repo=123' \
+           'REVIEW_BUS_REMOTE=x' \
+           'DISABLE_REVIEW_BUS=1' \
+           'CODEX_REVIEW_BUS=x' \
+           'ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills'; do
+    printf '%s\n' "$_pn" > "$pat_probe_dir/probe.sh"
+    if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
+        echo "FAIL - the identity scan flags legal code: '$_pn'"
+        pat_probe_fail=1
+    else
+        echo "ok   - …and does not flag: $_pn"
+    fi
+done
+rm -rf "$pat_probe_dir"
+[ "$pat_probe_fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
 
 # ── the scan itself fails closed on an input it cannot read ────────────────
 # The invariant this file owns is "no runtime script hard-codes an identity", and

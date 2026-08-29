@@ -402,8 +402,8 @@ grep -qF -- '--json baseRefName' "$TMP/args" \
     && pass "…and takes the base branch from the pull request" \
     || die "the base branch was not read from the PR: $(cat "$TMP/args")"
 # BOTH SOURCES OF PROTECTION ARE READ. Either can be the whole answer — measured,
-# `cli/cli` requires three contexts through classic protection and nothing through
-# rulesets, while `home-assistant/core` requires eight the other way round — so a
+# one sampled repository requires three contexts through classic protection and
+# nothing through rulesets, while another requires eight the other way round — so a
 # helper reading one alone reports a requirement as absent.
 grep -qF 'repos/acme/widget/branches/main' "$TMP/args" \
     && pass "…asking what classic protection requires of it" \
@@ -469,7 +469,7 @@ for _sv in SUCCESS:0:green FAILURE:1:failed ERROR:1:failed PENDING:3:pending EXP
         || die "a required $_c status gave '$got'"
 done
 # A RULESET REQUIREMENT COUNTS THE SAME, with classic protection saying nothing.
-# `home-assistant/core` is that shape: `protection.enabled` false, `protected`
+# A sampled repository is that shape: `protection.enabled` false, `protected`
 # true, eight contexts under the rules endpoint.
 mkgh_head "$WANT" green
 mkgh_required '{"protected":true,"protection":{"enabled":false,"required_status_checks":{"contexts":[]}}}' \
@@ -605,7 +605,7 @@ got="$(run 7 --head "$WANT" --required)"
     && pass "…and neither does a legacy status, which carries no app id" \
     || die "a legacy status satisfied a bound requirement: '$got'"
 # …WHILE AN UNBOUND REQUIREMENT IS MET BY EITHER KIND, as GitHub does it. All three
-# of `cli/cli`'s required contexts carry `app_id: null`.
+# of one sampled repository's required contexts carry `app_id: null`.
 for _n in '{"__typename":"CheckRun","name":"any","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}' '{"__typename":"StatusContext","context":"any","state":"SUCCESS"}'; do
     mkgh_head "$WANT" green
     mkgh_required '{"protected":true,"protection":{"required_status_checks":{"checks":[{"app_id":null,"context":"any"}]}}}' '[]' "[$_n]"
@@ -1014,7 +1014,8 @@ got="$(run 7 --head "$WANT" --required)"
 grep -qE '^PR_CI_STATE pr=7 status=green' <<<"${got#*|}" \
     && die "a forged line was emitted from a rule type: '$got'" \
     || pass "…so a rule type cannot forge a line of its own"
-# …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. `cli/cli` carries
+# …WHILE THE RULES THAT CANNOT NAME A CHECK ARE SKIPPED. A sampled repository
+# carries
 # `copilot_code_review` today, and refusing there would be a gate that never opens.
 for _rt in deletion non_fast_forward pull_request copilot_code_review required_signatures branch_name_pattern lock_branch tag authorization max_ref_updates workflow_updates required_review_thread_resolution max_file_path_length; do
     mkgh_head "$WANT" green

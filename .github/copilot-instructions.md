@@ -311,6 +311,21 @@ finding wherever it appears in `skills/watch-prs/`; it does **not** apply to the
 plugin's own metadata (`.claude-plugin/`) or to the install
 commands in `README.md`, which legitimately name this repository.
 
+**AND NO REPOSITORY BUT THIS ONE IS NAMED ANYWHERE, prose included.** The plugin
+works on the repository in the current directory; any other is one the operator did
+not ask about. That covers documentation and comments as well as code: a measurement
+taken elsewhere is evidence for its COUNT and its SHAPE, not for whose repository it
+was, so it is written "three required contexts on one, eleven on another" and never
+as slugs. Treat a third-party owner/repo slug added to any tracked file as a
+blocking finding, in a comment or a changelog entry as readily as in code. Functional dependency coordinates are not
+mentions: a workflow's `uses: actions/checkout@v4` or a package name names a thing
+the tooling requires, and a version bump must not be read as a naming violation.
+An API path is exempt only in its GENERIC form — `repos/{owner}/{repo}/commits`, or
+one built from derived variables — never with a literal owner and repository in it,
+which is the very thing being forbidden. What the rule is about is naming a
+repository as an EXAMPLE, as EVIDENCE, or as HISTORY. The one exception is the operator naming a repository in the
+session, which does not survive into a file.
+
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
 reads `git remote get-url origin` in its setup block, checks that read's status,
 and exports it as `REVIEW_BUS_REMOTE`; `rb_identity` prefers that over deriving.

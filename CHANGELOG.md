@@ -1,5 +1,53 @@
 # Changelog
 
+## [2.0.82] — 2026-08-29
+
+- **The plugin works on the repository in the current directory, and names no
+  other — anywhere, prose included.** That rule is now written down in `CLAUDE.md`
+  and in both reviewer files, so a slug added to a comment or a changelog entry is a
+  blocking finding rather than something to notice later.
+
+- **Thirty such mentions are gone**, and the identity guard no longer keeps a list
+  of the author's projects. The
+  measurements behind the required-checks work cited the public repositories they
+  were taken on, and two archived v1 planning documents discussed another project of
+  the same author. Every one of those names is gone: the measurements keep their
+  force — "three required contexts on one, eleven on another, twenty-three on a
+  third", "a commit with thirteen check runs and no statuses reports SUCCESS" — and
+  say nothing about whose repositories they were.
+
+  The two archived documents were **deleted** rather than edited. They planned the
+  v1 `review-bus` watcher, which v2 removed: `review-bus-codex-watcher.sh` and the
+  `test-review-bus-*.sh` fixtures no longer exist, nothing in the tree referenced
+  them, and every issue number in them belonged to the other project.
+
+- **And the identity guard no longer keeps a list of the author's projects.**
+  `test-pr-identity.sh` forbade two repository names by spelling them out — a list to
+  maintain, in the one file whose job is to forbid exactly that. It is ONE fixed
+  string now: the owner, in any spelling, anywhere in a scanned file. Its header used
+  to exempt the bare owner — "it names the shared review token in comments" — which
+  was a v1 idea that went with the bus; what is left is this repository's owner
+  appearing in files that must work for every other.
+
+  **It was a pattern language for four review rounds first, and that is the part
+  worth recording.** Generalising the list into arms that told a literal from an
+  expansion after `owner=` and `repo=` produced a finding per round, each fixing the
+  last: a name may start with a digit, then with a dot, then `[` is a glob and
+  `--repo=[A-Za-z]*)` is legal code, then `+(` is one too and `$'…'` is a literal
+  beginning with `$`. Every one was a fact about shell syntax, and reading shell
+  syntax out of text needs a shell. What the fixed strings cannot see is said where
+  the code is: an identity belonging to neither this repository nor its owner, and a
+  path keyed on the plugin's own name — which cannot be forbidden, because setup's
+  second discovery mode globs it to find the scripts at all.
+
+  That scan asserts an ABSENCE, and nothing had ever exercised it — a pattern
+  matching nothing would have reported the invariant holding without testing it.
+  Every arm now has a probe, and six DERIVED spellings have one too: the first
+  generalisation wrote `repo=.?[A-Za-z]`, where the `.?` eats the `$` and the class
+  eats the first letter, so `repo=$REPO` — the spelling this repository requires —
+  would have failed the guard. It matched nothing here only because no script
+  happens to write it that way, which is a landmine rather than a pass.
+
 ## [2.0.81] — 2026-08-29
 
 - **A shadowed `echo` and `exit` could walk past the round check-in's refusals and
@@ -125,12 +173,12 @@
   `repo` scope this loop runs under.
 
   Measured on ten repositories, none of which the measuring account administers:
-  three required contexts came back for `cli/cli`, eleven for
-  `kubernetes/kubernetes`, twenty-three for `microsoft/vscode`, while the dedicated
+  three required contexts came back for a sampled repository, eleven for
+  a sampled repository, twenty-three for a sampled repository, while the dedicated
   protection endpoint 404s on the same repository with the same token. Rulesets are
-  the other source and neither subsumes the other — `home-assistant/core` reports
+  the other source and neither subsumes the other — one sampled repository reports
   `protection.enabled: false` with `protected: true` and its eight contexts appear
-  only under `rules/branches/{b}`, `cli/cli` is the other way round — so the
+  only under `rules/branches/{b}`, a sampled repository is the other way round — so the
   required set is the **union**, and a helper reading one alone reports a
   requirement as absent.
 
@@ -265,9 +313,8 @@
   sources in one response addressed by the OID, so there are no pages to reconcile
   and no fold to get wrong.
 
-  Measured against the live API rather than assumed: a `cli/cli` commit with
-  thirteen check runs and no legacy statuses reports SUCCESS, and a
-  `pandas-dev/pandas` commit with one failed run, six still in progress and a
+  Measured against the live API rather than assumed: a commit with
+  thirteen check runs and no legacy statuses reports SUCCESS, and another with one failed run, six still in progress and a
   passing legacy status reports FAILURE — the server's precedence agreeing with
   this file's own contract, that a failed check decides while others are still
   running. `EXPECTED` is treated as pending, being the state of a required context
@@ -5659,7 +5706,7 @@ longer read; move anything project-specific in it into `AGENTS.md`.
 ## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
-  findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
+  findings**. `process_review` read `.summary` from the
   model result only in the zero-findings branch; with one or more findings it was
   overwritten by a status line and never reached the PR or the bus response. The
   prompt asks for a summary on *every* review — including the verification
