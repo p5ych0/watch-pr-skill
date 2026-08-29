@@ -6,7 +6,9 @@
 #   pr-ci-state.sh <pr> [--required] [--head <oid>]
 #
 #   0  green    — every check considered passed
-#   1  failed   — at least one failed or was cancelled
+#   1  failed   — at least one failed or was cancelled, or the base branch requires
+#                  its pull requests to be up to date and this head is behind it,
+#                  which `reason=behind_base` on the line tells apart
 #   3  pending  — at least one is still running and none has failed
 #   4  none     — no checks are configured; there is nothing to be green
 #   5  stale    — the PR head is not the OID asked about; ask again shortly
