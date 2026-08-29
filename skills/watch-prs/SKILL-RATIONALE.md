@@ -1927,7 +1927,7 @@ match and no second field to be confused with.
 Anything appended after that field would be swallowed into the baseline, which is
 the same field-order rule the signoff records follow and for the same reason.
 
-## EVERY REFUSAL HERE IS AN EXPANSION, AND THE GROUP IS WHAT CONTAINS IT.
+## NOTHING REACHES THE POST EXCEPT THROUGH THE ARM THAT PROVED IT.
 
 These four refusals were `|| { echo "ABORT: …"; exit 0; }`, and that shape has no
 containment in the shell this block runs in. `SKILL.md` executes in the operator's
@@ -1946,40 +1946,37 @@ and a failed probe's output becomes the operator's recorded permission to contin
 past a check-in. That is the one thing the comment above this block says must never
 happen. #224.
 
-An expansion has no such gap: `${VAR:?…}` is the shell refusing to expand, so no
-command runs and there is nothing to shadow. The value is cleared by an ASSIGNMENT,
-which the parser handles, and the condition is `[[`, `case` or a command's own
-status — `[[` and `case` are reserved words. This is #181's answer to the same class
-in the setup block, applied here.
+**The answer is where the post SITS, not what guards it.** Every proof is a reserved
+word — `if`, `[[`, `case` — and the `gh pr comment` is inside the innermost success
+arm of all three. No shadowed name can reach it, because reaching it means taking
+arms that only a proof opens. A shadowed `echo` silences the diagnostics and changes
+nothing else; `exit` is not used at all, so shadowing it has nothing to act on.
 
-**The clearing arm is the safe one on purpose.** `[[ $ROUNDS_RC == 3 ]] || ROUNDS_PAUSE=`
-sends every answer that is not the distinguished 3 to the clear, so an unexpected
-status refuses rather than continues. `case` does the same for the count: anything
-that is not digits empties the value the post would carry.
+**A REFUSAL SENTINEL WAS TRIED FIRST AND IS WORSE.** The first version of this fix
+cleared a variable and expanded it with `${VAR:?…}`, which is #181's answer for the
+setup block. It does not transfer, because the variables here are ones the
+operator's shell can have seen first: measured, with `declare -i ROUNDS_PAUSE`
+inherited, clearing it stores `0`, `${ROUNDS_PAUSE:?…}` finds that non-empty, and
+the acknowledgement is posted anyway. The setup block's expansions are safe from
+this because what they refuse on is an origin URL rather than a flag — a value no
+integer attribute can forge into truth. A sentinel whose whole content is
+"something was proved" is exactly the value an attribute can pre-seed.
 
-**Two refusals became one.** The parse arm and the shape arm said the same thing: a
-pipeline that failed leaves the count empty, and empty is what the shape refusal
-already answers. Removing it is `prefer removing the dependency over guarding it`
-rather than a shortcut — there is no state the deleted arm caught that the remaining
-one does not.
+**And the parse's status is taken by the `if` itself.** `ROUNDS="$(… | sed …)"` as
+the condition means a parser that printed a plausible count and then failed takes
+the else arm: measured, a `sed` printing `41` and returning 1 leaves the value in
+place and the branch still refuses. Written as an assignment followed by a shape
+check, those digits were accepted and posted.
 
-**THE GROUP IS NOT DECORATION, AND IT MUST NOT BE A SUBSHELL.** How far a `:?`
-expansion stops execution differs between a script and an interactive session, and
-an operator pasting this block into a terminal is the ordinary case here. Measured
-on bash 5.3:
+**`0` IS REFUSED WITH THE SHAPES THAT ARE NOT COUNTS.** No pause happens at zero
+rounds, so it is not a value this can ever legitimately acknowledge — and under a
+`declare -i` inherited from the operator's shell an empty parse becomes exactly
+that, so the semantic refusal closes an attribute hole as a side effect rather than
+by aiming at it.
 
-    container            non-interactive        interactive
-    top-level statements shell exits            the NEXT statement still runs
-    { … }                shell exits            the group is abandoned, then the
-                                                shell reads the line after it
-    ( … )                the rest still runs    the rest still runs
-
-Interactively the shell does not stop; it abandons the compound command it was in
-and carries on with the next line. So the container is not there to end the
-session — it is there to make sure everything between the refusal and the
-acknowledgement is inside ONE command, and goes with it. Ungrouped, the refusal
-aborts its own line and the next line is the `gh pr comment`, which is the defect
-with extra steps.
-
-A SUBSHELL is worse than no container at all: it dies and the parent carries on, in
-both modes. `{` is a reserved word, so nothing can take it.
+**What is NOT closed, and cannot be from inside.** A variable this block assigns can
+be `readonly` in the operator's shell with a plausible value already in it; the
+assignment then fails and the old value is what the arms see. That is the same limit
+`CLAUDE.md` records for the whole driver — nothing inside a process can distinguish
+the honest version of something it inherited — and it is why the block's own
+guarantee is about what a shadowed COMMAND can reach.

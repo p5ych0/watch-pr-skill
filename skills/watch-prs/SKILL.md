@@ -1150,30 +1150,33 @@ reached.
   # of a probe that failed. Permission is the one thing that must never be
   # inferred from unreadable output.
   #
-  # EVERY REFUSAL HERE IS AN EXPANSION, AND THE GROUP IS WHAT CONTAINS IT.
+  # NOTHING REACHES THE POST EXCEPT THROUGH THE ARM THAT PROVED IT.
   # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-  {
-    ROUNDS_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
-    ROUNDS_PAUSE=yes
-    [[ $ROUNDS_RC == 3 ]] || ROUNDS_PAUSE=
-    ROUNDS_PAUSE="${ROUNDS_PAUSE:?the round counter did not report a pause; nothing has been acknowledged}"
-    ROUNDS="$(printf '%s\n' "$ROUNDS_OUT" \
-              | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')"
-    # A parse that failed leaves this empty, which the shape refusal below already
-    # answers — so it is one refusal rather than two saying the same thing.
-    case "$ROUNDS" in
-        ""|*[!0-9]*) ROUNDS= ;;
-    esac
-    ROUNDS="${ROUNDS:?could not read a round count to acknowledge; nothing has been acknowledged}"
-    # The footer NAMES THE REVIEWER, because the count is per reviewer. An
-    # unscoped acknowledgement of 41 Codex rounds is read by a Copilot invocation
-    # with 5 and trips its ahead-of-count guard, blocking that phase permanently.
-    ROUNDS_ACK=
-    gh pr comment N --repo "$HOST/$OWNER/$REPO" \
-        --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" "$ROUNDS")" \
-        && ROUNDS_ACK=yes
-    ROUNDS_ACK="${ROUNDS_ACK:?could not record the acknowledgement; do not request another review}"
-  }
+  ROUNDS_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
+  if [[ $ROUNDS_RC == 3 ]]; then
+      if ROUNDS="$(printf '%s\n' "$ROUNDS_OUT" \
+                   | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')"; then
+          # A count of `0` is refused with the shapes that are not counts at all: no
+          # pause happens at zero rounds, and under a `declare -i` inherited from the
+          # operator's shell an empty parse becomes exactly that.
+          case "$ROUNDS" in
+              ""|0|*[!0-9]*)
+                  echo "ABORT: could not read a round count to acknowledge; nothing was recorded." ;;
+              *)
+                  # The footer NAMES THE REVIEWER, because the count is per reviewer.
+                  # An unscoped acknowledgement of 41 Codex rounds is read by a
+                  # Copilot invocation with 5 and trips its ahead-of-count guard,
+                  # blocking that phase permanently.
+                  gh pr comment N --repo "$HOST/$OWNER/$REPO" \
+                      --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" "$ROUNDS")" \
+                      || echo "ABORT: could not record the acknowledgement; do not request another review." ;;
+          esac
+      else
+          echo "ABORT: could not parse the round count; nothing was recorded."
+      fi
+  else
+      echo "ABORT: the round counter did not report a pause (rc=$ROUNDS_RC); nothing was recorded."
+  fi
   ```
  Only OWNER, MEMBER and
   COLLABORATOR comments are read as acknowledgements, and one naming a round that

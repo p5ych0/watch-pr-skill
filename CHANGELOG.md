@@ -3,12 +3,11 @@
 ## [2.0.81] — 2026-08-29
 
 - **A shadowed `echo` and `exit` could walk past the round check-in's refusals and
-  acknowledge a check-in nobody reported.** The block that records the operator's
-  permission to continue past a round boundary refused with
-  `|| { echo "ABORT: …"; exit 0; }`, four times. That bash runs in the operator's
-  own shell, where both names belong to whoever is sitting there. Measured against
-  the block lifted out of `SKILL.md`, with a probe printing a plausible
-  `PR_ROUND_PAUSE … rounds=41 …` line and then exiting 1:
+  record a permission nobody gave.** The block that acknowledges a round boundary
+  refused with `|| { echo "ABORT: …"; exit 0; }`, four times, and that bash runs in
+  the operator's own shell where both names belong to whoever is sitting there.
+  Measured against the block lifted out of `SKILL.md`, with a probe printing a
+  plausible `PR_ROUND_PAUSE … rounds=41 …` line and then exiting 1:
 
   | operator shell | acknowledgement posted? |
   | --- | --- |
@@ -16,31 +15,42 @@
   | `echo() { :; }` | no |
   | `echo() { :; }; exit() { return 0; }` | **yes** |
 
-  With both shadowed the arm runs, `exit` returns instead of terminating, execution
-  continues into the parse — which succeeds, because the forged line is well-formed
-  — and a failed probe's output becomes the recorded permission. The comment above
+  With both shadowed the arm ran, `exit` returned instead of terminating, execution
+  continued into the parse — which succeeds, because the forged line is well-formed
+  — and a failed probe's output became the recorded permission. The comment above
   that block says permission is the one thing that must never be inferred from
   unreadable output.
 
-  Every refusal is an expansion now. `${VAR:?…}` is the shell refusing to expand, so
-  no command runs and there is nothing to shadow; the value is cleared by an
-  assignment, which the parser handles, and the condition is `[[` or `case`, both
-  reserved words. That is the answer #181 gave for the setup block, in 2.0.65,
-  applied here. Two refusals became one on the way: a parse that failed leaves the count
-  empty, which the shape refusal already answers.
+  **The answer is where the post SITS, not what guards it.** Every proof is now a
+  reserved word — `if`, `[[`, `case` — and the `gh pr comment` is inside the
+  innermost success arm of all three. Reaching it means taking arms that only a
+  proof opens, so no shadowed name can; a shadowed `echo` silences the diagnostics
+  and changes nothing else, and `exit` is not used at all.
 
-  **And the block is wrapped in a brace group**, which is not decoration. How far a
-  `:?` stops execution differs by shell mode, and an operator pasting the block into
-  a terminal is the ordinary case: interactively the shell abandons the compound
-  command it was in and reads the next line, so ungrouped the refusal aborts its own
-  line and the next line is the `gh pr comment`. Inside a group everything between
-  the refusal and the post goes with it. A subshell would be worse than no group at
-  all — it dies while the parent carries on, in both modes.
+  **A refusal sentinel was tried first and is worse**, which is why the shape is
+  containment rather than #181's `${VAR:?…}`. That answer does not transfer here:
+  measured, with `declare -i ROUNDS_PAUSE` inherited from the operator's shell,
+  clearing the sentinel stores `0`, the expansion finds it non-empty, and the
+  acknowledgement is posted anyway. The setup block's expansions are safe from that
+  because they refuse on an origin URL rather than on a flag — a value no integer
+  attribute can forge into truth.
 
-  Covered by the lift added in 2.0.80's cycle: the attack is asserted three ways —
-  that it was injected, that nothing was posted, and that neither shadowed name is
-  reached at all — plus an interactive pair with the ungrouped statements as the
-  control. Closes #224.
+  **The parse's status is the `if`'s own condition.** A `sed` that prints a
+  plausible count and then fails leaves the digits in place, and an assignment
+  followed by a shape check accepted them; as a condition, the branch refuses.
+
+  **And `0` is refused with the values that are not counts.** No pause happens at
+  zero rounds, and under an inherited `declare -i` an empty parse becomes exactly
+  that — so a semantic refusal closes an attribute hole as a side effect.
+
+  What is not closed, and cannot be from inside: a variable this block assigns can
+  be `readonly` in the operator's shell with a plausible value already in it. That
+  is the limit `CLAUDE.md` records for the whole driver, and it is why the
+  guarantee is stated about what a shadowed COMMAND can reach.
+
+  `README.md`'s round check-in section says what a refusal now does: nothing is
+  recorded, the round is not closed, and the next call pauses again on the same
+  count. Closes #224.
 
 - The contract test's claim scanner now sees **indented** bash fences. Two of this
   document's blocks sit inside list items, and a column-anchored scan did not reach
