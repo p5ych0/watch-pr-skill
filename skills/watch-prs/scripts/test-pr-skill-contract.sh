@@ -869,6 +869,17 @@ FORGE
         || die "a relative TMPDIR was selected or refused (rc=$_rel out='$_rel_out')"
     # …AND AN UNWRITABLE ONE IS NOT COMMITTED TO EITHER. `-w` and `-x` as well as
     # `-d`, because "can hold a directory" is what the fallback is for.
+    #
+    # SKIPPED UNDER UID 0, BY NAME. Root bypasses the discretionary checks, so `-w`
+    # answers TRUE on a mode-500 directory and the block selects it — correctly, since
+    # root really can write there. The case would then report a failure against correct
+    # behaviour, which is the staging failing rather than the subject. CI runs
+    # unprivileged; a root container is still a normal way to run a suite, and a skip
+    # that says why beats a red that means nothing.
+    _rb_uid=1; _rb_uid="$(id -u 2>/dev/null)" || _rb_uid=1
+    if [ "$_rb_uid" = 0 ]; then
+        pass "this run is UID 0, so the unwritable-parent case is skipped by name"
+    else
     _unw_dir="$_forge_dir/unwritable"
     mkdir -p "$_unw_dir" && chmod 500 "$_unw_dir"
     _unw=0
@@ -881,6 +892,7 @@ FORGE
     { [ "$_unw" -eq 0 ] && case "$_unw_out" in *"PARENT=[$_forge_dir]"*) true ;; *) false ;; esac; } \
         && pass "…and an unwritable TMPDIR is passed over for HOME" \
         || die "an unwritable TMPDIR was committed to (rc=$_unw out='$_unw_out')"
+    fi
     # …AND A RELATIVE `HOME` IS NOT ACCEPTED AS THE SECOND EITHER.
     _relh=0
     _relh_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \

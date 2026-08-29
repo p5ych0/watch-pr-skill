@@ -552,6 +552,16 @@ reservation races cost one empty directory — lost or left behind — because
 underweighted as a non-blocking note. A NEW defect in that area is still a
 finding: each record accepts one named race and nothing else.
 
+**A third is accepted since 2026-08-29**, in
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md`: `pr-setup.sh` gives its reservation
+back by removing the leaves it created BY NAME, after proving the directory is still the
+object its `mkdir` made. A same-UID substitution between that proof and the removals is
+not refused, because shell cannot unlink relative to a held descriptor and a per-leaf
+descriptor moves the same check-then-use one level down. It rests on a measurement: the
+loss is bounded by the names this session had already taken, anything else the racer left
+survives, and `set -C` means none of those names can point elsewhere. Raise a cost you
+think was underweighted as a non-blocking note.
+
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection, and the

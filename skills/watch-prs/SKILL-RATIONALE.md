@@ -445,7 +445,7 @@ readonly assignment ends the session where it stands. #151.
 AND IT READS ANOTHER NAME BACK, because reading its OWN back cannot see an
 ALIAS. `declare -n RB_SETUP_DIR=RB_REMOTE` passes an assign-and-read-back probe
 perfectly: the assignment works and the value returns. The two are then the SAME
-VARIABLE, so the source — which sets `RB_REMOTE` — silently changes
+VARIABLE, so the read — which sets `RB_REMOTE` — silently changes
 `RB_SETUP_DIR` under the checks that follow, and the working paths are then
 proved against a literal built from a directory that is now the remote URL.
 
@@ -1699,9 +1699,9 @@ directory under a shared parent, which is the same window
 `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts for the transport
 name.
 
-So the identity is re-derived from the sourced value rather than trusted, and a
-sourced value that is empty, spans a line, or is not a usable identity is refused by
-expansion — the same three refusals the block made when it read the origin itself.
+So the identity is re-derived from the value that was READ rather than trusted, and a
+value that is empty, spans a line, or is not a usable identity is refused by expansion —
+the same three refusals this block has always made about an origin.
 
 ## EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL.
 

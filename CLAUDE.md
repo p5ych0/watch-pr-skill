@@ -776,15 +776,23 @@ author side of that contract matters:
   establish intent, never permission. Where a limitation is genuinely accepted,
   record it on the base ref as a dated file in `docs/decisions/`.
 
-  **Two are accepted there, one record each.** #160: the transport candidate name
+  **Three are accepted there, one record each.** #160: the transport candidate name
   is published in argv before the `mkdir` reserves it. #162: the reservation is an
-  inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. What makes
+  inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. And
+  2026-08-29: `pr-setup.sh` gives its reservation back by removing the leaves it
+  created BY NAME, after proving the directory is still the object its `mkdir` made,
+  so a same-UID substitution between that proof and the removals is not refused —
+  shell cannot unlink relative to a held descriptor, and a per-leaf descriptor moves
+  the same check-then-use one level down. What makes
   each acceptable is MEASURED rather than argued, and the measurement is a
   FIXTURE rather than a paragraph. A squatter costs a denial of service bounded by
   the second-parent retry and never a forged identity, which
   `test-pr-skill-contract.sh` stages against the real helper; the reservation
   races cost one empty directory, lost or left behind, which `test-pr-origin.sh`
-  stages with `mkdir` on `PATH` as the racer. Those cases are what the records
+  stages with `mkdir` on `PATH` as the racer; and the leaf cleanup loses exactly the
+  names this session had already taken and nothing else, which `test-pr-setup.sh`
+  stages by patching the substitution into a copy of the helper at the line it is
+  about. Those cases are what the records
   rest on: **if a bound changes they fail**, which is what stops an accepted limit
   drifting into an unexamined one.
 

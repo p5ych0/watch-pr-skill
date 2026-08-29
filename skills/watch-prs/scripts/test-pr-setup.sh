@@ -52,6 +52,19 @@ fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 
+# WHETHER THIS RUN CAN BE STOPPED BY A PERMISSION BIT AT ALL. Root bypasses the
+# discretionary checks, so a `chmod 500` stage does not make a directory unwritable for
+# it: the helper succeeds, the case reports a failure, and what failed is the STAGING
+# rather than the subject. CI runs unprivileged, but a root container is a normal way to
+# run a suite, and a fixture that goes red there against correct code is worse than one
+# that says why it did not run — which is the shape this file already uses for
+# `declare -l` and `declare -n`.
+_rb_uid=1
+_rb_uid="$(id -u 2>/dev/null)" || _rb_uid=1
+if [ "$_rb_uid" = 0 ]; then
+    pass "this run is UID 0, so the cases staged with a permission bit are skipped by name"
+fi
+
 REAL='git@github.com:acme/widget.git'
 
 # ── a checkout whose origin is known ───────────────────────────────────────
@@ -256,8 +269,9 @@ _sp_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_sp_d" 
 { [ "$_sp_rc" -eq 0 ] && [ -f "$_sp_d/origin" ] && [ -f "$_sp_d/work/summary.md" ]; } \
     && pass "…while a parent containing a space is set up rather than refused" \
     || die "a path with a space was refused (rc=$_sp_rc out='$_sp_out')"
-# AND THE VALUES IN IT SURVIVE THE SOURCE, which is the half a shape check cannot
-# see: the working files have to be where the driver builds their paths.
+# AND WHAT IT WROTE IS USABLE, which is the half a shape check cannot see: the origin
+# has to be readable out of the spaced path, and the working files have to be where the
+# driver builds their paths.
 _sp_got="$(cat "$_sp_d/origin" 2>/dev/null)" || _sp_got="READ_FAILED"
 { [ "$_sp_got" = "$REAL" ] && [ -f "$_sp_d/work/head.txt" ]; } \
     && pass "…and the origin and the working files under it are where the driver will look" \
@@ -525,7 +539,7 @@ cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # attempted and disarms only on success.
 #
 # SELF-DELIVERED, so there is no timing in the fixture. The staged copy sends itself
-# the signal at exactly the point the case is about — after the env write, before the
+# the signal at exactly the point the case is about — after the origin write, before the
 # `trap - EXIT` that a successful run reaches — which no `sleep`-and-`kill` can pin
 # down as precisely.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
@@ -548,6 +562,43 @@ for _sig in HUP INT TERM; do
         || die "a $_sig left the published directory behind: $(ls -A "$_sg" 2>/dev/null | tr '\n' ' ')"
     rm -rf "$_sg"
 done
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
+# ── what a substitution AFTER the identity check can cost ─────────────────
+# THE CLEANUP CHECKS THE HELD IDENTITY AND THEN REMOVES BY NAME, and nothing in shell
+# can unlink relative to a held descriptor. A same-UID process that substitutes the tree
+# between the check and the removals is therefore not refused — which is accepted in
+# `docs/decisions/2026-08-29-setup-leaf-cleanup.md`, and accepted on this measurement
+# rather than on an argument.
+#
+# WHAT IS MEASURED IS THE BOUND: the removals name `origin`, `o/origin` and the four
+# under `work/`, so a substitution loses exactly the files a racer chose to put at names
+# this session had already taken. Anything else it left is untouched. Staged by patching
+# the substitution into the copy under test at the line the case is about, since the
+# window is inside one function and no external process can be scheduled into it.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+sed 's|^    if \[\[ $RB_PHASE = written \]\]|    /usr/bin/env rm -rf "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR/work"; printf "theirs\\n" > "$RB_DIR/origin"; printf "theirs\\n" > "$RB_DIR/work/summary.md"; printf "keep\\n" > "$RB_DIR/unrelated"\
+&|' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'printf "keep\n" > "$RB_DIR/unrelated"' "$_stage/pr-setup.sh" \
+    && pass "the post-check substitution stage is patched" \
+    || die "the post-check substitution stage did not patch pr-setup.sh; the case proves nothing"
+sed -i.bak 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null .*|rb_setup_stop pin_storage 2|' "$_stage/pr-setup.sh" 2>/dev/null \
+    || sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null .*|rb_setup_stop pin_storage 2|' "$_stage/pr-setup.sh" > "$_stage/pr-setup.sh.new" && mv "$_stage/pr-setup.sh.new" "$_stage/pr-setup.sh"
+rm -f "$_stage/pr-setup.sh.bak"
+_sub="$(mktemp -d "$TMP/sub.XXXXXX")/dir"
+_sub_rc=0
+_sub_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sub" 2>&1)" || _sub_rc=$?
+[ "$_sub_rc" -ne 0 ] \
+    && pass "the staged failure refuses, so the cleanup ran" \
+    || die "the substitution case did not reach a refusal (out='$_sub_out')"
+{ [ ! -e "$_sub/origin" ] && [ ! -e "$_sub/work/summary.md" ]; } \
+    && pass "…and a substitution loses exactly the names this session had taken" \
+    || die "the measured bound has changed: a name this run created survived the cleanup"
+[ -f "$_sub/unrelated" ] \
+    && pass "…while anything at a name it never took is untouched" \
+    || die "the cleanup removed a name this run never created; the record's bound is wrong"
+rm -rf "$_sub"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
 # ── the creates are exclusive, so nothing is truncated through them ───────
@@ -621,6 +672,7 @@ cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # created inside it. The forged reader cannot do it — it runs before `work/` is made,
 # so the allocation fails first and the case would be measuring that instead — so the
 # copy under test is patched at the line the case is about, as the signal cases are.
+if [ "$_rb_uid" != 0 ]; then
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
 sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null|chmod 500 "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null|' \
@@ -638,6 +690,7 @@ chmod 700 "$_ps" 2>/dev/null || true
 rm -rf "$_ps"
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+fi
 # AND NOTHING UNDER THE RESERVED DIRECTORY IS UNLINKED BY A NESTED NAME WHERE `rmdir`
 # WOULD DO. The held descriptor authenticates `$RB_DIR` and says nothing about a name
 # inside it, so an `rm -f` on one resolves whatever is there by the time it runs. The
