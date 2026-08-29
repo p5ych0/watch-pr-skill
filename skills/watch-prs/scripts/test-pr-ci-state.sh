@@ -763,6 +763,21 @@ got="$(run 7 --head "$WANT" --required)"
     && pass "…and a body counting commits behind is behind, whatever its summary says" \
     || die "a self-contradicting comparison was read as current: '$got'"
 
+# …AND THE SUMMARY DECIDES AS WELL AS THE COUNT, which is the same rule read from
+# the other end: a body saying `behind` while counting nothing behind is the other
+# field lying, and the gate again takes the answer that does not merge.
+for _cs in '{"status":"behind","ahead_by":0,"behind_by":0}' '{"status":"diverged","ahead_by":2,"behind_by":0}'; do
+    mkgh_head "$WANT" green
+    mkgh_required '{"protected":false}' \
+        '[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"build"}]}}]' \
+        '[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","checkSuite":{"app":{"databaseId":7}}}]'
+    printf '%s\n' "$_cs" > "$TMP/gh.cmp"
+    got="$(run 7 --head "$WANT" --required)"
+    { [ "${got%%|*}" = 6 ] && grep -qF 'status=behind' <<<"${got#*|}"; } \
+        && pass "…and a body saying behind is behind, whatever its count says" \
+        || die "a self-contradicting summary was read as current: '$got'"
+done
+
 # …AND A CURRENT HEAD IS NOT REFUSED, which is the half that would otherwise be a
 # gate that never opens.
 for _cs in '{"status":"identical","ahead_by":0,"behind_by":0}' '{"status":"ahead","ahead_by":4,"behind_by":0}'; do
