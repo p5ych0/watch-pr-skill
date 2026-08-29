@@ -28,13 +28,22 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # fields exactly as silently.
 unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
 
-# Concrete-identity patterns that must never be hard-coded, as THREE FIXED STRINGS.
+# Concrete-identity patterns that must never be hard-coded, as TWO FIXED STRINGS.
 #
 # WHAT THIS CATCHES: this repository's OWNER and a project-prefixed bus variable, in
 # any spelling, anywhere in the file, comments included. `p5ych0/other`,
 # `p5ych0-other`, `/tmp/p5ych0-x-review-bus`, `owner=p5ych0` and
 # `repo=$'p5ych0-x'` are each one substring away, and none of them needs the text to
 # be parsed.
+#
+# THE OWNER ARM IS UNANCHORED ON PURPOSE. Anchoring it to `p5ych0/`, `p5ych0-` and
+# `owner=p5ych0` was proposed, on the ground that a bare token names no repository.
+# It is not exempt here: these files are the repo-agnostic ones, so there is no
+# legitimate reason for the owner to appear in any spelling — `CLAUDE.md` grants the
+# plugin's own metadata and install documentation an exemption, and neither is
+# scanned. Anchoring would also be three substrings where one does, and each anchor
+# is a shape somebody has to think of; the bare-token probe below says the strict
+# reading is deliberate.
 #
 # THE PLUGIN'S OWN NAME IS NOT ONE OF THEM, and cannot be: setup's second discovery
 # mode globs `~/.claude/plugins/cache/*/watch-pr-skill/*/skills/...` to find the
@@ -1161,7 +1170,8 @@ for _pp in 'x=p5ych0/some-other-repo' \
            'd=/tmp/p5ych0-x-review-bus' \
            'gh api -f repo=$'"'"'p5ych0-x'"'"'' \
            'SOMETHING_REVIEW_BUS=1' \
-           '# a comment naming owner=p5ych0'; do
+           '# a comment naming owner=p5ych0' \
+           '# this only ever worked for p5ych0'; do
     printf '%s\n' "$_pp" > "$pat_probe_dir/probe.sh"
     if grep -qE "$PAT" "$pat_probe_dir/probe.sh"; then
         echo "ok   - the identity scan still catches: $_pp"

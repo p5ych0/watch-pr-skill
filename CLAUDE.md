@@ -258,8 +258,14 @@ rediscovering them.
   operator did not ask about. That covers documentation and comments as well as
   code — a measurement taken somewhere else is evidence for its COUNT and its
   SHAPE, not for whose repository it was, so write "three required contexts on one,
-  eleven on another" and never the slugs. The exception is the operator asking, in
-  the session, about a named repository; it does not survive into a file.
+  eleven on another" and never the slugs.
+
+  **A functional dependency coordinate is not a mention.** `uses: actions/checkout@v4`
+  in a workflow, a package name, an API path — each names something the tooling
+  requires, and bumping one must not read as a violation. The rule is about naming a
+  repository as an EXAMPLE, as EVIDENCE, or as HISTORY. The other exception is the
+  operator asking, in the session, about a named repository; it does not survive
+  into a file.
 
   This was not free. The required-checks work cited five public repositories across
   nine files, and two archived planning documents discussed another project of the
