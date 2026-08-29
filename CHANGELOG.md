@@ -48,6 +48,14 @@
   recorded, there is no durable identity and the cleanup unlinks nothing, leaving a
   directory behind instead: the cost the record already covers.
 
+- **A name your shell has aliased stops setup instead of steering it.** The reviewer
+  logins and the four working paths are the driver's own assignments now, and a
+  `declare -n CODEX_BOT=OWNER` in a startup file makes one of them write THROUGH into
+  the identity: `OWNER` becomes the reviewer login, the read-back still passes because
+  it resolves through the same alias, and every later `gh` call is addressed at a slug
+  nobody chose. All ten names the block assigns are in the generic probe now, and its
+  refusal names them.
+
 - **The setup values are read, not sourced, and only one of them crosses.** The helper
   wrote a file of twelve assignments the driver sourced, and `.` is a name: in the
   operator's long-lived shell — the one place this loop cannot re-exec out of an

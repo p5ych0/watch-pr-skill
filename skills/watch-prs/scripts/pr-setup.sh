@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bash -p
 # Everything the driving session needs to start a run, done in a process and handed
-# back as a file the driver SOURCES.
+# back as ONE VALUE in a file the driver READS.
 #
 #   pr-setup.sh <dir>
 #
@@ -16,10 +16,9 @@
 # It was 178 executable lines of the document, read on every invocation of the
 # skill — 18,450 characters, about a fifth of the whole thing — and nothing
 # executed them. #26 closed on the finding that they could not move, because setup
-# EXPORTS into the driving session and a child cannot export into its parent. That
-# is true of a child's environment. It is not true of a file the driver sources: an
-# assignment in a sourced file happens in the sourcing shell, which is the one
-# property the block needed.
+# EXPORTS into the driving session and a child cannot export into its parent. That is
+# true of a child's ENVIRONMENT, and it settles less than it looks: what has to cross
+# is a VALUE, and a value can cross in a file.
 #
 # WHAT STAYS IN THE DOCUMENT is what this cannot do for it: finding the scripts at
 # all, choosing the parent directory to hand over, and the sourcing itself with the
@@ -27,10 +26,10 @@
 #
 # WHAT THE CALLER MUST STILL DO, and the reason it is not done here:
 #
-#   - VALIDATE AFTER SOURCING. This writes the file; it cannot prove the file the
-#     driver reads is the one it wrote. The driver re-derives the identity from the
-#     sourced value and checks the shape of every path, so a file tampered with in
-#     between is refused rather than trusted.
+#   - VALIDATE WHAT IT READ. This writes the file; it cannot prove the file the driver
+#     reads is the one it wrote. The driver re-derives the identity from what it read,
+#     and assigns and proves every other value itself. WHICH object it opened is not
+#     something either side can settle today — see #230.
 #   - REMOVE THE DIRECTORY. It is the caller's, by construction: this helper is
 #     given a name and creates it, and it must survive the call for the source to
 #     happen at all. A helper that removed it would be removing the thing it was

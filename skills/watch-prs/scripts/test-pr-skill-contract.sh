@@ -433,7 +433,8 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
 # THE PREFIX MATCH IS THE OTHER HALF, and it is what catches a readonly or a
 # transforming attribute — MIXED CASE, because an all-caps sentinel survives
 # `declare -u` unchanged and that attribute got through once.
-for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN; do
+for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN \
+           CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
     grep -q "( $_tn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_setup_body" \
         || die "the setup probe does not assign a random RbProbe sentinel to \$$_tn and match it"
     grep -q "\[\[ -z \${!$_tn:-} \]\]" <<<"$_setup_body" \
@@ -755,6 +756,35 @@ FORGE
         *'OWNER=acme REPO=widget'*) pass "…and the identity it announces is the checkout's" ;;
         *) die "the shadowed-dot case announced another identity: '$_dot_out'" ;;
     esac
+
+    # …AND AN ALIAS ONTO THE DERIVED IDENTITY IS REFUSED, which is the state the six
+    # local names added. `declare -n CODEX_BOT=OWNER` makes the assignment write
+    # THROUGH into the identity: `OWNER` becomes the reviewer login, `$CODEX_BOT` reads
+    # back as the login because it resolves through the same alias, the working-file
+    # checks pass, and the child pin compares only `RB_REMOTE` — so setup announces the
+    # bot as the repository owner and every later `gh` call is addressed at a slug
+    # nobody chose. Staged against `OWNER`, `REPO` and `HOST` in turn, because the hole
+    # is the identity rather than one name of it.
+    if [ "$_rb_has_n" = yes ]; then
+        for _al_pair in CODEX_BOT:OWNER COPILOT_BOT:REPO SUMMARY_FILE:OWNER \
+                        REQUEST_FILE:HOST PRIOR_FILE:REPO HEAD_FILE:OWNER; do
+            _al_src="${_al_pair%%:*}"; _al_dst="${_al_pair#*:}"
+            _al_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+                FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+                    declare -n '"$_al_src"'='"$_al_dst"'
+                    '"$_setup_body"'
+                ' 2>&1)" || true
+            case "$_al_out" in
+                *'OWNER=acme REPO=widget'*)
+                    die "a nameref $_al_src -> $_al_dst reached a session: '$_al_out'" ;;
+                *'OWNER='*)
+                    die "a nameref $_al_src -> $_al_dst announced an identity: '$_al_out'" ;;
+            esac
+        done
+        pass "a nameref from a locally assigned name onto the derived identity is refused"
+    else
+        pass "this shell has no declare -n, so the identity-alias states are skipped by name"
+    fi
 
     # ── the retry, and what it is gated on ────────────────────────────────
     # A STORAGE REFUSAL IS RETRIED UNDER THE OTHER PARENT. Status 2 means both
@@ -1086,7 +1116,8 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # the status passes while the setup directory is built at a name the operator
     # chose.
     if [ "$_rb_has_n" = yes ]; then
-        for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN; do
+        for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN \
+                   CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
             _nr_rc=0
             _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
                 FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -1154,7 +1185,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # through to the call, where a transformed `RB_SETUP_DIR` names a directory the
     # operator chose.
     case "$_setup_body" in
-        *'ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR and RB_PIN_SEEN is readonly'*)
+        *'ABORT: one of the names this block assigns —'*'is readonly, value-transforming, or aimed at another name'*)
             pass "…and the probe's refusal is an arm that says which names it is about" ;;
         *)  die "the probe refusal is not an arm with an abort" ;;
     esac

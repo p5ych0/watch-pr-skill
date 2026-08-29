@@ -1574,52 +1574,59 @@ assignment then fails and the old value is what the arms see. That is the same l
 the honest version of something it inherited — and it is why the block's own
 guarantee is about what a shadowed COMMAND can reach.
 
-## THE SETUP WORK RUNS IN A PROCESS AND WHAT COMES BACK IS ONE VALUE IN A FILE.
+## THE SETUP WORK RUNS IN A PROCESS, because nothing in this document executed it.
 
-This block was 178 executable lines and 105 of comment — 18,450 characters, about a
-fifth of `SKILL.md`, read on every invocation of the skill and executed by nothing.
-#26 closed on the finding that it could not move, because setup EXPORTS into the
-driving session and a child cannot export into its parent.
+It was 178 executable lines and 105 comment lines of this document — about a fifth of
+everything the driver reads on every invocation — and no test could reach any of it. A
+fenced block is not a file the suite has, and `test-pr-skill-contract.sh` covers only
+what it can lift and run.
 
-That is true of a child's ENVIRONMENT and not of a file the driver SOURCES. An
-assignment in a sourced file happens in the sourcing shell, which is the one
-property the block needed, so `pr-setup.sh` does the work in a process where it can
-be tested and writes the values out; what is left here is what a helper cannot do
-for the shell that calls it.
+#26 asked whether it could move and answered no, because setup EXPORTS into this
+session and a child cannot export into its parent. That is true of a child's
+ENVIRONMENT, and it settles less than it looks: what has to cross is a VALUE, and a
+value can cross in a file.
 
-What stays, and why each has to: finding the scripts at all, which is how the helper
-is reached; choosing the parent directory to hand over, because the alternative is
-the helper choosing and reporting a path back, and
-`docs/decisions/2026-08-26-transport-candidate-in-argv.md` records three refuted
-attempts at that channel; the source itself; and the proofs after it.
+WHAT STAYS IS WHAT A HELPER CANNOT DO FOR THIS SHELL: finding the scripts at all, since
+the identity parser is one of them; choosing the parent directory to hand over; the
+read; and the proofs after it, which catch a readonly name or a nameref defeating this
+shell's own assignment — a helper process cannot observe that. The pin is a fifth, and
+it is why the export below is made here.
 
-## NOTHING THE HELPER WROTE IS EXECUTED HERE; ONE VALUE IS READ.
+## AND WHAT COMES BACK IS ONE VALUE, because eleven of the twelve were never information.
 
-This block SOURCED a file of twelve assignments, and the source was the defect. `.` is
-a NAME. `SKILL.md`'s bash runs in the operator's long-lived shell, which nothing
-controls and which cannot re-exec out of its own functions — so a function named `.`
-could delegate the earlier `identitylib.sh` load, read the genuine assignments, and
-hand back a different origin. Everything after that agrees with it: `rb_identity`
-derives `OWNER` and `REPO` FROM the forged value, and the child pin reports the forged
-value back because it inherits the forged export. The session then posts, signs off
-and merges in another repository, with every check passing.
+The helper wrote twelve assignments and this block SOURCED them, which is a separate
+obligation from running the work in a process and is why it is a separate claim: the
+helper could stay a process and go back to handing over twelve values tomorrow.
 
-WHAT MADE THE SOURCE UNNECESSARY is that eleven of the twelve values were never
-information. `OWNER`, `REPO` and `HOST` are what `rb_identity` derives from the origin,
-and this block runs it anyway. The two reviewer logins are constants. The working
-directory and its four files are a literal suffix under a directory this shell named
-itself. Only the ORIGIN crosses a boundary this shell cannot see across.
+`OWNER`, `REPO` and `HOST` are what `rb_identity` derives FROM the origin, and this
+block runs it anyway. The two reviewer logins are constants. The working directory and
+its four files are a literal suffix under a directory this shell named itself —
+`RB_WORK_DIR` was not referenced anywhere else in the document at all. So the origin is
+the only value that crosses a boundary this shell cannot see across, and everything
+else is assigned here and proved.
+## NOTHING THE HELPER WROTE IS EXECUTED HERE, because `.` is a name in this shell.
 
-SO ONE VALUE COMES BACK, in a file read with `$(<…)` — a substitution the parser
-performs with no fork and no command name, which is how `pr-origin.sh` has always sent
-one and how the pin already comes back four lines below. A replaced file can now give
-a wrong string and nothing else, and `rb_identity` and the child pin are what refuse
-it.
+`SKILL.md`'s bash runs in the operator's long-lived shell, which nothing controls and
+which cannot re-exec out of its own functions. While the setup values arrived by
+SOURCING, a function named `.` could delegate the earlier `identitylib.sh` load, read
+the genuine assignments, and hand back a different origin — after which everything
+agreed with it, because `rb_identity` derives `OWNER` and `REPO` FROM the value and the
+child pin reports back the export made FROM it. The session then posts, signs off and
+merges in another repository with every check passing.
 
-#228 ASKED FOR THE SOURCE, and its reasoning was sound on the premise that many values
-had to cross. The premise was wrong, and finding that out is what removed the
-dependency rather than guarding it.
+THAT IS AN INDEPENDENT OBLIGATION FROM HOW THE VALUE TRAVELS. A future edit could keep
+the single value and reintroduce a source to read it, which is why this claim and the
+one below it are two.
 
+## THE VALUE ARRIVES BY EXPANSION, which the parser performs with no command in it.
+
+`$(<file)` is a substitution the shell performs itself — no fork, no command name, and
+nothing an operator's function can stand in for. It is how `pr-origin.sh` has always
+sent a value back and how the pin already comes back a few lines below, so this is the
+document's existing answer rather than a new one.
+
+WHAT IT DOES NOT ANSWER is WHICH object was bound; that is #230, and it is a property of
+this handoff on `main` as much as here.
 ## THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
 
 This block removed the env file after sourcing it and the pin leaf after reading it,
@@ -1731,6 +1738,20 @@ The alternative was a check per attribute, which is a list, and `CLAUDE.md` reco
 what a list of names costs: the first version enumerated the attributes it knew and
 was defeated by the next one.
 
+
+EVERY NAME THIS BLOCK ASSIGNS IS IN IT, and the six added with the local assignments
+are why that sentence is not decoration. `declare -n CODEX_BOT=OWNER` makes the
+assignment below write through into the identity: `OWNER` becomes the reviewer login,
+`$CODEX_BOT` still reads back as the login because it resolves through the same alias,
+the working-file checks pass, and the child pin compares only `RB_REMOTE` — so setup
+announces the bot as the repository owner and every later `gh` call is addressed at a
+slug nobody chose.
+
+RE-DERIVING THE IDENTITY AFTERWARDS WAS THE OTHER CANDIDATE and was rejected. It works
+only if the read-backs run AFTER it, so it is an ordering constraint on a chain that
+did not have one; and it answers this alias rather than aliasing generally, which is
+the enumeration this section exists to have removed. `${!name}` asks the question for
+any target, including ones no list would carry.
 ## EVERYTHING AFTER THE CALL IS INSIDE ITS SUCCESS ARM, so nothing walks past a refusal.
 
 The refusals here are arms not taken rather than statements that have to terminate.

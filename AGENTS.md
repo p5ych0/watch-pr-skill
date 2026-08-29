@@ -152,9 +152,11 @@ refactor, and the boundary has been measured twice. #26 asked whether this code
 could move into `.sh` files and answered no, on the grounds that the setup block
 EXPORTS into the operator's shell and a child cannot export into its parent. #228
 found that argument true of a child's ENVIRONMENT and false of a file the driver
-SOURCES — an assignment in a sourced file happens in the sourcing shell — and moved
-the setup work into `pr-setup.sh`, leaving the document 96 executable lines where it
-had 178.
+READS: what has to cross a process boundary is a VALUE, and a value can cross in a
+file. #228 moved the setup work into `pr-setup.sh` on that reading, leaving the
+document 108 executable lines where it had 178 — and only the ORIGIN crosses, because
+the identity parser derives three of the other values, two are constants, and the
+working paths are a literal suffix under a directory the driver named itself.
 
 What did NOT move is what a helper process cannot do for this one: finding the
 scripts at all, choosing the parent directory to hand over, the source itself, and
@@ -394,11 +396,12 @@ repository as an EXAMPLE, as EVIDENCE, or as HISTORY. The one exception is the o
 session, which does not survive into a file.
 
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
-has `pr-setup.sh` read the origin — through `pr-origin.sh`, privileged — and write
-both the assignment and its `export REVIEW_BUS_REMOTE` into the file the driver
-SOURCES, which is how a child's value reaches the parent at all; the driver then
-re-derives the identity from what it sourced, because a file is not a promise.
-`rb_identity` prefers that pin over deriving.
+has `pr-setup.sh` read the origin — through `pr-origin.sh`, privileged — and write it
+into a file the driver READS with `$(<…)`; the driver re-derives the identity from it,
+because a file is not a promise, and makes the `export REVIEW_BUS_REMOTE` itself.
+NOTHING the helper writes is sourced: `.` is a name, and in the driving shell a
+function by that name could hand back another origin that every later check agrees
+with. `rb_identity` prefers that pin over deriving.
 Every helper runs `rb_identity` in its own process against its own current
 directory, so without the pin a `cd` into a second checkout retargets every stage
 that POSTS — a signoff, a revocation, a review request — at whatever pull request

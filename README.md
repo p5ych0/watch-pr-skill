@@ -941,16 +941,26 @@ plugin docs and open an issue.
   cannot tell a squatted name from a filesystem with no room. The helper can, and
   says so.
 
-  The refusals AFTER the source read differently, and that is not cosmetic. Setup
-  sources a file the helper wrote, and the three checks on what arrived — the origin
-  is there, it is one line, it parses as an identity — are parameter expansions the
-  shell REFUSES rather than `echo` lines, so they begin with your shell's name, a
-  line number and `RB_REMOTE:`. In your own shell `echo` may be a function that
-  prints nothing, or one that forges a value and then stops `exit` from working; an
-  expansion has no command in it to shadow. What comes after — the working-path
-  check and the pin — announces itself with a plain `ABORT:` line, and correctly:
-  every one of those is an arm the block cannot walk past, so position is what
-  contains them and there is nowhere for a neutralised `exit` to carry on to.
+  The refusals AFTER the read differently, and that is not cosmetic. Setup READS one
+  value from the helper — the repository's remote — and derives, holds or builds
+  everything else itself, so nothing the helper wrote is ever executed. The three
+  checks on what arrived — the origin is there, it is one line, it parses as an
+  identity — are parameter expansions the shell REFUSES rather than `echo` lines, so
+  they begin with your shell's name, a line number and `RB_REMOTE:`. In your own shell
+  `echo` may be a function that prints nothing, or one that forges a value and then
+  stops `exit` from working; an expansion has no command in it to shadow. What comes
+  after — the working-path check and the pin — announces itself with a plain `ABORT:`
+  line, and correctly: every one of those is an arm the block cannot walk past, so
+  position is what contains them and there is nowhere for a neutralised `exit` to
+  carry on to.
+
+  One refusal names a list of variables and says one of them is "readonly,
+  value-transforming, or aimed at another name". Those are the names setup assigns in
+  your shell, and a startup file that has fixed any of them — made it readonly, given
+  it `declare -i`, or pointed it at another variable — is what that means. Setup
+  cannot work around it: an assignment to a readonly name fails silently, and one
+  aimed elsewhere writes into whatever it was aimed at. Unset them, or start the loop
+  from a shell that does not set them.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.

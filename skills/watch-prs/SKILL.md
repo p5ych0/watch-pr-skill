@@ -186,7 +186,9 @@ unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
-# THE SETUP WORK RUNS IN A PROCESS AND WHAT COMES BACK IS ONE VALUE IN A FILE.
+# THE SETUP WORK RUNS IN A PROCESS, because nothing in this document executed it.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND WHAT COMES BACK IS ONE VALUE, because eleven of the twelve were never information.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -197,7 +199,19 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
    && ( RB_SETUP_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_SETUP_DIR = RbProbe* ]] \
      && [[ -z ${!RB_SETUP_DIR:-} ]] ) 2>/dev/null \
    && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
-     && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
+     && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null \
+   && ( CODEX_BOT="RbProbe$$$RANDOM$RANDOM"; [[ $CODEX_BOT = RbProbe* ]] \
+     && [[ -z ${!CODEX_BOT:-} ]] ) 2>/dev/null \
+   && ( COPILOT_BOT="RbProbe$$$RANDOM$RANDOM"; [[ $COPILOT_BOT = RbProbe* ]] \
+     && [[ -z ${!COPILOT_BOT:-} ]] ) 2>/dev/null \
+   && ( SUMMARY_FILE="RbProbe$$$RANDOM$RANDOM"; [[ $SUMMARY_FILE = RbProbe* ]] \
+     && [[ -z ${!SUMMARY_FILE:-} ]] ) 2>/dev/null \
+   && ( REQUEST_FILE="RbProbe$$$RANDOM$RANDOM"; [[ $REQUEST_FILE = RbProbe* ]] \
+     && [[ -z ${!REQUEST_FILE:-} ]] ) 2>/dev/null \
+   && ( PRIOR_FILE="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_FILE = RbProbe* ]] \
+     && [[ -z ${!PRIOR_FILE:-} ]] ) 2>/dev/null \
+   && ( HEAD_FILE="RbProbe$$$RANDOM$RANDOM"; [[ $HEAD_FILE = RbProbe* ]] \
+     && [[ -z ${!HEAD_FILE:-} ]] ) 2>/dev/null; then
     # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     RB_TMPPARENT=
@@ -222,7 +236,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
             && { RB_TMPPARENT="$RB_TMPPARENT2"; }; }
     then
-        # NOTHING THE HELPER WROTE IS EXECUTED HERE; ONE VALUE IS READ.
+        # NOTHING THE HELPER WROTE IS EXECUTED HERE, because `.` is a name in this shell.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+        # THE VALUE ARRIVES BY EXPANSION, which the parser performs with no command in it.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         # THE FILE IS BOUND BEFORE IT IS READ, because a name can be replaced between the two.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -307,7 +323,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR and RB_PIN_SEEN is readonly, value-transforming, or aimed at another name; the setup directory cannot be chosen"
+    echo "ABORT: one of the names this block assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE or HEAD_FILE — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi
