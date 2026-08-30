@@ -35,19 +35,19 @@
   without the sticky bit another account can replace it afterwards — where a
   recursive cleanup would delete the replacement and everything in it. That is far
   past what `docs/decisions/2026-08-26-reservation-inference.md` accepts, and the
-  record rests on `rmdir` refusing anything with contents. The cleanup takes the
-  objects this run named, one at a time, and uses `rmdir` for the directories, so a
-  replacement carrying anything else survives and is left for its owner. It refuses to
-  remove anything at all unless the name still resolves to the object the reservation
+  record rests on `rmdir` refusing anything with contents. The cleanup ended up as ONE
+  reservation-level `rmdir` that removes nothing inside — see the entry below on why
+  every shape that gave the contents back destroyed something. It refuses even that
+  unless the name still resolves to the object the reservation
   made — `-O` for a directory another account holds, and the recorded inode for one
-  this account replaced, since a name that has been swapped is not a path to unlink
-  nested leaves through. A bare inode number is not a durable identity — one freed by
+  this account replaced, since a name that has been swapped is not one to give a
+  reservation back through. A bare inode number is not a durable identity — one freed by
   a `rmdir` can be handed straight to the next `mkdir` — so the helper holds a
   descriptor open on the directory it reserved, which stops the inode being freed at
   all. The number is read THROUGH that
   descriptor rather than through the published name, since one read through the name is
   the replacement's the moment the name has been swapped. Where the open fails, or the
-  number was never recorded, there is no durable identity and the cleanup unlinks
+  number was never recorded, there is no durable identity and the cleanup removes
   nothing, leaving a directory behind instead: the cost the record already covers.
 
 - **A name your shell has aliased stops setup instead of steering it.** The reviewer

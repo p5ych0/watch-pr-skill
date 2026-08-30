@@ -332,10 +332,11 @@ _forge_origin() {   # _forge_origin <body>
     return 0
 }
 # THE THIRD ARGUMENT IS WHAT THE CLEANUP IS EXPECTED TO DO, and it is not always
-# "removed". The give-back takes objects away one at a time and uses `rmdir` for the
-# directories, so anything it did not create REFUSES to go — which is the property,
-# not a shortfall: the name is published in argv, and a recursive removal would
-# delete whatever an account that replaced the directory had put in it.
+# "removed". The give-back is ONE `rmdir` on the reservation and nothing inside it, so it
+# succeeds only where the refusal came before anything was created — and where it came
+# after, the tree stays. That is the property rather than a shortfall: the name is
+# published in argv, and every shape that removed the contents resolved a name a same-UID
+# process may have substituted.
 _stagecase() {   # _stagecase <reason> <status> <gone|kept>
     local want="$1" wrc="$2" fate="$3" d o=0 oo
     d="$(mktemp -d "$TMP/st.XXXXXX")/dir"
@@ -430,9 +431,9 @@ grep -qF 'exec 8<"$RB_DIR"' "$SCRIPT" \
     || die "pr-setup.sh does not hold a descriptor on the directory it reserved"
 # AND THE RECORDED NUMBER IS THE OTHER HALF. The descriptor stops the inode being
 # reused; the number is what the comparison is against, and `ls -di` can fail or print
-# nothing — after which the comparison is skipped and the held descriptor alone would
-# let the leaf removals run against a name this run cannot vouch for. An empty record
-# is the same answer as a failed open.
+# nothing — after which the comparison is skipped and the held descriptor alone would let
+# the reservation's own `rmdir` run against a name this run cannot vouch for. An empty
+# record is the same answer as a failed open.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'p="$(dirname "$2")"
 rm -rf "$p"
