@@ -1,5 +1,56 @@
 # Changelog
 
+## [2.0.85] — 2026-08-30
+
+- **The round-close recipe is 2,258 characters shorter, and every one of them came out of
+  shell the driver reads on each invocation.** `SKILL.md` is 45% fenced bash, executed by
+  nothing and parsed by the model on every run; this is the first cut into the call
+  sequences that #26 left out of scope.
+
+  Three things went.
+
+  **The SECOND head-file proof.** Both fences validated `$HEAD_FILE` with a nested
+  forty-`?` `case` and an `-ef` test, and the one in the `post` fence guarded nothing:
+  `post` reads that file and refuses an altered one itself, before anything is posted, and
+  by the time the driver reaches that fence the threads are answered either way.
+
+  The FIRST copy stays, and an attempt to remove it in this change was reverted on review.
+  It runs after `gate` and before the replies — a moment the script is not running in —
+  and the replies cannot be taken back. `post` refusing later does not undo a resolved
+  thread. The argument for removing it was that a check cannot close its own window, which
+  is true of a racer and false of what actually goes wrong here: an operator's scratch
+  directory, an accidental alias, a session resumed with a different file. Against those a
+  check works, and it is the only one on the right side of the irreversible step.
+
+  **Twenty-four lines restating the script's own header** — the two invocations, the exit
+  statuses, the two kinds of push refusal. All of it is in `pr-close-round.sh`, beside the
+  code it describes, where it cannot drift. What stays is one line saying so, and what the
+  driver actually has to decide: which stage runs when, that the replies go between them,
+  and what each status means.
+
+  **The stdout parse.** The baseline came back only in the `PR_ROUND_CLOSED` record, so
+  the driver captured this script's output, ran `sed` over it, proved a record was there,
+  proved it carried a `prior-review=` field, and cut the value out with
+  `${rec##* prior-review=}`. Since 2.0.84 `post` writes it into a file, as `gate` writes
+  the head into its own, so the driver reads it through a bound descriptor and refuses if
+  that read fails. The record still carries the value for whoever is reading the terminal.
+
+  Nothing is checked less than before: what the driver stopped doing, the script does, and
+  `test-pr-close-round.sh` covers both conditions and both spellings.
+
+  **And the round-close read BINDS the baseline file before reading it.** Reading it as
+  `$(<"$PRIOR_FILE")` cannot tell a missing or unreadable file from an empty baseline, and
+  empty is legitimate — the ordinary answer when the head has no review yet. So a scratch
+  directory cleaned under a resumed session armed the watch with no baseline at all, and
+  on the automatic path a pass that finished during the CI wait is then accepted as the
+  answer to the request just made. Measured: the old form accepts it silently, the new one
+  refuses. The redirection fails where the read returned empty, which is the distinction
+  the fail-closed rule is about.
+
+  The opening request's read has the same shape and the same hole. It is NOT changed here:
+  it is pre-existing and unrelated to the round-close reduction, and `CLAUDE.md` says a
+  pre-existing defect found mid-work gets FILED rather than fixed. #238 carries it. #235.
+
 ## [2.0.84] — 2026-08-30
 
 - **The round's review baseline crosses in a file, like the head it sits beside.** It

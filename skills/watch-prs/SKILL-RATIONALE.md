@@ -1239,16 +1239,6 @@ Ending the arm in `[[ -n "" ]]` makes the LIST report non-zero, which nothing he
 reads. What does hold is that the work sits inside the branch a refusal does not
 take.
 
-## THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
-
-`CLAUDE.md` says to prove an assignment by reading the variable back, and the usual
-difficulty is that nothing else knows what the value should have been — a readonly
-name simply keeps whatever it held.
-
-The file does know. If this name was already readonly the assignment fails and the
-two disagree, which is the one case a check on the variable alone cannot see: the
-helper SUCCEEDED and the baseline is somebody else's.
-
 ## EMPTY IS AN ANSWER, THE PATTERN IS A LITERAL, AND THERE ARE TWO SHAPES.
 
 EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is nothing to
@@ -1274,101 +1264,6 @@ the request has been posted, leaving a pass in flight that nothing waits for.
 branch says nothing and returns 0 — a failed request indistinguishable from a
 posted one, which sends the driver into a wait for a review that was never asked
 for.
-
-## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
-
-Two recipes lived in `SKILL.md`, doing the same job in different ORDERS, and the
-ordering is the whole content. Nothing executed either, and a reader had to choose
-which one to copy — which is how the two drifted apart.
-
-There is one recipe in `SKILL.md` now, and the two orders are inside the script,
-where the suite reaches them. Issue #26.
-
-## THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
-
-`gate` pushes and proves the head green, and only then are the threads answered —
-so a resolve is a claim that is true when it is made.
-
-Resolve first and a round that then fails to push, or pushes red, has already
-recorded its findings as answered on a commit that never landed. With automatic
-review on it is worse: the pass the push starts reads threads already marked
-resolved, with no summary saying what resolved them.
-
-## IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
-
-A bare `git push` sends whatever branch the checkout is on, and this stage is given
-a PR NUMBER, not a branch.
-
-A round driven from a checkout left on the default branch — a `cd` or a `checkout`
-that failed, a second worktree holding the PR's branch — pushed `main`: an
-unreviewed commit on the default branch, and the round lost as well, because the
-checks were then awaited on a head the PR did not have. A detached HEAD is refused
-for the same reason. #119.
-
-## `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN.
-
-It was established in step 2 and the script refuses anything but `yes` or `no`, so
-the mode this PR is in picks the order INSIDE the script.
-
-The alternative was two recipes in `SKILL.md` and a reader deciding which to copy,
-which is how the two orderings drifted apart in the first place. A value assigned in your
-shell without `export` also reaches a function and not a child process, so reading
-it from the environment would give the script a silent default — and the default
-answer is a round closed on a mode nobody chose.
-
-## THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
-
-It was a string, and that is what #202 was. The driver captured `gate`'s output,
-`sed`ed the head out of the record, and assigned it — `GATED_HEAD="$( … )"`, an
-ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
-pushed. A startup file that has made that name readonly fails it there: with
-`errexit` on the shell ends, and without it the name keeps whatever it held, so the
-non-empty check passes on a seeded value and `post` is handed a head the gate never
-reported. `CLAUDE.md` records that an assignment's status cannot be taken, so a
-`||` on it catches nothing.
-
-A FILE HAS NO SUCH FAILURE, and it removes two more names with it. There is no
-capture, and there is no `sed` — which is a NAME, and one that prints a plausible
-forty hex and exits 0 sends `post` at whatever it says. Both stages take the same
-path, `gate` writes and `post` reads, and the value never enters this shell at all:
-what is checked here is that the file holds a COMMIT ID, which is a question about
-the file rather than about a name. Not merely that it is non-empty — the section
-below says why that is not enough — and not that it equals what `gate` reported,
-which the driver cannot know, since the record and the file are two claims and only
-one of them reaches this shell.
-
-It is the shape `pr-request-review.sh` uses for the review baseline and
-`pr-origin.sh` for the origin. A path rather than a name.
-
-WHAT THE DRIVER STILL CANNOT PROVE is that the file holds what `gate` reported —
-and it does not have to. `post` reads it and validates what it finds against
-`sha_reason` before anything is posted, so a truncated or corrupted file stops the
-round at the stage that depends on it, at the cost of a rerun. Checking it twice
-would be a branch no fixture can stage.
-
-## AND THE STAGE RUNS AS A CONDITION, so no name holds its OUTPUT.
-
-`GATE_OUT="$( … )"` captured everything the stage printed so that a `sed` could
-lift the head back out of it. Both halves are gone: the head travels in a file, and
-what the stage prints goes straight to the operator, which is where a reason
-belongs.
-
-A capture is also an assignment made AFTER the push, which is the defect this whole
-change is about, reached by the other road.
-
-## AND NO NAME HOLDS ITS STATUS EITHER.
-
-`; GATE_RC=$?` and a `case` on it: a readonly `GATE_RC` keeps its old value, so the
-`case` branched on a status from another round. Run as a condition there is no
-status variable at all, and `$?` in the `else` arm is the condition's own, read
-before anything can change it.
-
-WHAT NEITHER BUYS IS CONTAINMENT, and the claim used to say otherwise. With `exit`
-replaced by a function that returns, the `else` arm's `exit` returns, the trailing
-reserved word leaves the completed `if` with status 1, and execution carries on
-after the `fi`. Nothing consumes that status. What follows the `fi` is the head
-proof, which refuses on every path that is not a proven success — and after THAT is
-prose, which no shell construct reaches.
 
 ## AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
 
@@ -1465,16 +1360,270 @@ refusal arm and prints it unless `echo` has been shadowed, `post` asks the conte
 question again and refuses, so no summary is posted and no pass requested, and the
 allocation the paths come from cannot produce the aliased case at all.
 
-## THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
+## AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
 
-The check that matters is the one before the replies; this one is for the other
-way in. A later session — tomorrow, another machine — resumes at the post step
-with no gate having run in ITS shell, and the head file is whatever the last one
-left. The same question is the right question there, and the answer costs nothing.
+`if { … } 9<"$PRIOR_FILE"; then <use>; else <refuse>; fi`, and never the negation with
+the refusal in the `then`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, this fence
+DOES NOT REFUSE AT ALL. Measured on bash 5.3.9:
 
-It is a deliberate second copy rather than a rule with two callers, because the
-two guard different boundaries: one stops a walked-past refusal from reaching an
-irreversible resolve, and this one stops a post that never had a gate at all.
+    { true; } 9</nonexistent                            -> status 1
+    ! { true; } 9</nonexistent                          -> status 1
+    if ! { true; } 9</nonexistent; then A; else B; fi    -> B
+    if   { true; } 9</nonexistent; then A; else B; fi    -> B
+
+The `!` LEAVES THE STATUS AT 1 rather than inverting it, so both spellings take the
+`else`. The version is named and all four are shown because this was raised as
+contradicting bash's semantics — the claim is meant to be re-run, not believed.
+
+SO THE NEGATED FORM IS FAIL-OPEN HERE, which is the opposite of how it reads. It was
+how this fence's sibling at step 2 was written when the binding landed: a missing file
+fell through, matched the empty arm, and armed the watch with no baseline. Every check
+on it was a `grep` for the redirection, which was present and correct throughout, and
+only EXECUTING the fence found it.
+
+## AND THE NAME IS NOT CLEARED FIRST, because a clear is an assignment to it as well.
+
+`PRIOR_REVIEW=` looks like hygiene and is a write. On a RESUMED round-close session
+step 2's assignability probe has not run — a session can enter here directly — and
+setup's probe list does not carry this name, so nothing upstream has established that
+writing it is safe. Declared a nameref onto `BASH_XTRACEFD`, the clear empties that
+variable and bash CLOSES the descriptor it referred to, which can be the session's own
+stdout, after `post` has already closed the round.
+
+NOTHING IS LOST BY DROPPING IT. The bound assignment overwrites the value on the
+success path, and every failure path `exit`s without reading it — so a stale value can
+never be consumed, which is the only thing the clear was for.
+
+## AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
+
+Every arm of this fence ends in `exit` and then a reserved word, and NOTHING FOLLOWS
+THE `fi`. That is the containment `CLAUDE.md` describes: `exit` is a name the
+operator's shell can replace with one that RETURNS, so an abort arm can print its
+reason and carry straight on — and what it carries on INTO is the only thing that
+decides whether the refusal held.
+
+IT DID NOT HOLD BEFORE. The refusal sat in an inner `else`, and after the enclosing
+`fi` came a `case` on `$ROUND_RC` and `exit "$ROUND_RC"`. With a returning `exit`,
+the abort printed, fell out of both `if`s, and reached that final line with
+`ROUND_RC` still 0 — so the fence reported SUCCESS on a baseline it had just
+refused, and step 3 watched with the cleared value, which is the in-flight review
+being accepted as this round's answer.
+
+SO THE SUCCESS ARM CARRIES THE EXIT TOO, and the `ROUND_RC` diagnostic moved into
+the `else` of the outer `if` rather than sitting after it. Position is the
+containment: there is no code after the fence for a neutralised `exit` to fall into,
+and the reserved word after each `exit` leaves the arm non-zero for anything that
+reads it.
+
+## AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
+
+By the time this read runs the summary is posted and the next pass requested. The
+refusal stops the watch — that is all it can do — and the message says the round IS
+closed precisely so the next session does not treat it as a round that failed.
+
+RE-CLOSING IS THE EXPENSIVE MISREADING. A session that ran the round-close recipe
+again would post a SECOND summary and request a SECOND pass on the same head, which
+is the duplicate the trigger rules exist to prevent, and the reviewer would answer a
+round nobody ran. The exit is a `1` because something is wrong, and the text is what
+stops that `1` being read as "the round did not close".
+
+## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
+
+Twenty-four lines of this block were the two invocations, the exit statuses and the
+two kinds of push refusal — all of it already in `pr-close-round.sh`'s header, where
+a reader of the script finds it and where it cannot drift from the code beside it.
+Here it was a second copy read on every invocation of the skill and executed by
+nothing, and a second copy of a contract is the thing this repository has paid for
+repeatedly: the copy that is not beside the code is the one that goes stale.
+
+WHAT STAYS IS WHAT THE DRIVER HAS TO DECIDE — which stage runs when, that the
+replies go between them, and what each status means for the round. The rest is one
+line saying where to read it.
+
+## THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
+
+`CLAUDE.md` says to prove an assignment by reading the variable back, and the usual
+difficulty is that nothing else knows what the value should have been — a readonly
+name simply keeps whatever it held.
+
+The file does know. If this name was already readonly the assignment fails and the
+two disagree, which is the one case a check on the variable alone cannot see: the
+helper SUCCEEDED and the baseline is somebody else's.
+
+## A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
+
+`PRIOR_REVIEW="$(<"$PRIOR_FILE")"` cannot tell those apart. A missing or unreadable
+file makes the substitution EMPTY, and empty is a legitimate baseline — the ordinary
+answer when the head has no review yet — so the value passes every test after it and
+the watch arms with no baseline at all. On the automatic path that is the defect the
+baseline exists to prevent: a pass that finished during the CI wait is then accepted
+as the answer to the request just made.
+
+THE REDIRECTION IS WHAT DISTINGUISHES THEM. `9<"$PRIOR_FILE"` fails if the file is
+not there or cannot be read, and a failed redirection fails the whole compound
+command — so "could not read" and "read an empty value" take different branches,
+which is the fail-closed rule `CLAUDE.md` states. Reading through `/dev/fd/9` then
+reads the object that redirection opened rather than resolving the name a second
+time.
+
+What it protects is the WAIT, and the claim below says what it must not do instead.
+
+## THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
+
+`gate` has been an `if` condition since it was written; `post` was not, because its
+STDOUT had to be captured to get the baseline out of the record. That capture is gone
+— the baseline crosses in a file — and with it the reason for the shape.
+
+WHAT THE SHAPE COST was two names the operator's shell owns. The status went into
+`ROUND_RC`, and the branch was `[ "$ROUND_RC" -eq 0 ]`: a function called `[` that
+returns success routes a STOPPED or PAUSED `post` into the arm that reads the baseline
+and enters the watch — on a pass nobody requested, with the summary unposted. Both are
+gone: `if <helper>; then` cannot be stood in for, and `case $?` in the `else` tells the
+three answers apart with a reserved word, `$?` taken before anything can replace it.
+
+AND A CONDITION IS EXEMPT FROM `errexit`, which is the same reason every other stage
+in this document is written as one.
+
+## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
+
+`post` writes the review baseline into the file it is given, as `gate` writes the
+head into its own — #234. Before that it came back only in the `PR_ROUND_CLOSED`
+record, so this shell captured the script's stdout, ran `sed` over it, proved a
+record was there, proved it carried a `prior-review=` field, and cut the value out
+with `${rec##* prior-review=}`.
+
+TWELVE EXECUTABLE LINES FOR ONE VALUE, in the shell that cannot re-exec away from
+its operator's functions — `sed` is a name, the capture is an assignment, and the
+record's shape was a thing to parse. The file needs none of it: `$(<…)` is handled
+by the parser, and the value was validated by the helper that produced it.
+
+## THE RECORD IS STILL PRINTED, and it is what an operator reads.
+
+`post` still ends with `PR_ROUND_CLOSED pr=… reviewer=… head=… mode=… prior-review=…`,
+and the baseline is still in it. Moving the value into a file did not make the record
+redundant: it is the line a person scrolling the terminal reads to see which head the
+round closed on and which pass was requested, and it is what a transcript preserves.
+
+WHAT CHANGED IS ONLY WHO READS IT. The driver used to, by parsing; it does not now.
+Dropping the record because nothing machine-readable consumes it would take the
+operator's account of the round with it.
+
+## AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
+
+`post` took it from `pr-review-state.sh review-id`, which validates it, and
+`pr-watch.sh` refuses a baseline it cannot use as `--after-review`. A third copy of
+that rule in the document would be the duplication `CLAUDE.md` records paying for
+repeatedly — and it would be the copy furthest from the code, in the shell least able
+to run it.
+
+AND THERE IS NO ASSIGNMENT POSTCONDITION HERE ANY MORE, which is worth stating because
+there was one and it is gone. It compared the variable against a second read of the
+bound descriptor, and that second read is what does not work on macOS — the descriptor
+is duplicated rather than reopened, so it returns empty and the comparison refuses every
+non-empty baseline. It was removed rather than replaced, and each attribute it was meant
+to catch is answered elsewhere: a READONLY name ends the shell outright at the failed
+assignment, measured, rather than passing quietly; a value-TRANSFORMING or aliased one is
+what step 2's probe is for, before the request goes out; and a value that arrives
+transformed anyway is refused by `pr-watch.sh`, which validates what it is given as
+`--after-review`.
+
+SO NOTHING HERE CLAIMS TO PROVE THE ASSIGNMENT, and a claim saying otherwise would be a
+claim with no code under it.
+
+## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
+
+Two recipes lived in `SKILL.md`, doing the same job in different ORDERS, and the
+ordering is the whole content. Nothing executed either, and a reader had to choose
+which one to copy — which is how the two drifted apart.
+
+There is one recipe in `SKILL.md` now, and the two orders are inside the script,
+where the suite reaches them. Issue #26.
+
+## THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
+
+`gate` pushes and proves the head green, and only then are the threads answered —
+so a resolve is a claim that is true when it is made.
+
+Resolve first and a round that then fails to push, or pushes red, has already
+recorded its findings as answered on a commit that never landed. With automatic
+review on it is worse: the pass the push starts reads threads already marked
+resolved, with no summary saying what resolved them.
+
+## IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
+
+A bare `git push` sends whatever branch the checkout is on, and this stage is given
+a PR NUMBER, not a branch.
+
+A round driven from a checkout left on the default branch — a `cd` or a `checkout`
+that failed, a second worktree holding the PR's branch — pushed `main`: an
+unreviewed commit on the default branch, and the round lost as well, because the
+checks were then awaited on a head the PR did not have. A detached HEAD is refused
+for the same reason. #119.
+
+## `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN.
+
+It was established in step 2 and the script refuses anything but `yes` or `no`, so
+the mode this PR is in picks the order INSIDE the script.
+
+The alternative was two recipes in `SKILL.md` and a reader deciding which to copy,
+which is how the two orderings drifted apart in the first place. A value assigned in your
+shell without `export` also reaches a function and not a child process, so reading
+it from the environment would give the script a silent default — and the default
+answer is a round closed on a mode nobody chose.
+
+## THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
+
+It was a string, and that is what #202 was. The driver captured `gate`'s output,
+`sed`ed the head out of the record, and assigned it — `GATED_HEAD="$( … )"`, an
+ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
+pushed. A startup file that has made that name readonly fails it there: with
+`errexit` on the shell ends, and without it the name keeps whatever it held, so the
+non-empty check passes on a seeded value and `post` is handed a head the gate never
+reported. `CLAUDE.md` records that an assignment's status cannot be taken, so a
+`||` on it catches nothing.
+
+A FILE HAS NO SUCH FAILURE, and it removes two more names with it. There is no
+capture, and there is no `sed` — which is a NAME, and one that prints a plausible
+forty hex and exits 0 sends `post` at whatever it says. Both stages take the same
+path, `gate` writes and `post` reads, and the value never enters this shell at all:
+what is checked here is that the file holds a COMMIT ID, which is a question about
+the file rather than about a name. Not merely that it is non-empty — the section
+below says why that is not enough — and not that it equals what `gate` reported,
+which the driver cannot know, since the record and the file are two claims and only
+one of them reaches this shell.
+
+It is the shape `pr-request-review.sh` uses for the review baseline and
+`pr-origin.sh` for the origin. A path rather than a name.
+
+WHAT THE DRIVER STILL CANNOT PROVE is that the file holds what `gate` reported —
+and it does not have to. `post` reads it and validates what it finds against
+`sha_reason` before anything is posted, so a truncated or corrupted file stops the
+round at the stage that depends on it, at the cost of a rerun. Checking it twice
+would be a branch no fixture can stage.
+
+## AND THE STAGE RUNS AS A CONDITION, so no name holds its OUTPUT.
+
+`GATE_OUT="$( … )"` captured everything the stage printed so that a `sed` could
+lift the head back out of it. Both halves are gone: the head travels in a file, and
+what the stage prints goes straight to the operator, which is where a reason
+belongs.
+
+A capture is also an assignment made AFTER the push, which is the defect this whole
+change is about, reached by the other road.
+
+## AND NO NAME HOLDS ITS STATUS EITHER.
+
+`; GATE_RC=$?` and a `case` on it: a readonly `GATE_RC` keeps its old value, so the
+`case` branched on a status from another round. Run as a condition there is no
+status variable at all, and `$?` in the `else` arm is the condition's own, read
+before anything can change it.
+
+WHAT NEITHER BUYS IS CONTAINMENT, and the claim used to say otherwise. With `exit`
+replaced by a function that returns, the `else` arm's `exit` returns, the trailing
+reserved word leaves the completed `if` with status 1, and execution carries on
+after the `fi`. Nothing consumes that status. What follows the `fi` is the head
+proof, which refuses on every path that is not a proven success — and after THAT is
+prose, which no shell construct reaches.
 
 ## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 
@@ -1496,48 +1645,6 @@ saw and to no other.
 
 This is a separate question from when the round closes: the ordering says the post
 comes last, and this says the post is still allowed to happen when it gets there.
-
-## THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
-
-The script reads it immediately before it requests the pass, and a child cannot
-assign a variable here — so it says what the value was.
-
-Without this the watch keeps the OLDER baseline, and the terminal review this round
-just handled is newer than it, so it is accepted at once as the answer to a request
-nobody has answered yet.
-
-## THE RECORD HAS TO BE THERE.
-
-An absent record means the stage reported nothing, and step 3 would then watch
-against a baseline left over from the previous round.
-
-## THE BASELINE MAY LEGITIMATELY BE EMPTY, which is a different question.
-
-`pr-review-state.sh review-id` returns nothing when the current head has no review
-yet — which is every round that pushes a new commit, and every Copilot round, since
-a push never triggers one — and `pr-watch.sh` takes an empty baseline as "wait on
-any terminal review", which is exactly right there.
-
-Testing the VALUE for emptiness aborted on all of those, AFTER the summary was
-posted and the pass requested: the watch was never armed, and a retry posts the
-summary and requests the pass a second time.
-
-## THE FIELD IS WHAT IS CHECKED FOR, not what is in it.
-
-A record that lost the field entirely is a malformed answer. A record whose field
-is empty is an answer.
-
-Collapsing the two puts the abort on the ordinary case and lets the malformed one
-through, which is the wrong way round for a value step 3 is about to watch on.
-
-## `prior-review=` IS LAST IN THE RECORD, so everything after it is the value.
-
-`${CLOSED_REC##* prior-review=}` strips through the last occurrence, so the field
-being last is what makes that expansion the whole of the read — with nothing else to
-match and no second field to be confused with.
-
-Anything appended after that field would be swallowed into the baseline, which is
-the same field-order rule the signoff records follow and for the same reason.
 
 ## NOTHING REACHES THE POST EXCEPT THROUGH THE ARM THAT PROVED IT.
 
