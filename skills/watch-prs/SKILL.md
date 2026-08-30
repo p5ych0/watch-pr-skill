@@ -285,7 +285,14 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             then
                 # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                export PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS
+                # ONE NAME PER CALL, because `export` is a name this shell may have wrapped.
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+                export PR_CI_INTERVAL
+                export PR_CI_TIMEOUT
+                export PR_CI_GRACE
+                export PR_CI_PROBE_TIMEOUT
+                export REVIEW_MERGE_STRICT
+                export RB_SUITE_JOBS
                 # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.

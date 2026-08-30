@@ -2677,6 +2677,25 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
         pass "this shell has no declare -n, so the nameref knob state is skipped by name"
     fi
 
+    # …AND NEITHER DOES A ONE-ARGUMENT `export` WRAPPER, which is why the six names are
+    # exported one statement at a time. `export` is a name this shell may have wrapped,
+    # and `export() { builtin export "$1"; }` is an ordinary enough thing to find in a
+    # startup file: measured, it passes the first name and drops the rest, so a
+    # six-argument call would export `PR_CI_INTERVAL` and lose `REVIEW_MERGE_STRICT`
+    # without saying anything.
+    knob_wrap="$(cd "$SETUPTMP/repo" && run_limited 60 env -u REVIEW_MERGE_STRICT \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'REVIEW_MERGE_STRICT=1
+                 export() { builtin export "$1"; }
+                 eval "$1" >/dev/null
+                 builtin unset -f export
+                 bash -c '"'"'printf "child=%s" "${REVIEW_MERGE_STRICT-unset}"'"'"'' _ "$setup_block" 2>&1)" \
+        || knob_wrap="FAILED:$knob_wrap"
+    case "$knob_wrap" in
+        *child=1*) pass "…and a single-argument export wrapper costs no knob either" ;;
+        *) die "a one-argument export wrapper drops the later knobs (got '$knob_wrap')" ;;
+    esac
+
     # A readonly definition, in the SAME shell the block runs in — which is the
     # driver's situation, and the only place the case is reachable. `readonly -f`
     # does not survive a process boundary.

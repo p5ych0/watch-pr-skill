@@ -700,6 +700,28 @@ default while the terminal showed the value you set. That is the one behaviour
 the move could have changed silently, so it is handled here rather than at each
 of the four call sites.
 
+## ONE NAME PER CALL, because `export` is a name this shell may have wrapped.
+
+The six knobs are exported one statement at a time rather than as
+`export A B C D E F`, and the difference is not style. This block runs in the
+operator's own shell, where `export` can be a function; a wrapper as ordinary as
+`export() { builtin export "$1"; }` passes the first name and drops the rest.
+Measured: the six-argument call exports `PR_CI_INTERVAL` and nothing else, while
+six calls export all six.
+
+WHAT THAT COSTS is `REVIEW_MERGE_STRICT`, and it costs it SILENTLY — no status,
+no message, and the knob simply absent from every child. The other five make the
+gate slower or more talkative; that one makes it merge with `--admin` instead of
+handing the decision to GitHub, which is the bypass the operator set it to remove.
+
+IT WAS A `for` LOOP BEFORE, over a variable of its own, and that shape had the
+same failure by another route: with a nameref at that variable in the operator's
+shell the `for` RETARGETS it rather than writing through — measured, the aliased
+target keeps its value — after which the loop's own expansion is empty, every
+`export ""` fails with `not a valid identifier`, and no knob reaches any child.
+Silently again, the guard's `&&` list being exempt from `errexit`. Removing the
+variable removed that; writing one name per call removes the other.
+
 `REVIEW_MERGE_STRICT` IS IN THIS LIST FOR THE SAME REASON, and it is the one
 that matters most: it is the knob that makes the merge SAFER, by handing the
 decision to GitHub instead of merging with `--admin`. Losing it at the process

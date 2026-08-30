@@ -22,13 +22,16 @@
   that one cannot move, because proving it inside the helper would prove only that the
   helper exports.
 
-- **A `HOME` or `TMPDIR` containing a space works.** The helper's argument check
-  restricted the characters a path may hold, which the inline setup it replaced never
-  did — and that refusal is terminal, so a usable second parent was never tried and
-  the session ended on a path that works. What is refused is the shape now: a value
-  that is missing, one that is relative, and one carrying a `..` component. Nothing
-  evaluates the path; it is quoted in the `mkdir`, in every redirection and in every
-  `printf`.
+- **A `HOME` or `TMPDIR` containing a space, or a `..` component, works.** The helper's
+  argument check restricted what a path may hold, which the inline setup it replaced
+  never did — and those refusals are terminal, so a usable second parent was never tried
+  and the session ended on a path that works. A character class went first; the `..` rule
+  went after it, for the same reason and one the delegate makes plain, since
+  `pr-origin.sh` takes the same kind of argument and restricts nothing. What is refused
+  now is a value that is MISSING and one that is RELATIVE, neither of which can be a
+  handoff between two processes. Nothing evaluates the path — it is quoted in the
+  `mkdir`, in every redirection and in every `printf` — and its components resolve at the
+  syscall like any other path's.
 
 - **A name your shell has aliased stops setup instead of steering it.** The reviewer
   logins and the four working paths are the driver's own assignments now, and a
