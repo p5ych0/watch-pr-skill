@@ -1949,9 +1949,21 @@ grep -q 'RX_PRIOR' "$SKILL" \
 # name was already readonly the assignment fails and the two disagree, which is
 # the one case a pattern check on the variable alone cannot see — the helper
 # SUCCEEDED and the baseline is somebody else's.
-[ "$(grep -c '\[\[ \$PRIOR_REVIEW = "\$(<"/dev/fd/9")" \]\]' "$SKILL")" -ge 2 ] \
-    && pass "…and the read-back is proven against the file it came from" \
-    || die "the baseline is not proven against the file; a readonly PRIOR_REVIEW keeps its own value silently"
+# AND THE DESCRIPTOR IS READ ONCE. `/dev/fd/N` is a symlink on Linux, so opening it
+# re-opens the file at offset 0 and a second read works; on macOS and the BSDs it
+# DUPLICATES the descriptor and shares its offset, so the first read drains it and
+# the second returns empty. A read-back comparison there refuses every non-empty
+# baseline — at step 2 leaving a posted request with no watch, and at step 5
+# aborting after the summary and the next pass have gone out. The `macos-shell` job
+# runs on Ubuntu and cannot see it.
+#
+# NOTHING IS LOST BY DROPPING THE COMPARISON. A readonly `PRIOR_REVIEW` does not
+# reach it: measured, the failed assignment inside the group ends the shell outright,
+# which is the fail-closed answer. What the comparison was for is covered by the
+# redirection, which fails where a read would have returned empty.
+[ "$(grep -c 'PRIOR_REVIEW="\$(<"/dev/fd/9")"' "$SKILL")" -eq 2 ] \
+    && pass "…and each bound descriptor is read once, not twice" \
+    || die "a baseline descriptor is read more than once; on macOS the second read is empty"
 # AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
 # lost twice: with `errexit` on, a documented refusal ends the shell at the
 # assignment before anything reads it; without it, a startup file that has already

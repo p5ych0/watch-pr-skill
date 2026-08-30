@@ -1239,16 +1239,6 @@ Ending the arm in `[[ -n "" ]]` makes the LIST report non-zero, which nothing he
 reads. What does hold is that the work sits inside the branch a refusal does not
 take.
 
-## THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
-
-`CLAUDE.md` says to prove an assignment by reading the variable back, and the usual
-difficulty is that nothing else knows what the value should have been — a readonly
-name simply keeps whatever it held.
-
-The file does know. If this name was already readonly the assignment fails and the
-two disagree, which is the one case a check on the variable alone cannot see: the
-helper SUCCEEDED and the baseline is somebody else's.
-
 ## EMPTY IS AN ANSWER, THE PATTERN IS A LITERAL, AND THERE ARE TWO SHAPES.
 
 EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is nothing to
@@ -1382,19 +1372,6 @@ repeatedly: the copy that is not beside the code is the one that goes stale.
 WHAT STAYS IS WHAT THE DRIVER HAS TO DECIDE — which stage runs when, that the
 replies go between them, and what each status means for the round. The rest is one
 line saying where to read it.
-
-## AND THE ASSIGNMENT IS PROVEN AFTER A CLOSED ROUND TOO, where a refusal costs more.
-
-The same proof step 2 makes, at the one point where the thing it protects has
-already happened: the summary is posted and the next pass requested, so this
-refusal cannot un-close the round. It stops the WAIT instead, which is the part
-that would otherwise go wrong — a `PRIOR_REVIEW` this shell does not own keeps
-whatever the operator's startup file put there, and the watch then accepts a review
-older than this round as its answer.
-
-SO THE MESSAGE SAYS THE ROUND IS CLOSED, and says not to enter the wait step. An
-abort that read like a failed round would send the next session to re-close a round
-that is already closed, which posts a second summary and requests a second pass.
 
 ## A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
 

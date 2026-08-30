@@ -422,11 +422,8 @@ then
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
         # THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO, and at a different cost.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        # THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
-        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         PRIOR_REVIEW=
-        if ! { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")" \
-               && [[ $PRIOR_REVIEW = "$(<"/dev/fd/9")" ]]; } 9<"$PRIOR_FILE"; then
+        if ! { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
             echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'; PRIOR_REVIEW is not this session's to set, or the file is not there."
             exit 0
             [[ -n "" ]]
@@ -913,11 +910,8 @@ Then, and only then:
 if [ "$ROUND_RC" -eq 0 ]; then
     # A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    # AND THE ASSIGNMENT IS PROVEN AFTER A CLOSED ROUND TOO, where a refusal costs more.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     PRIOR_REVIEW=
-    if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")" \
-         && [[ $PRIOR_REVIEW = "$(<"/dev/fd/9")" ]]; } 9<"$PRIOR_FILE"; then
+    if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
         [[ -n x ]]
     else
         echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'. The round IS closed; do not enter the wait step, and do not re-close the round."
