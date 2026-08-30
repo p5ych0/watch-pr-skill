@@ -836,30 +836,8 @@ Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
 hard-coded answer — one recipe here, two orders there:
 
 ```bash
-#   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"
-#   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"
-#
-# `gate` writes the head it proved into `$HEAD_FILE`; `post` reads it back out.
-# The same path both times, and the value never enters this shell.
-#
-#     0  gated (`gate`) / closed (`post`)
-#     1  stopped  — the reason is on stdout; the round is NOT closed
-#     3  paused   — a round boundary. Decide with the operator
-#
-# Run `gate` from a checkout on this PR's branch. It pushes, and a push has to go
-# somewhere: it names the ref it may write, proves every push URL of `origin` is
-# the pinned repository, and refuses — having pushed nothing — if any of that does
-# not hold. Every refusal is a 1 with the reason on stdout and the round untouched.
-#
-# Two kinds of refusal, and only one is retryable:
-#
-#   · this checkout — on another branch, or on a detached HEAD. Move to the
-#     worktree holding the PR's branch and run it again. Nothing has happened;
-#   · this PR — it is from a FORK, or `origin` pushes somewhere that is not the
-#     pinned repository. Running it again changes nothing, because neither is
-#     about where you are standing. Stop and put it to the operator: a fork PR is
-#     outside what this loop drives, and a redirected `origin` is a configuration
-#     decision that is not the loop's to make.
+# THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
@@ -874,12 +852,6 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND NO NAME HOLDS ITS STATUS EITHER.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND ITS CONTENT IS PROVEN A COMMIT ID.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
     [[ -n x ]]    # a reserved word, not `:`, and TRUE — under `errexit` a false
                   # one here would end the shell on the successful path
@@ -893,24 +865,6 @@ else
            [[ -n "" ]] ;;
     esac
 fi
-if [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
-    case "$(<"$HEAD_FILE")" in
-        ????????????????????????????????????????)
-            case "$(<"$HEAD_FILE")" in
-                *[!0-9a-f]*)
-                    echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-                    exit 1
-                    [[ -n "" ]] ;;
-            esac ;;
-        *)            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-            exit 1
-            [[ -n "" ]] ;;
-    esac
-else
-    echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
-    exit 1
-    [[ -n "" ]]
-fi
 ```
 
 **Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.
@@ -918,45 +872,22 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-case "$(<"$HEAD_FILE")" in
-    ????????????????????????????????????????)
-        case "$(<"$HEAD_FILE")" in
-            *[!0-9a-f]*)
-                echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
-                exit 1
-                [[ -n "" ]] ;;
-        esac ;;
-    *)        echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
-        exit 1
-        [[ -n "" ]] ;;
-esac
 # ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE" 2>&1)"; ROUND_RC=$?
-printf '%s\n' "$POST_OUT"
-# THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; ROUND_RC=$?
+# THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [ "$ROUND_RC" -eq 0 ]; then
-    # THE RECORD HAS TO BE THERE.
+    PRIOR_REVIEW="$(<"$PRIOR_FILE")"
+    # AND THE ASSIGNMENT IS PROVEN AFTER A CLOSED ROUND TOO, where a refusal costs more.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    # THE BASELINE MAY LEGITIMATELY BE EMPTY, which is a different question.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    CLOSED_REC="$(printf '%s\n' "$POST_OUT" | sed -n '/^PR_ROUND_CLOSED /p' | tail -1)"
-    [ -n "$CLOSED_REC" ] \
-        || { echo "ABORT: the round reported no closing record; step 3 would watch against a stale baseline."; exit 1; }
-    # THE FIELD IS WHAT IS CHECKED FOR, not what is in it.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    case "$CLOSED_REC" in
-        *' prior-review='*) ;;
-        *) echo "ABORT: the closing record carries no baseline field; step 3 would watch against a stale one."; exit 1 ;;
-    esac
-    # `prior-review=` IS LAST IN THE RECORD, so everything after it is the value.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    PRIOR_REVIEW="${CLOSED_REC##* prior-review=}"
+    if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
+        echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set. The round IS closed; do not enter the wait step."
+        exit 1
+        [[ -n "" ]]
+    fi
 fi
 case "$ROUND_RC" in
     0) ;;   # the script printed the head it closed on

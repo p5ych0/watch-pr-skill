@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.85] — 2026-08-30
+
+- **The round-close recipe is 3,582 characters shorter, and every one of them came out
+  of shell the driver reads on each invocation.** `SKILL.md` is 45% fenced bash, executed
+  by nothing and parsed by the model on every run; this is the first cut into the call
+  sequences that #26 left out of scope. The two blocks that close a round go from 6,196
+  characters to about 2,600.
+
+  Three things went.
+
+  **The head-file proof, which the script already makes.** Both fences validated
+  `$HEAD_FILE` with a nested forty-`?` `case` and an `-ef` test — thirty lines of the one
+  shell nothing can harden — for two conditions `pr-close-round.sh` refuses itself: the
+  aliasing on entry, by `=` and by `-ef`, and the shape inside `post`, before anything is
+  posted. The driver's copy could not close its own window either, since the same racer
+  acts between the check and `post`'s read; that is the check-then-use shape this
+  repository has removed twice before.
+
+  **Twenty-four lines restating the script's own header** — the two invocations, the exit
+  statuses, the two kinds of push refusal. All of it is in `pr-close-round.sh`, beside the
+  code it describes, where it cannot drift. What stays is one line saying so, and what the
+  driver actually has to decide: which stage runs when, that the replies go between them,
+  and what each status means.
+
+  **The stdout parse.** The baseline came back only in the `PR_ROUND_CLOSED` record, so
+  the driver captured this script's output, ran `sed` over it, proved a record was there,
+  proved it carried a `prior-review=` field, and cut the value out with
+  `${rec##* prior-review=}`. Since 2.0.84 `post` writes it into a file, as `gate` writes
+  the head into its own, so the driver reads it with `$(<…)` and proves the assignment
+  took. The record still carries the value for whoever is reading the terminal.
+
+  Nothing is checked less than before: what the driver stopped doing, the script does, and
+  `test-pr-close-round.sh` covers both conditions and both spellings. #235.
+
 ## [2.0.84] — 2026-08-30
 
 - **The round's review baseline crosses in a file, like the head it sits beside.** It

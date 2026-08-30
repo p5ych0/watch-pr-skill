@@ -1596,23 +1596,20 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # fence alone is reached only after the threads have been resolved, so it stops
 # `post` and not the irreversible part. The proof sits in the gate's success arm,
 # and the ordering is what this asserts.
-# THE TWO GUARDS ARE ANCHORED ON DIFFERENT LINES, because they are no longer the
-# same shape: the one before the replies asks the file IDENTITY first and has the
-# shape test as its success arm, since `gate` refuses an aliased head file before
-# it clears anything and a summary that is forty hex characters satisfies the
-# shape test exactly. The post step's is the shape test alone, and by then the
-# identity question has been settled or the round never got here.
-_hf_guard_ln="$(grep -n '^if \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then' "$SKILL" | head -1 | cut -d: -f1)" || true
+# AND THE DOCUMENT DOES NOT RE-PROVE THE HEAD FILE, which is #235. It carried a
+# forty-`?` `case` and an `-ef` test in BOTH fences — thirty lines of the one shell
+# nothing can harden, for two conditions `pr-close-round.sh` refuses itself: the
+# aliasing on entry, by `=` and by `-ef`, and the shape inside `post`, before
+# anything is posted. The driver-side copy could not close its own window either —
+# the same racer acts between the check and `post`'s read — which is the
+# check-then-use shape this repository removed from `pr-origin.sh` (#176) and from
+# `pr-setup.sh`'s cleanup. What replaced it is the script's own refusal, which
+# `test-pr-close-round.sh` covers on both conditions and both spellings.
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
-_hf_post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
-{ [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
-    && pass "…and the head is proven, identity first, after the gate and before the replies" \
-    || die "the head is not proven before the replies (guard=$_hf_guard_ln replies=$_hf_res_ln)"
-_hf_post_guard_ln="$(grep -n '^case "\$(<"\$HEAD_FILE")" in' "$SKILL" | sed -n '1p' | cut -d: -f1)" || true
-{ [ -n "$_hf_post_guard_ln" ] && [ -n "$_hf_post_ln" ] \
-    && [ "$_hf_post_guard_ln" -gt "$_hf_res_ln" ] && [ "$_hf_post_guard_ln" -lt "$_hf_post_ln" ]; } \
-    && pass "…and the post step asks again, for a session that resumes into it" \
-    || die "the post step does not guard on the head file (guard=$_hf_post_guard_ln post=$_hf_post_ln)"
+_hf_dup="$(grep -c '^case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
+[ "$_hf_dup" -eq 0 ] \
+    && pass "…and the driver does not re-prove the head file the script already refuses" \
+    || die "the document still re-proves the head file in $_hf_dup place(s)"
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
 # posted — and nothing in the script's own tests would notice, because the script
@@ -1632,7 +1629,7 @@ grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$
 # dropped the very line being checked killed the run instead of failing it: no
 # FAIL, no RESULT, and a caller grepping for failures saw none.
 _gate_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
-_post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_post_ln="$(grep -n '^/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \
     && [ "$_gate_ln" -lt "$_res_ln" ] && [ "$_res_ln" -lt "$_post_ln" ]; } \
@@ -1652,18 +1649,24 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" |
 # OLDER baseline, against which the terminal review this round just handled is
 # newer, and is therefore accepted at once as the answer to a request nobody has
 # answered yet.
-# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and an empty one
-# has to stop the round. A recipe that echoes the record and carries on satisfies a
-# count while step 3 still watches against the parent's older baseline — which is
-# the defect, not the spelling.
-# ONE recipe now, not two: the mode is an argument to the script rather than the
-# thing that chooses which block to copy, so there is one site to satisfy.
-[ "$(grep -c 'PRIOR_REVIEW="${CLOSED_REC##\* prior-review=}"' "$SKILL")" -ge 1 ] \
-    && pass "the recipe assigns the baseline the round-closer reported" \
-    || die "a recipe prints the closing record without reading the baseline out of it"
-[ "$(grep -c 'the round reported no closing record' "$SKILL")" -ge 1 ] \
-    && pass "…and an absent RECORD stops the round rather than watching on a stale id" \
-    || die "a missing closing record is accepted and step 3 watches against a stale one"
+# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and the
+# assignment has to be PROVEN. A recipe that carries on regardless satisfies a count
+# while step 3 still watches against the parent's older baseline — which is the
+# defect, not the spelling.
+# OUT OF THE FILE, NOT OUT OF THE RECORD, since #234. `post` writes the baseline
+# into the file it is given, as `gate` writes the head into its own, so the twelve
+# lines that captured stdout, `sed`-ed a record out of it, proved the record was
+# there and carried the field, and cut the value out with `${rec##* prior-review=}`
+# are gone. The record still carries it for whoever reads the terminal.
+[ "$(grep -c 'PRIOR_REVIEW="\$(<"\$PRIOR_FILE")"' "$SKILL")" -ge 2 ] \
+    && pass "the recipe reads the baseline out of the file the round-closer wrote" \
+    || die "a recipe does not read the baseline out of \$PRIOR_FILE"
+grep -qF 'CLOSED_REC' "$SKILL" \
+    && die "the document still parses the closing record for the baseline" \
+    || pass "…and no longer parses it out of the closing record"
+[ "$(grep -c 'the review baseline did not survive being read back' "$SKILL")" -ge 2 ] \
+    && pass "…and proves the assignment took, on both paths that make it" \
+    || die "a recipe assigns the baseline without proving the assignment"
 # AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. `pr-review-state.sh review-id`
 # returns nothing when the current head has no review — every round that pushes a
 # new commit, and every Copilot round — and `pr-watch.sh` takes an empty value as
