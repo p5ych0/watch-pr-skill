@@ -900,14 +900,15 @@ Then, and only then:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; ROUND_RC=$?
-# THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
+# THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# THE RECORD IS STILL PRINTED, and it is what an operator reads.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
-# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-if [ "$ROUND_RC" -eq 0 ]; then
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
+    # THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # THE RECORD IS STILL PRINTED, and it is what an operator reads.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
@@ -926,8 +927,14 @@ if [ "$ROUND_RC" -eq 0 ]; then
         [[ -n "" ]]
     fi
 else
-    echo "The threads are answered but the round did not close: no summary was posted and no pass was requested. The reason is above; do not retry it blind."
-    exit "$ROUND_RC"
+    case $? in
+        3) echo "Stopping here: the pass left only replies, so there is nothing to fix and no signoff. Read it with the operator."
+           exit 3
+           [[ -n "" ]] ;;
+        *) echo "The threads are answered but the round did not close: no summary was posted and no pass was requested. The reason is above; do not retry it blind."
+           exit 1
+           [[ -n "" ]] ;;
+    esac
     [[ -n "" ]]
 fi
 ```

@@ -1455,6 +1455,22 @@ time.
 
 What it protects is the WAIT, and the claim below says what it must not do instead.
 
+## THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
+
+`gate` has been an `if` condition since it was written; `post` was not, because its
+STDOUT had to be captured to get the baseline out of the record. That capture is gone
+— the baseline crosses in a file — and with it the reason for the shape.
+
+WHAT THE SHAPE COST was two names the operator's shell owns. The status went into
+`ROUND_RC`, and the branch was `[ "$ROUND_RC" -eq 0 ]`: a function called `[` that
+returns success routes a STOPPED or PAUSED `post` into the arm that reads the baseline
+and enters the watch — on a pass nobody requested, with the summary unposted. Both are
+gone: `if <helper>; then` cannot be stood in for, and `case $?` in the `else` tells the
+three answers apart with a reserved word, `$?` taken before anything can replace it.
+
+AND A CONDITION IS EXEMPT FROM `errexit`, which is the same reason every other stage
+in this document is written as one.
+
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 
 `post` writes the review baseline into the file it is given, as `gate` writes the

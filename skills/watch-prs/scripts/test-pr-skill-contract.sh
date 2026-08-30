@@ -1637,7 +1637,7 @@ grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$
 # dropped the very line being checked killed the run instead of failing it: no
 # FAIL, no RESULT, and a caller grepping for failures saw none.
 _gate_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
-_post_ln="$(grep -n '^/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_post_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \
     && [ "$_gate_ln" -lt "$_res_ln" ] && [ "$_res_ln" -lt "$_post_ln" ]; } \
@@ -1646,16 +1646,18 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" |
 # THE THREE ANSWERS ARE DISTINGUISHED. A pause read as a stop loses the operator's
 # decision; a stop read as success closes a round that did not close.
 #
-# ASSERTED AS THE THREE THINGS THAT HAVE TO HAPPEN TO THE STATUS rather than as a
-# COUNT of the name. It was `grep -c … -ge 4`, which was four because of the shape at
-# the time — a `case` on the status after the fence — and that `case` is gone: it sat
-# where a neutralised `exit` could fall into it and report success on a refused
-# baseline. A count would have made removing it look like a regression.
-grep -q 'ROUND_RC=\$?' "$SKILL" \
-    && grep -q 'if \[ "\$ROUND_RC" -eq 0 \]; then' "$SKILL" \
-    && grep -q 'exit "\$ROUND_RC"' "$SKILL" \
-    && pass "…and the round-closer's status is captured, branched on, and passed on" \
-    || die "a recipe swallows the round-closer's status"
+# AND NO NAME HOLDS IT. It was captured into `ROUND_RC` and branched on with `[`, and
+# both are names the operator's shell owns: a function called `[` that returns success
+# routes a stopped or paused `post` into the arm that reads the baseline and enters the
+# watch. `post` runs as the `if` CONDITION now — which is also exempt from `errexit` —
+# and the three answers are told apart by `case $?` in the `else`, where `case` is a
+# reserved word and `$?` is taken first. Nothing is left to seed.
+grep -q '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" \
+    && pass "…and the post stage runs as a condition, with no name holding its status" \
+    || die "the post stage's status goes through a variable; take it at the invocation"
+grep -q 'ROUND_RC' "$SKILL" \
+    && die "the round-closer's status is held in a name again" \
+    || pass "…and ROUND_RC is gone with it"
 
 # ── THE DRIVER READS THE BASELINE BACK ─────────────────────────────────────
 # The script reads the review id immediately before it requests the pass, and
@@ -1717,7 +1719,8 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 # answer. ONE fence: the opening request's read is `main`'s, unbound, and #238 carries it.
 _bl_dir="$TMP_CL/bl"; mkdir -p "$_bl_dir" || die "the baseline-read scratch directory could not be made"
 # The round-close fence is a whole `if … fi` at column 0.
-awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.sh"
+awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-close-round.sh post N/, /^fi$/' "$SKILL" \
+    | sed '1s|^if .*|if "$RB_POST_STUB"; then|' > "$_bl_dir/close.sh"
 { [ -s "$_bl_dir/close.sh" ] && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/close.sh"; } \
     && pass "the baseline-read fence lifts, so the cases below reach the code they name" \
     || die "the baseline-read fence did not lift; the execution cases prove nothing"
@@ -1730,7 +1733,7 @@ awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.s
 # value and the refusal text is what distinguishes the two.
 _bl_run() {   # _bl_run <fence> <prior-file> ; prints "<rc>|<output>"
     local out rc=0
-    out="$(ROUND_RC=0 PRIOR_FILE="$2" bash -c '
+    out="$(RB_POST_STUB="${3:-true}" PRIOR_FILE="$2" bash -c '
         trap '"'"'printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"'"'"' EXIT
         . "$1" 2>/dev/null' _ "$1" 2>/dev/null)" || rc=$?
     printf '%s|%s' "$rc" "$out"
@@ -1782,7 +1785,7 @@ for _f in close; do
     # out of both `if`s into a final `exit "$ROUND_RC"` with `ROUND_RC` still 0, so the
     # fence reported success on a baseline it had just refused. Nothing follows the fence
     # now, and this runs it with `exit` defined as a function that returns.
-    _bl_ex="$(ROUND_RC=0 PRIOR_FILE="$_bl_dir/no-such-file" bash -c '
+    _bl_ex="$(RB_POST_STUB=true PRIOR_FILE="$_bl_dir/no-such-file" bash -c '
         exit() { return "${1:-0}"; }
         . "$1" 2>/dev/null
         printf "FELLTHROUGH:rc=%s" "$?"' _ "$_bl_dir/$_f.sh" 2>/dev/null)"
@@ -1790,6 +1793,23 @@ for _f in close; do
         *'FELLTHROUGH:rc=0'*) die "with a returning exit the $_f fence ends at status 0: '$_bl_ex'" ;;
         *) pass "…and a returning \`exit\` cannot carry the refusal into a success" ;;
     esac
+    # AND A FAILED `post` DOES NOT REACH THE READ, even with `[` shadowed. The status
+    # was captured into `ROUND_RC` and branched on with `[`, both names the operator's
+    # shell owns: a function called `[` returning success routed a stopped or paused
+    # `post` into the arm that reads the baseline and entered the watch on a pass nobody
+    # requested. The stage is the `if` condition now, which no function can stand in for.
+    for _bl_st in 1 3; do
+        printf '#!/usr/bin/env bash\nexit %s\n' "$_bl_st" > "$_bl_dir/post$_bl_st"
+        chmod +x "$_bl_dir/post$_bl_st"
+        _bl_fail="$(RB_POST_STUB="$_bl_dir/post$_bl_st" PRIOR_FILE="$_bl_dir/good" bash -c '
+            [() { return 0; }
+            trap '"'"'printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"'"'"' EXIT
+            . "$1" 2>/dev/null' _ "$_bl_dir/$_f.sh" 2>/dev/null)" || true
+        case "$_bl_fail" in
+            *TOOK:\[4242\]*) die "a post that exited $_bl_st still reached the baseline read" ;;
+            *) pass "…and a post that exits $_bl_st never reaches the read, even with [ shadowed" ;;
+        esac
+    done
     # AND AN EMPTY FILE IS STILL AN ANSWER, which is the distinction the whole change
     # rests on: a legitimate empty baseline must NOT be refused.
     : > "$_bl_dir/empty"
