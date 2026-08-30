@@ -180,17 +180,25 @@ done
 # single-quoted into safety and the escape was load-bearing — one mistake in it was a
 # command in the operator's shell. Nothing evaluates the value now, so what these
 # cases assert is that it arrives BYTE-EXACT and that nothing ran on the way.
+#
+# THE WITNESS IS AN ABSOLUTE PATH THE PAYLOAD ITSELF NAMES, so where the helper happens
+# to be standing does not enter into it. A bare `touch WITNESS` lands in the payload's
+# working directory, which is the repository `run` cds into and not the scratch root the
+# assertion was reading — so a payload that executed created a file nothing looked at,
+# and every case passed on the byte-exactness alone. Interpolating the path removes the
+# assumption rather than correcting it.
+_wit="$TMP/WITNESS"
 _inj_i=0
 for _bad in \
     "git@github.com:acme/w'x.git" \
-    'git@github.com:acme/w$(touch WITNESS)x.git' \
-    'git@github.com:acme/w`touch WITNESS`x.git' \
-    'git@github.com:acme/w;touch WITNESS;x.git' \
+    "git@github.com:acme/w\$(touch $_wit)x.git" \
+    "git@github.com:acme/w\`touch $_wit\`x.git" \
+    "git@github.com:acme/w;touch $_wit;x.git" \
     'git@github.com:acme/w x"y'"'"'z.git' \
     'git@github.com:acme/w${IFS}x.git'
 do
     _inj_i=$((_inj_i + 1))
-    rm -f "$TMP/WITNESS"
+    rm -f "$_wit"
     ( cd "$REPO" && git remote set-url origin "$_bad" ) 2>/dev/null \
         || { die "git would not hold the staged remote #$_inj_i"; continue; }
     r="$(run --)"
@@ -200,9 +208,9 @@ do
         continue
     fi
     _got="$(cat "$_d/origin" 2>/dev/null)" || _got="READ_FAILED"
-    { [ "$_got" = "$_bad" ] && [ ! -e "$TMP/WITNESS" ]; } \
+    { [ "$_got" = "$_bad" ] && [ ! -e "$_wit" ]; } \
         && pass "a remote carrying #$_inj_i comes back byte-exact and executes nothing" \
-        || die "remote #$_inj_i came back as '$_got' (witness-exists=$([ -e "$TMP/WITNESS" ] && echo yes || echo no))"
+        || die "remote #$_inj_i came back as '$_got' (witness-exists=$([ -e "$_wit" ] && echo yes || echo no))"
 done
 ( cd "$REPO" && git remote set-url origin "$REAL" ) 2>/dev/null || true
 
