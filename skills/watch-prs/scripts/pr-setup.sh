@@ -398,43 +398,35 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 [ -s "$RB_DIR/origin" ] || rb_setup_stop origin_write 2
 [ "$(cat "$RB_DIR/origin" 2>/dev/null)" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
 
-# ── the storage the pin will still need ────────────────────────────────────
+# ── why there is no probe for the storage the pin needs ────────────────────
 #
-# THE DRIVER CALLS `pr-origin.sh pin` AFTER THIS RETURNS, and that call creates a
-# directory and writes a leaf inside it. It reports 2 where the storage would not take
-# them — and the driver cannot act on that: `work/` and its four files are already
-# allocated on THIS parent, so pinning under the other one would leave a session whose
-# files are on a filesystem that has just refused, which dies at its first round summary
-# rather than here.
+# THERE WAS ONE, AND IT COULD NOT ANSWER ITS OWN QUESTION. `pr-origin.sh pin` creates a
+# directory and writes a leaf, and it reports 2 where the storage will not take them —
+# which the DRIVER cannot act on, because `work/` and the four files are already on this
+# parent by then. So the question was asked here instead, where a refusal is inside the
+# unit the driver retries.
 #
-# SO THE QUESTION IS ASKED INSIDE THE UNIT THAT RETRIES, and it is asked LAST. Every
-# allocation this helper makes — the reservation, `work/`, its four files, the origin —
-# is already on disk by the time these run, so what they answer is "is there room for
-# what comes NEXT" rather than "was there room a few steps ago". Probing before the
-# origin write answered the older question and a filesystem with exactly enough inodes
-# for setup and one more passed it.
+# A PROBE HAS TO RELEASE WHAT IT TOOK, AND RELEASING MEANS REMOVING A NAME. Keeping the
+# objects answers nothing: two inodes taken and held is two the pin then cannot have, so
+# a filesystem with exactly enough for setup and the pin passes the probe and fails the
+# call — the probe made the very state it was meant to detect. Removing them puts back
+# the only class this file has spent six review rounds getting out of: two `rmdir`s on
+# two names lose two of a watcher's empty directories, where
+# `docs/decisions/2026-08-26-reservation-inference.md` bounds the cost at one, and every
+# cleverer shape destroyed something. `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
+# carries that table.
 #
-# TWO OBJECTS, BECAUSE THE PIN MAKES TWO — and they are NOT REMOVED. Removing them meant
-# two `rmdir`s resolving two names, and a same-UID watcher that replaced both with its own
-# empty directories lost both: two, where
-# `docs/decisions/2026-08-26-reservation-inference.md` bounds the cost at one. Every
-# earlier attempt to be cleverer about that failed the same way, which is the table in
-# `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
+# SO THE PIN'S STORAGE FAILURE IS TERMINAL, and the recovery is a re-run. That is what it
+# was before the probe existed and the reasoning has not changed: pinning under the second
+# parent while the round summary and the gated head stay on a filesystem that has just
+# refused produces a session which looks set up and dies at its first write, after posting.
+# A re-run relocates the session as a whole — `pr-setup.sh` is offered the failing parent
+# first, reports 2 for the same reason, and the retry that already exists moves everything.
+# `SKILL.md`'s abort says so.
 #
-# LEAVING THEM COSTS TWO EMPTY DIRECTORIES INSIDE A TREE THIS SESSION KEEPS ANYWAY, which
-# is not litter in the sense that record is about: `$RB_DIR` outlives this call by design,
-# holding `work/`. It also makes the probe slightly CONSERVATIVE — the two inodes stay
-# taken, so the pin's own two must come from what is left after them — and erring that
-# way is the right direction for a probe whose whole job is to fail early.
-#
-# SO THIS FILE RESOLVES NO NAME INSIDE THE RESERVATION FOR REMOVAL, anywhere. The one
-# `rmdir` it has is the reservation itself, in the cleanup.
-#
-# WHAT IS LEFT is a filesystem that fills between these probes and the pin, which is two
-# processes apart and cannot be closed from either. The abort the driver prints there
-# says to re-run, which relocates the session as a whole.
-/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
-/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
+# WHAT IS STILL HANDLED IS THE SQUAT, which is the case an accepted record actually bounds:
+# a same-UID process pre-creating `$RB_SETUP_DIR/pin` makes the call report 2, and the
+# driver retries once under a second fixed name.
 
 # THE EXIT TRAP IS RESET AND THE SIGNAL HANDLERS ARE NOT. Success means the caller
 # gets the directory, so the cleanup must not fire on the way out — but a `TERM`

@@ -678,153 +678,22 @@ _sw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
 rm -rf "$_sw"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
-# ── the storage the pin will need is proved here ──────────────────────────
-# THE DRIVER CANNOT ACT ON A PIN THAT REPORTS A STORAGE FAILURE. By the time it calls
-# `pr-origin.sh pin`, `work/` and its four files are already on this parent, so pinning
-# under the other one leaves a session whose files are on a filesystem that has just
-# refused a directory — it dies at its first round summary instead, after posting. The
-# question is asked here instead, inside the unit the driver already retries.
+# ── there is no probe for the pin's storage, and that is deliberate ───────
+# A PROBE HAS TO RELEASE WHAT IT TOOK, AND RELEASING MEANS REMOVING A NAME. Keeping the
+# objects answers nothing — two inodes taken and held is two the pin then cannot have, so
+# a filesystem with exactly enough for setup and the pin passes and the call still fails.
+# Removing them puts back the class this file spent six review rounds getting out of: two
+# `rmdir`s on two names lose two of a watcher's empty directories, where
+# `docs/decisions/2026-08-26-reservation-inference.md` bounds the cost at one.
 #
-# STAGED BY MAKING THE DIRECTORY UNWRITABLE IMMEDIATELY BEFORE THE PROBE, which is the
-# state a full filesystem produces for it: the directory exists and another cannot be
-# created inside it. The forged reader cannot do it — it runs before `work/` is made,
-# so the allocation fails first and the case would be measuring that instead — so the
-# copy under test is patched at the line the case is about, as the signal cases are.
-if [ "$_rb_uid" != 0 ]; then
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^/usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null|chmod 500 "$RB_DIR"; /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null|' \
-    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'chmod 500 "$RB_DIR"; /usr/bin/env mkdir' "$_stage/pr-setup.sh" \
-    && pass "the pin-storage stage is patched" \
-    || die "the pin-storage stage did not patch pr-setup.sh; the case proves nothing"
-_ps="$(mktemp -d "$TMP/ps.XXXXXX")/dir"
-_ps_rc=0
-_ps_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ps" 2>&1)" || _ps_rc=$?
-chmod 700 "$_ps" 2>/dev/null || true
-{ [ "$_ps_rc" -eq 2 ] && case "$_ps_out" in *'reason=pin_storage'*) true ;; *) false ;; esac; } \
-    && pass "a parent that cannot take another directory is a storage refusal, which the driver retries" \
-    || die "the pin-storage probe did not report a retryable refusal (rc=$_ps_rc out='$_ps_out')"
-rm -rf "$_ps"
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-fi
-# AND NOTHING UNDER THE RESERVED DIRECTORY IS UNLINKED BY A NESTED NAME WHERE `rmdir`
-# WOULD DO. The held descriptor authenticates `$RB_DIR` and says nothing about a name
-# inside it, so an `rm -f` on one resolves whatever is there by the time it runs. The
-# probe's objects are both directories for that reason, and both come out with `rmdir`,
-# which refuses a symlink outright and refuses a directory with anything in it.
+# SO THE PIN'S STORAGE FAILURE IS TERMINAL and the recovery is a re-run, which is what it
+# was before the probe existed. What is still handled is the SQUAT — the case an accepted
+# record bounds — by the driver's retry under a second fixed name, which
+# `test-pr-skill-contract.sh` stages.
 case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
-    *'rm -f "$RB_DIR/pinprobe'*)
-        die "the pin probe unlinks a nested name with rm -f, which resolves a replacement" ;;
-    *)  pass "the pin probe creates and removes directories, so every removal is an rmdir" ;;
+    *pinprobe*) die "the pin-storage probe is back; it cannot release what it took without removing a name" ;;
+    *) pass "there is no pin-storage probe, so nothing has to be released" ;;
 esac
-
-# THE ORIGIN TRANSPORT IS LEFT WHERE IT IS, which is what `SKILL.md` does with its own
-# and for the same reason. Removing it meant `rm -f` on a nested name followed by `rmdir`
-# on its parent, and that pair destroys a REPLACEMENT: the first takes a racer's leaf, so
-# the second succeeds on a directory that had contents a moment earlier.
-{ [ -f "$ok_dir/o/origin" ] && [ -d "$ok_dir/o" ]; } \
-    && pass "the origin transport is left in place rather than unlinked by name" \
-    || die "the successful run removed its origin transport through a replaceable name"
-
-# THE PROBE RUNS LAST, after every allocation this helper makes. What it answers is
-# "is there room for what comes NEXT" rather than "was there room a few steps ago" — a
-# filesystem with exactly enough inodes for setup and one more passed a probe that ran
-# before the origin write, and the pin then failed on storage the driver could no longer
-# retry.
-# CAPTURED AND THEN PEELED, never piped into an early-exiting reader. `grep … | head -1`
-# is racy under `pipefail`: `head` exits at the first line, `grep` takes SIGPIPE and dies
-# with 141, and that becomes the pipeline's status — so a line that IS present reads as
-# absent, at whatever rate the scheduler decides. `${v%%:*}` takes the first match's
-# number with no second process to kill.
-_probe_all=""; _probe_all="$(grep -n 'mkdir -m 700 "$RB_DIR/pinprobe"' "$SCRIPT")" || _probe_all=""
-_probe_ln="${_probe_all%%:*}"; [ -n "$_probe_ln" ] || _probe_ln=0
-_orig_all=""; _orig_all="$(grep -n 'RB_REMOTE" > "$RB_DIR/origin"' "$SCRIPT")" || _orig_all=""
-_orig_ln="${_orig_all%%:*}"; [ -n "$_orig_ln" ] || _orig_ln=0
-{ [ "$_probe_ln" -gt 0 ] && [ "$_orig_ln" -gt 0 ] && [ "$_probe_ln" -gt "$_orig_ln" ]; } \
-    && pass "the pin probe runs after the origin write, so it measures what is left" \
-    || die "the pin probe runs before the origin write (probe=$_probe_ln origin=$_orig_ln)"
-# AND IT PROBES TWO OBJECTS, because the pin creates two — a directory and a leaf inside
-# it. One object answers half the question, and the half it misses is a filesystem with
-# room for exactly one more.
-_pp=0; _pp="$(grep -c 'mkdir -m 700 "$RB_DIR/pinprobe' "$SCRIPT")" || _pp=0
-[ "$_pp" -eq 2 ] \
-    && pass "…and probes two objects, which is what the pin allocates" \
-    || die "the pin probe allocates $_pp objects, not the two the pin needs"
-
-# AND A REPLACEMENT AT THE PROBE'S NAME IS NOT DESTROYED. The probe is ONE directory
-# created and removed by ONE `mkdir` and ONE `rmdir`, and that shape is what
-# `docs/decisions/2026-08-26-reservation-inference.md` rests on: "no data is destroyed,
-# because `rmdir` refuses anything with contents in it". A PAIR broke it — probing the
-# pin's leaf meant `rmdir leaf` then `rmdir pinprobe`, and the first EMPTIES a
-# replacement so the second succeeds on a directory that had contents a moment earlier.
-case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
-    *'rmdir "$RB_DIR/'*) die "the pin probe removes its objects; two name-resolved rmdirs can lose two replacements" ;;
-    *) pass "the pin probe leaves its objects, so no name inside the reservation is resolved for removal" ;;
-esac
-# AND THE ONLY REMOVAL IN THE FILE IS THE RESERVATION ITSELF. One `rmdir`, in the
-# cleanup, on `$RB_DIR` — anything else is a name a same-UID process may have
-# substituted, which is the table in `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
-_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
-[ "$_rm_n" -eq 1 ] \
-    && pass "…and the file has exactly one removal in it, the reservation's own" \
-    || die "pr-setup.sh has $_rm_n removals; it is meant to have exactly one"
-# STAGED: an object a watcher put at either probe name must be there afterwards, because
-# neither is removed at all.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# THE PROBE RUNS LAST, after every allocation this helper makes. What it answers is
-# "is there room for what comes NEXT" rather than "was there room a few steps ago" — a
-# filesystem with exactly enough inodes for setup and one more passed a probe that ran
-# before the origin write, and the pin then failed on storage the driver could no longer
-# retry.
-# CAPTURED AND THEN PEELED, never piped into an early-exiting reader. `grep … | head -1`
-# is racy under `pipefail`: `head` exits at the first line, `grep` takes SIGPIPE and dies
-# with 141, and that becomes the pipeline's status — so a line that IS present reads as
-# absent, at whatever rate the scheduler decides. `${v%%:*}` takes the first match's
-# number with no second process to kill.
-_probe_all=""; _probe_all="$(grep -n 'mkdir -m 700 "$RB_DIR/pinprobe"' "$SCRIPT")" || _probe_all=""
-_probe_ln="${_probe_all%%:*}"; [ -n "$_probe_ln" ] || _probe_ln=0
-_orig_all=""; _orig_all="$(grep -n 'RB_REMOTE" > "$RB_DIR/origin"' "$SCRIPT")" || _orig_all=""
-_orig_ln="${_orig_all%%:*}"; [ -n "$_orig_ln" ] || _orig_ln=0
-{ [ "$_probe_ln" -gt 0 ] && [ "$_orig_ln" -gt 0 ] && [ "$_probe_ln" -gt "$_orig_ln" ]; } \
-    && pass "the pin probe runs after the origin write, so it measures what is left" \
-    || die "the pin probe runs before the origin write (probe=$_probe_ln origin=$_orig_ln)"
-# AND IT PROBES TWO OBJECTS, because the pin creates two — a directory and a leaf inside
-# it. One object answers half the question, and the half it misses is a filesystem with
-# room for exactly one more.
-_pp=0; _pp="$(grep -c 'mkdir -m 700 "$RB_DIR/pinprobe' "$SCRIPT")" || _pp=0
-[ "$_pp" -eq 2 ] \
-    && pass "…and probes two objects, which is what the pin allocates" \
-    || die "the pin probe allocates $_pp objects, not the two the pin needs"
-
-# AND A REPLACEMENT AT THE PROBE'S NAME IS NOT DESTROYED. The probe is ONE directory
-# created and removed by ONE `mkdir` and ONE `rmdir`, and that shape is what
-# `docs/decisions/2026-08-26-reservation-inference.md` rests on: "no data is destroyed,
-# because `rmdir` refuses anything with contents in it". A PAIR broke it — probing the
-# pin's leaf meant `rmdir leaf` then `rmdir pinprobe`, and the first EMPTIES a
-# replacement so the second succeeds on a directory that had contents a moment earlier.
-case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
-    *'rmdir "$RB_DIR/'*) die "the pin probe removes its objects; two name-resolved rmdirs can lose two replacements" ;;
-    *) pass "the pin probe leaves its objects, so no name inside the reservation is resolved for removal" ;;
-esac
-# AND THE ONLY REMOVAL IN THE FILE IS THE RESERVATION ITSELF. One `rmdir`, in the
-# cleanup, on `$RB_DIR` — anything else is a name a same-UID process may have
-# substituted, which is the table in `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
-_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
-[ "$_rm_n" -eq 1 ] \
-    && pass "…and the file has exactly one removal in it, the reservation's own" \
-    || die "pr-setup.sh has $_rm_n removals; it is meant to have exactly one"
-# …AND BOTH PROBE DIRECTORIES ARE LEFT, which is what stops two name-resolved `rmdir`s
-# losing two of a watcher's empty directories — the bound
-# `docs/decisions/2026-08-26-reservation-inference.md` puts at one. They cost two empty
-# directories inside a tree this session keeps anyway.
-{ [ -d "$ok_dir/pinprobe" ] && [ -d "$ok_dir/pinprobe2" ]; } \
-    && pass "…and both probe directories are left, inside a tree this session keeps anyway" \
-    || die "the pin-storage probe removed an object inside the reservation"
 
 # ── the streams are separate ───────────────────────────────────────────────
 # NOTHING BUT THE READY LINE ON STDOUT, and every reason on stderr. The driver
@@ -854,10 +723,13 @@ _np_out="$(cd "$REPO" && run_limited 25 bash "$SCRIPT" "$TMP/never" 2>&1)" || _n
   && [ ! -e "$TMP/never" ]; } \
     && pass "an unprivileged caller is refused before anything is created" \
     || die "the unprivileged case gave rc=$_np '$_np_out'"
-# AND THE FILE IS NOT EXECUTABLE, so nothing can start it but a caller naming an
-# interpreter. A privileged shebang would state a protection the file does not rely
-# on and cannot enforce — the same exception `pr-origin.sh` carries, for the same
-# reason, and `test-pr-identity.sh` asserts that one.
+# AND THE FILE IS EXECUTABLE, which is the rule rather than the exception. Every
+# `pr-*.sh` begins `#!/usr/bin/env -S bash -p` and is started that way; the two files
+# excused from it are `pr-selfcheck.sh`, which re-execs into a clean shell of its own,
+# and `pr-origin.sh`, which is NOT executable at all so that only a caller naming an
+# interpreter can start it. `test-pr-identity.sh` asserts both halves of that exception,
+# and this helper is on neither side of it — a maintainer reading the opposite here would
+# take the mode bit off and turn the shebang into a comment.
 [ -x "$SCRIPT" ] \
     && pass "pr-setup.sh is executable, so its own privileged shebang is what starts it" \
     || die "pr-setup.sh is not executable; its #!/usr/bin/env -S bash -p shebang is inert"

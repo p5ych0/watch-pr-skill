@@ -108,28 +108,20 @@
   pair `pr-origin.sh` already uses and for the same reason: `O_EXCL` refuses a regular
   file and refuses a symlink whether or not its target exists.
 
-- **A parent that cannot take another directory is found before the session commits to
-  it.** `pr-origin.sh pin` creates a directory, and by the time the driver calls it the
-  working files are already allocated on that parent — so a storage failure there could
-  not be recovered from: pinning under the second parent while the round summary and the
-  gated head stay on a filesystem that has just refused a directory produces a session
-  that looks set up and dies at its first write, after posting. `pr-setup.sh` asks the
-  question itself now, with a probe beside where the pin will go — a
-  two sibling directories, each created and removed by one `mkdir` and one
-  `rmdir` on its own name — two because that is what the pin allocates, siblings because
-  a nested pair cannot be removed without emptying a replacement first. They run LAST,
-  after every allocation the helper makes, so what they answer is whether there is room
-  for what comes next rather than whether there was room a few steps ago. The refusal
-  happens inside the unit the driver already retries, so the whole session moves, and the
-  candidate it refused is given back rather than left holding an empty child.
+- **A pin that the storage refuses is terminal, and the recovery is a re-run.**
+  `pr-origin.sh pin` creates a directory and writes a leaf, and it reports the storage
+  status where those will not fit — which the driver cannot act on, because the working
+  files are already allocated on that parent: pinning under the second one while the round
+  summary and the gated head stay on a filesystem that has just refused produces a session
+  that looks set up and dies at its first write, after posting.
 
-  One `rmdir` on one name is the shape rather than an accident:
-  `docs/decisions/2026-08-26-reservation-inference.md` accepts a same-UID race on these
-  names and bounds it on one sentence — no data is destroyed, because `rmdir` refuses
-  anything with contents. Probing the pin's second object as well meant creating a
-  nested pair and removing both, and a two-step removal EMPTIES a replacement before it
-  removes it. What goes undetected is a filesystem with room for exactly one more inode;
-  the six allocations that precede this probe fail first on anything that tight.
+  A probe inside the helper was tried and removed, because it cannot answer its own
+  question. Keeping what it allocated is two inodes the pin then cannot have — so a
+  filesystem with exactly enough for setup and the pin passes the probe and fails the call,
+  the probe having made the state it was meant to detect. Releasing what it allocated means
+  removing a name, which is the class this helper spent several rounds getting out of. A
+  re-run relocates the session as a whole, and the abort says so. The SQUAT case — the one
+  an accepted record bounds — is handled separately, by the retry below.
 
 - **The setup values are read, not sourced, and only one of them crosses.** The helper
   wrote a file of twelve assignments the driver sourced, and `.` is a name: in the

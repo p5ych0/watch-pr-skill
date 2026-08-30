@@ -1676,17 +1676,21 @@ directory and therefore on the same filesystem, so pinning under the second pare
 they stay where they are produces a session that looks set up and dies at its first
 write — after it has posted.
 
-THE QUESTION IS ASKED EARLIER INSTEAD, WHERE IT CAN BE ACTED ON. `pr-setup.sh` creates
-and removes a probe directory beside where the pin will go, and a parent that cannot
-take it fails there with status 2 — inside the unit this block already retries, so the
-whole session moves, files and all. That is the recovery the pin used to have on its
-own, back when the work allocation came after it, restored without writing this block
-twice.
+A PROBE INSIDE THE HELPER WAS TRIED AND REMOVED, because it cannot answer its own
+question. Keeping what it allocated is inodes the pin then cannot have — a filesystem
+with exactly enough for setup and the pin passes the probe and fails the call, the probe
+having made the state it was meant to detect. Releasing what it allocated means removing
+a name inside the reservation, which is the class `pr-setup.sh` spent several rounds
+getting out of and which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` tabulates.
 
-WHAT IS LEFT IS A FILESYSTEM THAT FILLS BETWEEN THAT PROBE AND THE PIN, which is two
-processes apart and cannot be closed from either. The abort says to re-run, and a re-run
-relocates the session as a whole: `pr-setup.sh` is offered the failing parent first,
-reports 2 for the same reason, and the retry moves everything.
+SO THE RECOVERY IS A RE-RUN, and the abort says so. `pr-setup.sh` is offered the failing
+parent first on that run, reports 2 for the same reason, and the retry that already
+exists moves everything — files and all — to the parent that works. That costs the
+operator a command rather than the document a second copy of itself.
+
+THE SQUAT IS A DIFFERENT CASE AND IS HANDLED, because it is the one an accepted record
+bounds: a same-UID process pre-creating the pin's own name makes that call report 2, and
+the claim above this one is the retry for it.
 
 ## THE FILE IS BOUND BEFORE IT IS READ, because a name can be replaced between the two.
 
