@@ -2,10 +2,10 @@
 
 ## [2.0.83] — 2026-08-29
 
-- **Setup runs in a process now, and `SKILL.md` is 8,392 characters shorter.** The
-  block that starts a session was 178 executable lines and 105 comment lines of the
-  document — 18,450 characters, about a fifth of everything the driver reads on every
-  invocation — and nothing executed them. It is 108 and 53 now, 10,058 characters, and
+- **Setup runs in a process now, and `SKILL.md` is 6,677 characters shorter.** The
+  block that starts a session was 177 executable lines and 105 comment lines of the
+  document — 18,446 characters, about a fifth of everything the driver reads on every
+  invocation — and nothing executed them. It is 125 and 59 now, 11,769 characters, and
   the work happens in `pr-setup.sh`, which has tests.
 
   What made that possible was noticing that an old measurement proved less than it
@@ -30,26 +30,6 @@
   evaluates the path; it is quoted in the `mkdir`, in every redirection and in every
   `printf`.
 
-- **A failed setup no longer removes anything it did not create.** The directory's
-  name is published in argv before the `mkdir` reserves it, and under a parent
-  without the sticky bit another account can replace it afterwards — where a
-  recursive cleanup would delete the replacement and everything in it. That is far
-  past what `docs/decisions/2026-08-26-reservation-inference.md` accepts, and the
-  record rests on `rmdir` refusing anything with contents. The cleanup ended up as ONE
-  reservation-level `rmdir` that removes nothing inside — see the entry below on why
-  every shape that gave the contents back destroyed something. It refuses even that
-  unless the name still resolves to the object the reservation
-  made — `-O` for a directory another account holds, and the recorded inode for one
-  this account replaced, since a name that has been swapped is not one to give a
-  reservation back through. A bare inode number is not a durable identity — one freed by
-  a `rmdir` can be handed straight to the next `mkdir` — so the helper holds a
-  descriptor open on the directory it reserved, which stops the inode being freed at
-  all. The number is read THROUGH that
-  descriptor rather than through the published name, since one read through the name is
-  the replacement's the moment the name has been swapped. Where the open fails, or the
-  number was never recorded, there is no durable identity and the cleanup removes
-  nothing, leaving a directory behind instead: the cost the record already covers.
-
 - **A name your shell has aliased stops setup instead of steering it.** The reviewer
   logins and the four working paths are the driver's own assignments now, and a
   `declare -n CODEX_BOT=OWNER` in a startup file makes one of them write THROUGH into
@@ -72,9 +52,12 @@
   fragment of its own remote — which the child pin echoes back, so the comparison agrees
   and setup announces success on an identity every later helper rejects.
 
-- **A failed setup leaves what it made, and removes nothing at all.** Every shape that
-  removed something needed a NAME, and a name at or inside a directory a same-UID process
-  can write to may have been substituted between being created and being removed: a
+- **A failed setup leaves what it made, and removes nothing at all.** The directory's
+  name is published in argv before the `mkdir` reserves it, and under a parent without
+  the sticky bit another account can replace it afterwards — so every shape that removed
+  something needed a NAME that may have been substituted between being created and being
+  removed, and taking a replacement's contents is far past what
+  `docs/decisions/2026-08-26-reservation-inference.md` accepts. What each shape took: a
   recursive removal took a replacement's whole tree, a named `rm -f` took a replacement's
   file, a ledger of what this run created missed whatever a signal landed in front of,
   removing the directory names unconditionally took a watcher's empty directory at a name
@@ -149,9 +132,9 @@
 
 - **The setup directory's transports are no longer unlinked by the driver.** Removing
   the file it had just read meant unlinking through a name published in argv, which
-  takes a replacement's own file with it — the same defect the helper answers with a
-  held descriptor and a recorded inode, neither of which the driving shell has. What
-  the removals were for does not survive examination: the origin is
+  takes a replacement's own file with it — the same defect that left the helper itself
+  removing nothing, and the driving shell has no better name to remove through. What
+  the removals were for does not survive examination either: the origin is
   `git remote get-url origin`, which anyone who can reach the checkout can read, and
   the directory is mode 700.
 

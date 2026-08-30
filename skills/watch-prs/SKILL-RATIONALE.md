@@ -1579,7 +1579,7 @@ guarantee is about what a shadowed COMMAND can reach.
 
 ## THE SETUP WORK RUNS IN A PROCESS, because nothing in this document executed it.
 
-It was 178 executable lines and 105 comment lines of this document — about a fifth of
+It was 177 executable lines and 105 comment lines of this document — about a fifth of
 everything the driver reads on every invocation — and no test could reach any of it. A
 fenced block is not a file the suite has, and `test-pr-skill-contract.sh` covers only
 what it can lift and run.
@@ -1636,8 +1636,8 @@ This block removed the env file after sourcing it and the pin leaf after reading
 and both removals were the same defect one level up from the one `pr-setup.sh` was
 fixed for: `$RB_SETUP_DIR` is published in argv, so `rm -f "$RB_SETUP_DIR/pin/pin"`
 unlinks a REPLACEMENT's own `pin` when the directory it names has been swapped. The
-helper answers that with a held descriptor and a recorded inode; this shell has
-neither, and `exec` is a name besides.
+helper does not answer it either — it removes nothing at all, for exactly this reason,
+and this shell has no better name to remove through than the one it published.
 
 WHAT THE REMOVALS WERE FOR does not survive examination. The argument was that a copy
 left at a published name is one an account watching that name can read the origin out

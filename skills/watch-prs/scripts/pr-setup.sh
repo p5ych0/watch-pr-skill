@@ -157,8 +157,6 @@ rb_setup_stop() {   # <reason> <status>
 
 /usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null \
     || { echo "PR_SETUP status=error reason=dir_not_reserved dir=$RB_DIR" >&2; exit 2; }
-# HELD OPEN FOR THE LIFE OF THIS PROCESS, which is what stops the inode being reused.
-# The descriptor is never read from; it exists so the object cannot be freed.
 # ── the origin, through the helper that reads it privileged ────────────────
 # NOT `git remote get-url` HERE. `pr-origin.sh` is where that read is hardened, and
 # a second copy of it is the duplication `CLAUDE.md` records paying for four times.
@@ -169,19 +167,13 @@ rb_setup_stop() {   # <reason> <status>
 }
 RB_REMOTE=""
 RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transport 1
-# AND IT IS LEFT WHERE IT IS, which is what `SKILL.md` does with its own transports and
-# for the same reason. Removing it meant `rm -f` on a nested name followed by `rmdir` on
-# its parent, and that pair is the shape that destroys a REPLACEMENT: the first takes a
-# racer's leaf, after which the second succeeds on a directory that had contents a
-# moment ago. What the removal was for does not survive examination either — the leaf
-# holds the same origin as the file written below it, the directory is mode 700, and it
-# is inside a tree this session keeps for its working files anyway.
-#
-# AND THE FAILURE PATH DOES NOT REMOVE IT EITHER. `rmdir "$RB_DIR"` cannot give the
-# reservation back with a child in the way, so a refusal after this point leaves the tree
-# — which is the accepted cost in
-# `docs/decisions/2026-08-29-setup-leaf-cleanup.md`, and the alternative was removing a
-# name a same-UID process may have substituted. Litter rather than loss.
+# AND IT IS LEFT WHERE IT IS, like everything else this helper makes. Removing it meant
+# `rm -f` on a nested name followed by `rmdir` on its parent, and that pair destroys a
+# REPLACEMENT: the first takes a racer's leaf, after which the second succeeds on a
+# directory that had contents a moment ago. What the removal was for does not survive
+# examination either — the leaf holds the same origin as the file written below it, the
+# directory is mode 700, and it is inside a tree this session keeps for its working files
+# anyway. The general rule and its table are beside `rb_setup_stop`.
 
 [ -n "$RB_REMOTE" ] || rb_setup_stop origin_empty 1
 # `$'\n'`, NOT `"$(printf '\n')"`. Command substitution strips trailing newlines, so

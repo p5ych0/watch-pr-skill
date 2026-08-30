@@ -953,7 +953,7 @@ plugin docs and open an issue.
   attempt. The `PR_SETUP status=error` lines are one per call, which is what the
   one-versus-two diagnosis below rests on.
 
-  The refusals AFTER the read differently, and that is not cosmetic. Setup READS one
+  The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds
   everything else itself, so nothing the helper wrote is ever executed. The three
   checks on what arrived — the origin is there, it is one line, it parses as an

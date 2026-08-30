@@ -24,11 +24,12 @@
 # reservation, whether a hostile origin comes back byte-exact, whether a refusal leaves
 # anything behind. Neither can answer the other's question.
 #
-# THE CLEANUP IS THE PART TO READ FIRST. This directory's name is published in argv, and
-# `docs/decisions/2026-08-26-reservation-inference.md` accepts a same-UID race on it —
-# bounded at one EMPTY directory lost or left behind, on the strength of one sentence:
-# `rmdir` refuses anything with contents in it. Several cases here exist to keep that
-# sentence true.
+# THAT THE HELPER REMOVES NOTHING IS THE PART TO READ FIRST, and it is a contract rather
+# than an omission. This directory's name is published in argv, so every removal shape
+# resolves a name a same-UID process may have substituted in the meantime — and shell has
+# no descriptor-relative removal to reach past that. `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
+# carries what each shape destroyed; several cases here exist to keep the no-removal
+# contract true, and one counts the removals in the file itself.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"
@@ -309,9 +310,9 @@ _bd_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_bd_d" 
     && pass "…and an origin the identity parser refuses stops the run, carrying its reason" \
     || die "the unusable-origin case gave rc=$_bd '$_bd_out'"
 # THE TRANSPORT `pr-origin.sh` LEFT IS STILL THERE, and that is the design rather than
-# a leak: the cleanup is one `rmdir`, which refuses a directory with contents, so a
-# refusal after anything exists leaves this run's own tree. Nothing of anyone else's is
-# touched, which is what the removals that used to be here could not promise.
+# a leak: this helper removes nothing, so a refusal leaves whatever had been made. What
+# that buys is that nothing of anyone ELSE's can be taken either, which is what the
+# removals that used to be here could not promise.
 { [ -d "$_bd_d" ] && [ -f "$_bd_d/o/origin" ]; } \
     && pass "…and leaves its own transport rather than resolving a name to remove it" \
     || die "the unusable-origin refusal removed something inside the reservation"
@@ -332,37 +333,24 @@ _forge_origin() {   # _forge_origin <body>
     return 0
 }
 # THE THIRD ARGUMENT IS WHAT THE CLEANUP IS EXPECTED TO DO, and it is not always
-# "removed". The give-back is ONE `rmdir` on the reservation and nothing inside it, so it
-# succeeds only where the refusal came before anything was created — and where it came
-# after, the tree stays. That is the property rather than a shortfall: the name is
-# published in argv, and every shape that removed the contents resolved a name a same-UID
-# process may have substituted.
-_stagecase() {   # _stagecase <reason> <status> <gone|kept>
-    local want="$1" wrc="$2" fate="$3" d o=0 oo
+# "removed". Nothing is given back at all, at any stage: the name is published in argv,
+# and every removal shape resolved a name a same-UID process may have substituted. That is
+# the property rather than a shortfall.
+_stagecase() {   # _stagecase <reason> <status>
+    local want="$1" wrc="$2" d o=0 oo
     d="$(mktemp -d "$TMP/st.XXXXXX")/dir"
     oo="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$d" 2>&1)" || o=$?
     { [ "$o" -eq "$wrc" ] && case "$oo" in *"reason=$want"*) true ;; *) false ;; esac; } \
         && pass "…$want is reported, with status $wrc" \
         || die "the $want case gave rc=$o '$oo'"
     # WHAT IS ASSERTED IS THAT NOTHING WAS DESTROYED, not that the directory went. The
-    # cleanup is one `rmdir`, which succeeds only on an empty directory — so a refusal
-    # that happened before anything was created gives the reservation back, and one that
-    # happened after leaves this run's own tree. Both are correct; requiring the removal
-    # would be requiring the leaf deletions that six rounds of review took out.
-    # THE DIRECTORY IS ALWAYS LEFT, because this helper removes nothing — the argument
-    # is beside `rb_setup_stop`, and the cost is in
-    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md`. The `gone` fate survives for one
-    # case only: `dir_not_reserved`, where the `mkdir` never succeeded and there is
-    # nothing of this run's to leave.
-    if [ "$fate" = gone ]; then
-        [ ! -e "$d" ] \
-            && pass "…and there is no directory, because the reservation never succeeded" \
-            || die "the $want case left a directory it never made"
-    else
-        [ -d "$d" ] \
-            && pass "…and what it had made is left where it is" \
-            || die "the $want case removed a directory this run made"
-    fi
+    # reservation is always left, because this helper removes nothing — the argument is
+    # beside `rb_setup_stop`, and the cost is in
+    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md`. Requiring a removal here would be
+    # requiring back the deletions that six rounds of review took out.
+    [ -d "$d" ] \
+        && pass "…and what it had made is left where it is" \
+        || die "the $want case removed a directory this run made"
     return 0
 }
 # THE STAGED COPY STILL WORKS, or every case below passes against a broken staging
@@ -375,28 +363,28 @@ _so_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "the staged copy with a working reader is ready, so the cases below reach their states" \
     || die "the staged copy failed on a good read (rc=$_so out='$_so_out')"
 _forge_origin ': > "$2/origin"'
-_stagecase origin_empty 1 kept
+_stagecase origin_empty 1
 _forge_origin 'printf "a\nb\n" > "$2/origin"'
-_stagecase origin_multiline 1 kept
+_stagecase origin_multiline 1
 _forge_origin 'mkdir "$2/origin"'
-_stagecase origin_transport 1 kept
+_stagecase origin_transport 1
 # AND THE READER'S OWN STORAGE REFUSAL IS CARRIED THROUGH AS ONE. `pr-origin.sh`
 # reports 2 where the storage would not take what it asked, and that is the status
 # the DRIVER retries on — folding it into 1 would turn a full filesystem into a
 # session that stops instead of one that moves to the other parent.
 printf '#!/usr/bin/env bash\nexit 2\n' > "$_stage/pr-origin.sh"; chmod +x "$_stage/pr-origin.sh"
-_stagecase origin_storage 2 kept
+_stagecase origin_storage 2
 # …WHILE THE READER'S TERMINAL REFUSAL STAYS TERMINAL.
 printf '#!/usr/bin/env bash\nexit 1\n' > "$_stage/pr-origin.sh"; chmod +x "$_stage/pr-origin.sh"
-_stagecase origin_unreadable 1 kept
+_stagecase origin_unreadable 1
 
-# ── the cleanup removes what this run made, and nothing else ──────────────
+# ── a replacement survives a refusal, contents and all ────────────────────
 # THE NAME IS PUBLISHED IN ARGV BEFORE THE `mkdir` RESERVES IT, and under a parent
 # without the sticky bit another account can replace the directory AFTER the
 # reservation. A recursive removal on a later failure then deletes the replacement
 # and everything in it — which is far past what
-# `docs/decisions/2026-08-26-reservation-inference.md` accepts, and that record rests
-# on `rmdir` REFUSING anything with contents in it.
+# `docs/decisions/2026-08-26-reservation-inference.md` accepts, and is why the shapes
+# that removed anything are gone.
 #
 # STAGED DETERMINISTICALLY, by having the forged reader do the replacing: it is
 # handed `<dir>/o`, so its parent is the directory under test, and it swaps that for
@@ -417,13 +405,39 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
 { [ -f "$_rr/witness" ] && [ -d "$_rr/squatter-subdir" ]; } \
     && pass "…and the cleanup leaves what it did not create" \
     || die "the cleanup destroyed a replacement's contents (witness=$([ -e "$_rr/witness" ] && echo yes || echo no) subdir=$([ -e "$_rr/squatter-subdir" ] && echo yes || echo no))"
-# THE DIRECTORY ITSELF SURVIVES TOO, because `rmdir` refuses one with contents. That
-# is the bound the record describes, reached from the other end: at most an empty
-# directory goes.
+# THE DIRECTORY ITSELF SURVIVES TOO, which is the same assertion read from the other
+# end: a shape that took the empty directory would take a replaced one just as readily,
+# the name being all either has to go on.
 [ -d "$_rr" ] \
-    && pass "…and the replacement directory itself, which rmdir refuses to take" \
+    && pass "…and the replacement directory itself, which no shape here resolves" \
     || die "the replacement directory was removed although it had contents"
 rm -rf "$_rr"
+# ── a signal kills the helper and takes nothing with it ───────────────────
+# THE HELPER ARMS NO TRAPS, so a fatal signal is bash's own default disposition: the
+# shell dies of it and nothing runs on the way out. That is the behaviour the removal
+# of the cleanup left behind, and the scan below can only see that no `trap` is written
+# — it cannot see what a signal actually does to a run in progress.
+#
+# STAGED DETERMINISTICALLY, with no timing at all: the forged reader signals its own
+# parent, which IS the helper, and the reader has already created the transport by then.
+# Measured: bash terminates while waiting on the foreground child rather than deferring
+# to its return, so the run dies partway through with the reservation and the transport
+# in place and the later files never written.
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"
+kill -TERM "$PPID"'
+_sg="$(mktemp -d "$TMP/sg.XXXXXX")/dir"
+_sg_rc=0
+_sg_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sg" 2>&1)" || _sg_rc=$?
+[ "$_sg_rc" -eq 143 ] \
+    && pass "an untrapped TERM ends the helper with 128+15, nothing having handled it" \
+    || die "the signal case gave rc=$_sg_rc '$_sg_out'"
+# AND WHAT HAD BEEN MADE IS STILL THERE, which is the half a text scan cannot reach: a
+# handler that removed the reservation would leave this true only for the transport, and
+# one that removed the tree would leave neither.
+{ [ -d "$_sg" ] && [ -f "$_sg/o/origin" ]; } \
+    && pass "…and the reservation and the transport inside it are left where they are" \
+    || die "the signal took something with it (dir=$([ -d "$_sg" ] && echo yes || echo no) transport=$([ -f "$_sg/o/origin" ] && echo yes || echo no))"
+
 # ── nothing is removed at all, which is the whole cleanup contract ────────
 # EVERY SHAPE THAT REMOVED ANYTHING NEEDED A NAME, and shell has no descriptor-relative
 # removal — no `unlinkat`, no `rmdir` on a held directory. The last shape standing was one
