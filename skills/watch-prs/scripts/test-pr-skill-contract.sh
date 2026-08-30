@@ -1683,6 +1683,71 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 [ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 2 ] \
     && pass "…and proves the assignment took, on both paths that make it" \
     || die "a recipe assigns the baseline without proving the assignment"
+# ── AND BOTH BASELINE READS ARE EXECUTED, NOT ONLY GREPPED ────────────────
+#
+# Every assertion above this point is a `grep` for the redirection, the assignment
+# or the diagnostic text, and all three stay green against a fence that no longer
+# refuses: the shape can be right while the behaviour is wrong. What has to hold is
+# that a `$PRIOR_FILE` which is missing or unreadable REFUSES rather than reading as
+# the legitimate empty baseline — because an empty baseline arms the watch with
+# nothing, and on the automatic path a pass that finished during the CI wait is then
+# accepted as the answer to the request just made.
+#
+# LIFTED AND RUN, both fences, against a good file and a missing one. The abort arms
+# `exit`, so each runs in its own shell and the status and the output are the answer.
+_bl_dir="$TMP_CL/bl"; mkdir -p "$_bl_dir" || die "the baseline-read scratch directory could not be made"
+# The round-close fence is a whole `if … fi` at column 0.
+awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.sh"
+# The opening fence's read is nested; lift its own `if ! … fi` and dedent it.
+awk '/^        PRIOR_REVIEW=$/{f=1} f{print} f&&/^        fi$/{exit}' "$SKILL" \
+    | sed 's/^        //' > "$_bl_dir/open.sh"
+{ [ -s "$_bl_dir/close.sh" ] && [ -s "$_bl_dir/open.sh" ] \
+  && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/close.sh" && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/open.sh"; } \
+    && pass "both baseline-read fences lift, so the cases below reach the code they name" \
+    || die "a baseline-read fence did not lift; the execution cases prove nothing"
+# THE ABORT ARMS `exit`, so a sourced fence that refuses ends the wrapper before it can
+# report — which is why the refusal is read off the OUTPUT, not off a `||` that never
+# runs. The diagnostic is what an operator sees, so it is what the case asserts.
+_bl_run() {   # _bl_run <fence> <prior-file> ; prints "<rc>|<output>"
+    local out rc=0
+    out="$(ROUND_RC=0 PRIOR_FILE="$2" bash -c '
+        . "$1" 2>/dev/null
+        printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"' _ "$1" 2>/dev/null)" || rc=$?
+    printf '%s|%s' "$rc" "$out"
+}
+printf '%s\n' 4242 > "$_bl_dir/good"
+for _f in close open; do
+    _bl_ok="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/good")"
+    case "${_bl_ok#*|}" in
+        TOOK:\[4242\]) pass "the $_f fence reads a real baseline through the descriptor" ;;
+        *) die "the $_f fence gave '${_bl_ok}' on a readable baseline" ;;
+    esac
+    _bl_gone="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/no-such-file")"
+    case "${_bl_gone#*|}" in
+        *'could not be read back'*) pass "…and REFUSES a baseline file that is not there" ;;
+        *) die "the $_f fence accepted a missing baseline file: '${_bl_gone}'" ;;
+    esac
+    if [ "$(id -u)" -ne 0 ]; then
+        : > "$_bl_dir/unreadable"; chmod 000 "$_bl_dir/unreadable"
+        _bl_unr="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/unreadable")"
+        chmod 600 "$_bl_dir/unreadable"
+        case "${_bl_unr#*|}" in
+            *'could not be read back'*) pass "…and one it cannot read, which an empty read would have accepted" ;;
+            *) die "the $_f fence accepted an unreadable baseline file: '${_bl_unr}'" ;;
+        esac
+    else
+        pass "running as root, so the unreadable-baseline state is skipped by name"
+    fi
+    # AND AN EMPTY FILE IS STILL AN ANSWER, which is the distinction the whole change
+    # rests on: a legitimate empty baseline must NOT be refused.
+    : > "$_bl_dir/empty"
+    _bl_empty="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/empty")"
+    case "${_bl_empty#*|}" in
+        TOOK:\[\]) pass "…while an empty baseline is carried through, not refused" ;;
+        *) die "the $_f fence refused a legitimately empty baseline: '${_bl_empty}'" ;;
+    esac
+done
+
 # AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. `pr-review-state.sh review-id`
 # returns nothing when the current head has no review — every round that pushes a
 # new commit, and every Copilot round — and `pr-watch.sh` takes an empty value as

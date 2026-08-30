@@ -423,11 +423,7 @@ then
         # THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO, and at a different cost.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         PRIOR_REVIEW=
-        if ! { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
-            echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'; PRIOR_REVIEW is not this session's to set, or the file is not there."
-            exit 0
-            [[ -n "" ]]
-        else
+        if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
             # EMPTY IS AN ANSWER, THE PATTERN IS A LITERAL, AND THERE ARE TWO SHAPES.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             case "$PRIOR_REVIEW" in
@@ -446,6 +442,10 @@ then
                     exit 0
                     [[ -n "" ]] ;;
             esac
+        else
+            echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'; PRIOR_REVIEW is not this session's to set, or the file is not there."
+            exit 0
+            [[ -n "" ]]
         fi
     else
         echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
