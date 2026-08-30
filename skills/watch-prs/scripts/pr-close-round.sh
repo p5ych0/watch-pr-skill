@@ -2,12 +2,21 @@
 # Close a review round: push the fixes, prove the head is green, post the summary
 # and request the next pass.
 #
-#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no> <head-file>
-#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file>
+#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no> <head-file> <prior-file>
+#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file> <prior-file>
 #
 # BOTH STAGES TAKE THE SAME <head-file>: `gate` writes the head it proved into it,
 # `post` reads it back. The head itself in that position is the pre-#202 form and
 # is refused by name.
+#
+# AND THE SAME <prior-file>, WHICH IS THE OTHER VALUE THAT HAS TO CROSS. `post`
+# writes the review baseline into it, and the driver's watch reads it back. It
+# travelled in the `PR_ROUND_CLOSED` record before, which meant the driving shell
+# captured this script's stdout, ran `sed` over it, checked the record was there,
+# checked it carried the field, and cut the value out with `${rec##* prior-review=}`
+# — twelve executable lines in the one shell nothing can harden, to receive a value
+# the file mechanism beside it already hands over. The record still carries it, for
+# whoever is reading the terminal; the driver no longer parses it. #234.
 #
 #   0  gated/closed — `gate`: the head is pushed and green, and the threads may
 #                     now be answered. `post`: the summary is posted and the next
@@ -210,7 +219,7 @@ case "$STAGE" in
 esac
 shift
 
-PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"
+PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"; PRIOR_FILE="${6:-}"
 # THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
 # stages take the same path: `gate` writes the head it proved into it, and `post`
 # reads it back out. The value never enters the driving shell.
@@ -270,8 +279,29 @@ fi
 # THE ALIAS CHECK STAYS AHEAD OF IT, and that ordering is forced: truncating a head
 # file that IS the summary destroys the account this stage is about to post. The
 # driver asks the file identity first for the same reason.
+# THE PRIOR FILE IS THE SAME KIND OF ARGUMENT AND GETS THE SAME CHECKS. Aliasing it
+# to the summary would have the baseline overwrite the account this stage posts;
+# aliasing it to the head file would have it overwrite the head `post` re-proves
+# against. Both are the accident an operator with a tidy scratch directory produces,
+# and both are silent without this.
+[ -n "$PRIOR_FILE" ] \
+    || { echo "ABORT: a prior file is required: 'post' writes the review baseline into it and the driver reads it back."; exit 1; }
+if [ "$PRIOR_FILE" = "$SUMMARY_FILE" ] || [ "$PRIOR_FILE" -ef "$SUMMARY_FILE" ] 2>/dev/null; then
+    echo "ABORT: the prior file and the summary file are the same file ('$PRIOR_FILE'); the baseline would overwrite the account."
+    exit 1
+fi
+if [ "$PRIOR_FILE" = "$HEAD_FILE" ] || [ "$PRIOR_FILE" -ef "$HEAD_FILE" ] 2>/dev/null; then
+    echo "ABORT: the prior file and the head file are the same file ('$PRIOR_FILE'); the baseline would overwrite the head 'post' re-proves against."
+    exit 1
+fi
+# EMPTIED BY THE GATE, ALONGSIDE THE HEAD. A `post` that fails after a previous
+# round wrote a baseline would otherwise leave the OLD value readable, and the
+# driver's watch would take it — accepting a review that predates this round as the
+# answer to the request this round did not make. Empty is a legitimate baseline, so
+# an emptied file is not a refusal; it is the absence of a claim.
 if [ "$STAGE" = gate ]; then
     > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
+    > "$PRIOR_FILE" || { echo "ABORT: could not empty the prior file '$PRIOR_FILE'."; exit 1; }
 fi
 
 case "$PR" in
@@ -508,9 +538,23 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # baseline captured before the push accepts a pass that FINISHED during the CI
     # wait as the answer to a request made after it — and a Codex pass on a small
     # diff can beat the checks.
-    local prior
+    local prior _back
     prior=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; return 1; }
+    # AND IT IS HANDED OVER BEFORE THE REQUEST, with the write's status taken and the
+    # value read back. `printf` can report success and the write fail at the flush when
+    # the redirection closes, and a driver reading a truncated baseline watches against
+    # a value no request was made with. Taking the status only works while there is
+    # something left to refuse WITH: after the request there is not, and the round is
+    # irreversibly half-closed. So the file is written here — the read above is still
+    # immediately before the request, which is what that ordering is for — and a failure
+    # stops the stage with nothing posted and nothing queued.
+    printf '%s\n' "$prior" > "$PRIOR_FILE" \
+        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted."; return 1; }
+    _back="$(<"$PRIOR_FILE")" \
+        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; nothing has been posted."; return 1; }
+    [ "$_back" = "$prior" ] \
+        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; nothing has been posted."; return 1; }
     # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
     # never triggered by a mention and never by a push — only by `--add-reviewer` —
     # so a Copilot round that posted the Codex mention requested nothing at all,

@@ -1568,14 +1568,14 @@ gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N ' "$SKILL")" || gate
 [ -x "$SCRIPT_DIR/pr-close-round.sh" ] \
     && pass "the round-closer ships" \
     || die "the round-closer is missing"
-grep -q 'pr-close-round.sh gate N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HEAD_FILE"' "$SKILL" \
+grep -q 'pr-close-round.sh gate N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HEAD_FILE" "\$PRIOR_FILE"' "$SKILL" \
     && pass "…and the recipe gates on the mode this PR is actually in" \
     || die "the recipe does not run the gate with \$AUTO_REVIEW and the head file"
 # BOTH STAGES ARE GIVEN THE SAME PATH, and that is the whole of the handoff since
 # #202: `gate` writes the head it proved into it and `post` reads it back, so the
 # value never enters the driving shell. A recipe that passed a captured head here
 # would be back to an assignment made after the push.
-grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HEAD_FILE"' "$SKILL" \
+grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HEAD_FILE" "\$PRIOR_FILE"' "$SKILL" \
     && pass "…and posts against the head file the gate wrote" \
     || die "the recipe does not post with the head file"
 grep -q 'GATED_HEAD=' "$SKILL" \

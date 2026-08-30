@@ -171,6 +171,12 @@ world() {   # world ; the state in which a round closes cleanly
 # fixture whose subject is an env-driven override clears it itself.
 stage() {   # stage <stage> [args…] ; prints "<rc>|<output>" for ONE stage
     local out rc=0 st="$1"; shift
+    # THE PRIOR FILE IS SUPPLIED WHEN THE CALLER GAVE A FULL ARGUMENT LIST, which is
+    # what the driver does with one of the four working files setup creates. A case
+    # deliberately passing FEWER — the missing-head-file one — is left short, so the
+    # refusal it is about still fires; a case about the prior file itself passes its
+    # own sixth argument and this does nothing.
+    if [ "$#" -eq 5 ]; then set -- "$@" "$TMP/prior.txt"; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
@@ -294,7 +300,7 @@ world; : > "$TMP/summary.md"
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/head.txt" 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/head.txt" "$TMP/prior.txt" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -qF 'summary is empty' <<<"$got"; } \
     && pass "an empty summary stops the round" \
     || die "an empty summary gave rc=$rc '$got'"
@@ -305,7 +311,7 @@ world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no "$TMP/head.txt" 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no "$TMP/head.txt" "$TMP/prior.txt" 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and so does a summary file that is not there" \
     || die "a missing summary file gave rc=$rc"
@@ -412,7 +418,7 @@ world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no "$TMP/head.txt" 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no "$TMP/head.txt" "$TMP/prior.txt" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -qF 'not a reviewer this loop drives' <<<"$got"; } \
     && pass "an unrecognised reviewer is refused, by name" \
     || die "an unknown reviewer gave rc=$rc '$got'"
@@ -631,7 +637,7 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-        "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" "$TMP/head.txt" 2>&1)"; rc=$?
+        "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" "$TMP/head.txt" "$TMP/prior.txt" 2>&1)"; rc=$?
     { [ "$rc" -eq 1 ] && grep -qF "$_want" <<<"$got"; } \
         && pass "refused by name: $_want" \
         || die "'$_pr/$_who/$_auto' gave rc=$rc '$got'"
@@ -742,6 +748,42 @@ grep -q 'pr-round-count' "$TMP/calls" \
 grep -q 'PR_ROUND_CLOSED .*prior-review=42' <<<"${got#*|}" \
     && pass "…and carries the baseline back" \
     || die "post's record was '${got#*|}'"
+
+# ── AND THE BASELINE IS HANDED OVER IN A FILE, NOT ONLY IN THE RECORD ──────
+# #234. The record is what an operator reads; the FILE is what the driver acts on.
+# It travelled in the record alone, which meant the driving shell captured this
+# script's stdout, `sed`-ed a line out of it, checked the line was there, checked it
+# carried the field, and cut the value out — twelve executable lines in the one
+# shell nothing can harden, for a value `gate` already knows how to hand over.
+[ "$(cat "$TMP/prior.txt" 2>/dev/null)" = 42 ] \
+    && pass "…and writes it into the prior file the caller named" \
+    || die "the prior file holds '$(cat "$TMP/prior.txt" 2>/dev/null)', not the baseline"
+
+# ── THE GATE EMPTIES THE PRIOR FILE, so a failed `post` cannot leave the LAST ──
+# round's baseline readable. The driver's watch would take it and accept a review
+# that predates this round as the answer to a request this round never made.
+world; printf '%s\n' 'STALE' > "$TMP/prior.txt"
+stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)" >/dev/null
+[ ! -s "$TMP/prior.txt" ] \
+    && pass "the gate empties the prior file, so no stale baseline survives a failed post" \
+    || die "the gate left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
+
+# ── AND IT IS NOT THE SUMMARY OR THE HEAD FILE ────────────────────────────
+# Aliased to the summary the baseline overwrites the account this stage posts;
+# aliased to the head file it overwrites the head `post` re-proves against. Both are
+# what an operator with a tidy scratch directory produces by accident.
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)" "$TMP/summary.md")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the account' <<<"${got#*|}"; } \
+    && pass "a prior file that is the summary file is refused" \
+    || die "the prior/summary alias gave '$got'"
+world; _hf="$(headf)"; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$_hf" "$_hf")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the head' <<<"${got#*|}"; } \
+    && pass "…and one that is the head file is refused too" \
+    || die "the prior/head alias gave '$got'"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a prior file is required' <<<"${got#*|}"; } \
+    && pass "…and an absent one is a refusal rather than a silent skip" \
+    || die "the missing prior file gave '$got'"
 
 # ── THE HEAD `post` CLOSES ON IS THE HEAD `gate` PROVED ────────────────────
 # Answering threads takes as long as it takes. A commit made in between leaves the
@@ -860,7 +902,7 @@ rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scri
 : > "$TMP/broken/recordlib.sh"
 _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" 2>&1)"; _st_rc=$?
+    "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _st_rc=$?
 { [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
     && pass "…and a gate that cannot bootstrap leaves no stale head either" \
     || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
@@ -872,7 +914,7 @@ _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$
 world; printf 'do not touch me\n' > "$TMP/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 got="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 2>&1)"; _oid_rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$TMP/prior.txt" 2>&1)"; _oid_rc=$?
 { [ "$_oid_rc" = 1 ] && grep -qF 'the head FILE, not the head itself' <<<"$got" \
     && [ -s "$TMP/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]; } \
     && pass "…and an existing file named after an OID is refused, not truncated" \
@@ -942,6 +984,12 @@ got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=$' <<<"${got#*|}"; } \
     && pass "a head with no review yet closes, reporting an empty baseline" \
     || die "an empty baseline gave '${got}'"
+# …AND IT REACHES THE FILE AS AN EMPTY FILE, which is an answer rather than a
+# failure. The driver tells it from a STALE value only because `gate` emptied the
+# file first — without that, last round's baseline would still be sitting there.
+{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
+    && pass "…and the prior file reads back empty rather than holding a previous round's value" \
+    || die "an empty baseline left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
 
 # AND THE FIELD IS STILL THERE, which is the whole difference between an answer
 # and a malformed record. Asserted on the record itself rather than on the value,

@@ -836,8 +836,8 @@ Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
 hard-coded answer — one recipe here, two orders there:
 
 ```bash
-#   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"
-#   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"
+#   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"
+#   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"
 #
 # `gate` writes the head it proved into `$HEAD_FILE`; `post` reads it back out.
 # The same path both times, and the value never enters this shell.
@@ -880,7 +880,7 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"; then
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
     [[ -n x ]]    # a reserved word, not `:`, and TRUE — under `errexit` a false
                   # one here would end the shell on the successful path
 else
@@ -936,7 +936,7 @@ esac
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" 2>&1)"; ROUND_RC=$?
+POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE" 2>&1)"; ROUND_RC=$?
 printf '%s\n' "$POST_OUT"
 # THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md

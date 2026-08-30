@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.84] — 2026-08-30
+
+- **The round's review baseline crosses in a file, like the head it sits beside.** It
+  came back in `post`'s `PR_ROUND_CLOSED` record and nowhere else, so the driving shell
+  captured the script's stdout, ran `sed` over it, proved a record was there, proved it
+  carried a `prior-review=` field, and cut the value out with `${rec##* prior-review=}` —
+  twelve executable lines of the one shell nothing can harden, to receive a value
+  `pr-close-round.sh` already knew how to hand over. `gate` has written the head it proved
+  into a caller-named file since #202, for the reason that capture was removed: an
+  assignment a readonly name makes fail in silence.
+
+  `post` now takes that file as a sixth argument and writes the baseline into it. The
+  record still carries the value, for whoever is reading the terminal; what changes is
+  that the driver no longer parses it out.
+
+  Three things come with it. `gate` EMPTIES the file, alongside the head, so a `post` that
+  fails cannot leave the previous round's baseline readable — the watch would take it and
+  accept a review that predates this round as the answer to a request this round never
+  made. The write happens BEFORE the request, with its status taken and the value read
+  back, because after the request there is nothing left to refuse with and the round is
+  irreversibly half-closed. And the file is refused if it is the summary file or the head
+  file, by path and by `-ef`: aliased to the first the baseline overwrites the account
+  being posted, aliased to the second it overwrites the head `post` re-proves against.
+
+  An empty baseline stays an answer rather than a failure — nothing is looked up on the
+  automatic path, and on a first manual request the reviewer has usually not seen the head
+  — and it reaches the driver as an empty file, which is distinguishable from a stale one
+  only because `gate` emptied it first. #234.
+
 ## [2.0.83] — 2026-08-29
 
 - **Setup runs in a process now, and `SKILL.md` is 6,677 characters shorter.** The
