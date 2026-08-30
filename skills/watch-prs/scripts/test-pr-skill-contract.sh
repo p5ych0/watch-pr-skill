@@ -700,7 +700,7 @@ FORGE
         || die "a spaced parent was refused or its paths were mangled (rc=$_sp out='$_sp_out')"
     rm -rf "$_sp_dir"
 
-    # …AND AN ENV OBJECT THAT IS NOT A REGULAR FILE IS REFUSED, which is the `-f` on
+    # …AND AN ORIGIN OBJECT THAT IS NOT A REGULAR FILE IS REFUSED, which is the `-f` on
     # the descriptor reached behaviourally rather than by grep. A directory at that
     # name opens, so only the test on the bound object catches it.
     _nf=0

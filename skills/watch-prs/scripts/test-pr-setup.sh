@@ -226,10 +226,16 @@ for _kind in dir file symlink; do
     # AND NOTHING WAS WRITTEN THROUGH IT. The symlink case is the one that matters:
     # a helper that fell back to `mkdir -p` would follow it and allocate under a
     # directory the caller never named.
+    #
+    # THE DIRECTORY CASE ASKS WHAT IS IN THERE, not whether some named leaf is absent.
+    # It named one, and a named leaf is a list: the name it held was the transport this
+    # helper stopped writing, so a regression that allocated `origin`, `o` or `work`
+    # inside a directory it never reserved passed the assertion with the canary intact.
+    # `ls -A` returning exactly the canary needs no list and cannot go stale.
     case "$_kind" in
-        dir)     { [ -f "$_t/canary" ] && [ ! -e "$_t/env" ]; } \
-                     && pass "…and the directory that was there is untouched" \
-                     || die "the pre-existing directory was written into" ;;
+        dir)     { [ -f "$_t/canary" ] && [ "$(ls -A "$_t" 2>/dev/null)" = canary ]; } \
+                     && pass "…and the directory that was there holds nothing but its canary" \
+                     || die "the pre-existing directory was written into: $(ls -A "$_t" 2>/dev/null | tr '\n' ' ')" ;;
         symlink) { [ -L "$_t" ] && [ -z "$(ls -A "$_pre/elsewhere" 2>/dev/null)" ]; } \
                      && pass "…and the symlink's target is still empty" \
                      || die "the helper wrote through the symlink" ;;
@@ -394,7 +400,7 @@ rm -rf "$p"
 mkdir -m 700 "$p"
 mkdir -m 700 "$p/squatter-subdir"
 printf "not this runs\n" > "$p/witness"
-printf "not this runs\n" > "$p/env"
+printf "not this runs\n" > "$p/origin"
 exit 1'
 _rr="$(mktemp -d "$TMP/rr.XXXXXX")/dir"
 _rr_rc=0
@@ -402,7 +408,7 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
 [ "$_rr_rc" -ne 0 ] \
     && pass "a directory replaced after the reservation still ends in a refusal" \
     || die "the replacement case did not refuse (out='$_rr_out')"
-{ [ -f "$_rr/witness" ] && [ -d "$_rr/squatter-subdir" ]; } \
+{ [ -f "$_rr/witness" ] && [ -d "$_rr/squatter-subdir" ] && [ -s "$_rr/origin" ]; } \
     && pass "…and the cleanup leaves what it did not create" \
     || die "the cleanup destroyed a replacement's contents (witness=$([ -e "$_rr/witness" ] && echo yes || echo no) subdir=$([ -e "$_rr/squatter-subdir" ] && echo yes || echo no))"
 # THE DIRECTORY ITSELF SURVIVES TOO, which is the same assertion read from the other
@@ -413,10 +419,12 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     || die "the replacement directory was removed although it had contents"
 rm -rf "$_rr"
 # ── a signal kills the helper and takes nothing with it ───────────────────
-# THE HELPER ARMS NO TRAPS, so a fatal signal is bash's own default disposition: the
-# shell dies of it and nothing runs on the way out. That is the behaviour the removal
-# of the cleanup left behind, and the scan below can only see that no `trap` is written
-# — it cannot see what a signal actually does to a run in progress.
+# THE HELPER ARMS ONE TRAP, AND IT REMOVES NOTHING. The cleanup handlers went with the
+# cleanup, so `TERM` and `HUP` are bash's own default disposition here — the shell dies of
+# them and nothing runs on the way out. `INT` is not: without a handler the run continues
+# past it, which is what the second case below is for. The scan further down can see how
+# many `trap` lines there are and that none of them removes anything; it cannot see what a
+# signal actually does to a run in progress, which is what these cases are.
 #
 # STAGED DETERMINISTICALLY, with no timing at all: the forged reader signals its own
 # parent, which IS the helper, and the reader has already created the transport by then.
@@ -463,8 +471,10 @@ _sigcase INT 130
 # is a CHECK-THEN-USE: `rmdir` resolves the name again after the comparison, so a racer
 # replacing the directory in that window has its replacement taken.
 #
-# So this helper removes nothing, the descriptor and the inode went with the cleanup they
-# gated, and the traps went with them — there was nothing left for a handler to do.
+# So this helper removes nothing, and the descriptor and the inode went with the cleanup
+# they gated. The CLEANUP traps went with it too — there was nothing left for those to do —
+# and the `INT` re-raise that stays is not one of them: it removes nothing, which is what
+# the second count below asserts of every handler in the file.
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries the table of what each earlier
 # shape destroyed.
 _rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
