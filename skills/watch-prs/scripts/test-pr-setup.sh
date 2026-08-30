@@ -181,19 +181,22 @@ done
 # command in the operator's shell. Nothing evaluates the value now, so what these
 # cases assert is that it arrives BYTE-EXACT and that nothing ran on the way.
 #
-# THE WITNESS IS AN ABSOLUTE PATH THE PAYLOAD ITSELF NAMES, so where the helper happens
-# to be standing does not enter into it. A bare `touch WITNESS` lands in the payload's
-# working directory, which is the repository `run` cds into and not the scratch root the
-# assertion was reading — so a payload that executed created a file nothing looked at,
-# and every case passed on the byte-exactness alone. Interpolating the path removes the
-# assumption rather than correcting it.
+# THE WITNESS TRAVELS IN THE ENVIRONMENT AND THE PAYLOAD QUOTES IT, so neither where the
+# helper is standing nor what the path contains enters into it. It was `touch WITNESS`,
+# relative, which lands in the payload's working directory — the repository `run` cds
+# into, not the scratch root the assertion read — so a payload that executed created a
+# file nothing looked at and every case passed on the byte-exactness alone. Interpolating
+# the path fixed that and put a second one in its place: a contributor whose `TMPDIR`
+# holds a space made the interpolated `touch /a b/WITNESS` two operands, and the
+# monitored file stayed absent while the origin HAD been executed. A name carries any
+# path as one word, and the payloads are literal text again with nothing to escape.
 _wit="$TMP/WITNESS"
 _inj_i=0
 for _bad in \
     "git@github.com:acme/w'x.git" \
-    "git@github.com:acme/w\$(touch $_wit)x.git" \
-    "git@github.com:acme/w\`touch $_wit\`x.git" \
-    "git@github.com:acme/w;touch $_wit;x.git" \
+    'git@github.com:acme/w$(touch "$RB_WIT")x.git' \
+    'git@github.com:acme/w`touch "$RB_WIT"`x.git' \
+    'git@github.com:acme/w;touch "$RB_WIT";x.git' \
     'git@github.com:acme/w x"y'"'"'z.git' \
     'git@github.com:acme/w${IFS}x.git'
 do
@@ -201,7 +204,7 @@ do
     rm -f "$_wit"
     ( cd "$REPO" && git remote set-url origin "$_bad" ) 2>/dev/null \
         || { die "git would not hold the staged remote #$_inj_i"; continue; }
-    r="$(run --)"
+    r="$(run RB_WIT="$_wit" --)"
     _d="$(dir_of "$r")"
     if [ "$(rc_of "$r")" != 0 ]; then
         die "the helper refused a legal-if-hostile remote #$_inj_i: '$r'"
@@ -526,14 +529,21 @@ case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
 esac
 # THE ORIGIN WRITE, STAGED. The forged reader runs before that write, so it can plant
 # the symlink in the window the case is about.
+#
+# THE VICTIM'S PATH TRAVELS IN THE ENVIRONMENT, for the reason the injection witness
+# above does: interpolated into the staged text it is shell SOURCE, and a contributor
+# whose `TMPDIR` holds a space turns `ln -s /a b/origin` into three operands. The plant
+# then fails, the helper succeeds because there was no symlink, and the case reports the
+# helper wrote through one. A name carries any path as one word.
 _vic="$TMP/victim-origin"
 printf 'PRECIOUS\n' > "$_vic"
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"
-ln -s '"$_vic"' "$(dirname "$2")/origin"'
+ln -s "$RB_VICTIM" "$(dirname "$2")/origin"'
 _sy="$(mktemp -d "$TMP/sy.XXXXXX")/dir"
 _sy_rc=0
-_sy_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sy" 2>&1)" || _sy_rc=$?
+_sy_out="$(cd "$REPO" && run_limited 25 env RB_VICTIM="$_vic" \
+    /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sy" 2>&1)" || _sy_rc=$?
 [ "$_sy_rc" -ne 0 ] \
     && pass "a symlink planted at the origin name is refused rather than written through" \
     || die "the helper wrote through a planted symlink (out='$_sy_out')"
@@ -546,14 +556,15 @@ rm -rf "$_sy"
 # process can reach.
 printf 'PRECIOUS\n' > "$_vic"
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^for _f in summary.md request.md prior.txt head.txt; do|ln -s '"$_vic"' "$RB_WORK_DIR/summary.md"; &|' \
+sed 's|^for _f in summary.md request.md prior.txt head.txt; do|ln -s "$RB_VICTIM" "$RB_WORK_DIR/summary.md"; &|' \
     "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
 grep -qF 'ln -s' "$_stage/pr-setup.sh" \
     && pass "the working-leaf symlink stage is patched" \
     || die "the working-leaf stage did not patch pr-setup.sh; the case proves nothing"
 _sw="$(mktemp -d "$TMP/sw.XXXXXX")/dir"
 _sw_rc=0
-_sw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sw" 2>&1)" || _sw_rc=$?
+_sw_out="$(cd "$REPO" && run_limited 25 env RB_VICTIM="$_vic" \
+    /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sw" 2>&1)" || _sw_rc=$?
 [ "$_sw_rc" -ne 0 ] \
     && pass "a symlink planted at a working path is refused rather than written through" \
     || die "the helper wrote through a planted working-path symlink (out='$_sw_out')"
