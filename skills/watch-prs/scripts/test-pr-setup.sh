@@ -423,9 +423,9 @@ rm -rf "$_rr"
 # to change the outcome rather than being taken on trust. A bare inode number can be
 # handed back to the next `mkdir` once the original is freed; a descriptor held on the
 # original stops it being freed at all. Where the open fails there is no durable
-# identity, and the cleanup falls back to `rmdir` alone rather than unlinking through
-# a name it cannot vouch for — asserted here by removing the `exec` from a copy of the
-# subject and requiring the leaves to survive anyway.
+# identity, and the cleanup does not give the directory back at all rather than removing
+# one it cannot vouch for — asserted here by removing the `exec` from a copy of the
+# subject and requiring the replacement to survive whole.
 grep -qF 'exec 8<"$RB_DIR"' "$SCRIPT" \
     && pass "the reservation is held open, so its inode cannot be reused" \
     || die "pr-setup.sh does not hold a descriptor on the directory it reserved"
@@ -450,8 +450,8 @@ _ni="$(mktemp -d "$TMP/ni.XXXXXX")/dir"
 _ni_rc=0
 _ni_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ni" 2>&1)" || _ni_rc=$?
 { [ -f "$_ni/env" ] && [ -f "$_ni/o/origin" ]; } \
-    && pass "…and with no recorded inode the cleanup unlinks nothing either" \
-    || die "a cleanup with no recorded inode still unlinked leaves (rc=$_ni_rc out='$_ni_out')"
+    && pass "…and with no recorded inode the cleanup takes nothing either" \
+    || die "a cleanup with no recorded inode still took what it could not vouch for (rc=$_ni_rc out='$_ni_out')"
 rm -rf "$_ni"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 # AND WITHOUT IT NOTHING IS UNLINKED, which is the fallback rather than a weaker
@@ -472,17 +472,16 @@ _nh="$(mktemp -d "$TMP/nh.XXXXXX")/dir"
 _nh_rc=0
 _nh_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_nh" 2>&1)" || _nh_rc=$?
 { [ -f "$_nh/env" ] && [ -f "$_nh/o/origin" ]; } \
-    && pass "…and with no held descriptor the cleanup unlinks nothing at all" \
-    || die "a cleanup with no durable identity still unlinked leaves (rc=$_nh_rc out='$_nh_out')"
+    && pass "…and with no held descriptor the cleanup takes nothing at all" \
+    || die "a cleanup with no durable identity still took what it could not vouch for (rc=$_nh_rc out='$_nh_out')"
 rm -rf "$_nh"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
-# AND THE IDENTITY IS RECORDED FROM THE DESCRIPTOR, NOT FROM THE NAME, which closes
-# the window one level down: a swap between the `exec` and the record would capture the
+# AND THE IDENTITY IS RECORDED FROM THE DESCRIPTOR, NOT FROM THE NAME, which closes the
+# window one level down: a swap between the `exec` and the record would capture the
 # REPLACEMENT's inode, after which the comparison is replacement against replacement,
-# agrees, and the cleanup unlinks the replacement's own files. Staged by making the
-# forged reader do the swap — it runs after the reservation and after the hold, which
-# is exactly that window.
+# agrees, and the cleanup gives back a directory this run never made. Nothing INSIDE is
+# ever removed, so what the identity protects is that one `rmdir` and nothing else.
 grep -qF 'RB_INO="$(rb_setup_ino_held)"' "$SCRIPT" \
     && pass "the recorded inode comes from the held descriptor rather than the path" \
     || die "pr-setup.sh records its inode through the published name, which a swap replaces"
@@ -490,12 +489,12 @@ grep -qF 'ls -diL /dev/fd/8' "$SCRIPT" \
     && pass "…read with -L, so it is the directory's inode and not the /proc link's" \
     || die "the held-object read omits -L; on Linux that reports the symlink's inode"
 
-# …AND A REPLACEMENT CARRYING THE SAME NAMES IS NOT UNLINKED THROUGH EITHER. The
-# case above used witnesses this run never names, so it passed on a cleanup that
-# still removed `env` and `o/origin` by path. `-O` refuses a directory another
-# ACCOUNT holds — which is the boundary the record is about — but a fixture runs as
-# one account, so what this reaches is the other guard: the inode recorded when the
-# `mkdir` reported success, which a replacement does not carry.
+# …AND A REPLACEMENT IS NOT GIVEN BACK IN THIS RUN'S PLACE. `-O` refuses a directory
+# another ACCOUNT holds — which is the boundary the record is about — but a fixture runs
+# as one account, so what this reaches is the other guard: the inode recorded when the
+# `mkdir` reported success, which a replacement does not carry. Its CONTENTS were never
+# at risk once the cleanup became one `rmdir`; what this case protects is the directory
+# itself.
 _forge_origin 'p="$(dirname "$2")"
 rm -rf "$p"
 mkdir -m 700 "$p"
@@ -510,8 +509,8 @@ _rc2_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.
     && pass "a replacement carrying the declared leaf names still ends in a refusal" \
     || die "the name-collision case did not refuse (out='$_rc2_out')"
 { [ -f "$_rc2/env" ] && [ -f "$_rc2/o/origin" ]; } \
-    && pass "…and neither declared leaf is unlinked through the replaced path" \
-    || die "the cleanup unlinked a replacement's own leaf (env=$([ -e "$_rc2/env" ] && echo yes || echo no) origin=$([ -e "$_rc2/o/origin" ] && echo yes || echo no))"
+    && pass "…and the replacement keeps everything it had put there" \
+    || die "the cleanup took a replacement's own file (env=$([ -e "$_rc2/env" ] && echo yes || echo no) origin=$([ -e "$_rc2/o/origin" ] && echo yes || echo no))"
 rm -rf "$_rc2"
 
 # ── an origin file that does not hold the value is refused ────────────────
@@ -540,10 +539,9 @@ _mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     || die "the lost-write refusal removed a directory with contents in it"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
-# ── a signal after the write gives the reservation back ───────────────────
-# THE DEFAULT ACTION FOR `HUP`, `INT` AND `TERM` IS TO TERMINATE, so without a
-# handler a signal arriving after `work/` and the origin exist leaves a non-empty
-# published directory behind — carrying the session's origin — and the driver
+# ── a signal after the write is caught, and leaves the tree ───────────────
+# THE DEFAULT ACTION FOR `HUP`, `INT` AND `TERM` IS TO TERMINATE, so without a handler
+# the run ends with no cleanup at all and no status anyone can read — and the driver
 # deliberately performs no cleanup after a non-zero helper status, because it cannot
 # know who created the path. So the helper arms the cleanup before the reservation is
 # attempted and disarms only on success.

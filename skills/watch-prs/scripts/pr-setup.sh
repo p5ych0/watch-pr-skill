@@ -154,17 +154,18 @@ RB_INO=
 # number is an identity for as long as this run needs it. Measured: bash opens a
 # directory read-only on both platforms this suite runs on.
 #
-# AND THE LEAF REMOVALS ARE GATED ON HAVING IT. Where the open fails there is no
-# durable identity to compare against, so the cleanup falls back to `rmdir` ALONE —
-# which cannot unlink anything and leaves a directory behind at worst, the cost the
-# accepted record already covers. Nothing unsafe happens on a platform this has not
-# been measured on; something is left behind instead.
+# AND THE RESERVATION'S OWN `rmdir` IS GATED ON HAVING IT. There are no leaf removals to
+# gate — nothing inside the reservation is ever removed — so what the identity protects is
+# the one `rmdir` on `$RB_DIR` itself: without it the cleanup would give back a directory
+# at this name that may be a racer's rather than this run's. Where the open fails, that
+# `rmdir` does not run and the directory is left instead, which is the cost the accepted
+# record already covers.
 #
 # AND IT IS READ THROUGH THE DESCRIPTOR, NOT THROUGH THE NAME. Recording it as
 # `rb_setup_ino "$RB_DIR"` reopened the window one level down: a swap between the
 # `exec` and that read records the REPLACEMENT's inode, after which the comparison
-# below is replacement against replacement, agrees, and the cleanup unlinks the
-# replacement's own files. `/dev/fd/8` names the object this run holds however the
+# below is replacement against replacement, agrees, and the cleanup gives back a
+# directory this run never made. `/dev/fd/8` names the object this run holds however the
 # path has been rearranged since — measured: with the directory removed and recreated
 # under it, the held inode is unchanged and the path's is not.
 #
@@ -185,9 +186,9 @@ rb_setup_ino_held() {   # the inode of the object descriptor 8 holds, or nothing
     printf '%s' "${1-}"
     return 0
 }
-# `[[`, NOT `[`, in every one of these. The condition decides whether files are
-# DELETED, and `[` is a name; `[[` is a reserved word the parser handles and nothing
-# can stand in for.
+# `[[`, NOT `[`, in every one of these. The condition decides whether a directory is
+# REMOVED, and `[` is a name; `[[` is a reserved word the parser handles and nothing can
+# stand in for.
 #
 # ONE `rmdir` AND NOTHING ELSE, which is the shape six rounds of review converged on
 # rather than a simplification. Every attempt to give the CONTENTS back needed a NAME,
