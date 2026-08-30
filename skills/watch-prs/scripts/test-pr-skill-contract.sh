@@ -1748,8 +1748,11 @@ printf '%s\n' 4242 > "$_bl_dir/good"
 for _f in close; do
     _bl_rc=1
     _bl_ok="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/good")"
-    case "${_bl_ok#*|}" in
-        TOOK:\[4242\]) pass "the $_f fence reads a real baseline through the descriptor" ;;
+    case "$_bl_ok" in
+        # THE STATUS TOO. `exit 0` turned into `exit 1` still yields the value, and the
+        # driver would then STOP after a round that closed cleanly instead of going on to
+        # the watch — a success the fence reports as a failure.
+        0\|TOOK:\[4242\]) pass "the $_f fence reads a real baseline through the descriptor, and continues" ;;
         *) die "the $_f fence gave '${_bl_ok}' on a readable baseline" ;;
     esac
     _bl_gone="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/no-such-file")"
@@ -1814,8 +1817,8 @@ for _f in close; do
     # rests on: a legitimate empty baseline must NOT be refused.
     : > "$_bl_dir/empty"
     _bl_empty="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/empty")"
-    case "${_bl_empty#*|}" in
-        TOOK:\[\]) pass "…while an empty baseline is carried through, not refused" ;;
+    case "$_bl_empty" in
+        0\|TOOK:\[\]) pass "…while an empty baseline is carried through, not refused" ;;
         *) die "the $_f fence refused a legitimately empty baseline: '${_bl_empty}'" ;;
     esac
 done
@@ -2119,7 +2122,11 @@ grep -q '^[^#]*REQ_RC=' "$SKILL" \
 grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
-grep -q 'PRIOR_REVIEW="$(<"/dev/fd/9")"' "$SKILL" \
+# THE OPENING PATH'S OWN SPELLING, which is `main`'s: it reads `$PRIOR_FILE` by name.
+# Pointed at the round-close read instead, this stayed green through anything done to
+# the opening one — including removing it. #238 changes that read; this assertion moves
+# with it then.
+grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
     && pass "…and the read-back is inside that branch, not after it" \
     || die "the baseline read-back is not inside the request's success branch; a shadowed exit reaches it"
 # AND THE NAME IT READS INTO IS PROVEN ASSIGNABLE BEFORE THE REQUEST GOES OUT.
