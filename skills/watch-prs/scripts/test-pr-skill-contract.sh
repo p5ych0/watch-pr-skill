@@ -1722,8 +1722,20 @@ awk '/^    if \{ \[\[ -f \/dev\/fd\/9 \]\] && CODEX_SHA=/, /^    fi$/' "$SKILL" 
 # — the forger that does not forge, which this file has had to fix before.
 _ph_digits=0000000000000000000000000000000000000001
 _ph_letters=abcdef0123456789abcdef0123456789abcdef01
+# `declare -u` IS BASH 4.0+, and the `macos-shell` job is 3.2.57. There the attribute
+# line fails, `CODEX_SHA` is left unchanged, and the case would report that the attribute
+# did not transform the value — a probe broken on the shell it exists to accommodate,
+# failing every PR. Asked with an `if`, like the `-l` probe above and for the same reason:
+# an `&&` list reports 1 on a shell without the attribute, which under this file's `set -e`
+# ends the run. `-i` is in every bash and needs no gate.
+_rb_has_u=no
+if ( declare -u _rb_probe_u ) 2>/dev/null; then _rb_has_u=yes; fi
 for _ph_case in "|$_ph_letters" "-i|$_ph_digits" "-u|$_ph_letters"; do
     _ph_at="${_ph_case%%|*}"; _ph_val="${_ph_case#*|}"
+    if [ "$_ph_at" = "-u" ] && [ "$_rb_has_u" != yes ]; then
+        pass "this shell has no declare -u, so the uppercasing state is skipped by name"
+        continue
+    fi
     printf '%s\n' "$_ph_val" > "$_ph_dir/sha"
     _ph_out="$(HEAD_FILE="$_ph_dir/sha" bash -c '
         [ -n "$2" ] && declare $2 CODEX_SHA
