@@ -566,13 +566,16 @@ for _sig in HUP INT TERM; do
     [ "$_sg_rc" -ne 0 ] \
         && pass "a $_sig after the write does not report success" \
         || die "the $_sig case returned 0 (out='$_sg_out')"
-    # WHAT IS ASSERTED IS THAT THE HANDLER RAN, not that the tree went: the cleanup is
-    # one `rmdir`, which refuses a directory with contents, so a signal after the working
-    # files exist leaves them. The reservation is given back where it is still empty, and
-    # a signal is caught either way — which is what the traps are for.
-    { [ ! -e "$_sg" ] || [ -d "$_sg" ]; } \
-        && pass "…and what is left is this run's own tree, with nothing else touched" \
-        || die "a $_sig left something other than a directory at the reservation"
+    # AND THE TREE IS REQUIRED TO SURVIVE, not merely permitted to. This signal is
+    # delivered where the successful run would reset its `EXIT` trap — after `work/`, its
+    # four files and the origin all exist — so the cleanup's one `rmdir` MUST fail on a
+    # directory with contents. Accepting an absent `$_sg` here let a regression that
+    # deleted the reservation and everything in it report PASS, which is the whole
+    # behaviour round 18 established.
+    { [ -d "$_sg" ] && [ -f "$_sg/origin" ] && [ -f "$_sg/work/summary.md" ] \
+      && [ -f "$_sg/work/head.txt" ]; } \
+        && pass "…and the tree it had written is left intact, contents and all" \
+        || die "a $_sig removed the reservation or its contents: '$(ls -A "$_sg" 2>/dev/null | tr '\n' ' ')'"
     rm -rf "$_sg"
 done
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"

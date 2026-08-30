@@ -89,10 +89,11 @@
   from loss to
   litter: a refusal after anything exists leaves this run's own tree — one directory per
   refused attempt — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with
-  the table of what each earlier shape destroyed. The pin probes are left in place for the
-  same reason: two `rmdir`s on two names can lose two of a watcher's empty directories,
-  where the record bounds the cost at one, and the two they leave sit inside a tree the
-  session keeps anyway.
+  the table of what each earlier shape destroyed. There is no pin-storage probe for the
+  same reason, and for one more: two `rmdir`s on two names can lose two of a watcher's
+  empty directories where the record bounds the cost at one, and a probe that instead
+  KEEPS what it allocated is capacity the pin then cannot have. See the entry above on
+  why a pin the storage refuses is terminal.
 
 - **The origin transport is left where it is.** The helper copied the origin out of
   `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
