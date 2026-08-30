@@ -143,9 +143,9 @@ esac
 # untrapped `TERM` with 143, which is what a caller should see.
 #
 # `INT` IS NOT ONE OF THOSE. Measured the same way, `kill -INT` at this process while
-# `pr-origin.sh` runs does not end it — the run continues, creates every working file and
-# publishes `status=ready`, so a caller reads a session somebody stopped as one that
-# succeeded. This handler removes NOTHING: it disarms itself and re-raises, which is the
+# `pr-origin.sh` runs does not end it — the run continues, creates every working file,
+# EXITS 0 and prints the ready line, so the caller's `if` takes its success arm on a
+# session somebody stopped and whoever is watching the terminal is told it started. This handler removes NOTHING: it disarms itself and re-raises, which is the
 # whole of it, and the caller then sees 130 with whatever had been made left exactly where
 # a refusal leaves it. Where the signal was ignored on entry bash installs no handler at
 # all and the run carries on, which is what a process started with `INT` ignored should do.

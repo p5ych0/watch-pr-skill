@@ -422,8 +422,8 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "a directory replaced after the reservation still ends in a refusal" \
     || die "the replacement case did not refuse (out='$_rr_out')"
 { [ -f "$_rr/witness" ] && [ -d "$_rr/squatter-subdir" ] && [ -s "$_rr/origin" ]; } \
-    && pass "…and the cleanup leaves what it did not create" \
-    || die "the cleanup destroyed a replacement's contents (witness=$([ -e "$_rr/witness" ] && echo yes || echo no) subdir=$([ -e "$_rr/squatter-subdir" ] && echo yes || echo no))"
+    && pass "…and what it did not create is still there, nothing having been removed" \
+    || die "a replacement's contents were destroyed; this helper unlinks nothing (witness=$([ -e "$_rr/witness" ] && echo yes || echo no) subdir=$([ -e "$_rr/squatter-subdir" ] && echo yes || echo no))"
 # THE DIRECTORY ITSELF SURVIVES TOO, which is the same assertion read from the other
 # end: a shape that took the empty directory would take a replaced one just as readily,
 # the name being all either has to go on.
@@ -460,11 +460,14 @@ kill -'"$sig"' "$PPID"'
         && pass "a $sig ends the helper with $want" \
         || die "the $sig case gave rc=$rc '$out'"
     # THE READY LINE IS ASSERTED ABSENT AS WELL AS THE STATUS, because the failure this
-    # case exists for is a run that carries on to the end: with `INT` unhandled the status
-    # was 0 AND `status=ready` was published, and a caller branches on both.
+    # case exists for is a run that carries on to the END: with `INT` unhandled the status
+    # was 0 and `status=ready` was published, and the two are separate evidence of it. The
+    # driver branches on the STATUS alone — it never reads this line — so what the second
+    # assertion catches is a run that announced a session to whoever is watching the
+    # terminal after being stopped.
     case "$out" in
         *'status=ready'*) die "the $sig case published a ready line for a run that was stopped" ;;
-        *) pass "…with no ready line, so nothing downstream reads it as a session that started" ;;
+        *) pass "…with no ready line, so nothing reports a session that never started" ;;
     esac
     # AND WHAT HAD BEEN MADE IS STILL THERE, which is the half a text scan cannot reach: a
     # handler that removed the reservation would leave this true only for the transport,
@@ -592,9 +595,12 @@ case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
 esac
 
 # ── the streams are separate ───────────────────────────────────────────────
-# NOTHING BUT THE READY LINE ON STDOUT, and every reason on stderr. The driver
-# reads one stream and never sees the other, which is what lets a caller capture
-# the ready line without a refusal's diagnostics landing in the value.
+# NOTHING BUT THE READY LINE ON STDOUT, and every reason on stderr. THE DRIVER READS
+# NEITHER: it branches on the exit STATUS and takes the origin from the file, so the
+# ready line is a diagnostic and the status is the control signal. What the separation
+# buys is that the diagnostic stays honest — a refusal's reasons cannot end up on the
+# stream that carries the success line, so anything that does capture stdout gets the
+# ready line or nothing, and never a reason that reads like one.
 _od="$(mktemp -d "$TMP/od.XXXXXX")/dir"
 _out_only="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_od" 2>/dev/null)" || true
 case "$_out_only" in
