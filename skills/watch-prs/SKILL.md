@@ -420,11 +420,14 @@ then
     # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
-        PRIOR_REVIEW="$(<"$PRIOR_FILE")"
+        # THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO, and at a different cost.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         # THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-        if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
-            echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
+        PRIOR_REVIEW=
+        if ! { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")" \
+               && [[ $PRIOR_REVIEW = "$(<"/dev/fd/9")" ]]; } 9<"$PRIOR_FILE"; then
+            echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'; PRIOR_REVIEW is not this session's to set, or the file is not there."
             exit 0
             [[ -n "" ]]
         else
@@ -908,11 +911,16 @@ Then, and only then:
 # AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [ "$ROUND_RC" -eq 0 ]; then
-    PRIOR_REVIEW="$(<"$PRIOR_FILE")"
+    # A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # AND THE ASSIGNMENT IS PROVEN AFTER A CLOSED ROUND TOO, where a refusal costs more.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
-        echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set. The round IS closed; do not enter the wait step."
+    PRIOR_REVIEW=
+    if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")" \
+         && [[ $PRIOR_REVIEW = "$(<"/dev/fd/9")" ]]; } 9<"$PRIOR_FILE"; then
+        [[ -n x ]]
+    else
+        echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'. The round IS closed; do not enter the wait step, and do not re-close the round."
         exit 1
         [[ -n "" ]]
     fi

@@ -1396,6 +1396,39 @@ SO THE MESSAGE SAYS THE ROUND IS CLOSED, and says not to enter the wait step. An
 abort that read like a failed round would send the next session to re-close a round
 that is already closed, which posts a second summary and requests a second pass.
 
+## A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
+
+`PRIOR_REVIEW="$(<"$PRIOR_FILE")"` cannot tell those apart. A missing or unreadable
+file makes the substitution EMPTY, and empty is a legitimate baseline — the ordinary
+answer when the head has no review yet — so the value passes every test after it and
+the watch arms with no baseline at all. On the automatic path that is the defect the
+baseline exists to prevent: a pass that finished during the CI wait is then accepted
+as the answer to the request just made.
+
+THE REDIRECTION IS WHAT DISTINGUISHES THEM. `9<"$PRIOR_FILE"` fails if the file is
+not there or cannot be read, and a failed redirection fails the whole compound
+command — so "could not read" and "read an empty value" take different branches,
+which is the fail-closed rule `CLAUDE.md` states. Reading through `/dev/fd/9` then
+reads the object that redirection opened rather than resolving the name a second
+time.
+
+THE ROUND IS ALREADY CLOSED WHEN THIS FIRES, and the message says so. The summary is
+posted and the pass requested, so the refusal stops the WAIT and must not read as a
+round that failed: a session told otherwise re-closes a closed round, which posts a
+second summary and requests a second pass.
+
+## THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO, and at a different cost.
+
+The same read, at step 2, with the same hole and a cheaper failure: nothing has been
+closed there, so a refusal costs the request rather than the round. It is written the
+same way because it is the same defect — one document, one variable, two sites — and
+leaving the older one unbound would be the copy that goes stale, which is the shape
+this repository has paid for more than once.
+
+WHAT DIFFERS IS THE EXIT. Step 2's refusal is a `0`: the request has been made, and
+the operator is told the wait cannot be armed. Step 5's is a `1` and says the round
+is closed. Both stop before the watch, which is the only thing either can protect.
+
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 
 `post` writes the review baseline into the file it is given, as `gate` writes the

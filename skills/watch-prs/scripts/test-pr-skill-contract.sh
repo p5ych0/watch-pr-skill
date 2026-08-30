@@ -1666,13 +1666,21 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" |
 # lines that captured stdout, `sed`-ed a record out of it, proved the record was
 # there and carried the field, and cut the value out with `${rec##* prior-review=}`
 # are gone. The record still carries it for whoever reads the terminal.
-[ "$(grep -c 'PRIOR_REVIEW="\$(<"\$PRIOR_FILE")"' "$SKILL")" -ge 2 ] \
-    && pass "the recipe reads the baseline out of the file the round-closer wrote" \
-    || die "a recipe does not read the baseline out of \$PRIOR_FILE"
+# READ THROUGH A BOUND DESCRIPTOR, not by name: `$(<"$PRIOR_FILE")` cannot tell a
+# missing file from an empty baseline, and empty is legitimate — so an unreadable
+# file armed the watch with no baseline at all. The redirection fails where the read
+# would have returned empty, which is the distinction `CLAUDE.md`'s fail-closed rule
+# is about.
+[ "$(grep -c '9<"\$PRIOR_FILE"' "$SKILL")" -ge 2 ] \
+    && pass "the recipe binds the baseline file before reading it, on both paths" \
+    || die "a recipe reads \$PRIOR_FILE by name; a failed read is then an empty baseline"
+grep -qF 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
+    && die "a recipe still reads the baseline by name rather than through the descriptor" \
+    || pass "…and neither reads it by name any more"
 grep -qF 'CLOSED_REC' "$SKILL" \
     && die "the document still parses the closing record for the baseline" \
     || pass "…and no longer parses it out of the closing record"
-[ "$(grep -c 'the review baseline did not survive being read back' "$SKILL")" -ge 2 ] \
+[ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 2 ] \
     && pass "…and proves the assignment took, on both paths that make it" \
     || die "a recipe assigns the baseline without proving the assignment"
 # AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. `pr-review-state.sh review-id`
@@ -1941,7 +1949,7 @@ grep -q 'RX_PRIOR' "$SKILL" \
 # name was already readonly the assignment fails and the two disagree, which is
 # the one case a pattern check on the variable alone cannot see — the helper
 # SUCCEEDED and the baseline is somebody else's.
-grep -qF 'if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then' "$SKILL" \
+[ "$(grep -c '\[\[ \$PRIOR_REVIEW = "\$(<"/dev/fd/9")" \]\]' "$SKILL")" -ge 2 ] \
     && pass "…and the read-back is proven against the file it came from" \
     || die "the baseline is not proven against the file; a readonly PRIOR_REVIEW keeps its own value silently"
 # AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
@@ -1962,7 +1970,7 @@ grep -q '^[^#]*REQ_RC=' "$SKILL" \
 grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
-grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
+grep -q 'PRIOR_REVIEW="$(<"/dev/fd/9")"' "$SKILL" \
     && pass "…and the read-back is inside that branch, not after it" \
     || die "the baseline read-back is not inside the request's success branch; a shadowed exit reaches it"
 # AND THE NAME IT READS INTO IS PROVEN ASSIGNABLE BEFORE THE REQUEST GOES OUT.

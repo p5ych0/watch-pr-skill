@@ -36,7 +36,17 @@
   took. The record still carries the value for whoever is reading the terminal.
 
   Nothing is checked less than before: what the driver stopped doing, the script does, and
-  `test-pr-close-round.sh` covers both conditions and both spellings. #235.
+  `test-pr-close-round.sh` covers both conditions and both spellings.
+
+  **And the baseline file is BOUND before it is read, on both paths.** Reading it as
+  `$(<"$PRIOR_FILE")` cannot tell a missing or unreadable file from an empty baseline, and
+  empty is legitimate — the ordinary answer when the head has no review yet. So a scratch
+  directory cleaned under a resumed session armed the watch with no baseline at all, and
+  on the automatic path a pass that finished during the CI wait is then accepted as the
+  answer to the request just made. Measured: the old form accepts it silently, the new one
+  refuses. The redirection fails where the read returned empty, which is the distinction
+  the fail-closed rule is about. The opening request's read had the same shape and is
+  written the same way — one document, one variable, two sites. #235.
 
 ## [2.0.84] — 2026-08-30
 
