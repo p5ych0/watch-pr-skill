@@ -316,6 +316,15 @@ _nr_out="$(cd "$_noremote" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_n
 [ -d "$_nr_d" ] \
     && pass "…and the directory it had reserved is left, since this helper removes nothing" \
     || die "a refused run removed the directory it had reserved"
+# …AND IT IS EMPTY, WHICH IS THE ONE THING THAT DOES DISAPPEAR AND IS NOT THIS HELPER'S.
+# `pr-origin.sh read` creates `<dir>/o` itself and gives it back on its OWN refusal path,
+# that being its contract (#157) — so on this path the transport was made by that helper
+# and taken back by it, and what is left is the reservation alone. The scan further down
+# reads `pr-setup.sh` and cannot see a delegated removal; this is where the distinction is
+# held, against the case below where the origin IS read and `o/origin` survives.
+[ -z "$(ls -A "$_nr_d" 2>/dev/null)" ] \
+    && pass "…and empty, the delegated reader having taken back the transport it made" \
+    || die "the remoteless refusal left [$(ls -A "$_nr_d" 2>/dev/null | tr '\n' ' ')] behind"
 # AND A REMOTE THAT IS NOT AN IDENTITY IS REFUSED BY THE PARSER, with the parser's
 # own reason carried through — the helper proves the origin parses before it writes
 # it, so a value that cannot be an identity never reaches a file the driver reads.

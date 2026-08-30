@@ -579,7 +579,11 @@ with the cleanup, there being nothing left for a handler to run; the one that st
 `INT` re-raise, which removes nothing and exists because a non-interactive shell otherwise
 survives `INT` and publishes a ready line for a run somebody stopped. Do not raise the
 leftover directory as a leak, and do not reintroduce a removal of any kind — a fixture
-asserts the file contains none and that no handler removes anything. Raise a cost you think was underweighted as a
+asserts the file contains none and that no handler removes anything. One object is
+outside that promise and is not this helper's: `pr-origin.sh read` creates its own
+transport directory and gives it back on its own refusal path, so a checkout with no
+readable origin ends with the reservation present and empty. That is stated in the file
+and staged behaviourally on both sides. Raise a cost you think was underweighted as a
 non-blocking note.
 
 **The `--admin` merge mode is accepted too**, in

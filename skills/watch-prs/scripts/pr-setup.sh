@@ -12,9 +12,20 @@
 #      of them. This is `pr-origin.sh`'s distinction and it is the same one.
 #
 # NEITHER REFUSAL IS SIDE-EFFECT-FREE, and a caller should not read one as though it
-# were. NOTHING IS EVER REMOVED — not the reservation, not the transport, not the files
-# written inside it — so a refusal at any point leaves whatever this run had made by then,
-# INCLUDING one that came immediately after the `mkdir` and made only an empty directory.
+# were. THIS FILE REMOVES NOTHING — not the reservation, not the transport, not the files
+# written inside it — so a refusal at any point leaves whatever THIS process had made by
+# then, INCLUDING one that came immediately after the `mkdir` and made only an empty
+# directory.
+#
+# ONE THING CAN STILL DISAPPEAR, AND IT IS NOT THIS FILE'S. `pr-origin.sh read` creates
+# `<dir>/o` itself and gives it back on its OWN refusal path — its contract is a directory
+# it created, and a refusal that left it would be a leak nothing else collects (#157). So a
+# checkout with no readable origin ends with the reservation present and EMPTY: the
+# transport was made by that helper and taken back by it. Measured, and the fixture stages
+# both sides — an origin that helper cannot READ leaves an empty reservation, while one it
+# reads and this file then refuses to PARSE leaves `o/origin` where it is. The scan for
+# removals reads this file, so it is the behavioural cases that hold the distinction.
+#
 # That is the trade:
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries what each attempt at removing
 # the contents destroyed. A caller that must not accumulate those is a caller that has to

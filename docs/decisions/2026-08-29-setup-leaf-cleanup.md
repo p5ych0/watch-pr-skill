@@ -55,6 +55,7 @@ it.
 | --- | --- |
 | the `mkdir` never succeeded | there is no directory of this run's, and none is left |
 | a refusal after the reservation | the directory is **left**, with whatever had been written in it |
+| a refusal from `pr-origin.sh read` itself | the directory is left and is **empty** — that helper creates its own transport and gives it back on its own refusal path (#157), which is the one removal this contract does not cover and does not own |
 | a signal at any point | the same |
 | anything a same-UID process placed at or inside that name | **untouched** |
 

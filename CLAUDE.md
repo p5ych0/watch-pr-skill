@@ -790,7 +790,7 @@ author side of that contract matters:
   `test-pr-skill-contract.sh` stages against the real helper; the reservation
   races cost one empty directory, lost or left behind, which `test-pr-origin.sh`
   stages with `mkdir` on `PATH` as the racer; and the helper takes nothing of anybody
-  else's because it removes nothing at all, which `test-pr-setup.sh` stages against the
+  else's because it removes nothing at all — the one object that can still vanish is `pr-origin.sh`'s own transport, which that helper creates and gives back on its own refusal, so a checkout with no readable origin ends with the reservation empty — which `test-pr-setup.sh` stages against the
   real helper — `TERM` and `INT` both delivered mid-run — and pins with a scan requiring no removal of any kind and no removing handler. Those cases are what the records
   rest on: **if a bound changes they fail**, which is what stops an accepted limit
   drifting into an unexamined one.

@@ -579,7 +579,8 @@ read-back for its own directory. A function would have held it once and
 cannot be used: `return` is a name a startup file can replace with one
 that does not return, and `readonly -f` makes this document's own
 definition fail so an inherited one runs. `CLAUDE.md`
-records both. Two copies of a correct read-back beat one copy of a guess.
+records both. Naming the directory in a variable both attempts read is
+what removed the duplication a function could not.
 
 AND A REFUSED FIRST ATTEMPT HAS ALREADY SAID WHY, on the helper's stderr,
 naming the component and the reason. That is what makes retrying under

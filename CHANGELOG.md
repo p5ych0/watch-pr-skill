@@ -74,7 +74,10 @@
   session somebody had stopped. The handler disarms itself and re-raises. The cost is
   litter rather than loss — one directory per refused attempt, holding whatever had been
   written — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with the table
-  of what each earlier shape destroyed.
+  of what each earlier shape destroyed. One thing can still disappear and it is not this
+  helper's: `pr-origin.sh read` creates its own transport directory and gives it back on
+  its own refusal path, that being its contract, so a checkout with no readable origin
+  ends with the reservation present and empty.
 
 - **The origin transport is left where it is.** The helper copied the origin out of
   `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
