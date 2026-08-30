@@ -760,30 +760,71 @@ _pp=0; _pp="$(grep -c 'mkdir -m 700 "$RB_DIR/pinprobe' "$SCRIPT")" || _pp=0
 # pin's leaf meant `rmdir leaf` then `rmdir pinprobe`, and the first EMPTIES a
 # replacement so the second succeeds on a directory that had contents a moment earlier.
 case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
-    *'pinprobe/'*) die "the pin probe creates a nested object; removing it takes two steps, which empties a replacement first" ;;
-    *) pass "the pin probe is one directory, so its removal is a single rmdir on a single name" ;;
+    *'rmdir "$RB_DIR/'*) die "the pin probe removes its objects; two name-resolved rmdirs can lose two replacements" ;;
+    *) pass "the pin probe leaves its objects, so no name inside the reservation is resolved for removal" ;;
 esac
-# STAGED: a replacement carrying contents must survive the cleanup intact.
+# AND THE ONLY REMOVAL IN THE FILE IS THE RESERVATION ITSELF. One `rmdir`, in the
+# cleanup, on `$RB_DIR` — anything else is a name a same-UID process may have
+# substituted, which is the table in `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
+_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
+[ "$_rm_n" -eq 1 ] \
+    && pass "…and the file has exactly one removal in it, the reservation's own" \
+    || die "pr-setup.sh has $_rm_n removals; it is meant to have exactly one"
+# STAGED: an object a watcher put at either probe name must be there afterwards, because
+# neither is removed at all.
 for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
 _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|^/usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null .. rb_setup_stop pin_storage 2|mkdir -p "$RB_DIR/pinprobe/theirs"; &|' \
-    "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'mkdir -p "$RB_DIR/pinprobe/theirs";' "$_stage/pr-setup.sh" \
-    && pass "the probe-replacement stage is patched" \
-    || die "the probe-replacement stage did not patch pr-setup.sh; the case proves nothing"
-_pr="$(mktemp -d "$TMP/pr.XXXXXX")/dir"
-_pr_rc=0
-_pr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_pr" 2>&1)" || _pr_rc=$?
-[ -d "$_pr/pinprobe/theirs" ] \
-    && pass "…and a replacement carrying contents survives the probe's removal intact" \
-    || die "the probe removal destroyed a replacement that had contents (rc=$_pr_rc out='$_pr_out')"
-rm -rf "$_pr"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-# …AND IT LEAVES NOTHING BEHIND, because the probe directory is this run's and is
-# removed the moment it has answered.
-[ ! -e "$ok_dir/pinprobe" ] \
-    && pass "…and the probe directory does not survive a successful run" \
-    || die "the pin-storage probe left its directory behind"
+
+# THE PROBE RUNS LAST, after every allocation this helper makes. What it answers is
+# "is there room for what comes NEXT" rather than "was there room a few steps ago" — a
+# filesystem with exactly enough inodes for setup and one more passed a probe that ran
+# before the origin write, and the pin then failed on storage the driver could no longer
+# retry.
+# CAPTURED AND THEN PEELED, never piped into an early-exiting reader. `grep … | head -1`
+# is racy under `pipefail`: `head` exits at the first line, `grep` takes SIGPIPE and dies
+# with 141, and that becomes the pipeline's status — so a line that IS present reads as
+# absent, at whatever rate the scheduler decides. `${v%%:*}` takes the first match's
+# number with no second process to kill.
+_probe_all=""; _probe_all="$(grep -n 'mkdir -m 700 "$RB_DIR/pinprobe"' "$SCRIPT")" || _probe_all=""
+_probe_ln="${_probe_all%%:*}"; [ -n "$_probe_ln" ] || _probe_ln=0
+_orig_all=""; _orig_all="$(grep -n 'RB_REMOTE" > "$RB_DIR/origin"' "$SCRIPT")" || _orig_all=""
+_orig_ln="${_orig_all%%:*}"; [ -n "$_orig_ln" ] || _orig_ln=0
+{ [ "$_probe_ln" -gt 0 ] && [ "$_orig_ln" -gt 0 ] && [ "$_probe_ln" -gt "$_orig_ln" ]; } \
+    && pass "the pin probe runs after the origin write, so it measures what is left" \
+    || die "the pin probe runs before the origin write (probe=$_probe_ln origin=$_orig_ln)"
+# AND IT PROBES TWO OBJECTS, because the pin creates two — a directory and a leaf inside
+# it. One object answers half the question, and the half it misses is a filesystem with
+# room for exactly one more.
+_pp=0; _pp="$(grep -c 'mkdir -m 700 "$RB_DIR/pinprobe' "$SCRIPT")" || _pp=0
+[ "$_pp" -eq 2 ] \
+    && pass "…and probes two objects, which is what the pin allocates" \
+    || die "the pin probe allocates $_pp objects, not the two the pin needs"
+
+# AND A REPLACEMENT AT THE PROBE'S NAME IS NOT DESTROYED. The probe is ONE directory
+# created and removed by ONE `mkdir` and ONE `rmdir`, and that shape is what
+# `docs/decisions/2026-08-26-reservation-inference.md` rests on: "no data is destroyed,
+# because `rmdir` refuses anything with contents in it". A PAIR broke it — probing the
+# pin's leaf meant `rmdir leaf` then `rmdir pinprobe`, and the first EMPTIES a
+# replacement so the second succeeds on a directory that had contents a moment earlier.
+case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
+    *'rmdir "$RB_DIR/'*) die "the pin probe removes its objects; two name-resolved rmdirs can lose two replacements" ;;
+    *) pass "the pin probe leaves its objects, so no name inside the reservation is resolved for removal" ;;
+esac
+# AND THE ONLY REMOVAL IN THE FILE IS THE RESERVATION ITSELF. One `rmdir`, in the
+# cleanup, on `$RB_DIR` — anything else is a name a same-UID process may have
+# substituted, which is the table in `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
+_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
+[ "$_rm_n" -eq 1 ] \
+    && pass "…and the file has exactly one removal in it, the reservation's own" \
+    || die "pr-setup.sh has $_rm_n removals; it is meant to have exactly one"
+# …AND BOTH PROBE DIRECTORIES ARE LEFT, which is what stops two name-resolved `rmdir`s
+# losing two of a watcher's empty directories — the bound
+# `docs/decisions/2026-08-26-reservation-inference.md` puts at one. They cost two empty
+# directories inside a tree this session keeps anyway.
+{ [ -d "$ok_dir/pinprobe" ] && [ -d "$ok_dir/pinprobe2" ]; } \
+    && pass "…and both probe directories are left, inside a tree this session keeps anyway" \
+    || die "the pin-storage probe removed an object inside the reservation"
 
 # ── the streams are separate ───────────────────────────────────────────────
 # NOTHING BUT THE READY LINE ON STDOUT, and every reason on stderr. The driver

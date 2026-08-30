@@ -970,12 +970,14 @@ plugin docs and open an issue.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.
-  **The abort counts nothing**, deliberately: each `ABORT:` line above it is one
-  attempt and its reason. There may be one or two, because the retry runs only
-  where the first refusal was about storage — a name it could not take on a sound
-  ancestry, or a directory it created and then could not write the value into —
-  and not where it was about the path or the checkout, which another parent does
-  not fix.
+  **The abort counts nothing**, deliberately: each `PR_SETUP status=error` line above
+  it is one attempt and its reason. There may be one or two, because the retry runs
+  only where the first refusal was about storage — a name it could not take on a sound
+  ancestry, or a directory it created and then could not write the value into — and
+  not where it was about the path or the checkout, which another parent does not fix.
+  The `ABORT:` lines mixed in with them come from `pr-origin.sh` running inside the
+  helper, and there may be none, one or two of those per attempt; they are not what to
+  count.
 
   So **if they name a path setup could not create or write**, re-run
   first: the helper creates that directory exclusively, and the same diagnostic

@@ -570,13 +570,14 @@ finding: each record accepts one named race and nothing else.
 
 **A third is accepted since 2026-08-29**, in
 `docs/decisions/2026-08-29-setup-leaf-cleanup.md`: `pr-setup.sh` gives its reservation
-back by removing the leaves it created BY NAME, after proving the directory is still the
-object its `mkdir` made. A same-UID substitution between that proof and the removals is
-not refused, because shell cannot unlink relative to a held descriptor and a per-leaf
-descriptor moves the same check-then-use one level down. It rests on a measurement: the
-loss is bounded by the names this session had already taken, anything else the racer left
-survives, and `set -C` means none of those names can point elsewhere. Raise a cost you
-think was underweighted as a non-blocking note.
+back with ONE `rmdir` and removes NOTHING inside it, so a refusal or a signal after
+`work/`, the origin or the transport exists leaves this run's own tree in place. Every
+shape that gave the contents back needed a name a same-UID process may have substituted
+between the create and the removal, and each destroyed something — that record carries the
+table. `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup
+can destroy nothing whatever happened at that name: the cost is litter rather than loss.
+Do not raise the leftover tree as a leak, and do not reintroduce a removal of anything
+inside the reservation. Raise a cost you think was underweighted as a non-blocking note.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses

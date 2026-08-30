@@ -86,7 +86,10 @@
   now destroy nothing whatever has happened at that name. The cost moves from loss to
   litter: a refusal after anything exists leaves this run's own tree — one directory per
   refused attempt — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with
-  the table of what each earlier shape destroyed.
+  the table of what each earlier shape destroyed. The pin probes are left in place for the
+  same reason: two `rmdir`s on two names can lose two of a watcher's empty directories,
+  where the record bounds the cost at one, and the two they leave sit inside a tree the
+  session keeps anyway.
 
 - **The origin transport is left where it is.** The helper copied the origin out of
   `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
@@ -144,12 +147,14 @@
   proves by reading back. Nothing the helper writes is evaluated, so the quoting that
   made a sourced line an assignment is gone with the source that needed it.
 
-- **A setup killed part-way gives its directory back.** `HUP`, `INT` and `TERM` had no
+- **A setup killed part-way is caught rather than terminating silently.** `HUP`, `INT` and `TERM` had no
   handler, so a signal arriving after the working files and the origin existed left a
   published directory behind carrying the session's remote — and the driver
   deliberately cleans up nothing after a non-zero helper status, because it cannot know
   who created the path. The cleanup is armed before the reservation is attempted and
-  disarmed only on success.
+  disarmed only on success. What it can give back is an EMPTY reservation: the cleanup is
+  one `rmdir`, so a signal after the working files exist leaves this run's own tree — see
+  the entry below on why nothing inside is removed.
 
 - **A name the operator's shell has fixed stops the session instead of steering it.**
   The two reviewer logins and the four working paths are the driver's own assignments

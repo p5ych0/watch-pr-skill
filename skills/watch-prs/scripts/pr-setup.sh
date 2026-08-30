@@ -35,7 +35,7 @@
 #     working files inside it that every later stage writes into. The driver removes
 #     nothing under it, deliberately: unlinking through a name published in argv can take
 #     what replaced it. What THIS file removes is a refused reservation, on its failure
-#     path only, and only the names it had already created. A helper that removed it would be removing the thing it was
+#     path only, and only when it is EMPTY — one `rmdir`, nothing inside it. A helper that removed it would be removing the thing it was
 #     asked to produce.
 #   - PROVE THE PIN. `pr-origin.sh pin` asks whether a CHILD sees this repository,
 #     and the child that matters is one the driver starts. Proving it here would
@@ -308,9 +308,12 @@ REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
 # true by construction and says nothing about the shell that reads the file.
 #
 # So it stays in `SKILL.md`, immediately after the export it is about, which that shell
-# makes itself. It is one call and one comparison there rather than the
-# probe-and-retry it used to be, because this helper has already made the directory
-# it needs.
+# makes itself. It is one call and one comparison there rather than the probe-and-retry
+# it used to be, because this helper has already made the directory it needs — with one
+# exception: `pin` creates its own leaf directory under that name, so a same-UID process
+# can pre-create it and make the call report 2. The driver retries that once, under a
+# second fixed name, which is the cost
+# `docs/decisions/2026-08-26-transport-candidate-in-argv.md` bounds an argv squat at.
 
 # ── the working files ──────────────────────────────────────────────────────
 # FOUR FILES, FROM ONE ALLOCATION, and files rather than shell variables: the text
@@ -411,21 +414,27 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 # origin write answered the older question and a filesystem with exactly enough inodes
 # for setup and one more passed it.
 #
-# TWO OBJECTS, BECAUSE THE PIN MAKES TWO, and SIBLINGS rather than a nested pair. Each
-# is created by one `mkdir` and removed by one `rmdir` on its own name, which is the
-# shape `docs/decisions/2026-08-26-reservation-inference.md` rests on: a replacement
-# carrying anything survives, because `rmdir` refuses a directory with contents. A
-# NESTED pair breaks that — removing the child empties a replacement so that removing
-# the parent succeeds on what had contents a moment earlier — and a file leaf is worse
-# still, needing `rm -f` on a nested name.
+# TWO OBJECTS, BECAUSE THE PIN MAKES TWO — and they are NOT REMOVED. Removing them meant
+# two `rmdir`s resolving two names, and a same-UID watcher that replaced both with its own
+# empty directories lost both: two, where
+# `docs/decisions/2026-08-26-reservation-inference.md` bounds the cost at one. Every
+# earlier attempt to be cleverer about that failed the same way, which is the table in
+# `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
+#
+# LEAVING THEM COSTS TWO EMPTY DIRECTORIES INSIDE A TREE THIS SESSION KEEPS ANYWAY, which
+# is not litter in the sense that record is about: `$RB_DIR` outlives this call by design,
+# holding `work/`. It also makes the probe slightly CONSERVATIVE — the two inodes stay
+# taken, so the pin's own two must come from what is left after them — and erring that
+# way is the right direction for a probe whose whole job is to fail early.
+#
+# SO THIS FILE RESOLVES NO NAME INSIDE THE RESERVATION FOR REMOVAL, anywhere. The one
+# `rmdir` it has is the reservation itself, in the cleanup.
 #
 # WHAT IS LEFT is a filesystem that fills between these probes and the pin, which is two
 # processes apart and cannot be closed from either. The abort the driver prints there
 # says to re-run, which relocates the session as a whole.
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 /usr/bin/env mkdir -m 700 "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
-/usr/bin/env rmdir "$RB_DIR/pinprobe2" 2>/dev/null || rb_setup_stop pin_storage 2
-/usr/bin/env rmdir "$RB_DIR/pinprobe" 2>/dev/null || rb_setup_stop pin_storage 2
 
 # THE EXIT TRAP IS RESET AND THE SIGNAL HANDLERS ARE NOT. Success means the caller
 # gets the directory, so the cleanup must not fire on the way out — but a `TERM`
