@@ -990,8 +990,12 @@ plugin docs and open an issue.
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, it is not a squatted name — count the
-  `PR_SETUP status=error` lines.
+  If re-running keeps failing, **read the lines rather than the repetition**: a
+  process watching argv can contend on every run, so failing twice rules nothing out
+  — that residual cost is what
+  `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts. What the reason
+  says and how many `PR_SETUP status=error` lines there are is the evidence there is,
+  so count them.
   **Two** means setup has already used both parents, so `unset TMPDIR` is not the
   answer: that selects one it just tried. Point `TMPDIR` at storage with room
   instead, on a filesystem `HOME` is not on. **One** means either that only one of

@@ -290,12 +290,12 @@ rb_close_call_present \
 # HISTORY, which is a tree and not an identity, so the merge gate keeps its `cd`.
 # ── the session is pinned out of the setup helper's own file ──────────────
 #
-# THE EXPORT MOVED, and this is where that shows. It was
-# `export REVIEW_BUS_REMOTE="$RB_REMOTE"` in the document; since #228 the helper
-# writes both the assignment and the `export` into the file this shell SOURCES, so
-# the grep that used to find it in `SKILL.md` finds nothing and would have to be
-# deleted rather than moved. What replaced it is stronger: the pin is proved by a
-# CHILD further down, which is the question the export exists to answer.
+# THE EXPORT STAYED IN THE DOCUMENT, which is what the first assertion below reads.
+# An earlier shape had the helper write both the assignment and the `export` into a
+# file this shell SOURCED; the helper hands back the origin alone now, so the export
+# is the driver's own line again and the grep that has always found it still does.
+# The pin is proved by a CHILD further down either way, which is the question the
+# export exists to answer.
 # BOUND BEFORE IT IS READ, AND NOT SOURCED AT ALL. This block SOURCED a file of
 # twelve assignments, and `.` is a NAME: in the operator's long-lived shell a function
 # by that name could delegate the earlier library load, read the genuine assignments
@@ -535,9 +535,10 @@ fi
 exit "${FORGE_RC:-0}"
 FORGE
     # AND THE SETUP FORGE, which follows `pr-setup.sh`'s contract: one directory it
-    # creates, an `env` file inside it, and `work/` holding the four files created
-    # empty. Its own names throughout — a forge sharing `FORGE_RC` with the pin one
-    # cannot express "setup succeeded and the pin failed", which is a case below.
+    # creates, an `origin` file inside it holding one line, and `work/` holding the
+    # four files created empty. Its own names throughout — a forge sharing `FORGE_RC`
+    # with the pin one cannot express "setup succeeded and the pin failed", which is
+    # a case below.
     cat > "$_forge_dir/pr-setup.sh" <<'FORGE'
 #!/usr/bin/env bash
 [ -n "${FORGE_SETUP_LOG:-}" ] && printf '%s\n' "$1" >> "$FORGE_SETUP_LOG"
@@ -1103,7 +1104,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # child answer with another repository while everything the driver read is
     # correct, which is the mismatch this comparison exists for — and it is a separate
     # name from `FORGE_VALUE` because a forge that answered the pin with the value it
-    # wrote into the env file could never disagree with it.
+    # wrote into the origin file could never disagree with it.
     _pm=0
     _pm_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
         FORGE_PIN_VALUE='git@github.com:acme/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '

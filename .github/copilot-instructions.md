@@ -182,7 +182,7 @@ EXPORTS into the operator's shell and a child cannot export into its parent. #22
 found that argument true of a child's ENVIRONMENT and false of a file the driver
 READS: what has to cross a process boundary is a VALUE, and a value can cross in a
 file. #228 moved the setup work into `pr-setup.sh` on that reading, leaving the
-document 108 executable lines where it had 178 — and only the ORIGIN crosses, because
+document 125 executable lines where it had 177 — and only the ORIGIN crosses, because
 the identity parser derives three of the other values, two are constants, and the
 working paths are a literal suffix under a directory the driver named itself.
 

@@ -27,8 +27,8 @@
 #
 # WHY THIS IS A SCRIPT AND NOT A FENCE IN `SKILL.md`.
 #
-# It was 178 executable lines of the document, read on every invocation of the
-# skill — 18,450 characters, about a fifth of the whole thing — and nothing
+# It was 177 executable lines of the document, read on every invocation of the
+# skill — 18,446 characters, about a fifth of the whole thing — and nothing
 # executed them. #26 closed on the finding that they could not move, because setup
 # EXPORTS into the driving session and a child cannot export into its parent. That is
 # true of a child's ENVIRONMENT, and it settles less than it looks: what has to cross
