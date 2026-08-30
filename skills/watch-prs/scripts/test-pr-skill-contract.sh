@@ -1702,6 +1702,47 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 [ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 1 ] \
     && pass "…and refuses in its own words when that read fails" \
     || die "the round-close recipe reads the baseline without a refusal for a read that failed"
+# ── AND A TRANSFORMING ATTRIBUTE CANNOT CORRUPT THE PHASE SHA ────────────
+#
+# The read succeeding does not mean the NAME holds what the file held. `CODEX_SHA` is
+# not in setup's probe list, and this block runs in the operator's long-lived shell:
+# `declare -i` coerces a forty-digit sha to an integer on assignment — measured,
+# `0000…0001` becomes `1` — and `declare -u` returns it uppercased. Both assignments
+# SUCCEED, so a condition that only reads is satisfied by a wrong value, and by then
+# the signoff has been posted.
+_ph_dir="$TMP_CL/ph"; mkdir -p "$_ph_dir" || die "the phase-sha scratch directory could not be made"
+awk '/^    if \{ \[\[ -f \/dev\/fd\/9 \]\] && CODEX_SHA=/, /^    fi$/' "$SKILL" \
+    | sed 's/^    //' > "$_ph_dir/read.sh"
+{ [ -s "$_ph_dir/read.sh" ] && grep -q '9<"$HEAD_FILE"' "$_ph_dir/read.sh"; } \
+    && pass "the phase sha read lifts, so the cases below reach the code they name" \
+    || die "the phase sha read did not lift; the cases prove nothing"
+# A VALUE PER ATTRIBUTE, because neither transforms the other's. `declare -i` needs an
+# all-digit sha to coerce; `declare -u` needs one with letters to uppercase. A single
+# fixture value would leave one of the two cases passing against a value it never changed
+# — the forger that does not forge, which this file has had to fix before.
+_ph_digits=0000000000000000000000000000000000000001
+_ph_letters=abcdef0123456789abcdef0123456789abcdef01
+for _ph_case in "|$_ph_letters" "-i|$_ph_digits" "-u|$_ph_letters"; do
+    _ph_at="${_ph_case%%|*}"; _ph_val="${_ph_case#*|}"
+    printf '%s\n' "$_ph_val" > "$_ph_dir/sha"
+    _ph_out="$(HEAD_FILE="$_ph_dir/sha" bash -c '
+        [ -n "$2" ] && declare $2 CODEX_SHA
+        . "$1" 2>/dev/null
+        printf "GOT:[%s]" "${CODEX_SHA-unset}"' _ "$_ph_dir/read.sh" "$_ph_at" 2>/dev/null)" || true
+    if [ -z "$_ph_at" ]; then
+        case "$_ph_out" in
+            *"GOT:[$_ph_val]"*) pass "a plain shell reads the phase sha through and keeps it" ;;
+            *) die "the phase sha read failed on a plain shell: '$_ph_out'" ;;
+        esac
+        continue
+    fi
+    case "$_ph_out" in
+        *"GOT:[$_ph_val]"*) die "declare $_ph_at did not transform the value; the case proves nothing" ;;
+        *ABORT:*) pass "…and declare $_ph_at is refused rather than carried into the phase" ;;
+        *) die "declare $_ph_at gave '$_ph_out' — neither the value nor a refusal" ;;
+    esac
+done
+
 # ── AND THE BASELINE READ IS EXECUTED, NOT ONLY GREPPED ──────────────────
 #
 # Every assertion above this point is a `grep` for the redirection, the assignment

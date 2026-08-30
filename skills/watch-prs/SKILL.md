@@ -1125,22 +1125,28 @@ EOF
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE STAGE RUNS AS A CONDITION, so no name holds its status.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND WHAT WAS READ IS PROVED A SHA, because an attribute can transform an assignment.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND THE PAUSE ARM READS IT TOO, the signoff being recorded either way.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" "$HEAD_FILE"; then
-    if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")"; } 9<"$HEAD_FILE"; then
+    if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")" \
+         && [[ ${#CODEX_SHA} -eq 40 ]] && [[ $CODEX_SHA != *[!0-9a-f]* ]]; } 9<"$HEAD_FILE"; then
         [[ -n x ]]
     else
-        echo "ABORT: no Codex signoff sha could be read back for this phase; step 8 would have nothing to gate on."
+        echo "ABORT: no usable Codex signoff sha could be read back for this phase; step 8 would have nothing to gate on."
         exit 1
         [[ -n "" ]]
     fi
 else
     case $? in
-        3) if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")"; } 9<"$HEAD_FILE"; then
+        3) if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")" \
+                && [[ ${#CODEX_SHA} -eq 40 ]] && [[ $CODEX_SHA != *[!0-9a-f]* ]]; } 9<"$HEAD_FILE"; then
                echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
                exit 3
                [[ -n "" ]]
            else
-               echo "ABORT: the phase paused but no signoff sha could be read back; step 8 would have nothing to gate on."
+               echo "ABORT: the phase paused but no usable signoff sha could be read back; step 8 would have nothing to gate on."
                exit 1
                [[ -n "" ]]
            fi ;;

@@ -1433,6 +1433,31 @@ three answers apart with a reserved word, `$?` taken before anything can replace
 AND A CONDITION IS EXEMPT FROM `errexit`, which is the same reason every other stage
 in this document is written as one.
 
+## AND WHAT WAS READ IS PROVED A SHA, because an attribute can transform an assignment.
+
+The read succeeding does not mean the NAME holds what the file held. `CODEX_SHA` is not
+in setup's probe list, and this block runs in the operator's long-lived shell: declared
+`declare -i`, a forty-digit sha is coerced to an integer the moment it is assigned —
+measured, `0000…0001` becomes `1` — and declared `declare -u` it comes back uppercased.
+Both assignments SUCCEED, so the condition is satisfied and the value is wrong.
+
+WHAT IS WRONG WITH A WRONG VALUE HERE is that the signoff has already been posted: the
+corrupted sha is then named to the operator on the pause, or handed to `open` and the
+merge gates. So the length and the alphabet are checked inside the same condition,
+where a failure takes the refusal arm rather than continuing.
+
+## AND THE PAUSE ARM READS IT TOO, the signoff being recorded either way.
+
+A `3` is a round boundary, not a failure: `record` posts the signoff and THEN pauses, so
+the sha exists and the operator is told which commit they may merge on. An arm that
+skipped the read would stop without naming it, which is the one thing the operator needs
+at that boundary.
+
+IT IS THE SAME READ AND THE SAME PROOF, written out twice because this shell has no
+function to hold it in — `return` is a name, and `readonly -f` defeats a definition made
+here. That duplication is the price, and it is the one this document pays everywhere a
+value crosses.
+
 ## THE STAGE RUNS AS A CONDITION, so no name holds its status.
 
 The same shape every other stage in this document uses, and for the same reasons: a
@@ -1456,15 +1481,12 @@ for a value the stage that just ran already had. It writes it into a caller-name
 now, as `pr-close-round.sh gate` has handed the head over since #202 and `post` the
 baseline since #234. #239.
 
-THE FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE, so a stage that stops cannot leave a
-PREVIOUS run's sha to be read as this one's — and an empty file is not a sha, so the
-reader refuses rather than mistaking it for an answer. The write happens BEFORE the
-comment is posted, with its status taken and the value read back, because after the
-post the signoff is on the PR and this stage cannot be un-run.
-
-THE PAUSE READS IT TOO. A `3` means the round boundary was reached, and the signoff is
-recorded either way — the operator is told which sha they may merge on, so the read
-happens in that arm as well as on success.
+THE FILE IS EMPTIED EARLY, so a stage that stops cannot leave a PREVIOUS run's sha to
+be read as this one's — and an empty file is not a sha, so the reader refuses rather
+than mistaking it for an answer. NOT before EVERY refusal, and the exception is
+deliberate: the alias checks run first and exit without truncating, because a sha file
+that IS the body file would have its account destroyed by the very clearing meant to
+protect the caller. Those refusals leave the file alone.
 
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 

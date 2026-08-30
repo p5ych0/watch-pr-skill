@@ -425,9 +425,13 @@ if [[ $SHA_FILE = "$BODY_FILE" ]] || [[ $SHA_FILE -ef $BODY_FILE ]] 2>/dev/null;
     echo "ABORT: the sha file and the body file are the same file ('$SHA_FILE'); the sha would overwrite the account."
     exit 1
 fi
-# EMPTIED FIRST, so a refusal cannot leave a PREVIOUS run's sha for the caller to read as
-# this one's. Empty is not a valid sha, so an emptied file is refused by the reader rather
-# than mistaken for an answer.
+# EMPTIED HERE, so a refusal below cannot leave a PREVIOUS run's sha for the caller to
+# read as this one's. Empty is not a valid sha, so an emptied file is refused by the reader
+# rather than mistaken for an answer.
+#
+# NOT BEFORE EVERY REFUSAL, and the exception is the two checks above rather than an
+# oversight: a sha file that IS the body file must not be truncated, because the account
+# this stage is about to post is what would be destroyed. Those refusals leave it alone.
 > "$SHA_FILE" || { echo "ABORT: could not empty the sha file '$SHA_FILE'."; exit 1; }
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest
