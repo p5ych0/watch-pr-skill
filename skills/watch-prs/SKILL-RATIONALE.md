@@ -1481,12 +1481,14 @@ for a value the stage that just ran already had. It writes it into a caller-name
 now, as `pr-close-round.sh gate` has handed the head over since #202 and `post` the
 baseline since #234. #239.
 
-THE FILE IS EMPTIED EARLY, so a stage that stops cannot leave a PREVIOUS run's sha to
-be read as this one's — and an empty file is not a sha, so the reader refuses rather
-than mistaking it for an answer. NOT before EVERY refusal, and the exception is
-deliberate: the alias checks run first and exit without truncating, because a sha file
-that IS the body file would have its account destroyed by the very clearing meant to
-protect the caller. Those refusals leave the file alone.
+WHAT THE HELPER DOES WITH THAT FILE IS THE HELPER'S TO ARGUE, and it does, beside the
+code: that it empties the file early — though not before the alias checks, which refuse
+without truncating, since a sha file that IS the body file would have its account
+destroyed by the clearing — and that it writes and reads back the value BEFORE the
+comment is posted, there being nothing left to refuse with afterwards. Those are
+properties of `pr-copilot-phase.sh`, not of this block, and restating them here would be
+the second copy this repository keeps paying for. What this block relies on is only that
+the file holds a sha or the read fails, which the claims above and below it cover.
 
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 
