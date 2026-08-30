@@ -77,26 +77,6 @@ case "$-" in
     *) echo "PR_SETUP status=error reason=not_privileged" >&2; exit 1 ;;
 esac
 
-# `INT` IS NOT FATAL TO THIS SHELL WITHOUT A HANDLER, and that is why one is armed at all.
-# Measured on bash 5: `kill -INT` at this process while it WAITS ON A CHILD does not end
-# it — the run continues, creates every working file, exits 0 and prints the ready line,
-# so the caller's `if` takes its success arm on a session somebody stopped and whoever is
-# watching the terminal is told it started. `TERM` ends the run with 143 and `HUP` with
-# 129, so neither needs one.
-#
-# ARMED BEFORE THE FIRST CHILD, which is the substitution on the line below. NOT because
-# that window is known to be broken — measured, it is not: with no handler at all an `INT`
-# delivered there ends the run with 130, while one delivered during the wait on
-# `pr-origin.sh` does not. The two waits differ, and which of them bash treats as fatal is
-# not something this file should have to know. Arming above every wait removes the
-# question instead of answering it per window, and costs nothing: the handler removes
-# NOTHING — it disarms itself and re-raises, which is the whole of it — so there is no
-# cleanup for a signal to race and nothing to be careful about. The caller sees 130, with
-# whatever had been made left exactly where a refusal leaves it. Where `INT` was ignored
-# on entry bash installs no handler at all and the run carries on, which is what a process
-# started with `INT` ignored should do.
-trap 'trap - INT; kill -INT "$$"' INT
-
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_SETUP status=error reason=self_dir_unreadable" >&2; exit 1; }
 
@@ -162,8 +142,22 @@ esac
 # for them to do: measured on bash 5, an untrapped `HUP` ends the run with 129 and an
 # untrapped `TERM` with 143, which is what a caller should see.
 #
-# `INT` IS NOT ONE OF THOSE, and its handler is armed at the top of this file rather than
-# here, before the first child there is anything to wait on. The argument is beside it.
+# `INT` IS NOT ONE OF THOSE. Measured the same way, `kill -INT` at this process while it
+# waits on `pr-origin.sh` does not end it — the run continues, creates every working file,
+# exits 0 and prints the ready line, so the caller's `if` takes its success arm on a
+# session somebody stopped and whoever is watching the terminal is told it started. This
+# handler removes NOTHING: it disarms itself and re-raises, which is the whole of it, and
+# the caller then sees 130 with whatever had been made left exactly where a refusal leaves
+# it. Where `INT` was ignored on entry bash installs no handler at all and the run carries
+# on, which is what a process started with `INT` ignored should do.
+#
+# ARMED HERE RATHER THAN AT THE TOP OF THE FILE, and that placement was tried and taken
+# back out. The only child before this point is the substitution that finds this
+# directory, and measured with no handler at all an `INT` delivered THERE ends the run
+# with 130 — bash treats the two waits differently, and the earlier one needs nothing. So
+# arming above it protects no window that can be demonstrated, and a fixture for it passed
+# against both placements. `CLAUDE.md` § Tests: prove a fix can fail, or stop.
+trap 'trap - INT; kill -INT "$$"' INT
 
 # THE REFUSALS SAY WHY AND STOP, and that is all they do. They used to clean up as well,
 # and then the `EXIT` trap cleaned up again behind them — the second pass being the

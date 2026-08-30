@@ -479,44 +479,6 @@ kill -'"$sig"' "$PPID"'
 }
 _sigcase TERM 143
 _sigcase INT 130
-# AND AN `INT` DURING THE FIRST CHILD, WHICH IS BEFORE THE HELPER HAS READ ANYTHING —
-# the substitution that finds the script's own directory, reached before the reservation
-# exists and long before `pr-origin.sh` is started.
-#
-# WHAT THIS PINS IS THE OUTCOME, NOT THE HANDLER'S POSITION, and the difference is worth
-# knowing before reading it as the case for arming early. Measured with no handler at all:
-# an `INT` here ends the run with 130, while one delivered during the wait on
-# `pr-origin.sh` does not — the two waits differ, and this one was never the hole. The
-# handler is armed above every wait anyway, so that the file does not have to know which
-# is which, and this case fails if that stops being the outcome for any reason.
-#
-# STAGED THROUGH `PATH`: privileged startup ignores `BASH_ENV` and imports no functions,
-# but it does not sanitise `PATH` — that is #91 and stated in the file — so a `dirname`
-# planted there is what the substitution runs. It signals its own parent, which is the
-# helper itself: measured, `$PPID` inside a command substitution is the script's own pid,
-# because bash execs the single command in the substitution's subshell rather than
-# forking again under it. It then answers correctly, so a helper that survives the signal
-# goes on to a completely ordinary successful run — which is what makes the case fail
-# loudly rather than for a second reason.
-_ep_bin="$(mktemp -d "$TMP/eb.XXXXXX")"
-printf '#!/usr/bin/env bash\nkill -INT "$PPID"\nexec /usr/bin/dirname "$@"\n' > "$_ep_bin/dirname"
-chmod +x "$_ep_bin/dirname"
-_ed="$(mktemp -d "$TMP/ei.XXXXXX")/dir"
-_ed_rc=0
-_ed_out="$(cd "$REPO" && run_limited 25 env PATH="$_ep_bin:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" "$_ed" 2>&1)" || _ed_rc=$?
-[ "$_ed_rc" -eq 130 ] \
-    && pass "an INT during the first child ends the helper too, the handler being armed above it" \
-    || die "the early-INT case gave rc=$_ed_rc '$_ed_out'"
-case "$_ed_out" in
-    *'status=ready'*) die "the early-INT case published a ready line for a run that was stopped" ;;
-    *) pass "…with no ready line, so nothing reports a session that never started" ;;
-esac
-# AND NOTHING WAS RESERVED, because the signal lands before the `mkdir`. This is the one
-# stage where there is nothing of this run's to leave.
-[ ! -e "$_ed" ] \
-    && pass "…and no directory, the signal having landed before the reservation" \
-    || die "the early-INT case left a directory it should not have reached"
 
 # ── nothing is removed at all, which is the whole cleanup contract ────────
 # EVERY SHAPE THAT REMOVED ANYTHING NEEDED A NAME, and shell has no descriptor-relative
