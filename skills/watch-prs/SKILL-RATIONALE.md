@@ -360,12 +360,13 @@ alike. That exclusion is the helper's since #157, along with the ancestry walk
 and the write, so all three run privileged, where `mkdir` is not a name an
 operator's startup file can replace.
 
-TWO DIRECTORIES, NOT ONE, AND EACH GONE AS SOON AS ITS VALUE IS READ. The origin
-read and the pin probe are separate calls at separate times, and the second is
-behind the first's success; sharing one directory would mean keeping it open
-across the whole of setup for no gain. `-m 700` is applied by `mkdir` itself, so
-there is no interval between creation and use in which anything can be placed
-inside.
+TWO DIRECTORIES, NOT ONE, AND BOTH LEFT WHERE THEY ARE. The origin read and the
+pin probe are separate calls at separate times, and the second is behind the
+first's success. NEITHER IS REMOVED AFTERWARDS: both names are published in argv,
+and unlinking through one takes a replacement's own object — the class
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md` tabulates, reached here from
+the driver's side. `-m 700` is applied by `mkdir` itself, so there is no interval
+between creation and use in which anything can be placed inside.
 
 THE PATH IS BUILT, NOT CAPTURED. `$(mktemp -d)` would name the directory in one
 line, and a driving shell tracing to fd 1 would put the trace of `mktemp` inside
@@ -437,7 +438,8 @@ assigns is in it. The helper owns the rest, and since #228 it owns the whole sec
 stage as well, so there is one probe rather than two. A readonly or
 value-transforming one in the long-lived driving shell survives an assignment and
 leaves a STALE value behind, and a stale `/somewhere/owned` then passes every
-check: its `origin` is read as this session's remote and the cleanup deletes it.
+check: its `origin` is read as this session's remote, and every stage after it is
+addressed at whatever repository that names.
 
 A SUBSHELL, ONE MIXED-CASE VALUE, COMPARED INSIDE. The subshell inherits the
 attribute, so a readonly fails there and a `declare -i` or `declare -l` stores

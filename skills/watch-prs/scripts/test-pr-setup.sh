@@ -102,8 +102,10 @@ run() {   # run [env-entries…] -- [args…] ; prints "<rc>|<dir>|<output>"
     vd="$vp/dir"
     if [ "${#args[@]}" -eq 0 ]; then args=("$vd"); fi
     # `bash -p` AS THE CALLER, which is the documented invocation: privileged mode
-    # has to be in force before the subject's first line, and only the caller can
-    # arrange that — there is no hop inside the file and it is not executable.
+    # has to be in force before the subject's first line and there is no hop inside the
+    # file, so the caller supplies it. The helper IS executable and carries its own
+    # privileged shebang — a case below requires both — but nothing here relies on that,
+    # since the driver names the interpreter itself.
     #
     # BOTH STREAMS JOINED, so one assertion can look at the ready line and the
     # reason together. The separation itself is asserted by its own case below.
