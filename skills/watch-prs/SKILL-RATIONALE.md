@@ -501,12 +501,10 @@ passes all three can fail to hold a directory anyway — an exhausted quota,
 a full filesystem, a read-only mount, a name another account got to first
 — and it can accept the directory and refuse the BYTES written into it,
 which is the same failure one step later. THE RETRY BELOW IS WHAT COVERS
-BOTH: the helper reports 2 for either, the `elif` reads that status in its
-own condition, and the read-back stays inside the arm that names its
-directory. A second copy of the read-back is the price, and it is the one
-this block can pay — a branch on the status OUTSIDE the arm is the
-walked-past-guard class this block exists to close, and there is not one.
-#161.
+BOTH: the helper reports 2 for either, the retry reads that status in its
+own condition, and both attempts join into one success arm — a branch on
+the status OUTSIDE the arm is the walked-past-guard class this block
+exists to close, and there is not one. #161.
 
 WHAT IS NOT RETRIED, AND WHY. A parent whose ANCESTRY the helper refuses —
 another account owning a component, a world-writable non-sticky one, an
@@ -567,17 +565,20 @@ descriptor (a symlink to another operator-owned transport passes it), and
 between the two and the sequential probes disagree). There is no `openat`
 here to anchor the identity. #161, #176.
 
-AN `elif` READS THE STATUS WITHOUT LEAVING THE `if`. `$?` after a failed
-condition is that command's, `[[` is a reserved word, and the read-back
-stays contained in the arm below — so the distinction is usable without
-anything becoming a statement after a guard. And each arm knows exactly
-which directory the helper just created, because it named it: there is
-nothing to guess and therefore nothing to race.
+THE STATUS IS READ WITHOUT LEAVING THE `if`. `$?` after a failed condition
+is that command's, `[[` is a reserved word, and the read-back stays
+contained in the success arm below — so the distinction is usable without
+anything becoming a statement after a guard. And the arm knows exactly
+which directory the helper created, because `RB_SETUP_DIR` names it and
+the retry REASSIGNS it before calling again: there is nothing to guess and
+therefore nothing to race.
 
-THE READ-BACK IS WRITTEN TWICE, and that is the price. A function would
-hold it once and cannot be used: `return` is a name a startup file can
-replace with one that does not return, and `readonly -f` makes this
-document's own definition fail so an inherited one runs. `CLAUDE.md`
+THE READ-BACK IS WRITTEN ONCE, and reassigning that name is what buys it.
+The shape before was an `elif` with an arm apiece, each spelling the
+read-back for its own directory. A function would have held it once and
+cannot be used: `return` is a name a startup file can replace with one
+that does not return, and `readonly -f` makes this document's own
+definition fail so an inherited one runs. `CLAUDE.md`
 records both. Two copies of a correct read-back beat one copy of a guess.
 
 AND A REFUSED FIRST ATTEMPT HAS ALREADY SAID WHY, on the helper's stderr,
@@ -610,10 +611,10 @@ quota, a read-only mount, a name another account got to first. And 1
 means the refusal was about the PATH or the checkout, which another
 parent does not fix and an operator has to see named.
 
-NOT A BRANCH OUTSIDE THE ARM. `elif [[ $? -eq 2 ]] && helper …; then` is a
-condition of this same `if`, so the read-back below stays contained in the
-arm that names its directory — nothing here is a statement after a guard,
-which is the shape #155 and #158 removed. `[[` is a reserved word and `$?`
+NOT A BRANCH OUTSIDE THE ARM. `|| { [[ $? -eq 2 ]] && … && helper …; }` is
+part of this same `if`'s condition, so the read-back below stays contained
+in its success arm — nothing here is a statement after a guard, which is
+the shape #155 and #158 removed. `[[` is a reserved word and `$?`
 is a shell parameter, so neither is a name anything can take.
 
 AND `$?` IS TAKEN BEFORE ANYTHING ELSE RUNS, which is why the emptiness

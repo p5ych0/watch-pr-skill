@@ -840,9 +840,13 @@ FORGE
     { [ "$_su_r" -eq 0 ] && [ "$_su_n" -eq 2 ]; } \
         && pass "a storage refusal is retried under the second parent" \
         || die "the setup call did not retry (rc=$_su_r calls=$_su_n out='$_su_ro')"
-    # …AND `RB_TMPPARENT` FOLLOWS THE PARENT THAT WORKED. The working directory is
-    # built from it, and a retry that read the setup from `HOME` while leaving the name
-    # on `TMPDIR` then died allocating under the full filesystem it had just left.
+    # …AND `RB_TMPPARENT` FOLLOWS THE PARENT THAT WORKED. Since #228 that is bookkeeping
+    # rather than a dependency — `RB_SETUP_DIR` is what the origin, the working files and
+    # the pin leaf are built from, and nothing after the retry reads this name — so what
+    # the case holds is that the name does not go on describing a parent that refused.
+    # Before, the working directory was built from it separately, and a retry that read
+    # the setup from `HOME` while leaving the name on `TMPDIR` died allocating under the
+    # full filesystem it had just left.
     case "$_su_ro" in
         *"PARENT=[$_forge_dir/t2]"*) pass "…and RB_TMPPARENT follows the parent that worked" ;;
         *) die "the retry left RB_TMPPARENT on the parent that refused: '$_su_ro'" ;;
@@ -879,9 +883,10 @@ FORGE
         && pass "…and the two attempts name different directories" \
         || die "the two candidates collided (first='$_su_a' second='$_su_b')"
     # …AND THE RETRY IS GATED ON THE STATUS, IN THE CONDITION ITSELF. `$?` is taken
-    # FIRST inside the `elif`-shaped arm, because a command between would replace it,
-    # and the read-back stays inside that arm's own success path — so nothing becomes
-    # a statement after a guard.
+    # FIRST inside the `|| { … }` that carries the retry, because a command between
+    # would replace it, and the read-back stays inside the `if`'s own success arm —
+    # which both attempts share, since the retry reassigns `RB_SETUP_DIR` rather than
+    # opening an arm of its own. So nothing becomes a statement after a guard.
     grep -qF '{ [[ $? -eq 2 ]] && [[ -n $RB_TMPPARENT2 ]]' <<<"$_setup_body" \
         && pass "…with the retry gated on the reservation status in the condition itself" \
         || die "the setup retry does not gate on the reservation status"
