@@ -1131,10 +1131,12 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
 
     # …AND THE PIN TRANSPORT IS LEFT ALONE, INCLUDING WHAT IT DID NOT PUT THERE.
     # `$RB_SETUP_DIR` is published in argv, so the pin directory under it is a name
-    # another process can act on. A `rm -rf` there deletes a replacement's contents,
-    # which is past what `docs/decisions/2026-08-26-reservation-inference.md` accepts
-    # — its bound is one EMPTY directory, and it rests on `rmdir` refusing anything
-    # with contents in it.
+    # another process can act on. This block removes nothing under it, which is what
+    # these two assertions read: a replacement's contents survive because no removal is
+    # attempted, not because some removal was careful. The block that DID unlink here
+    # took a replacement's own `pin` whenever the directory had been swapped, and
+    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries why no shape of it
+    # works.
     _px_dir=""
     _px_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
         FORGE_PIN_ECHO=1 FORGE_PIN_EXTRA=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -1147,11 +1149,11 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
         || die "the pin-extra case did not report a setup directory: '$_px_out'"
     if [ -n "$_px_dir" ] && [ -d "$_px_dir" ]; then
         { [ -f "$_px_dir/pin/witness" ] && [ -d "$_px_dir/pin/squatter-subdir" ]; } \
-            && pass "…and a replacement's contents under the pin name survive the removal" \
-            || die "the pin removal destroyed contents it did not create"
+            && pass "…and a replacement's contents under the pin name survive, nothing having been removed" \
+            || die "something under the pin name was destroyed; this block unlinks nothing"
         [ -f "$_px_dir/pin/pin" ] \
-            && pass "…and the leaf it read is left alone too, being under the same published name" \
-            || die "the pin leaf was unlinked through a name that may have been replaced"
+            && pass "…and the leaf it read is left where it is, being under the same published name" \
+            || die "the pin leaf is gone; unlinking it resolves a name that may have been replaced"
         rm -rf "$_px_dir"
     fi
 
