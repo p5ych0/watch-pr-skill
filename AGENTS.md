@@ -559,7 +559,10 @@ back with ONE `rmdir` and removes NOTHING inside it, so a refusal or a signal af
 shape that gave the contents back needed a name a same-UID process may have substituted
 between the create and the removal, and each destroyed something — that record carries the
 table. `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup
-can destroy nothing whatever happened at that name: the cost is litter rather than loss.
+can destroy no CONTENTS whatever happened at that name: the cost is litter rather than
+loss. The one thing it can still take is an EMPTY directory a racer left at the
+candidate, which `2026-08-26-reservation-inference.md` already accepts and this record
+does not widen.
 Do not raise the leftover tree as a leak, and do not reintroduce a removal of anything
 inside the reservation. Raise a cost you think was underweighted as a non-blocking note.
 

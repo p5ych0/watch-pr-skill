@@ -15,7 +15,12 @@
 # were. The reservation is given back by ONE `rmdir`, which succeeds only while the
 # directory is EMPTY — so a refusal before anything was created takes the directory with
 # it, and one after `o/origin`, `work/` or the origin exists leaves this run's tree where
-# it is. Nothing of anyone else's is ever removed, which is the trade:
+# it is. NO CONTENTS AND NO DATA ARE EVER REMOVED — `rmdir` refuses a directory holding
+# anything and refuses a symlink — with one exception the base ref already accepts: a
+# racer that creates the candidate between `RB_PREEXISTED=no` and this helper's `mkdir`
+# has its EMPTY reservation taken by the cleanup, which is
+# `docs/decisions/2026-08-26-reservation-inference.md`'s measured cost. That is the
+# trade:
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries what each attempt at removing
 # the contents destroyed. A caller that must not accumulate those is a caller that has to
 # collect them itself; the driver does not, because it retries under a second parent and
@@ -193,8 +198,10 @@ rb_setup_ino_held() {   # the inode of the object descriptor 8 holds, or nothing
 # directory at a name this run had not reached.
 #
 # SO NOTHING INSIDE IS REMOVED AT ALL. `rmdir` succeeds only on a directory that is
-# empty and refuses a symlink outright, so this can destroy nothing whatever has happened
-# at that name — which is the property each of those attempts was reaching for and none
+# empty and refuses a symlink outright, so this can destroy no CONTENTS whatever has
+# happened at that name — an empty directory a racer left at the candidate is the one
+# thing it can take, and `docs/decisions/2026-08-26-reservation-inference.md` accepts
+# exactly that — which is the property each of those attempts was reaching for and none
 # of them held.
 #
 # WHAT IT COSTS is a failed setup leaving its own tree behind: one directory per refused
@@ -230,7 +237,8 @@ rb_setup_give_back() {   # give back the reservation, if it is still this run's 
 # Measured on bash 5: an untrapped fatal `TERM` still runs the `EXIT` trap and still
 # reports 143, so on these paths the two shapes are indistinguishable — and
 # `test-pr-setup.sh` asserts the INVARIANT, that the run does not report success and
-# that nothing of anyone else's is touched, rather than which route produced it. What IS
+# that no contents of anyone else's are touched, rather than which route produced it.
+# What IS
 # left behind is this run's own tree wherever the signal arrived after a write — the same
 # residue as any other refusal, and for the same reason. They are here because
 # `pr-origin.sh` has them and the two helpers should not differ on a question this

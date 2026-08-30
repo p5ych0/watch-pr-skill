@@ -83,7 +83,10 @@
   check-then-use one level down.
 
   `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup can
-  now destroy nothing whatever has happened at that name. The cost moves from loss to
+  now destroy no CONTENTS whatever has happened at that name — an empty directory a racer
+  left at the candidate is the one thing it can still take, which
+  `docs/decisions/2026-08-26-reservation-inference.md` already accepts. The cost moves
+  from loss to
   litter: a refusal after anything exists leaves this run's own tree — one directory per
   refused attempt — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with
   the table of what each earlier shape destroyed. The pin probes are left in place for the

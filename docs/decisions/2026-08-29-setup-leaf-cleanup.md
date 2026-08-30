@@ -37,8 +37,14 @@ contents and cannot destroy something.
 ## What is accepted, measured rather than argued
 
 `rmdir` succeeds only on an EMPTY directory and refuses a symlink outright. So the
-cleanup can destroy nothing whatever has happened at that name, and the cost moves from
-loss to litter.
+cleanup can destroy no CONTENTS whatever has happened at that name, and the cost moves
+from loss to litter.
+
+**One thing it can still take, and that is accepted elsewhere.** A racer which creates
+the candidate between `RB_PREEXISTED=no` and this helper's `mkdir` has its EMPTY
+reservation removed — the measured cost in
+`docs/decisions/2026-08-26-reservation-inference.md`, which this record does not widen and
+does not repeat.
 
 | situation | measured outcome |
 | --- | --- |
