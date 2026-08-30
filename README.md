@@ -953,12 +953,20 @@ plugin docs and open an issue.
   attempt. The `PR_SETUP status=error` lines are one per call *that refused*, which is
   what the one-versus-two diagnosis below rests on.
 
-  **Zero of them is a third answer, and it is not a refusal.** A helper that was
-  interrupted or killed prints nothing and ends with the signal's status — 130 for
-  `INT`, 143 for `TERM`, 129 for `HUP` — so the abort you are reading came from a run
-  that was stopped rather than one that decided anything. Nothing is wrong with the
-  setup in that case; re-run it. Whatever the stopped run had already created is left
-  where it is, which is the same litter a refusal leaves.
+  **Zero of them is a third answer, and it is not a refusal.** It means the helper
+  never got as far as saying anything, and there are two ways that happens. It was
+  **stopped** — interrupted or killed, in which case it ends with the signal's status,
+  130 for `INT`, 143 for `TERM`, 129 for `HUP` — or it **could not run at all**, which
+  is what you see if `pr-setup.sh` is missing, unreadable, or fails before it can
+  report: the discovery above proves `pr-review-state.sh` is there and executable and
+  says nothing about the rest of the directory.
+
+  The two are told apart by the status and by what else is on the terminal — a stopped
+  run is silent, one that could not start says so in your shell's own words, naming the
+  file. Re-running fixes the first and not the second, so a second abort with no status
+  line is an installation to look at rather than a race to retry. Either way, whatever
+  had already been created is left where it is, which is the same litter a refusal
+  leaves.
 
   The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds

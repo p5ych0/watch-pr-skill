@@ -367,11 +367,12 @@ _rb_gone="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -nE 'RB_ORIGIN_DIR|RB_ORIGI
 # proof against it. What the removals were for does not survive examination: the
 # origin is `git remote get-url origin`, which anyone who can reach the checkout can
 # read anyway, and the directory is mode 700.
-# MATCHED AS COMMAND WORDS, NOT AS SPELLINGS. Three exact strings were listed, so a
-# plain `rm "$RB_SETUP_DIR/origin"` — or `unlink`, which needs no flags — was a removal
-# through the published path that this case reported as none. The flags are not what
-# makes it one.
-if grep -qE '(^|[^[:alnum:]_/-])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$skill_flat"; then
+# MATCHED AS COMMAND WORDS, NOT AS SPELLINGS, AND A PATHNAME IS STILL A COMMAND. Three
+# exact strings were listed, so a plain `rm "$RB_SETUP_DIR/origin"` — or `unlink`, which
+# needs no flags — was a removal through the published path that this case reported as
+# none. The flags are not what makes it one, and neither is being reached by a bare name:
+# the left boundary admits a path prefix, so `/bin/rm` matches too.
+if grep -qE '(^|[^[:alnum:]_-])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$skill_flat"; then
     die "SKILL.md unlinks something under the published setup path"
 else
     pass "the driver unlinks nothing under the published setup path"

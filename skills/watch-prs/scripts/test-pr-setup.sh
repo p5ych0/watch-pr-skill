@@ -507,13 +507,38 @@ _sigcase HUP 129
 # the second count below asserts of every handler in the file.
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries the table of what each earlier
 # shape destroyed.
-# MATCHED AS COMMAND WORDS, NOT AS SPELLINGS. It listed `rm -f`, `rm -rf` and `rmdir`,
-# so a plain `rm "$RB_DIR/origin"` — or `unlink`, which needs no flags at all — was a
-# removal the scan reported as none. The flags are not what makes it one.
-_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -cE '(^|[^[:alnum:]_/-])(rm|rmdir|unlink)([[:space:]]|$)')" || _rm_n=0
+# MATCHED AS COMMAND WORDS, NOT AS SPELLINGS, AND NOT AS UNQUALIFIED ONES EITHER. It
+# listed `rm -f`, `rm -rf` and `rmdir`, so a plain `rm "$RB_DIR/origin"` — or `unlink`,
+# which needs no flags at all — was a removal the scan reported as none. Matching the word
+# then excluded `/` from the left boundary to keep paths out, which dropped `/bin/rm -f`,
+# a spelling the ORIGINAL substring scan did catch. The boundary admits a path prefix now:
+# what makes it a removal is the command, whether or not it is reached by pathname.
+_RB_RM_RE='(^|[^[:alnum:]_-])(rm|rmdir|unlink)([[:space:]]|$)'
+_rmscan() { grep -v '^[[:space:]]*#' "$1" | grep -cE "$_RB_RM_RE" || return 0; }
+_rm_n=0; _rm_n="$(_rmscan "$SCRIPT")" || _rm_n=0
 [ "$_rm_n" -eq 0 ] \
     && pass "pr-setup.sh removes nothing at all, so no name it resolves can take another's object" \
     || die "pr-setup.sh has $_rm_n removals; it is meant to have none"
+# AND THE SCAN ITSELF IS EXERCISED, because a pattern that matches nothing passes the
+# assertion above for the wrong reason — which is exactly how the `/bin/rm` spelling was
+# lost. Each of these is staged into a copy of the real file and has to be counted.
+for _rv in 'rm "$RB_DIR/origin"' '/bin/rm -f "$RB_DIR/origin"' 'unlink "$RB_DIR/origin"' \
+           '/usr/bin/unlink "$RB_DIR/origin"' 'rmdir "$RB_DIR"' '/bin/rmdir "$RB_DIR"'; do
+    _rc_f="$(mktemp "$TMP/rmv.XXXXXX")"
+    { cat "$SCRIPT"; printf '%s\n' "$_rv"; } > "$_rc_f"
+    [ "$(_rmscan "$_rc_f")" -ge 1 ] \
+        && pass "…and the scan counts a removal written as '$_rv'" \
+        || die "the removal scan misses '$_rv'; a regression in that spelling would pass"
+done
+# …AND DOES NOT COUNT A NAME THAT MERELY CONTAINS ONE. A scan that matched these would
+# fire on the tree and be silenced by whoever met it next.
+for _rv in 'confirm "$RB_DIR"' 'RB_FORM=1' 'perform_check "$RB_DIR"'; do
+    _rc_f="$(mktemp "$TMP/rmv.XXXXXX")"
+    { cat "$SCRIPT"; printf '%s\n' "$_rv"; } > "$_rc_f"
+    [ "$(_rmscan "$_rc_f")" -eq 0 ] \
+        && pass "…and does not count '$_rv', which is not a removal" \
+        || die "the removal scan fires on '$_rv'"
+done
 # THE TRAPS ARE COUNTED THE SAME WAY, and one is expected: `INT` is not fatal here without
 # a handler, so the run would otherwise continue and publish a ready line. What is asserted
 # of it is that no handler REMOVES anything — a body that did would put the whole class
@@ -522,7 +547,7 @@ _tr_n=0; _tr_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '^trap ')" || _tr
 [ "$_tr_n" -eq 1 ] \
     && pass "…and one trap, which is the INT re-raise the measured behaviour needs" \
     || die "pr-setup.sh arms $_tr_n traps; it is meant to arm exactly the INT one"
-_trb_n=0; _trb_n="$(grep '^trap ' "$SCRIPT" | grep -cE '(^|[^[:alnum:]_/-])(rm|rmdir|unlink)([[:space:]]|$)')" || _trb_n=0
+_trb_n=0; _trb_n="$(grep '^trap ' "$SCRIPT" | grep -cE "$_RB_RM_RE")" || _trb_n=0
 [ "$_trb_n" -eq 0 ] \
     && pass "…and no handler removes anything, so the class cannot come back behind a signal" \
     || die "$_trb_n of pr-setup.sh's traps remove something"
