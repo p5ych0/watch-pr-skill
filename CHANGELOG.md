@@ -45,8 +45,11 @@
   on the automatic path a pass that finished during the CI wait is then accepted as the
   answer to the request just made. Measured: the old form accepts it silently, the new one
   refuses. The redirection fails where the read returned empty, which is the distinction
-  the fail-closed rule is about. The opening request's read had the same shape and is
-  written the same way — one document, one variable, two sites. #235.
+  the fail-closed rule is about.
+
+  The opening request's read has the same shape and the same hole. It is NOT changed here:
+  it is pre-existing and unrelated to the round-close reduction, and `CLAUDE.md` says a
+  pre-existing defect found mid-work gets FILED rather than fixed. #238 carries it. #235.
 
 ## [2.0.84] — 2026-08-30
 

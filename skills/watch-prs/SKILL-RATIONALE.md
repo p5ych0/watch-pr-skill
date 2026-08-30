@@ -1360,6 +1360,27 @@ refusal arm and prints it unless `echo` has been shadowed, `post` asks the conte
 question again and refuses, so no summary is posted and no pass requested, and the
 allocation the paths come from cannot produce the aliased case at all.
 
+## AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
+
+`if { … } 9<"$PRIOR_FILE"; then <use>; else <refuse>; fi`, and never the negation with
+the refusal in the `then`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, this fence
+DOES NOT REFUSE AT ALL. Measured on bash 5.3.9:
+
+    { true; } 9</nonexistent                            -> status 1
+    ! { true; } 9</nonexistent                          -> status 1
+    if ! { true; } 9</nonexistent; then A; else B; fi    -> B
+    if   { true; } 9</nonexistent; then A; else B; fi    -> B
+
+The `!` LEAVES THE STATUS AT 1 rather than inverting it, so both spellings take the
+`else`. The version is named and all four are shown because this was raised as
+contradicting bash's semantics — the claim is meant to be re-run, not believed.
+
+SO THE NEGATED FORM IS FAIL-OPEN HERE, which is the opposite of how it reads. It was
+how this fence's sibling at step 2 was written when the binding landed: a missing file
+fell through, matched the empty arm, and armed the watch with no baseline. Every check
+on it was a `grep` for the redirection, which was present and correct throughout, and
+only EXECUTING the fence found it.
+
 ## AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
 
 By the time this read runs the summary is posted and the next pass requested. The
@@ -1385,6 +1406,16 @@ WHAT STAYS IS WHAT THE DRIVER HAS TO DECIDE — which stage runs when, that the
 replies go between them, and what each status means for the round. The rest is one
 line saying where to read it.
 
+## THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
+
+`CLAUDE.md` says to prove an assignment by reading the variable back, and the usual
+difficulty is that nothing else knows what the value should have been — a readonly
+name simply keeps whatever it held.
+
+The file does know. If this name was already readonly the assignment fails and the
+two disagree, which is the one case a check on the variable alone cannot see: the
+helper SUCCEEDED and the baseline is somebody else's.
+
 ## A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
 
 `PRIOR_REVIEW="$(<"$PRIOR_FILE")"` cannot tell those apart. A missing or unreadable
@@ -1402,41 +1433,6 @@ reads the object that redirection opened rather than resolving the name a second
 time.
 
 What it protects is the WAIT, and the claim below says what it must not do instead.
-
-## THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO.
-
-The same read, at step 2, with the same hole. It is written the same way because it
-is the same defect — one document, one variable, two sites — and leaving the older
-one unbound would be the copy that goes stale, which is the shape this repository has
-paid for more than once.
-
-## AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
-
-`if { … } 9<"$PRIOR_FILE"; then <use>; else <refuse>; fi`, and never the negation with
-the refusal in the `then`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, this fence
-DOES NOT REFUSE AT ALL: measured on bash 5, a failed redirection on a compound command
-gives `!` no status to invert, and both spellings take the ELSE branch.
-
-    if ! { … } 9</nonexistent; then A; else B; fi   -> B
-    if   { … } 9</nonexistent; then A; else B; fi   -> B
-
-SO THE NEGATED FORM IS FAIL-OPEN HERE, which is the opposite of how it reads. A missing
-file fell through to the `case`, matched the empty arm, and armed the watch with no
-baseline — the hole the binding was added to close. That is how it was written when the
-binding landed, it survived a review round, and only EXECUTING the fence found it: every
-check on it was a `grep` for the redirection, which was present and correct throughout.
-
-## AND A REFUSAL THERE STOPS BEFORE THE WATCH, the request having already gone out.
-
-Step 2's refusal exits `0`, and the difference from step 5 is what has happened by
-then: the request is POSTED. There is nothing to undo and nothing to retry — the pass
-is queued whatever this shell does next — so what the refusal protects is the WAIT,
-which would otherwise be armed with no baseline and take the previous terminal review
-as the answer.
-
-SO IT IS NOT A FAILED REQUEST, and must not read as one. A session told the request
-failed would make it again, and a second `@codex review` on the same head is the
-duplicate pass the trigger rules exist to prevent.
 
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 

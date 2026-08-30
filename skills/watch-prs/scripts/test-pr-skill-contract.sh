@@ -1657,10 +1657,12 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" |
 # OLDER baseline, against which the terminal review this round just handled is
 # newer, and is therefore accepted at once as the answer to a request nobody has
 # answered yet.
-# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and the
-# assignment has to be PROVEN. A recipe that carries on regardless satisfies a count
-# while step 3 still watches against the parent's older baseline — which is the
-# defect, not the spelling.
+# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and a read that
+# FAILED has to be refused rather than carried on from. A recipe that carries on
+# regardless satisfies a count while step 3 watches against the parent's older
+# baseline — which is the defect, not the spelling. What is NOT asserted is a
+# postcondition on the assignment itself: there is none, and the contract below says
+# why.
 # OUT OF THE FILE, NOT OUT OF THE RECORD, since #234. `post` writes the baseline
 # into the file it is given, as `gate` writes the head into its own, so the twelve
 # lines that captured stdout, `sed`-ed a record out of it, proved the record was
@@ -1671,12 +1673,13 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" |
 # file armed the watch with no baseline at all. The redirection fails where the read
 # would have returned empty, which is the distinction `CLAUDE.md`'s fail-closed rule
 # is about.
-[ "$(grep -c '9<"\$PRIOR_FILE"' "$SKILL")" -ge 2 ] \
-    && pass "the recipe binds the baseline file before reading it, on both paths" \
-    || die "a recipe reads \$PRIOR_FILE by name; a failed read is then an empty baseline"
-grep -qF 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
-    && die "a recipe still reads the baseline by name rather than through the descriptor" \
-    || pass "…and neither reads it by name any more"
+# THE ROUND-CLOSE READ ONLY. The opening request's read has the same shape and the same
+# hole, and hardening it was reverted out of this change: it is pre-existing on `main` and
+# unrelated to the round-close reduction, which `CLAUDE.md` says gets FILED rather than
+# fixed mid-work. #238 carries it.
+[ "$(grep -c '9<"\$PRIOR_FILE"' "$SKILL")" -eq 1 ] \
+    && pass "the round-close recipe binds the baseline file before reading it" \
+    || die "the round-close read does not bind \$PRIOR_FILE; a failed read is then an empty baseline"
 grep -qF 'CLOSED_REC' "$SKILL" \
     && die "the document still parses the closing record for the baseline" \
     || pass "…and no longer parses it out of the closing record"
@@ -1687,9 +1690,9 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 # that arrives transformed anyway is refused by `pr-watch.sh`. The execution cases below
 # are what hold the behaviour; this only holds that both paths SAY something when the read
 # fails.
-[ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 2 ] \
-    && pass "…and both paths refuse in their own words when that read fails" \
-    || die "a recipe reads the baseline without a refusal for a read that failed"
+[ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 1 ] \
+    && pass "…and refuses in its own words when that read fails" \
+    || die "the round-close recipe reads the baseline without a refusal for a read that failed"
 # ── AND BOTH BASELINE READS ARE EXECUTED, NOT ONLY GREPPED ────────────────
 #
 # Every assertion above this point is a `grep` for the redirection, the assignment
@@ -1705,16 +1708,9 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 _bl_dir="$TMP_CL/bl"; mkdir -p "$_bl_dir" || die "the baseline-read scratch directory could not be made"
 # The round-close fence is a whole `if … fi` at column 0.
 awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.sh"
-# The opening fence's read is nested; lift its own `if { … }; then … else … fi` and
-# dedent it. POSITIVE condition with the refusal in the `else`: the negated spelling is
-# the one this pull request found takes the non-refusal branch after a failed
-# redirection, so it must not be described here as the shape to look for.
-awk '/^        PRIOR_REVIEW=$/{f=1} f{print} f&&/^        fi$/{exit}' "$SKILL" \
-    | sed 's/^        //' > "$_bl_dir/open.sh"
-{ [ -s "$_bl_dir/close.sh" ] && [ -s "$_bl_dir/open.sh" ] \
-  && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/close.sh" && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/open.sh"; } \
-    && pass "both baseline-read fences lift, so the cases below reach the code they name" \
-    || die "a baseline-read fence did not lift; the execution cases prove nothing"
+{ [ -s "$_bl_dir/close.sh" ] && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/close.sh"; } \
+    && pass "the baseline-read fence lifts, so the cases below reach the code they name" \
+    || die "the baseline-read fence did not lift; the execution cases prove nothing"
 # THE ABORT ARMS `exit`, so a sourced fence that refuses ends the wrapper before it can
 # report — which is why the refusal is read off the OUTPUT, not off a `||` that never
 # runs. The diagnostic is what an operator sees, so it is what the case asserts.
@@ -1732,8 +1728,8 @@ printf '%s\n' 4242 > "$_bl_dir/good"
 # session makes the request twice, and the second looks successful and the driver walks
 # into the watch. Both mutations keep the diagnostic and omit `TOOK:`, so only the status
 # tells them apart.
-for _f in close open; do
-    case "$_f" in close) _bl_rc=1 ;; *) _bl_rc=0 ;; esac
+for _f in close; do
+    _bl_rc=1
     _bl_ok="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/good")"
     case "${_bl_ok#*|}" in
         TOOK:\[4242\]) pass "the $_f fence reads a real baseline through the descriptor" ;;
@@ -2039,11 +2035,11 @@ grep -q 'RX_PRIOR' "$SKILL" \
     && die "the baseline is validated against a pattern held in a variable; use a literal" \
     || pass "…and is validated against a literal pattern"
 # AND THE READ-BACK IS PROVEN AGAINST THE FILE. `CLAUDE.md` says to prove an
-# assignment by reading the variable back, and the usual difficulty is that
-# nothing else knows what the value should have been. Here the file does: if the
-# name was already readonly the assignment fails and the two disagree, which is
-# the one case a pattern check on the variable alone cannot see — the helper
-# SUCCEEDED and the baseline is somebody else's.
+# assignment by reading the variable back, and the OPENING path still does exactly
+# that — `[[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]`, by name, which is where its own
+# hole is and which #238 carries. The ROUND-CLOSE path does not: its comparison went
+# with the second descriptor read, for the reason below, and what answers each
+# attribute instead is recorded in `SKILL-RATIONALE.md`.
 # AND THE DESCRIPTOR IS READ ONCE. `/dev/fd/N` is a symlink on Linux, so opening it
 # re-opens the file at offset 0 and a second read works; on macOS and the BSDs it
 # DUPLICATES the descriptor and shares its offset, so the first read drains it and
@@ -2052,13 +2048,13 @@ grep -q 'RX_PRIOR' "$SKILL" \
 # aborting after the summary and the next pass have gone out. The `macos-shell` job
 # runs on Ubuntu and cannot see it.
 #
-# NOTHING IS LOST BY DROPPING THE COMPARISON. A readonly `PRIOR_REVIEW` does not
+# NOTHING IS LOST BY DROPPING IT THERE. A readonly `PRIOR_REVIEW` does not
 # reach it: measured, the failed assignment inside the group ends the shell outright,
 # which is the fail-closed answer. What the comparison was for is covered by the
 # redirection, which fails where a read would have returned empty.
-[ "$(grep -c 'PRIOR_REVIEW="\$(<"/dev/fd/9")"' "$SKILL")" -eq 2 ] \
-    && pass "…and each bound descriptor is read once, not twice" \
-    || die "a baseline descriptor is read more than once; on macOS the second read is empty"
+[ "$(grep -c 'PRIOR_REVIEW="\$(<"/dev/fd/9")"' "$SKILL")" -eq 1 ] \
+    && pass "…and that bound descriptor is read once, not twice" \
+    || die "the baseline descriptor is read more than once; on macOS the second read is empty"
 # AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
 # lost twice: with `errexit` on, a documented refusal ends the shell at the
 # assignment before anything reads it; without it, a startup file that has already
