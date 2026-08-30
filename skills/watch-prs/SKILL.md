@@ -917,7 +917,8 @@ if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-    PRIOR_REVIEW=
+    # AND THE NAME IS NOT CLEARED FIRST, because a clear is an assignment to it as well.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
         exit 0   # the script printed the head it closed on
         [[ -n "" ]]

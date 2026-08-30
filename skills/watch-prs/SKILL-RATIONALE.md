@@ -1381,6 +1381,19 @@ fell through, matched the empty arm, and armed the watch with no baseline. Every
 on it was a `grep` for the redirection, which was present and correct throughout, and
 only EXECUTING the fence found it.
 
+## AND THE NAME IS NOT CLEARED FIRST, because a clear is an assignment to it as well.
+
+`PRIOR_REVIEW=` looks like hygiene and is a write. On a RESUMED round-close session
+step 2's assignability probe has not run — a session can enter here directly — and
+setup's probe list does not carry this name, so nothing upstream has established that
+writing it is safe. Declared a nameref onto `BASH_XTRACEFD`, the clear empties that
+variable and bash CLOSES the descriptor it referred to, which can be the session's own
+stdout, after `post` has already closed the round.
+
+NOTHING IS LOST BY DROPPING IT. The bound assignment overwrites the value on the
+success path, and every failure path `exit`s without reading it — so a stale value can
+never be consumed, which is the only thing the clear was for.
+
 ## AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
 
 Every arm of this fence ends in `exit` and then a reserved word, and NOTHING FOLLOWS

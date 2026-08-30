@@ -1761,10 +1761,15 @@ for _f in close; do
     # check for the message alone accepts exactly that: the driver proceeding toward the
     # watch with an empty baseline, which is the failure. The refusal has to be present
     # AND the continuation absent.
+    # THE STATUS AND THE MESSAGE. The `EXIT` trap prints `TOOK:` on every path now, so
+    # its presence is no longer what distinguishes a refusal from a fall-through — the
+    # returning-`exit` case below is what covers that. What these hold is that the fence
+    # refuses, says why, and ends non-zero, and that it never carries the VALUE through.
     case "${_bl_gone#*|}" in
-        *'could not be read back'*TOOK:\[\]*)
+        *TOOK:\[4242\]*) die "the $_f fence carried a value through its refusal: '${_bl_gone}'" ;;
+        *'could not be read back'*)
             [ "${_bl_gone%%|*}" = "$_bl_rc" ] \
-                && pass "…and REFUSES a baseline file that is not there, with status $_bl_rc and nothing after it" \
+                && pass "…and REFUSES a baseline file that is not there, with status $_bl_rc" \
                 || die "the $_f fence refused with status ${_bl_gone%%|*}, not $_bl_rc" ;;
         *) die "the $_f fence accepted a missing baseline file: '${_bl_gone}'" ;;
     esac
@@ -1773,7 +1778,8 @@ for _f in close; do
         _bl_unr="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/unreadable")"
         chmod 600 "$_bl_dir/unreadable"
         case "${_bl_unr#*|}" in
-            *'could not be read back'*TOOK:\[\]*)
+            *TOOK:\[4242\]*) die "the $_f fence carried a value through its refusal: '${_bl_unr}'" ;;
+            *'could not be read back'*)
                 [ "${_bl_unr%%|*}" = "$_bl_rc" ] \
                     && pass "…and one it cannot read, with the same status" \
                     || die "the $_f fence refused an unreadable file with status ${_bl_unr%%|*}, not $_bl_rc" ;;
@@ -1804,14 +1810,22 @@ for _f in close; do
     for _bl_st in 1 3; do
         printf '#!/usr/bin/env bash\nexit %s\n' "$_bl_st" > "$_bl_dir/post$_bl_st"
         chmod +x "$_bl_dir/post$_bl_st"
+        _bl_frc=0
         _bl_fail="$(RB_POST_STUB="$_bl_dir/post$_bl_st" PRIOR_FILE="$_bl_dir/good" bash -c '
             [() { return 0; }
             trap '"'"'printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"'"'"' EXIT
-            . "$1" 2>/dev/null' _ "$_bl_dir/$_f.sh" 2>/dev/null)" || true
+            . "$1" 2>/dev/null' _ "$_bl_dir/$_f.sh" 2>/dev/null)" || _bl_frc=$?
+        # THE STATUS AND THE MESSAGE, not just that the read was skipped. `post` pauses
+        # with 3 when the pass it waited on left only replies, and that is an operator
+        # DECISION; folding it into the generic refusal loses it, and a `3)` arm changed
+        # to `exit 1` skips the read just the same.
+        case "$_bl_st" in 3) _bl_want='left only replies' ;; *) _bl_want='did not close' ;; esac
         case "$_bl_fail" in
             *TOOK:\[4242\]*) die "a post that exited $_bl_st still reached the baseline read" ;;
-            *) pass "…and a post that exits $_bl_st never reaches the read, even with [ shadowed" ;;
         esac
+        { [ "$_bl_frc" -eq "$_bl_st" ] && case "$_bl_fail" in *"$_bl_want"*) true ;; *) false ;; esac; } \
+            && pass "…and a post that exits $_bl_st ends at $_bl_st with its own words, even with [ shadowed" \
+            || die "a post that exited $_bl_st gave rc=$_bl_frc '$_bl_fail'"
     done
     # AND AN EMPTY FILE IS STILL AN ANSWER, which is the distinction the whole change
     # rests on: a legitimate empty baseline must NOT be refused.
