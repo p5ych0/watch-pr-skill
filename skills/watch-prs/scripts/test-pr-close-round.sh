@@ -780,6 +780,46 @@ world; _hf="$(headf)"; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$_h
 { [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the head' <<<"${got#*|}"; } \
     && pass "…and one that is the head file is refused too" \
     || die "the prior/head alias gave '$got'"
+# …AND UNDER ANOTHER NAME, which is what the `-ef` half is for. The two cases above
+# pass the SAME pathname, so string equality answers them and `-ef` never runs — a
+# regression dropping it would leave them green while a symlinked prior file
+# overwrote the account or the head. Both targets, both reached by a second name.
+world; ln -sf "$TMP/summary.md" "$TMP/palias.txt"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)" "$TMP/palias.txt")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the account' <<<"${got#*|}"; } \
+    && pass "…and a prior file that is the summary under another name is refused" \
+    || die "the symlinked prior/summary alias gave '$got'"
+rm -f "$TMP/palias.txt"
+world; _hf="$(headf)"; ln -sf "$_hf" "$TMP/palias.txt"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$_hf" "$TMP/palias.txt")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the head' <<<"${got#*|}"; } \
+    && pass "…and the head file under another name is refused too" \
+    || die "the symlinked prior/head alias gave '$got'"
+rm -f "$TMP/palias.txt"
+
+# ── THE WRITE HAPPENS BEFORE THE REQUEST, AND THAT IS WHAT THIS PROVES ─────
+# The success assertion above sees the file only after `post` returns, so it passes
+# just as well if the write moved AFTER the request, if its status went unchecked,
+# or if the read-back went away. What makes the ordering safety-critical is that
+# there is nothing to refuse with afterwards: the summary is posted and the pass
+# requested, so a driver reading a truncated baseline watches against a value no
+# request was made with, and the round cannot be un-closed.
+#
+# STAGED BY MAKING THE WRITE FAIL: a DIRECTORY at the prior path takes no
+# redirection. It passes every argument check — non-empty, neither the summary nor
+# the head file — and the pre-bootstrap truncation skips it, being guarded on `-f`.
+# So the first thing that can fail is the write itself.
+world; rm -rf "$TMP/priordir"; mkdir -p "$TMP/priordir"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "$TMP/priordir")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not write the review baseline' <<<"${got#*|}"; } \
+    && pass "a baseline that cannot be written stops the stage" \
+    || die "the unwritable prior file gave '$got'"
+# AND NOTHING WAS REQUESTED, which is the half the status cannot show. Both request
+# paths are checked, because which one runs depends on the reviewer.
+grep -qE 'gh pr comment|gh pr edit' "$TMP/calls" \
+    && die "the stage requested a review before the baseline was handed over" \
+    || pass "…before the summary was posted or any pass requested"
+rm -rf "$TMP/priordir"
 world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'a prior file is required' <<<"${got#*|}"; } \
     && pass "…and an absent one is a refusal rather than a silent skip" \
@@ -900,12 +940,19 @@ world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
 # file, long before any argument is looked at.
 rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
 : > "$TMP/broken/recordlib.sh"
+printf '%s\n' 'STALE-BASELINE' > "$TMP/prior.txt"
 _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _st_rc=$?
 { [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
     && pass "…and a gate that cannot bootstrap leaves no stale head either" \
     || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
+# AND NO STALE BASELINE, for the same reason and by the same means. The truncation
+# further down never runs when the bootstrap refuses, so a previous round's value
+# would still be sitting there for the driver's watch to take. #234.
+[ ! -s "$TMP/prior.txt" ] \
+    && pass "…and no stale baseline either" \
+    || die "a bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
 
 # AND A FILE NAMED AFTER AN OID IN THE CURRENT DIRECTORY IS NOT TOUCHED. The
 # pre-#202 form puts the head itself in that position, and the bootstrap clear runs

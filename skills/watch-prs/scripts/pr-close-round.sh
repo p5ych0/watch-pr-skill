@@ -16,7 +16,9 @@
 # checked it carried the field, and cut the value out with `${rec##* prior-review=}`
 # — twelve executable lines in the one shell nothing can harden, to receive a value
 # the file mechanism beside it already hands over. The record still carries it, for
-# whoever is reading the terminal; the driver no longer parses it. #234.
+# whoever is reading the terminal, and this stage now ALSO writes the file; removing
+# the driver's parsing is #235 and has not happened yet, so both routes are live in
+# this release. #234.
 #
 #   0  gated/closed — `gate`: the head is pushed and green, and the threads may
 #                     now be answered. `post`: the summary is posted and the next
@@ -151,6 +153,22 @@ if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
     > "${6}" || {
         echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept."
+        exit 1
+    }
+fi
+# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A
+# bootstrap refusal above the truncation further down leaves the PREVIOUS round's
+# baseline in place, and the driver's watch takes what it finds: a review that
+# predates this round, accepted as the answer to a request this round never made.
+# The exceptions are the summary — truncating it destroys the account — and the head
+# file, which the arm above has already emptied and whose emptiness must not be
+# mistaken for this one's. Both are refused properly further down; this only
+# declines to do damage before that refusal can be reached. #234.
+if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
+   && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
+    > "${7}" || {
+        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept."
         exit 1
     }
 fi

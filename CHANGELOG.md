@@ -12,8 +12,10 @@
   assignment a readonly name makes fail in silence.
 
   `post` now takes that file as a sixth argument and writes the baseline into it. The
-  record still carries the value, for whoever is reading the terminal; what changes is
-  that the driver no longer parses it out.
+  record still carries the value, for whoever is reading the terminal, and the driver
+  still parses it out of the record in this release — removing that is #235, and it is
+  what the file is for. Both routes are live until then, which is the ordering
+  `CLAUDE.md` requires: a helper change lands before the change that consumes it.
 
   Three things come with it. `gate` EMPTIES the file, alongside the head, so a `post` that
   fails cannot leave the previous round's baseline readable — the watch would take it and
