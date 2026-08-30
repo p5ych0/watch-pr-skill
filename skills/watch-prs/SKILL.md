@@ -285,10 +285,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             then
                 # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
-                    [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
-                done
-                unset _rb_knob
+                export PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS
                 # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
                 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
                 # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.

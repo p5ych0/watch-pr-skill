@@ -274,7 +274,23 @@ _argcase() {   # _argcase <reason> <args…>
 }
 _argcase bad_dir
 _argcase dir_not_absolute rel/ative
-_argcase bad_dir "$TMP/a/../b"
+# …AND A `..` COMPONENT IS NOT ONE, which it was until a review pointed out the cost.
+# `pr-origin.sh` takes the same kind of argument and restricts nothing, so refusing it
+# here refused a directory the delegate would accept — and `bad_dir` is TERMINAL, while
+# the driver retries only a 2, so a `TMPDIR` of `/tmp/base/a/../b` ended the session
+# with a usable `HOME` never tried. What is asserted is the whole run, not the status:
+# the path resolves, and the origin and the working files are where the driver looks.
+_dd="$TMP/dd/a/../b"; mkdir -p "$TMP/dd/a" "$TMP/dd/b"
+_dd_d="$_dd/dir"
+_dd_rc=0
+_dd_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_dd_d" 2>&1)" || _dd_rc=$?
+{ [ "$_dd_rc" -eq 0 ] && [ -f "$_dd_d/origin" ] && [ -f "$_dd_d/work/summary.md" ]; } \
+    && pass "…and a parent carrying a .. component is set up rather than refused" \
+    || die "a path with a .. component was refused (rc=$_dd_rc out='$_dd_out')"
+_dd_got="$(cat "$_dd_d/origin" 2>/dev/null)" || _dd_got="READ_FAILED"
+[ "$_dd_got" = "$REAL" ] \
+    && pass "…with the origin readable through it" \
+    || die "the origin under a .. path read as '$_dd_got'"
 _argcase usage "$TMP/one" "$TMP/two"
 # …AND AN ORDINARY FILESYSTEM CHARACTER IS NOT A REFUSAL. A character class was here
 # and it was a regression: the driver builds this name under `$TMPDIR` or `$HOME`, an
@@ -513,12 +529,38 @@ _sigcase HUP 129
 # then excluded `/` from the left boundary to keep paths out, which dropped `/bin/rm -f`,
 # a spelling the ORIGINAL substring scan did catch. The boundary admits a path prefix now:
 # what makes it a removal is the command, whether or not it is reached by pathname.
+# A FAILED READ IS NOT ZERO REMOVALS, which is what `|| return 0` made it. `grep -c`
+# exits 1 for no match and 2 for an error, and swallowing both reported a clean file
+# whenever the read failed — the fail-closed rule `CLAUDE.md` states, broken in the
+# check that holds this PR's whole contract. The stages are taken apart: the strip
+# either succeeds or selects nothing, anything else is a failure the caller sees.
 _RB_RM_RE='(^|[^[:alnum:]_-])(rm|rmdir|unlink)([[:space:]]|$)'
-_rmscan() { grep -v '^[[:space:]]*#' "$1" | grep -cE "$_RB_RM_RE" || return 0; }
-_rm_n=0; _rm_n="$(_rmscan "$SCRIPT")" || _rm_n=0
+_rmscan() {   # <file> — prints the count; non-zero means the file could not be scanned
+    local body n
+    body="$(grep -v '^[[:space:]]*#' "$1")"
+    case $? in 0) ;; 1) body="" ;; *) return 2 ;; esac
+    n="$(grep -cE "$_RB_RM_RE" <<<"$body")"
+    case $? in 0|1) ;; *) return 2 ;; esac
+    printf '%s\n' "$n"
+    return 0
+}
+_rm_n=""; _rm_n="$(_rmscan "$SCRIPT")" \
+    || die "the removal scan could not read $SCRIPT; it proves nothing"
 [ "$_rm_n" -eq 0 ] \
     && pass "pr-setup.sh removes nothing at all, so no name it resolves can take another's object" \
     || die "pr-setup.sh has $_rm_n removals; it is meant to have none"
+# AND AN UNREADABLE FILE IS A FAILURE RATHER THAN A CLEAN ONE, staged directly.
+if [ "$(id -u)" -eq 0 ]; then
+    pass "running as root, so the unreadable-scan state is skipped by name"
+else
+    _un_f="$(mktemp "$TMP/unr.XXXXXX")"; cat "$SCRIPT" > "$_un_f"; chmod 000 "$_un_f"
+    if _rmscan "$_un_f" >/dev/null 2>&1; then
+        die "the removal scan reported a result for a file it could not read"
+    else
+        pass "…and a file it cannot read is a failure, not a clean answer"
+    fi
+    chmod 600 "$_un_f"
+fi
 # AND THE SCAN ITSELF IS EXERCISED, because a pattern that matches nothing passes the
 # assertion above for the wrong reason — which is exactly how the `/bin/rm` spelling was
 # lost. Each of these is staged into a copy of the real file and has to be counted.
@@ -547,7 +589,10 @@ _tr_n=0; _tr_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '^trap ')" || _tr
 [ "$_tr_n" -eq 1 ] \
     && pass "…and one trap, which is the INT re-raise the measured behaviour needs" \
     || die "pr-setup.sh arms $_tr_n traps; it is meant to arm exactly the INT one"
-_trb_n=0; _trb_n="$(grep '^trap ' "$SCRIPT" | grep -cE "$_RB_RM_RE")" || _trb_n=0
+_trb_n=""; _trb_bodies="$(grep '^trap ' "$SCRIPT")"
+case $? in 0|1) ;; *) die "the trap scan could not read $SCRIPT; it proves nothing" ;; esac
+_trb_n="$(grep -cE "$_RB_RM_RE" <<<"$_trb_bodies")"
+case $? in 0|1) ;; *) die "the trap-body scan failed; it proves nothing" ;; esac
 [ "$_trb_n" -eq 0 ] \
     && pass "…and no handler removes anything, so the class cannot come back behind a signal" \
     || die "$_trb_n of pr-setup.sh's traps remove something"

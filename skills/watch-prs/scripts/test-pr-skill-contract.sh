@@ -372,11 +372,16 @@ _rb_gone="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -nE 'RB_ORIGIN_DIR|RB_ORIGI
 # needs no flags — was a removal through the published path that this case reported as
 # none. The flags are not what makes it one, and neither is being reached by a bare name:
 # the left boundary admits a path prefix, so `/bin/rm` matches too.
-if grep -qE '(^|[^[:alnum:]_-])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$skill_flat"; then
-    die "SKILL.md unlinks something under the published setup path"
-else
-    pass "the driver unlinks nothing under the published setup path"
-fi
+# A FAILED SCAN IS NOT A CLEAN ONE. `grep -q` exits 2 on an error, which an `if` reads
+# as its `else` — the clean branch — so a probe that could not run reported the driver
+# innocent. The status is taken and 2 is a third answer.
+_rm_rc=0
+grep -qE '(^|[^[:alnum:]_-])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$skill_flat" || _rm_rc=$?
+case "$_rm_rc" in
+    0) die "SKILL.md unlinks something under the published setup path" ;;
+    1) pass "the driver unlinks nothing under the published setup path" ;;
+    *) die "the removal scan over the lifted block failed (rc=$_rm_rc); it proves nothing" ;;
+esac
 
 # THE BLOCK LIFTS OUT WHOLE, from the probe that opens it to the `fi` that closes
 # it. One range, whole by construction: every refusal in it is an `else` arm, so a
@@ -2631,20 +2636,46 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     # declarations used to guard, which is now the process boundary's job
     # everywhere EXCEPT here, because this block genuinely does run in your shell.
     #
-    # Two things are deliberately NOT asserted, because neither can fail:
-    # `export FOO` on an unset name puts nothing in the environment, so a child
-    # cannot tell that spelling from the guarded one; and the loop cannot abort a
-    # `set -e` session, because bash exempts a `&&` list whose left side fails.
-    # A fixture for either would be a green tick over an unverifiable claim.
+    # THERE IS NO LOOP VARIABLE ANY MORE, and this case is what says so. The export was
+    # a `for` over the knob names with a guard and an `unset` after it, and under a
+    # `declare -n _rb_knob=SUMMARY_FILE` in the operator's shell that loop RETARGETS the
+    # nameref — measured, it does not write through it — after which `$_rb_knob` expands
+    # empty, every `export ""` fails with "not a valid identifier", and the knobs reach
+    # no child at all. Silently: the guard's `&&` list is exempt from `set -e`.
+    # `export A B C` needs no variable, and `export` on an unset name puts nothing in the
+    # environment, so the guard bought nothing either.
+    #
+    # The case below therefore reads a name the block no longer has, and the one after it
+    # is the behavioural half: the knobs still arrive with that nameref in place.
     knob_leak="$(cd "$SETUPTMP/repo" && run_limited 60 env \
         CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
         bash -c 'eval "$1" >/dev/null
                  printf "leak=%s" "${_rb_knob-clean}"' _ "$setup_block" 2>&1)" \
         || knob_leak="FAILED:$knob_leak"
     case "$knob_leak" in
-        *leak=clean*) pass "…and the export loop leaves no name behind in that shell" ;;
-        *) die "the setup block leaks its loop variable into the session (got '$knob_leak')" ;;
+        *leak=clean*) pass "…and the export leaves no loop variable behind in that shell" ;;
+        *) die "the setup block leaks a loop variable into the session (got '$knob_leak')" ;;
     esac
+
+    # …AND A HOSTILE `_rb_knob` CANNOT COST THE KNOBS, which is what the loop did.
+    # `REVIEW_MERGE_STRICT` is the one that matters: losing it at the process boundary
+    # does not fail, it silently restores the `--admin` bypass the operator set it to
+    # remove.
+    if [ "$_rb_has_n" = yes ]; then
+        knob_nref="$(cd "$SETUPTMP/repo" && run_limited 60 env -u REVIEW_MERGE_STRICT \
+            CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+            bash -c 'REVIEW_MERGE_STRICT=1
+                     declare -n _rb_knob=SUMMARY_FILE
+                     eval "$1" >/dev/null
+                     bash -c '"'"'printf "child=%s" "${REVIEW_MERGE_STRICT-unset}"'"'"'' _ "$setup_block" 2>&1)" \
+            || knob_nref="FAILED:$knob_nref"
+        case "$knob_nref" in
+            *child=1*) pass "…and a nameref at the old loop variable costs no knob" ;;
+            *) die "a nameref named _rb_knob still costs the knobs (got '$knob_nref')" ;;
+        esac
+    else
+        pass "this shell has no declare -n, so the nameref knob state is skipped by name"
+    fi
 
     # A readonly definition, in the SAME shell the block runs in — which is the
     # driver's situation, and the only place the case is reachable. `readonly -f`

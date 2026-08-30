@@ -113,12 +113,19 @@ rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_SETUP status=error" || exit 
 # takes the same kind of argument and restricts no character, which is the shape to
 # match. Nothing here ever evaluates the value: it is quoted in the `mkdir`, in
 # every redirection and in every `printf`, so an ordinary filesystem character is
-# data. What is left is what the checks were for — a value that is missing, one that
-# is relative, and one carrying a `..` component.
+# data. What is left is what the checks are for — a value that is MISSING, and one that
+# is RELATIVE, which cannot be a stable handoff between two processes.
+#
+# A `..` COMPONENT IS NOT ONE OF THEM, and refusing it was a defect. `pr-origin.sh` takes
+# the same kind of argument and restricts nothing, so this refused a directory the helper
+# it delegates to would accept — and the driver builds this path from `TMPDIR`, which is
+# the operator's to set. `/tmp/base/a/../b` is an ordinary writable directory; refusing it
+# ended the session TERMINALLY, since the driver retries a 2 and not a 1, so a usable
+# `HOME` was never tried. The path is never evaluated and the components resolve at the
+# syscall like any other path's, so there was nothing the check bought.
 RB_DIR="${1-}"
 case "$RB_DIR" in
-    "" | */../* | */..)
-        echo "PR_SETUP status=error reason=bad_dir" >&2; exit 1 ;;
+    "") echo "PR_SETUP status=error reason=bad_dir" >&2; exit 1 ;;
     /*) ;;
     *)  echo "PR_SETUP status=error reason=dir_not_absolute" >&2; exit 1 ;;
 esac
