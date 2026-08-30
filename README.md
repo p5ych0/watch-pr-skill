@@ -926,41 +926,100 @@ plugin docs and open an issue.
   requests, and a `cd` into a second checkout used to send those to whatever pull
   request of *that* repository shared the number. If you genuinely need to switch
   repositories, start a new session rather than unsetting the pin.
-- **`RB_REMOTE: could not read the origin for this session`:** `pr-origin.sh`
-  refused, for any of the reasons it refuses for — it could not create the private directory
-  the value travels in, it would not trust an ancestor of that directory, it could
-  not resolve the path, or it could not read a usable `origin` from the checkout.
-  **The helper's own line above says which**, and it is the one to read first.
-  Several of them are things you can repair — a checkout with no `origin` gets a
-  remote added, an ancestor another account owns gets a different parent — and the
-  one documented here is the storage case, because that is the one the abort itself
-  can tell you how to get past.
+- **`ABORT: could not set this session up`:** `pr-setup.sh` refused, for any of the
+  reasons it refuses for — it could not create the private directory it works in,
+  it could not read a usable `origin` from the checkout, the origin is not one the
+  identity parser accepts, or the storage would not take the working files.
+  **The helper's own `PR_SETUP status=error reason=…` line above says which**, and
+  it is the one to read first. Several of them are things you can repair — a
+  checkout with no `origin` gets a remote added, an ancestor another account owns
+  gets a different parent — and the one documented here is the storage case, because
+  that is the one the abort itself can tell you how to get past.
 
-  The line begins with your shell's name and `RB_REMOTE:` because setup emits it
-  as a parameter expansion the shell refuses rather than through `echo`, which in
-  your own shell may be a function that prints nothing — or one that forges a
-  value and then stops `exit` from working. Every refusal that comes from READING
-  the origin looks like that — the transport itself, and the three checks on the
-  value that follow it: your shell's name, a line number, `RB_REMOTE:`, and the
-  reason. What comes after, the pin and the working files, still announces itself
-  with a plain `ABORT:` line; nothing runs after those, so there is nowhere for a
-  neutralised `exit` to carry on to.
+  The driver's line says only that each `PR_SETUP status=error` line above it is one
+  attempt and its reason, and that is deliberate: it handed over a name and got back a
+  status. The helper's line names the reason — one per attempt — which is what tells you
+  whether the refusal was about storage, the checkout, or the path.
+
+  **`reason=dir_not_reserved` does not say which.** It is what every failed `mkdir`
+  reports, and a name somebody else had already taken and a filesystem with no room both
+  fail the same call. Nothing in the diagnostic separates them, which is why re-running is
+  the first thing to try: a squatted name is gone by the next attempt and a full
+  filesystem is not.
+
+  **Count those lines, not the `ABORT:` ones.** `pr-origin.sh` runs inside the helper
+  and prints its own `ABORT:` lines when the checkout or an ancestor is the problem, so
+  those do not correspond to attempts at all — there may be none, one, or two per
+  attempt. The `PR_SETUP status=error` lines are one per call *that refused*, which is
+  what the one-versus-two diagnosis below rests on.
+
+  **Zero of them is a third answer, and it is not a refusal.** It means the helper
+  never got as far as saying anything, and there are two ways that happens. It was
+  **stopped** — interrupted or killed, in which case it ends with the signal's status,
+  130 for `INT`, 143 for `TERM`, 129 for `HUP` — or it **could not run at all**, which
+  is what you see if `pr-setup.sh` is missing, unreadable, or fails before it can
+  report: the discovery above proves `pr-review-state.sh` is there and executable and
+  says nothing about the rest of the directory.
+
+  The two are told apart by the status and by what else is on the terminal — a stopped
+  run is silent, one that could not start says so in your shell's own words, naming the
+  file. Re-running fixes the first and not the second, so a second abort with no status
+  line is an installation to look at rather than a race to retry. Either way, whatever
+  had already been created is left where it is, which is the same litter a refusal
+  leaves.
+
+  The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
+  value from the helper — the repository's remote — and derives, holds or builds
+  everything else itself, so nothing the helper wrote is ever executed. The three
+  checks on what arrived — the origin is there, it is one line, it parses as an
+  identity — are parameter expansions the shell REFUSES rather than `echo` lines, so
+  they begin with your shell's name, a line number and `RB_REMOTE:`. In your own shell
+  `echo` may be a function that prints nothing, or one that forges a value and then
+  stops `exit` from working; an expansion has no command in it to shadow. What comes
+  after — the working-path check and the pin — announces itself with a plain `ABORT:`
+  line, and correctly: every one of those is an arm the block cannot walk past, so
+  position is what contains them and there is nowhere for a neutralised `exit` to
+  carry on to.
+
+  One refusal names a list of variables and says one of them is "readonly,
+  value-transforming, or aimed at another name". Those are the names setup assigns in
+  your shell, and a startup file that has fixed any of them — made it readonly, given
+  it `declare -i`, or pointed it at another variable — is what that means. Setup
+  cannot work around it: an assignment to a readonly name fails silently, and one
+  aimed elsewhere writes into whatever it was aimed at.
+
+  **Where a startup file is what declares them, edit or disable that declaration**, or
+  start a shell that does not read the file. A fresh shell is not enough on its own,
+  because it reads the same file and arrives with the same attribute. Where the name
+  was set by hand in the session you are in, a new shell is the whole fix.
+
+  Unsetting is not the way out either, and for two of the three it cannot be: bash
+  refuses to unset a readonly name at all, and `unset` on a nameref clears the variable
+  it points at rather than the nameref — leaving you with the alias, still not
+  assignable, and without whatever it aliased.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.
-  **The abort counts nothing**, deliberately: each `ABORT:` line above it is one
-  attempt and its reason. There may be one or two, because the retry runs only
-  where the first refusal was about storage — a name it could not take on a sound
-  ancestry, or a directory it created and then could not write the value into —
-  and not where it was about the path or the checkout, which another parent does
-  not fix.
+  **The abort counts nothing**, deliberately: each `PR_SETUP status=error` line above
+  it is one attempt and its reason. There may be one or two, because the retry runs
+  only where the first refusal was about storage — a name it could not take on a sound
+  ancestry, or a directory it created and then could not write the value into — and
+  not where it was about the path or the checkout, which another parent does not fix.
+  The `ABORT:` lines mixed in with them come from `pr-origin.sh` running inside the
+  helper, and there may be none, one or two of those per attempt; they are not what to
+  count.
 
   So **if they name a path setup could not create or write**, re-run
   first: the helper creates that directory exclusively, and the same diagnostic
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, look at storage — and count the `ABORT:` lines.
+  If re-running keeps failing, **read the lines rather than the repetition**: a
+  process watching argv can contend on every run, so failing twice rules nothing out
+  — that residual cost is what
+  `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts. What the reason
+  says and how many `PR_SETUP status=error` lines there are is the evidence there is,
+  so count them.
   **Two** means setup has already used both parents, so `unset TMPDIR` is not the
   answer: that selects one it just tried. Point `TMPDIR` at storage with room
   instead, on a filesystem `HOME` is not on. **One** means either that only one of

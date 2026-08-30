@@ -419,6 +419,12 @@ if [ -f "$SKILL" ]; then
         fi
         assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
     done
+    # NO HELPER HANDS VALUES BACK BY BEING SOURCED, and the branch that credited one
+    # is gone with the arrangement. `pr-setup.sh` wrote a file of assignments
+    # `SKILL.md` sourced, which made `.` — a NAME, in the one shell that cannot re-exec
+    # out of its operator's functions — the thing carrying the session's identity. It
+    # hands back the origin alone now, read with `$(<…)`, and every other value the
+    # document ASSIGNS, so the scan sees them where it always looked.
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #

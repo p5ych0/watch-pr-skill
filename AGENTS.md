@@ -148,13 +148,24 @@ When reviewing a change here:
 **What the driver cannot do is make the reply instructions unreachable.** They are
 prose between two fences, so a shell whose `exit` returns reads them whatever the
 fence above did. That is a limit of the driving-shell design, not a deferred
-refactor: #26 measured whether this code could move into `.sh` files and answered
-no — the setup block exports into the operator's shell and a child cannot export
-into its parent, and the read-backs exist to catch a readonly name or a nameref
-defeating the driver's own assignment, which the helper process cannot observe. Do
-not raise "this should move into a script" here, and do not treat the residue as a
-reason to add another guard: two were built for it and both were removed for
-costing more than they closed.
+refactor, and the boundary has been measured twice. #26 asked whether this code
+could move into `.sh` files and answered no, on the grounds that the setup block
+EXPORTS into the operator's shell and a child cannot export into its parent. #228
+found that argument true of a child's ENVIRONMENT and false of a file the driver
+READS: what has to cross a process boundary is a VALUE, and a value can cross in a
+file. #228 moved the setup work into `pr-setup.sh` on that reading, leaving the
+document 125 executable lines where it had 177 — and only the ORIGIN crosses, because
+the identity parser derives three of the other values, two are constants, and the
+working paths are a literal suffix under a directory the driver named itself.
+
+What did NOT move is what a helper process cannot do for this one: finding the
+scripts at all, choosing the parent directory to hand over, the READ itself, and the
+assignments and read-backs after it, which exist to catch a readonly name or a nameref
+defeating the driver's own assignment — a helper cannot observe that, and neither can it prove
+the pin, since `pr-origin.sh pin` answers whether a CHILD OF THE DRIVER sees this
+repository. So do not raise "this should move into a script" against what is left,
+and do not treat the residue as a reason to add another guard: two were built for it
+and both were removed for costing more than they closed.
 
 ## Claims and their arguments in `SKILL.md`
 
@@ -384,9 +395,27 @@ which is the very thing being forbidden. What the rule is about is naming a
 repository as an EXAMPLE, as EVIDENCE, or as HISTORY. The one exception is the operator naming a repository in the
 session, which does not survive into a file.
 
+**A FIXTURE'S PLACEHOLDER IDENTITY IS NOT A MENTION.** `rb_identity` parses a host, an
+owner and a repository, so a case proving that two identities differ needs two such
+values, and every one of them names some pair. `test-pr-identity.sh` has said in a
+comment since it was written that a test file is where a concrete placeholder identity
+is supposed to appear, and its scan keys on the OWNER and the shape rather than on a
+list precisely so those pass — a rule that swept them in would be one deleted rather
+than one that holds. The suite uses one placeholder pair throughout with a few
+deliberately wrong-looking counterparts, consistent across it. A value a case needs is
+not an example, not evidence and not history, so do not raise one as a naming violation.
+
+**This paragraph deliberately does not spell them.** The exemption is for a value a
+fixture supplies; prose about the suite is not that, so naming the placeholder here
+would be the violation it describes. The values are in `test-pr-identity.sh`.
+
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
-reads `git remote get-url origin` in its setup block, checks that read's status,
-and exports it as `REVIEW_BUS_REMOTE`; `rb_identity` prefers that over deriving.
+has `pr-setup.sh` read the origin — through `pr-origin.sh`, privileged — and write it
+into a file the driver READS with `$(<…)`; the driver re-derives the identity from it,
+because a file is not a promise, and makes the `export REVIEW_BUS_REMOTE` itself.
+NOTHING the helper writes is sourced: `.` is a name, and in the driving shell a
+function by that name could hand back another origin that every later check agrees
+with. `rb_identity` prefers that pin over deriving.
 Every helper runs `rb_identity` in its own process against its own current
 directory, so without the pin a `cd` into a second checkout retargets every stage
 that POSTS — a signoff, a revocation, a review request — at whatever pull request
@@ -522,6 +551,24 @@ reservation races cost one empty directory — lost or left behind — because
 `rmdir` refuses anything with contents in it. Raise a cost you think was
 underweighted as a non-blocking note. A NEW defect in that area is still a
 finding: each record accepts one named race and nothing else.
+
+**A third is accepted since 2026-08-29**, in
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md`: `pr-setup.sh` removes NOTHING — not the
+files it wrote, not the transport, not the reservation itself — so a refusal leaves
+whatever it had made and nothing collects it. Every shape that removed something needed a
+NAME, and each destroyed something a reviewer found; that record carries the table,
+ending with the one that convicts the class: shell has no descriptor-relative removal, so
+every removal resolves a name AFTER whatever check preceded it. The cleanup traps went
+with the cleanup, there being nothing left for a handler to run; the one that stays is an
+`INT` re-raise, which removes nothing and exists because a non-interactive shell otherwise
+survives `INT` and publishes a ready line for a run somebody stopped. Do not raise the
+leftover directory as a leak, and do not reintroduce a removal of any kind — a fixture
+asserts the file contains none and that no handler removes anything. One object is
+outside that promise and is not this helper's: `pr-origin.sh read` creates its own
+transport directory and gives it back on its own refusal path, so a checkout with no
+readable origin ends with the reservation present and empty. That is stated in the file
+and staged behaviourally on both sides. Raise a cost you think was underweighted as a
+non-blocking note.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses

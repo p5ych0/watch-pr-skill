@@ -1,5 +1,155 @@
 # Changelog
 
+## [2.0.83] — 2026-08-29
+
+- **Setup runs in a process now, and `SKILL.md` is 6,677 characters shorter.** The
+  block that starts a session was 177 executable lines and 105 comment lines of the
+  document — 18,446 characters, about a fifth of everything the driver reads on every
+  invocation — and nothing executed them. It is 125 and 59 now, 11,769 characters, and
+  the work happens in `pr-setup.sh`, which has tests.
+
+  What made that possible was noticing that an old measurement proved less than it
+  said. #26 asked whether this code could move into a script and answered no, because
+  setup EXPORTS into the driving session and a child cannot export into its parent.
+  That is true of a child's environment, and the values that actually have to cross
+  turn out to be one: the origin. Everything else the driver derives from it, holds as
+  a constant, or builds from a literal under a directory it named itself.
+
+  Nothing about what the driver checks was given up. The origin still comes back
+  through `pr-origin.sh`, privileged; the identity is still re-derived from what was
+  read, because a file is not a promise; the working paths are still proved to be
+  empty files; and the pin is still proved by a real child of the driving shell —
+  that one cannot move, because proving it inside the helper would prove only that the
+  helper exports.
+
+- **A `HOME` or `TMPDIR` containing a space, or a `..` component, works.** The helper's
+  argument check restricted what a path may hold, which the inline setup it replaced
+  never did — and those refusals are terminal, so a usable second parent was never tried
+  and the session ended on a path that works. A character class went first; the `..` rule
+  went after it, for the same reason and one the delegate makes plain, since
+  `pr-origin.sh` takes the same kind of argument and restricts nothing. What is refused
+  now is a value that is MISSING and one that is RELATIVE, neither of which can be a
+  handoff between two processes. Nothing evaluates the path — it is quoted in the
+  `mkdir`, in every redirection and in every `printf` — and its components resolve at the
+  syscall like any other path's.
+
+- **A name your shell has aliased stops setup instead of steering it.** The reviewer
+  logins and the four working paths are the driver's own assignments now, and a
+  `declare -n CODEX_BOT=OWNER` in a startup file makes one of them write THROUGH into
+  the identity: `OWNER` becomes the reviewer login, the read-back still passes because
+  it resolves through the same alias, and every later `gh` call is addressed at a slug
+  nobody chose. All ten names the block assigns are in the generic probe now, and its
+  refusal names them.
+
+- **A squatted pin name costs a second name, not the session.** `pr-origin.sh pin`
+  creates the directory it is given, exclusively, so a same-UID process that pre-creates
+  it makes that call report the storage status — and setup aborted. The name is derived
+  from one published in argv, which is the race
+  `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts on the grounds that
+  a squat costs a RETRY. It does again: a second, fixed name, tried once.
+
+- **A name the operator's shell has aliased to the identity stops setup.** `RB_REMOTE`
+  joins the ten names the generic probe already covered: declared as a nameref onto
+  `OWNER` or `HOST`, the clear and the origin read write through it, `rb_identity` then
+  replaces that target with a parsed component, and the export pins the session to a
+  fragment of its own remote — which the child pin echoes back, so the comparison agrees
+  and setup announces success on an identity every later helper rejects.
+
+- **A failed setup leaves what it made, and removes nothing at all.** The directory's
+  name is published in argv before the `mkdir` reserves it, and under a parent without
+  the sticky bit another account can replace it afterwards — so every shape that removed
+  something needed a NAME that may have been substituted between being created and being
+  removed, and taking a replacement's contents is far past what
+  `docs/decisions/2026-08-26-reservation-inference.md` accepts. What each shape took: a
+  recursive removal took a replacement's whole tree, a named `rm -f` took a replacement's
+  file, a ledger of what this run created missed whatever a signal landed in front of,
+  removing the directory names unconditionally took a watcher's empty directory at a name
+  never reached, and the last shape — one `rmdir` on the reservation, gated on a held
+  descriptor and a recorded inode — is still a check-then-use, because the removal
+  resolves the name again after the comparison.
+
+  Shell has no descriptor-relative removal, so there is no shape that works. The helper
+  removes nothing now, and the cleanup traps went with the cleanup they existed to run: an
+  untrapped `TERM` ends the run with 143 and an untrapped `HUP` with 129, which is what a
+  caller should see. `INT` is the one signal that needs a handler, and it removes nothing
+  either — measured, a non-interactive shell survives `INT` delivered while it waits on a
+  child, so the run went on to write every working file and publish `status=ready` for a
+  session somebody had stopped. The handler disarms itself and re-raises. The cost is
+  litter rather than loss — one directory per refused attempt, holding whatever had been
+  written — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with the table
+  of what each earlier shape destroyed. One thing can still disappear and it is not this
+  helper's: `pr-origin.sh read` creates its own transport directory and gives it back on
+  its own refusal path, that being its contract, so a checkout with no readable origin
+  ends with the reservation present and empty.
+
+- **The origin transport is left where it is.** The helper copied the origin out of
+  `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
+  followed by `rmdir` on its parent — a pair that destroys a REPLACEMENT, since the first
+  takes a racer's leaf and the second then succeeds on a directory that had contents a
+  moment earlier. It stays, as the driver's own transports do: the leaf holds the same
+  origin as the file beside it, and the directory is mode 700 inside a tree the session
+  keeps anyway.
+
+- **Nothing setup creates can be written through a symlink.** The four working files and
+  the origin were created with a plain `>`, which opens with `O_TRUNC` and follows
+  symlinks — and the directory's name is published in argv, so an account that can reach
+  it could put a symlink at one of those paths and have the redirection truncate whatever
+  it pointed at. That is destroying a file the operator owns rather than losing an empty
+  reservation. The opens are exclusive now, under `set -C` with `umask 077`, which is the
+  pair `pr-origin.sh` already uses and for the same reason: `O_EXCL` refuses a regular
+  file and refuses a symlink whether or not its target exists.
+
+- **A pin that the storage refuses is terminal, and the recovery is a re-run.**
+  `pr-origin.sh pin` creates a directory and writes a leaf, and it reports the storage
+  status where those will not fit — which the driver cannot act on, because the working
+  files are already allocated on that parent: pinning under the second one while the round
+  summary and the gated head stay on a filesystem that has just refused produces a session
+  that looks set up and dies at its first write, after posting.
+
+  A probe inside the helper was tried and removed, because it cannot answer its own
+  question. Keeping what it allocated is two inodes the pin then cannot have — so a
+  filesystem with exactly enough for setup and the pin passes the probe and fails the call,
+  the probe having made the state it was meant to detect. Releasing what it allocated means
+  removing a name, which is the class this helper spent several rounds getting out of. A
+  re-run relocates the session as a whole, and the abort says so. The SQUAT case — the one
+  an accepted record bounds — is handled separately, by the retry below.
+
+- **The setup values are read, not sourced, and only one of them crosses.** The helper
+  wrote a file of twelve assignments the driver sourced, and `.` is a name: in the
+  operator's long-lived shell — the one place this loop cannot re-exec out of an
+  inherited function — a function by that name could read the genuine assignments and
+  hand back a different origin, after which the identity derivation and the child pin
+  both agree with the forged value, because both are computed from it. The session
+  could then post, sign off and merge in another repository with every check passing.
+
+  What made the source unnecessary is that eleven of the twelve values were never
+  information: `OWNER`, `REPO` and `HOST` are what the identity parser derives from the
+  origin, the two reviewer logins are constants, and the working directory and its four
+  files are a literal suffix under a directory the driver named itself. Only the origin
+  crosses now, in a file read with `$(<…)`, and everything else the driver assigns and
+  proves by reading back. Nothing the helper writes is evaluated, so the quoting that
+  made a sourced line an assignment is gone with the source that needed it.
+
+- **A name the operator's shell has fixed stops the session instead of steering it.**
+  The two reviewer logins and the four working paths are the driver's own assignments
+  now, and an assignment to a readonly name fails in silence — it prints a complaint
+  and the list it is in reports success. Each is read back against the literal it was
+  just given, and `RB_PIN_SEEN` joins the three names the generic probe already covered:
+  declared as a nameref onto `SUMMARY_FILE`, the clear before the pin read emptied that
+  path and the read then wrote the remote into it, after which the comparison passed
+  through the alias and setup announced success with a working file naming nothing
+  usable.
+
+- **The setup directory's transports are no longer unlinked by the driver.** Removing
+  the file it had just read meant unlinking through a name published in argv, which
+  takes a replacement's own file with it — the same defect that left the helper itself
+  removing nothing, and the driving shell has no better name to remove through. What
+  the removals were for does not survive examination either: the origin is
+  `git remote get-url origin`, which anyone who can reach the checkout can read, and
+  the directory is mode 700.
+
+
+
 ## [2.0.82] — 2026-08-29
 
 - **The plugin works on the repository in the current directory, and names no
