@@ -1275,6 +1275,101 @@ branch says nothing and returns 0 — a failed request indistinguishable from a
 posted one, which sends the driver into a wait for a review that was never asked
 for.
 
+## AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
+
+`gate` refuses an aliased head file BEFORE it clears anything — it has to, or the
+refusal would destroy the account it is protecting — so on that one path the file
+is left holding the summary.
+
+THE IDENTITY IS ASKED FIRST, and the content test is its success arm. A summary
+that IS forty lowercase hex characters, a commit id someone pasted on a line of its
+own, satisfies the content test exactly, and is the one summary that can. `-ef`
+answers what the content cannot, and it answers it about the two paths this session
+chose rather than about what is in them.
+
+ONE DECISION RATHER THAN TWO STATEMENTS. Written as a guard above the content test,
+a shadowed `exit` that returns would walk from the identity refusal straight into
+the arm that accepts.
+
+WHERE THE INVARIANT IS ACTUALLY ESTABLISHED is the setup block: the four working
+paths are derived from one directory by DISTINCT literal suffixes and each is read
+back against its own literal, so in the documented flow they cannot be the same
+file. This is defence for a path that allocation already excludes, which is why it
+costs one reserved-word test and no lookup.
+
+## AND ITS CONTENT IS PROVEN A COMMIT ID.
+
+Not merely non-empty. Every refusal other than the aliased one leaves the file
+EMPTY — `gate` empties it before any other refusal can happen, and writes it only
+on success — so an empty file is already the ordinary evidence that no gate
+succeeded. Asking for a commit id also covers the aliased path, where the file
+holds the summary.
+
+A LITERAL PATTERN IN A `case`, not a regex in a variable. A validator held in a
+name is a second name a startup file can seed, and a seeded pattern accepting a
+seeded value is a check that agrees with itself; `case` is a reserved word and
+these patterns are in the source. The forty-character test and the hex test are
+separate arms because one glob cannot say both.
+
+WHAT IT CANNOT PROVE is that the file holds what `gate` REPORTED. The record and
+the file are two claims and only one of them reaches this shell. A file that was
+written truthfully and then changed by something else would pass; `post` re-proves
+the head against the local HEAD and the PR before it posts, which is where that is
+caught.
+
+## AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
+
+A resolve cannot be taken back. Resolving before the head is proven records this
+round's findings as answered on a commit that may never have landed, and with
+automatic review on the pass the push started reads threads already marked
+resolved with no summary saying what resolved them.
+
+AFTER THE `fi`, NOT INSIDE THE GATE'S SUCCESS ARM. Placed there it is on the one
+path that does not need it: a refusal takes the `else`, and with `exit` replaced by
+a function that returns, control leaves the `if` having evaluated nothing. After
+the `fi` it is on every path out of the stage.
+
+THE GATE'S SUCCESS ARM IS TRUE, and `[[ -n x ]]` rather than `[[ -n "" ]]`. Under
+`errexit` a false statement in a `then` BODY ends the shell — the exemption is for
+a command run as a CONDITION, and this is not one — so the successful path would
+have died after the push and before the replies. `:` would also be true, and is a
+name; a reserved word that is true is both.
+
+A SHADOWED `echo` COSTS THE MESSAGE, NOT THE REFUSAL, and that is ACCEPTED. The
+refusal is the arm being taken and the head not being proven; the `echo` only says
+why.
+
+MAKING THE SHELL WRITE IT WAS TRIED TWICE AND COST MORE EACH TIME. A `${…:?}`
+expansion needs a name to expand, and the name is the operator's to seed:
+`declare -i RB_HEAD_BAD=1` makes the clear store `0`, so the expansion never fires
+and the guard is decoration. Proving the clear with `[[ -z … ]]` fixes that and
+opens a worse door — `declare -n RB_HEAD_BAD=BASH_XTRACEFD` makes the CLEAR itself
+write through the nameref and close the operator's stdout, so the refusal is not
+merely silent, it has damaged the shell it was protecting.
+
+SO THE SCRATCH NAME IS GONE. A defence against a shadowable name that introduces a
+seedable name is not a defence, and the second attempt was worse than the first.
+The residue is: in a shell with `echo` shadowed and `exit` returning, the arm is
+taken, nothing is printed, and control reaches the prose.
+
+WHAT NO SHELL CONSTRUCT HERE CAN DO is make the reply instructions unreachable.
+They are PROSE, in a Markdown document, between two fences — so a driver whose
+`exit` returns can read them whatever the fence above did.
+
+AND THAT IS A LIMIT OF THE DESIGN RATHER THAN A DEFERRED TASK. #26 asked whether
+this code could move into `.sh` files and answered no, twice over: the setup block
+exports `REVIEW_BUS_REMOTE` into the driving shell and a child cannot export into
+its parent, and this step's own read-back exists to catch a readonly name or a
+nameref defeating the driver's assignment — moving it into the helper would move it
+to the one process that cannot observe the failure. The glue has to run where the
+values land.
+
+So there is no refactor waiting to close this, and a comment saying there is would
+be read as an instruction to attempt one. What holds instead: every path takes a
+refusal arm and prints it unless `echo` has been shadowed, `post` asks the content
+question again and refuses, so no summary is posted and no pass requested, and the
+allocation the paths come from cannot produce the aliased case at all.
+
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
 Twenty-four lines of this block were the two invocations, the exit statuses and the
@@ -1314,14 +1409,28 @@ its operator's functions — `sed` is a name, the capture is an assignment, and 
 record's shape was a thing to parse. The file needs none of it: `$(<…)` is handled
 by the parser, and the value was validated by the helper that produced it.
 
-THE RECORD IS STILL PRINTED, and still carries the baseline. It is what an operator
-reads. What changed is that the driver no longer reads it.
+## THE RECORD IS STILL PRINTED, and it is what an operator reads.
 
-THE VALUE IS NOT RE-VALIDATED HERE, and that is not an omission. `post` took it from
-`pr-review-state.sh review-id`, which validates it; `pr-watch.sh` refuses a baseline
-it cannot use as `--after-review`. What this shell proves is what only this shell
-can: that the ASSIGNMENT took, which a readonly or transforming name would defeat in
-silence.
+`post` still ends with `PR_ROUND_CLOSED pr=… reviewer=… head=… mode=… prior-review=…`,
+and the baseline is still in it. Moving the value into a file did not make the record
+redundant: it is the line a person scrolling the terminal reads to see which head the
+round closed on and which pass was requested, and it is what a transcript preserves.
+
+WHAT CHANGED IS ONLY WHO READS IT. The driver used to, by parsing; it does not now.
+Dropping the record because nothing machine-readable consumes it would take the
+operator's account of the round with it.
+
+## AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
+
+`post` took it from `pr-review-state.sh review-id`, which validates it, and
+`pr-watch.sh` refuses a baseline it cannot use as `--after-review`. A third copy of
+that rule in the document would be the duplication `CLAUDE.md` records paying for
+repeatedly — and it would be the copy furthest from the code, in the shell least able
+to run it.
+
+WHAT THIS SHELL PROVES IS WHAT ONLY THIS SHELL CAN: that the ASSIGNMENT took. A
+readonly or value-transforming `PRIOR_REVIEW` defeats it in silence, and no helper can
+see that from outside the process.
 
 ## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
 

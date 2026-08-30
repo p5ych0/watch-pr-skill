@@ -15,10 +15,9 @@
 # captured this script's stdout, ran `sed` over it, checked the record was there,
 # checked it carried the field, and cut the value out with `${rec##* prior-review=}`
 # — twelve executable lines in the one shell nothing can harden, to receive a value
-# the file mechanism beside it already hands over. The record still carries it, for
-# whoever is reading the terminal, and this stage now ALSO writes the file; removing
-# the driver's parsing is #235 and has not happened yet, so both routes are live in
-# this release. #234.
+# the file mechanism beside it already hands over. The driver reads the FILE now and
+# nothing else; the record still carries the baseline, for whoever is reading the
+# terminal, and it is no longer parsed by anything. #234, #235.
 #
 #   0  gated/closed — `gate`: the head is pushed and green, and the threads may
 #                     now be answered. `post`: the summary is posted and the next

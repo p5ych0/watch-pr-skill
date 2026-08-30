@@ -1596,20 +1596,28 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # fence alone is reached only after the threads have been resolved, so it stops
 # `post` and not the irreversible part. The proof sits in the gate's success arm,
 # and the ordering is what this asserts.
-# AND THE DOCUMENT DOES NOT RE-PROVE THE HEAD FILE, which is #235. It carried a
-# forty-`?` `case` and an `-ef` test in BOTH fences — thirty lines of the one shell
-# nothing can harden, for two conditions `pr-close-round.sh` refuses itself: the
-# aliasing on entry, by `=` and by `-ef`, and the shape inside `post`, before
-# anything is posted. The driver-side copy could not close its own window either —
-# the same racer acts between the check and `post`'s read — which is the
-# check-then-use shape this repository removed from `pr-origin.sh` (#176) and from
-# `pr-setup.sh`'s cleanup. What replaced it is the script's own refusal, which
-# `test-pr-close-round.sh` covers on both conditions and both spellings.
+# THE PROOF BEFORE THE REPLIES STAYS, and #235 removed only its SECOND copy. The
+# boundary is what makes them different: the replies are irreversible, and this one
+# runs before them, in a moment the script is not running in at all. `post` refuses
+# an altered head file too, but by then the threads are resolved and that cannot be
+# taken back — so a check here is not a duplicate of the script's, it is the only
+# one on the right side of the line. The window argument for removing it does not
+# hold either: the realistic corruption is an operator's own scratch directory or a
+# resumed session, not a racer defeating the check, and against those a check works.
+# It was removed and restored in the same pull request, on that finding.
+_hf_guard_ln="$(grep -n '^if \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then' "$SKILL" | head -1 | cut -d: -f1)" || true
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
+{ [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
+    && pass "…and the head is proven, identity first, after the gate and before the replies" \
+    || die "the head is not proven before the replies (guard=$_hf_guard_ln replies=$_hf_res_ln)"
+# AND THE POST FENCE DOES NOT ASK AGAIN, which is the copy that went. `post` reads
+# the file and validates it with `sha_reason` before anything is posted, so a second
+# driver-side check there guards nothing that has not already been guarded — the
+# threads are answered by then either way.
 _hf_dup="$(grep -c '^case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
 [ "$_hf_dup" -eq 0 ] \
-    && pass "…and the driver does not re-prove the head file the script already refuses" \
-    || die "the document still re-proves the head file in $_hf_dup place(s)"
+    && pass "…and the post fence does not repeat it, the script refusing there itself" \
+    || die "the post fence still re-proves the head file in $_hf_dup place(s)"
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
 # posted — and nothing in the script's own tests would notice, because the script
@@ -1676,16 +1684,25 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 grep -qF '[ -n "$PRIOR_REVIEW" ]' "$SKILL" \
     && die "the driver tests the baseline VALUE for emptiness; an empty baseline is legitimate and the request has already been made by then" \
     || pass "…while an empty baseline is carried through rather than rejected"
-# The FIELD is what distinguishes the two, so the driver has to look for it.
+# AND THE ONE RECORD STILL PARSED IS THE COPILOT PHASE'S, not the round's. Since
+# #235 the round-close path reads `$PRIOR_FILE`; `pr-copilot-phase.sh open` has no
+# such file and still reports its baseline in `PR_COPILOT_PHASE_OPENED`, so the two
+# assertions below are about THAT parser. They were written for the round-close
+# recipe and outlived it by one commit — matching only the Copilot parser while
+# their fixtures still spelled `PR_ROUND_CLOSED`, which is a check that cannot fail
+# for the thing it names.
 grep -qF "*' prior-review='*)" "$SKILL" \
-    && pass "…told apart by the field's presence, not by what is in it" \
-    || die "the driver cannot tell a record missing the baseline field from one whose field is empty"
+    && pass "…and the phase-open record is told apart by the field's presence, not by what is in it" \
+    || die "the driver cannot tell a phase-open record missing the baseline field from one whose field is empty"
+grep -qF 'PRIOR_REVIEW="${OPEN_REC##* prior-review=}"' "$SKILL" \
+    && pass "…and that is the only record the driver still parses a baseline out of" \
+    || die "the Copilot phase-open recipe no longer reads its baseline out of its record"
 # THE EXPANSION ITSELF IS EXECUTED, against both answers it must keep apart. The
 # greps above prove `SKILL.md` uses this expansion; only running it proves the
 # expansion is right, and a `##` that ate one character too many would satisfy
-# every grep here.
-_rec_full='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-review=42'
-_rec_none='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-review='
+# every grep here. The fixtures are phase-open records, which is what is parsed.
+_rec_full='PR_COPILOT_PHASE_OPENED pr=7 head=abc prior-review=42'
+_rec_none='PR_COPILOT_PHASE_OPENED pr=7 head=abc prior-review='
 { [ "${_rec_full##* prior-review=}" = 42 ] && [ -z "${_rec_none##* prior-review=}" ]; } \
     && pass "…and the expansion keeps a present baseline and an empty one apart" \
     || die "the baseline expansion reads '${_rec_full##* prior-review=}' and '${_rec_none##* prior-review=}'"

@@ -2,21 +2,25 @@
 
 ## [2.0.85] — 2026-08-30
 
-- **The round-close recipe is 3,582 characters shorter, and every one of them came out
-  of shell the driver reads on each invocation.** `SKILL.md` is 45% fenced bash, executed
-  by nothing and parsed by the model on every run; this is the first cut into the call
-  sequences that #26 left out of scope. The two blocks that close a round go from 6,196
-  characters to about 2,600.
+- **The round-close recipe is 2,258 characters shorter, and every one of them came out of
+  shell the driver reads on each invocation.** `SKILL.md` is 45% fenced bash, executed by
+  nothing and parsed by the model on every run; this is the first cut into the call
+  sequences that #26 left out of scope.
 
   Three things went.
 
-  **The head-file proof, which the script already makes.** Both fences validated
-  `$HEAD_FILE` with a nested forty-`?` `case` and an `-ef` test — thirty lines of the one
-  shell nothing can harden — for two conditions `pr-close-round.sh` refuses itself: the
-  aliasing on entry, by `=` and by `-ef`, and the shape inside `post`, before anything is
-  posted. The driver's copy could not close its own window either, since the same racer
-  acts between the check and `post`'s read; that is the check-then-use shape this
-  repository has removed twice before.
+  **The SECOND head-file proof.** Both fences validated `$HEAD_FILE` with a nested
+  forty-`?` `case` and an `-ef` test, and the one in the `post` fence guarded nothing:
+  `post` reads that file and refuses an altered one itself, before anything is posted, and
+  by the time the driver reaches that fence the threads are answered either way.
+
+  The FIRST copy stays, and an attempt to remove it in this change was reverted on review.
+  It runs after `gate` and before the replies — a moment the script is not running in —
+  and the replies cannot be taken back. `post` refusing later does not undo a resolved
+  thread. The argument for removing it was that a check cannot close its own window, which
+  is true of a racer and false of what actually goes wrong here: an operator's scratch
+  directory, an accidental alias, a session resumed with a different file. Against those a
+  check works, and it is the only one on the right side of the irreversible step.
 
   **Twenty-four lines restating the script's own header** — the two invocations, the exit
   statuses, the two kinds of push refusal. All of it is in `pr-close-round.sh`, beside the
