@@ -5,11 +5,21 @@
 #   pr-setup.sh <dir>
 #
 #   0  <dir>/origin holds the remote and <dir>/work holds the session's four files
-#   1  stopped — the reason is on stderr; nothing was written
+#   1  stopped — the reason is on stderr
 #   2  the STORAGE would not take it — the directory could not be created
 #      exclusively, or a write inside it failed. The caller retries under a second
 #      parent; every other refusal is terminal, because another parent fixes none
 #      of them. This is `pr-origin.sh`'s distinction and it is the same one.
+#
+# NEITHER REFUSAL IS SIDE-EFFECT-FREE, and a caller should not read one as though it
+# were. The reservation is given back by ONE `rmdir`, which succeeds only while the
+# directory is EMPTY — so a refusal before anything was created takes the directory with
+# it, and one after `o/origin`, `work/` or the origin exists leaves this run's tree where
+# it is. Nothing of anyone else's is ever removed, which is the trade:
+# `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries what each attempt at removing
+# the contents destroyed. A caller that must not accumulate those is a caller that has to
+# collect them itself; the driver does not, because it retries under a second parent and
+# an operator can see what is left.
 #
 # WHY THIS IS A SCRIPT AND NOT A FENCE IN `SKILL.md`.
 #
@@ -219,8 +229,10 @@ rb_setup_give_back() {   # give back the reservation, if it is still this run's 
 # WHAT THEY ADD OVER THE `EXIT` TRAP ALONE IS SMALL, AND SAYING SO IS THE POINT.
 # Measured on bash 5: an untrapped fatal `TERM` still runs the `EXIT` trap and still
 # reports 143, so on these paths the two shapes are indistinguishable — and
-# `test-pr-setup.sh` asserts the INVARIANT, that nothing is left behind and the run
-# does not report success, rather than which route produced it. They are here because
+# `test-pr-setup.sh` asserts the INVARIANT, that the run does not report success and
+# that nothing of anyone else's is touched, rather than which route produced it. What IS
+# left behind is this run's own tree wherever the signal arrived after a write — the same
+# residue as any other refusal, and for the same reason. They are here because
 # `pr-origin.sh` has them and the two helpers should not differ on a question this
 # file has already answered once. Do not read this as a claim that removing them
 # changes an outcome.
