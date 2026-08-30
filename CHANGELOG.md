@@ -72,28 +72,22 @@
   fragment of its own remote — which the child pin echoes back, so the comparison agrees
   and setup announces success on an identity every later helper rejects.
 
-- **A failed setup gives its reservation back with one `rmdir`, and removes nothing
-  inside it.** Every shape that gave the contents back needed a name, and a name inside a
-  directory a same-UID process can write to is one that may have been substituted between
-  being created and being removed: a recursive removal took a replacement's whole tree, a
-  named `rm -f` took a replacement's file, a ledger of what this run created missed
-  whatever a signal landed in front of, and removing the directory names unconditionally
-  took a watcher's empty directory at a name this run never reached. Shell has no
-  `unlinkat`, so every removal resolves a path and a descriptor per object moves the same
-  check-then-use one level down.
+- **A failed setup leaves what it made, and removes nothing at all.** Every shape that
+  removed something needed a NAME, and a name at or inside a directory a same-UID process
+  can write to may have been substituted between being created and being removed: a
+  recursive removal took a replacement's whole tree, a named `rm -f` took a replacement's
+  file, a ledger of what this run created missed whatever a signal landed in front of,
+  removing the directory names unconditionally took a watcher's empty directory at a name
+  never reached, and the last shape — one `rmdir` on the reservation, gated on a held
+  descriptor and a recorded inode — is still a check-then-use, because the removal
+  resolves the name again after the comparison.
 
-  `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup can
-  now take nothing of anybody else's at all: contents are safe because `rmdir` refuses a
-  directory holding anything, and an empty directory a racer left at the candidate is safe
-  because the `rmdir` runs only where an inode was RECORDED and still resolves to the
-  object this run's own `mkdir` made. The cost moves from loss to
-  litter: a refusal after anything exists leaves this run's own tree — one directory per
-  refused attempt — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with
-  the table of what each earlier shape destroyed. There is no pin-storage probe for the
-  same reason, and for one more: two `rmdir`s on two names can lose two of a watcher's
-  empty directories where the record bounds the cost at one, and a probe that instead
-  KEEPS what it allocated is capacity the pin then cannot have. See the entry above on
-  why a pin the storage refuses is terminal.
+  Shell has no descriptor-relative removal, so there is no shape that works. The helper
+  removes nothing now, and the traps went with the cleanup they existed to run: an
+  untrapped fatal signal ends the run with the status a caller should see. The cost is
+  litter rather than loss — one directory per refused attempt, holding whatever had been
+  written — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with the table
+  of what each earlier shape destroyed.
 
 - **The origin transport is left where it is.** The helper copied the origin out of
   `pr-origin.sh`'s transport and then removed it, which meant `rm -f` on a nested name
@@ -142,15 +136,6 @@
   crosses now, in a file read with `$(<…)`, and everything else the driver assigns and
   proves by reading back. Nothing the helper writes is evaluated, so the quoting that
   made a sourced line an assignment is gone with the source that needed it.
-
-- **A setup killed part-way is caught rather than terminating silently.** `HUP`, `INT` and `TERM` had no
-  handler, so a signal arriving after the working files and the origin existed left a
-  published directory behind carrying the session's remote — and the driver
-  deliberately cleans up nothing after a non-zero helper status, because it cannot know
-  who created the path. The cleanup is armed before the reservation is attempted and
-  disarmed only on success. What it can give back is an EMPTY reservation: the cleanup is
-  one `rmdir`, so a signal after the working files exist leaves this run's own tree — see
-  the entry below on why nothing inside is removed.
 
 - **A name the operator's shell has fixed stops the session instead of steering it.**
   The two reviewer logins and the four working paths are the driver's own assignments

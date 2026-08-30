@@ -1,27 +1,28 @@
-# Decision: a failed setup leaves its own tree behind
+# Decision: a failed setup leaves what it made
 
 **Date:** 2026-08-29
 **Status:** accepted
 **Decided by:** the repository operator, after the measurement in this record's own PR
-**Raised in:** #229, rounds 13 through 18
+**Raised in:** #229, rounds 13 through 28
 
-`pr-setup.sh` gives its reservation back with ONE `rmdir` and removes nothing inside it.
-A refusal after anything has been created therefore leaves that directory in place,
-holding files this run wrote.
+`pr-setup.sh` removes NOTHING. Not the files it wrote, not the transport it read the
+origin out of, and not the reservation itself — so a refusal leaves whatever it had made
+at that point, and nothing collects it.
 
 That is accepted rather than fixed. This record is what a reviewer should be pointed at
 when it is raised again.
 
 **It accepts this and nothing else.** The reservation race on the candidate name is
 `2026-08-26-transport-candidate-in-argv.md`; the reservation being an inference is
-`2026-08-26-reservation-inference.md`. Those bound what can be LOST. This one is about
-what is LEFT.
+`2026-08-26-reservation-inference.md`. Those bound what `pr-origin.sh` can LOSE. This one
+is about what `pr-setup.sh` LEAVES.
 
-## Why the contents are not removed
+## Why nothing is removed
 
-Every shape that gave them back needed a NAME, and a name inside a directory a same-UID
-process can write to is one that may have been substituted between being created and
-being removed. Each was tried in turn and each destroyed something:
+Every shape that removed something needed a NAME, and a name inside — or at — a directory
+a same-UID process can write to is one that may have been substituted between being
+created and being removed. Each was tried in turn, and each destroyed something a reviewer
+then found:
 
 | shape | what it took |
 | --- | --- |
@@ -29,40 +30,36 @@ being removed. Each was tried in turn and each destroyed something:
 | named `rm -f` per leaf | a replacement's file at one of this run's names |
 | a ledger of what this run created | nothing — but it missed whatever a signal landed in front of, leaving the tree anyway |
 | `rmdir` on every directory name unconditionally | a watcher's empty directory at a name this run never reached |
+| one `rmdir` on the reservation, ungated | a racer's empty reservation, where no inode had been recorded |
+| one `rmdir` on the reservation, gated on a held descriptor and a recorded inode | a replacement substituted between the comparison and the `rmdir` — the comparison reads the name, and so does the removal |
 
-Shell has no `unlinkat`, so every removal resolves a path; holding a descriptor per
-object moves the same check-then-use one level down. There is no shape that removes the
-contents and cannot destroy something.
+The last row is the one that ends it. Shell has no descriptor-relative removal: no
+`unlinkat`, and no `rmdir` on a directory a descriptor holds. **Every removal resolves a
+name after whatever check preceded it**, so there is no shape that removes anything here
+and cannot take something a same-UID process substituted.
+
+**The traps went with the cleanup**, because there was nothing left for a handler to run.
+Measured on bash 5: an untrapped fatal `TERM` ends the run with status 143, which is what
+a caller should see.
 
 ## What is accepted, measured rather than argued
 
-`rmdir` succeeds only on an EMPTY directory and refuses a symlink outright. So the
-cleanup can destroy no CONTENTS whatever has happened at that name, and the cost moves
-from loss to litter.
-
-**And it takes nothing of anybody else's at all**, including an empty directory a racer
-left at the candidate. The one `rmdir` runs only where an inode was RECORDED — which needs
-this run's own `mkdir` to have reported success — and where the name still resolves to it,
-so a racer's directory can never match. `2026-08-26-reservation-inference.md` measures that
-loss for `pr-origin.sh`, whose cleanup is its own; this record does not inherit it.
-
 | situation | measured outcome |
 | --- | --- |
-| a refusal before anything is created | the reservation is **given back** |
-| a refusal after `work/`, the origin or the transport exists | this run's **own tree is left**, contents intact |
-| a signal at any point | the same: given back if empty, left if not |
-| anything a same-UID process placed inside, at any name | **untouched** |
+| the `mkdir` never succeeded | there is no directory of this run's, and none is left |
+| a refusal after the reservation | the directory is **left**, with whatever had been written in it |
+| a signal at any point | the same |
+| anything a same-UID process placed at or inside that name | **untouched** |
 
-`test-pr-setup.sh` stages each of those against the real helper, and asserts the cleanup
-body contains exactly one `rmdir` and no `rm` at all — so a shape that resolves a name
-inside the reservation cannot come back without a case failing.
+`test-pr-setup.sh` stages each of those against the real helper, and asserts that the file
+contains NO removal of any kind and arms NO trap — so a shape that resolves a name for
+removal cannot come back without a case failing.
 
 ## What it costs
 
 One directory per refused attempt, under `TMPDIR` or `HOME`, holding at most the four
-working files, the origin and the transport leaf. Nothing collects it. That is more
-litter than `2026-08-26-reservation-inference.md` accounts for, and it is the trade this
-record accepts: **litter rather than loss.**
+working files, the origin and the transport leaf. Nothing collects it. **Litter rather
+than loss**, which is the trade this record accepts.
 
 ## What is NOT accepted here
 

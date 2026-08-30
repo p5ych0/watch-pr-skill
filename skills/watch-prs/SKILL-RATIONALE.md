@@ -428,10 +428,13 @@ why.
 THE NAMES THAT ARE LEFT ARE PROVED ASSIGNABLE BEFORE ANYTHING USES THEM. There
 were five — `RB_TMPPARENT`, `RB_TRY`, `RB_TMPDIR`, `RB_ORIGIN_OUT` and
 `RB_PIN_OUT` — each with a probe and each a thing this shell had to defend, and
-there were two stages with a probe apiece. Three remain, in ONE probe:
-`RB_TMPPARENT`, `RB_TMPPARENT2` and `RB_SETUP_DIR`. The helper owns the rest, and
-since #228 it owns the whole second stage as well — there is one call now, so
-there is one probe. A readonly or
+there were two stages with a probe apiece. ELEVEN are probed now, in ONE probe:
+`RB_TMPPARENT`, `RB_TMPPARENT2`, `RB_SETUP_DIR`, `RB_PIN_SEEN`, `RB_REMOTE`, the two
+reviewer logins and the four working-file names. The list grew because the block
+ASSIGNS more than it used to — the helper hands back one value, so everything else
+is this shell's own — and the rule is the one stated below: every name this block
+assigns is in it. The helper owns the rest, and since #228 it owns the whole second
+stage as well, so there is one probe rather than two. A readonly or
 value-transforming one in the long-lived driving shell survives an assignment and
 leaves a STALE value behind, and a stale `/somewhere/owned` then passes every
 check: its `origin` is read as this session's remote and the cleanup deletes it.

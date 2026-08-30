@@ -293,9 +293,9 @@ _nr_out="$(cd "$_noremote" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_n
 { [ "$_nr" -eq 1 ] && case "$_nr_out" in *'reason=origin_unreadable'*) true ;; *) false ;; esac; } \
     && pass "a checkout with no origin is refused terminally" \
     || die "the remoteless checkout gave rc=$_nr '$_nr_out'"
-[ ! -e "$_nr_d" ] \
-    && pass "…and the directory it had reserved is given back" \
-    || die "a refused run left its directory behind"
+[ -d "$_nr_d" ] \
+    && pass "…and the directory it had reserved is left, since this helper removes nothing" \
+    || die "a refused run removed the directory it had reserved"
 # AND A REMOTE THAT IS NOT AN IDENTITY IS REFUSED BY THE PARSER, with the parser's
 # own reason carried through — the helper proves the origin parses before it writes
 # it, so a value that cannot be an identity never reaches a file the driver reads.
@@ -349,14 +349,19 @@ _stagecase() {   # _stagecase <reason> <status> <gone|kept>
     # that happened before anything was created gives the reservation back, and one that
     # happened after leaves this run's own tree. Both are correct; requiring the removal
     # would be requiring the leaf deletions that six rounds of review took out.
+    # THE DIRECTORY IS ALWAYS LEFT, because this helper removes nothing — the argument
+    # is beside `rb_setup_stop`, and the cost is in
+    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md`. The `gone` fate survives for one
+    # case only: `dir_not_reserved`, where the `mkdir` never succeeded and there is
+    # nothing of this run's to leave.
     if [ "$fate" = gone ]; then
         [ ! -e "$d" ] \
-            && pass "…and its directory is given back, being empty" \
-            || die "the $want case left a directory that had nothing in it"
+            && pass "…and there is no directory, because the reservation never succeeded" \
+            || die "the $want case left a directory it never made"
     else
         [ -d "$d" ] \
-            && pass "…and the directory is left, because rmdir refuses what it holds" \
-            || die "the $want case removed a directory with contents"
+            && pass "…and what it had made is left where it is" \
+            || die "the $want case removed a directory this run made"
     fi
     return 0
 }
@@ -380,10 +385,10 @@ _stagecase origin_transport 1 kept
 # the DRIVER retries on — folding it into 1 would turn a full filesystem into a
 # session that stops instead of one that moves to the other parent.
 printf '#!/usr/bin/env bash\nexit 2\n' > "$_stage/pr-origin.sh"; chmod +x "$_stage/pr-origin.sh"
-_stagecase origin_storage 2 gone
+_stagecase origin_storage 2 kept
 # …WHILE THE READER'S TERMINAL REFUSAL STAYS TERMINAL.
 printf '#!/usr/bin/env bash\nexit 1\n' > "$_stage/pr-origin.sh"; chmod +x "$_stage/pr-origin.sh"
-_stagecase origin_unreadable 1 gone
+_stagecase origin_unreadable 1 kept
 
 # ── the cleanup removes what this run made, and nothing else ──────────────
 # THE NAME IS PUBLISHED IN ARGV BEFORE THE `mkdir` RESERVES IT, and under a parent
@@ -419,259 +424,25 @@ _rr_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "…and the replacement directory itself, which rmdir refuses to take" \
     || die "the replacement directory was removed although it had contents"
 rm -rf "$_rr"
-# THE HELD DESCRIPTOR IS WHAT MAKES THE INODE AN IDENTITY, so its absence is asserted
-# to change the outcome rather than being taken on trust. A bare inode number can be
-# handed back to the next `mkdir` once the original is freed; a descriptor held on the
-# original stops it being freed at all. Where the open fails there is no durable
-# identity, and the cleanup does not give the directory back at all rather than removing
-# one it cannot vouch for — asserted here by removing the `exec` from a copy of the
-# subject and requiring the replacement to survive whole.
-grep -qF 'exec 8<"$RB_DIR"' "$SCRIPT" \
-    && pass "the reservation is held open, so its inode cannot be reused" \
-    || die "pr-setup.sh does not hold a descriptor on the directory it reserved"
-# AND THE RECORDED NUMBER IS THE OTHER HALF. The descriptor stops the inode being
-# reused; the number is what the comparison is against, and `ls -di` can fail or print
-# nothing — after which the comparison is skipped and the held descriptor alone would let
-# the reservation's own `rmdir` run against a name this run cannot vouch for. An empty
-# record is the same answer as a failed open.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'p="$(dirname "$2")"
-rm -rf "$p"
-mkdir -m 700 "$p"
-mkdir -m 700 "$p/o"
-printf "not this runs\n" > "$p/env"
-printf "not this runs\n" > "$p/o/origin"
-exit 1'
-grep -vF 'RB_INO="$(rb_setup_ino_held)"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'RB_INO="$(rb_setup_ino' "$_stage/pr-setup.sh" \
-    && die "the no-inode stage did not patch pr-setup.sh; the case proves nothing" \
-    || pass "the no-inode stage is patched"
-_ni="$(mktemp -d "$TMP/ni.XXXXXX")/dir"
-_ni_rc=0
-_ni_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ni" 2>&1)" || _ni_rc=$?
-{ [ -f "$_ni/env" ] && [ -f "$_ni/o/origin" ]; } \
-    && pass "…and with no recorded inode the cleanup takes nothing either" \
-    || die "a cleanup with no recorded inode still took what it could not vouch for (rc=$_ni_rc out='$_ni_out')"
-rm -rf "$_ni"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-# AND WITHOUT IT NOTHING IS UNLINKED, which is the fallback rather than a weaker
-# version of the same removal.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'p="$(dirname "$2")"
-rm -rf "$p"
-mkdir -m 700 "$p"
-mkdir -m 700 "$p/o"
-printf "not this runs\n" > "$p/env"
-printf "not this runs\n" > "$p/o/origin"
-exit 1'
-grep -vF 'exec 8<"$RB_DIR"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'exec 8<"$RB_DIR"' "$_stage/pr-setup.sh" \
-    && die "the no-descriptor stage did not patch pr-setup.sh; the case proves nothing" \
-    || pass "the no-descriptor stage is patched"
-_nh="$(mktemp -d "$TMP/nh.XXXXXX")/dir"
-_nh_rc=0
-_nh_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_nh" 2>&1)" || _nh_rc=$?
-{ [ -f "$_nh/env" ] && [ -f "$_nh/o/origin" ]; } \
-    && pass "…and with no held descriptor the cleanup takes nothing at all" \
-    || die "a cleanup with no durable identity still took what it could not vouch for (rc=$_nh_rc out='$_nh_out')"
-rm -rf "$_nh"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# AND THE IDENTITY IS RECORDED FROM THE DESCRIPTOR, NOT FROM THE NAME, which closes the
-# window one level down: a swap between the `exec` and the record would capture the
-# REPLACEMENT's inode, after which the comparison is replacement against replacement,
-# agrees, and the cleanup gives back a directory this run never made. Nothing INSIDE is
-# ever removed, so what the identity protects is that one `rmdir` and nothing else.
-grep -qF 'RB_INO="$(rb_setup_ino_held)"' "$SCRIPT" \
-    && pass "the recorded inode comes from the held descriptor rather than the path" \
-    || die "pr-setup.sh records its inode through the published name, which a swap replaces"
-grep -qF 'ls -diL /dev/fd/8' "$SCRIPT" \
-    && pass "…read with -L, so it is the directory's inode and not the /proc link's" \
-    || die "the held-object read omits -L; on Linux that reports the symlink's inode"
-
-# …AND A REPLACEMENT IS NOT GIVEN BACK IN THIS RUN'S PLACE. `-O` refuses a directory
-# another ACCOUNT holds — which is the boundary the record is about — but a fixture runs
-# as one account, so what this reaches is the other guard: the inode recorded when the
-# `mkdir` reported success, which a replacement does not carry. Its CONTENTS were never
-# at risk once the cleanup became one `rmdir`; what this case protects is the directory
-# itself.
-_forge_origin 'p="$(dirname "$2")"
-rm -rf "$p"
-mkdir -m 700 "$p"
-mkdir -m 700 "$p/o"
-printf "not this runs\n" > "$p/env"
-printf "not this runs\n" > "$p/o/origin"
-exit 1'
-_rc2="$(mktemp -d "$TMP/rc.XXXXXX")/dir"
-_rc2_rc=0
-_rc2_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_rc2" 2>&1)" || _rc2_rc=$?
-[ "$_rc2_rc" -ne 0 ] \
-    && pass "a replacement carrying the declared leaf names still ends in a refusal" \
-    || die "the name-collision case did not refuse (out='$_rc2_out')"
-{ [ -f "$_rc2/env" ] && [ -f "$_rc2/o/origin" ]; } \
-    && pass "…and the replacement keeps everything it had put there" \
-    || die "the cleanup took a replacement's own file (env=$([ -e "$_rc2/env" ] && echo yes || echo no) origin=$([ -e "$_rc2/o/origin" ] && echo yes || echo no))"
-rm -rf "$_rc2"
-
-# ── an origin file that does not hold the value is refused ────────────────
-# THE WRITE'S STATUS IS NOT ENOUGH ON ITS OWN. `printf` can report success and the
-# write fail at the flush when the redirection is closed, so the file can be empty or
-# short while the status says the write worked — and a caller reading a truncated
-# origin would pin the session to it. The value is read back and compared.
+# ── nothing is removed at all, which is the whole cleanup contract ────────
+# EVERY SHAPE THAT REMOVED ANYTHING NEEDED A NAME, and shell has no descriptor-relative
+# removal — no `unlinkat`, no `rmdir` on a held directory. The last shape standing was one
+# `rmdir` on the reservation gated by an inode compared against a held descriptor, and it
+# is a CHECK-THEN-USE: `rmdir` resolves the name again after the comparison, so a racer
+# replacing the directory in that window has its replacement taken.
 #
-# STAGED BY MAKING THE WRITE GO NOWHERE, which is the state a failed flush leaves:
-# the copy under test writes to `/dev/null` instead of the leaf, so the status is
-# clean and the file is not there.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-sed 's|> "\$RB_DIR/origin" |> /dev/null |' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -q '> /dev/null || rb_setup_stop origin_write' "$_stage/pr-setup.sh" \
-    && pass "the lost-write stage is patched" \
-    || die "the lost-write stage did not patch pr-setup.sh; the case proves nothing"
-_mw="$(mktemp -d "$TMP/mw.XXXXXX")/dir"
-_mw_rc=0
-_mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_mw" 2>&1)" || _mw_rc=$?
-{ [ "$_mw_rc" -eq 2 ] && case "$_mw_out" in *'reason=origin_write'*) true ;; *) false ;; esac; } \
-    && pass "an origin file that does not hold the value is refused, not announced ready" \
-    || die "a lost origin write was announced ready (rc=$_mw_rc out='$_mw_out')"
-[ -d "$_mw" ] \
-    && pass "…and leaves its own tree rather than resolving names inside it" \
-    || die "the lost-write refusal removed a directory with contents in it"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# ── no recorded identity, no reservation-level removal ────────────────────
-# AN EMPTY `RB_INO` MEANS THE `mkdir` NEVER REPORTED SUCCESS or the identity could not be
-# read, and in both cases a directory standing at this name is one this run cannot vouch
-# for — most likely a racer's, since the `mkdir` fails precisely when the name was taken.
-# Skipping the comparison and removing anyway is how somebody else's EMPTY reservation was
-# taken; the earlier no-descriptor case cannot see it, because a replacement holding files
-# survives the `rmdir` whether or not the guard is there.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'p="$(dirname "$2")"
-rm -rf "$p"
-mkdir -m 700 "$p"
-exit 1'
-grep -vF 'exec 8<"$RB_DIR"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-grep -qF 'exec 8<"$RB_DIR"' "$_stage/pr-setup.sh" \
-    && die "the empty-replacement stage did not patch pr-setup.sh; the case proves nothing" \
-    || pass "the empty-replacement stage is patched"
-_er="$(mktemp -d "$TMP/er.XXXXXX")/dir"
-_er_rc=0
-_er_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_er" 2>&1)" || _er_rc=$?
-[ -d "$_er" ] \
-    && pass "…so an EMPTY replacement is not given back in this run's place" \
-    || die "the cleanup removed an empty replacement with no recorded identity (rc=$_er_rc out='$_er_out')"
-rm -rf "$_er"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# ── a read-back that prints and then fails is not proof ───────────────────
-# ANYTHING A COMMAND PRINTS BEFORE FAILING IS NOT DATA, which `CLAUDE.md` records for
-# `gh` and applies here: written as `[ "$(cat …)" = "$RB_REMOTE" ]` the substitution's
-# status is DISCARDED, because the `[` supplies its own — so a read that emitted the right
-# bytes and then failed was accepted as proof the write had landed.
-#
-# STAGED WITH A `cat` ON `PATH` that prints the expected value and exits 1, ahead of the
-# real one. The helper resolves `cat` through `PATH` for this read, so a directory
-# prepended to it is the whole staging.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-_catdir="$TMP/catbin"; mkdir -p "$_catdir"
-# ONLY THE READ-BACK, NOT EVERY `cat`. The helper also reads `pr-origin.sh`'s transport
-# with `cat`, and a stub that failed both refused at `origin_transport` — before the line
-# this case is about, so it passed whichever shape the read-back had.
-printf '#!/usr/bin/env bash\n/bin/cat "$@"\ncase "$1" in */o/origin) exit 0 ;; */origin) exit 1 ;; esac\nexit 0\n' > "$_catdir/cat"
-chmod +x "$_catdir/cat"
-_cb="$(mktemp -d "$TMP/cb.XXXXXX")/dir"
-_cb_rc=0
-_cb_out="$(cd "$REPO" && run_limited 25 env PATH="$_catdir:$PATH" \
-    /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_cb" 2>&1)" || _cb_rc=$?
-{ [ "$_cb_rc" -ne 0 ] && case "$_cb_out" in *'status=ready'*) false ;; *) true ;; esac; } \
-    && pass "a read-back that prints the right value and then fails is not accepted" \
-    || die "a failed read-back was taken as proof of the write (rc=$_cb_rc out='$_cb_out')"
-rm -rf "$_cb" "$_catdir"
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# ── a signal after the write is caught, and leaves the tree ───────────────
-# THE DEFAULT ACTION FOR `HUP`, `INT` AND `TERM` IS TO TERMINATE, so without a handler
-# the run ends with no cleanup at all and no status anyone can read — and the driver
-# deliberately performs no cleanup after a non-zero helper status, because it cannot
-# know who created the path. So the helper arms the cleanup before the reservation is
-# attempted and disarms only on success.
-#
-# SELF-DELIVERED, so there is no timing in the fixture. The staged copy sends itself
-# the signal at exactly the point the case is about — after the origin write, before the
-# `trap - EXIT` that a successful run reaches — which no `sleep`-and-`kill` can pin
-# down as precisely.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-for _sig in HUP INT TERM; do
-    sed "s|^trap - EXIT\$|kill -s $_sig \"\$\$\"|" "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
-    grep -q "kill -s $_sig" "$_stage/pr-setup.sh" \
-        || { die "the $_sig stage did not patch pr-setup.sh; the case proves nothing"; continue; }
-    _sg="$(mktemp -d "$TMP/sg.XXXXXX")/dir"
-    _sg_rc=0
-    _sg_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sg" 2>&1)" || _sg_rc=$?
-    # THE STATUS SAYS IT DIED OF THE SIGNAL rather than returning from a handler. A
-    # trap REPLACES a signal's terminating action, so one that merely returned would
-    # leave the shell finishing the work it was killed during and reporting 0.
-    [ "$_sg_rc" -ne 0 ] \
-        && pass "a $_sig after the write does not report success" \
-        || die "the $_sig case returned 0 (out='$_sg_out')"
-    # AND THE TREE IS REQUIRED TO SURVIVE, not merely permitted to. This signal is
-    # delivered where the successful run would reset its `EXIT` trap — after `work/`, its
-    # four files and the origin all exist — so the cleanup's one `rmdir` MUST fail on a
-    # directory with contents. Accepting an absent `$_sg` here let a regression that
-    # deleted the reservation and everything in it report PASS, which is the whole
-    # behaviour round 18 established.
-    { [ -d "$_sg" ] && [ -f "$_sg/origin" ] && [ -f "$_sg/work/summary.md" ] \
-      && [ -f "$_sg/work/head.txt" ]; } \
-        && pass "…and the tree it had written is left intact, contents and all" \
-        || die "a $_sig removed the reservation or its contents: '$(ls -A "$_sg" 2>/dev/null | tr '\n' ' ')'"
-    rm -rf "$_sg"
-done
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# ── an early failure does not remove what it never created ────────────────
-# `RB_PHASE` SAID "SOMETHING CAN BE INSIDE NOW", not which names this run had taken. The
-# cleanup removed every name the helper EVER creates, so a `pr-origin.sh` that planted
-# `$RB_DIR/origin` and then refused had that file deleted by a run which never wrote it —
-# past the bound `docs/decisions/2026-08-29-setup-leaf-cleanup.md` accepts, which is the
-# names this session HAD ALREADY TAKEN.
-#
-# STAGED WITH THE FORGED READER DOING THE PLANTING, since it runs after the reservation
-# and before any of the later creates — which is exactly the window.
-for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
-_forge_origin 'printf "planted\n" > "$(dirname "$2")/origin"
-exit 1'
-_ec="$(mktemp -d "$TMP/ec.XXXXXX")/dir"
-_ec_rc=0
-_ec_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_ec" 2>&1)" || _ec_rc=$?
-{ [ "$_ec_rc" -ne 0 ] && case "$_ec_out" in *'reason=origin_unreadable'*) true ;; *) false ;; esac; } \
-    && pass "an early read failure refuses, so the cleanup ran" \
-    || die "the early-failure case did not refuse as expected (rc=$_ec_rc out='$_ec_out')"
-[ -f "$_ec/origin" ] \
-    && pass "…and a file at a name this run had not yet taken survives it" \
-    || die "the cleanup removed a name this run never created"
-rm -rf "$_ec"
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
-cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
-
-# ── a substitution cannot destroy anything, because nothing inside is removed ─
-# THE CLEANUP IS ONE `rmdir`, which succeeds only on an EMPTY directory and refuses a
-# symlink outright. That is what makes a substitution harmless rather than bounded: there
-# is no name inside `$RB_DIR` that this helper resolves on a failure path, so whatever a
-# same-UID process put there is still there afterwards. Six rounds of review reached this
-# by removing, one at a time, every shape that did resolve such a name.
-case "$(grep -v '^[[:space:]]*#' "$SCRIPT")" in
-    *'rm -f "$RB_DIR'*|*'rm -rf "$RB_DIR'*)
-        die "the cleanup unlinks a name inside the reservation; a substitution loses that object" ;;
-    *)  pass "nothing inside the reservation is unlinked, so a substitution loses nothing" ;;
-esac
-_cl_body="$(sed -n '/^rb_setup_give_back/,/^}/p' "$SCRIPT")" || _cl_body=""
-_cl_n=0; _cl_n="$(grep -c 'rmdir' <<<"$_cl_body")" || _cl_n=0
-{ [ -n "$_cl_body" ] && [ "$_cl_n" -eq 1 ]; } \
-    && pass "…and the cleanup is that one rmdir, with nothing else in it" \
-    || die "the cleanup body has $_cl_n rmdir calls; it is meant to have exactly one"
+# So this helper removes nothing, the descriptor and the inode went with the cleanup they
+# gated, and the traps went with them — there was nothing left for a handler to do.
+# `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries the table of what each earlier
+# shape destroyed.
+_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
+[ "$_rm_n" -eq 0 ] \
+    && pass "pr-setup.sh removes nothing at all, so no name it resolves can take another's object" \
+    || die "pr-setup.sh has $_rm_n removals; it is meant to have none"
+_tr_n=0; _tr_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '^trap ')" || _tr_n=0
+[ "$_tr_n" -eq 0 ] \
+    && pass "…and no traps, since a handler with no cleanup to run changes nothing" \
+    || die "pr-setup.sh arms $_tr_n traps with no cleanup for them to run"
 
 # ── the creates are exclusive, so nothing is truncated through them ───────
 # A PLAIN `>` OPENS WITH O_TRUNC AND FOLLOWS SYMLINKS. This directory's name is
@@ -710,7 +481,7 @@ _sy_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     && pass "…and the file it pointed at is untouched" \
     || die "the symlink target was truncated: '$(cat "$_vic" 2>/dev/null)'"
 rm -rf "$_sy"
-# AND A WORKING LEAF, STAGED THE SAME WAY the signal cases are — the plant has to happen
+# AND A WORKING LEAF, STAGED BY PATCHING THE COPY UNDER TEST — the plant has to happen
 # between `work/` being created and the loop that fills it, which nothing outside the
 # process can reach.
 printf 'PRECIOUS\n' > "$_vic"

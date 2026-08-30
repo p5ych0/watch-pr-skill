@@ -938,8 +938,14 @@ plugin docs and open an issue.
 
   The driver's line says only that each `PR_SETUP status=error` line above it is one
   attempt and its reason, and that is deliberate: it handed over a name and got back a
-  status, so it cannot tell a squatted name from a filesystem with no room. The helper
-  can, and says so — one such line per attempt, carrying the reason.
+  status. The helper's line names the reason — one per attempt — which is what tells you
+  whether the refusal was about storage, the checkout, or the path.
+
+  **`reason=dir_not_reserved` does not say which.** It is what every failed `mkdir`
+  reports, and a name somebody else had already taken and a filesystem with no room both
+  fail the same call. Nothing in the diagnostic separates them, which is why re-running is
+  the first thing to try: a squatted name is gone by the next attempt and a full
+  filesystem is not.
 
   **Count those lines, not the `ABORT:` ones.** `pr-origin.sh` runs inside the helper
   and prints its own `ABORT:` lines when the checkout or an ancestor is the problem, so
@@ -984,7 +990,7 @@ plugin docs and open an issue.
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, look at storage — and count the
+  If re-running keeps failing, it is not a squatted name — count the
   `PR_SETUP status=error` lines.
   **Two** means setup has already used both parents, so `unset TMPDIR` is not the
   answer: that selects one it just tried. Point `TMPDIR` at storage with room

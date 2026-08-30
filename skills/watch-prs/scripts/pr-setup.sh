@@ -117,179 +117,48 @@ case "$RB_DIR" in
 esac
 [ "$#" -eq 1 ] || { echo "PR_SETUP status=error reason=usage" >&2; exit 1; }
 
-# ── the reservation, and giving it back ────────────────────────────────────
+# ── the reservation, which is never given back ─────────────────────────────
 #
-# EVERYTHING HERE IS `pr-origin.sh`'s SHAPE, and that is deliberate rather than
-# convenient: the two helpers take the same kind of argument, publish it in argv the
-# same way, and rest on the same accepted record — so a second answer to one question
-# would be a second thing to keep true. What that file worked out, and what
-# `docs/decisions/2026-08-26-reservation-inference.md` accepts, is reproduced below
-# with its reasoning kept short; the long form is there.
+# THIS HELPER REMOVES NOTHING. Not the leaves it wrote, not the transport, and not the
+# reservation itself — so a refusal leaves whatever it had made at that point, and a
+# successful run leaves the directory for the caller, which is the point of the call.
 #
-# THE CLEANUP IS ARMED BEFORE THE RESERVATION IS ATTEMPTED, because `mkdir` is an
-# external command: a signal delivered while it runs is handled once it RETURNS, and
-# arming afterwards leaves a window where this shell dies with the directory made.
+# THAT IS WHERE SEVERAL REVIEW ROUNDS ENDED, one shape at a time, and each shape was
+# removed because it destroyed something. `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
+# carries the table: `rm -rf` took a replacement's whole tree; a named `rm -f` per leaf
+# took a replacement's file; a ledger of what this run had created missed whatever a
+# signal landed in front of; removing the directories unconditionally took a watcher's
+# empty directory at a name this run never reached; and the last shape — one `rmdir` on
+# the reservation, gated on an inode compared against a held descriptor — is a
+# CHECK-THEN-USE, because `rmdir` resolves the NAME again after the comparison. A racer
+# that replaces the directory in that window has its replacement taken.
 #
-# WHICH MEANS THE CLEANUP CAN RUN WHEN THE NAME IS NOT OURS, so it proves that first
-# and three facts are needed. `RB_OWNED` is certain and late — set after a successful
-# `mkdir`. `RB_PREEXISTED` covers the window before that: a name that held nothing
-# when this run began is one this run made. And `-O` refuses a name another ACCOUNT
-# holds, which neither flag can see — that is what stops the reservation-level `rmdir`
-# taking a directory another account put at this name. Nothing inside is ever removed, so
-# these guards are about the directory itself and nothing else.
-RB_OWNED=no
-RB_PREEXISTED=no
-RB_INO=
-[[ -e $RB_DIR ]] && RB_PREEXISTED=yes
-# AND THE OBJECT ITSELF IS HELD, because ownership is not identity. `-O` refuses a
-# name another ACCOUNT holds and that is the boundary the record is about — but a
-# replacement made by this same account passes every test above, and the cleanup would
-# then give back a directory this run never created.
+# EVERY ONE OF THOSE NEEDED A NAME, and shell has no descriptor-relative removal: no
+# `unlinkat`, no `rmdir` on a held directory. There is no shape that removes anything here
+# and cannot take something a same-UID process substituted. So nothing is removed.
 #
-# AN OPEN DESCRIPTOR IS WHAT MAKES THE INODE A DURABLE IDENTITY. A bare inode number
-# is not one: an inode freed by a `rmdir` can be handed straight back to the next
-# `mkdir`, and the comparison would then accept a different object. While a descriptor
-# on the original is open the inode cannot be freed, so it cannot be reused, and the
-# number is an identity for as long as this run needs it. Measured: bash opens a
-# directory read-only on both platforms this suite runs on.
+# WHAT IT COSTS is a directory per refused attempt, under `TMPDIR` or `HOME`, holding
+# whatever this run had written. Nothing collects it. That is litter, and the record
+# accepts it, because the alternative is loss.
 #
-# AND THE RESERVATION'S OWN `rmdir` IS GATED ON HAVING IT. There are no leaf removals to
-# gate — nothing inside the reservation is ever removed — so what the identity protects is
-# the one `rmdir` on `$RB_DIR` itself: without it the cleanup would give back a directory
-# at this name that may be a racer's rather than this run's. Where the open fails, that
-# `rmdir` does not run and the directory is left instead, which is the cost the accepted
-# record already covers.
-#
-# AND IT IS READ THROUGH THE DESCRIPTOR, NOT THROUGH THE NAME. Recording it as
-# `rb_setup_ino "$RB_DIR"` reopened the window one level down: a swap between the
-# `exec` and that read records the REPLACEMENT's inode, after which the comparison
-# below is replacement against replacement, agrees, and the cleanup gives back a
-# directory this run never made. `/dev/fd/8` names the object this run holds however the
-# path has been rearranged since — measured: with the directory removed and recreated
-# under it, the held inode is unchanged and the path's is not.
-#
-# `-L`, AND IT IS LOAD-BEARING. On Linux `/dev/fd/8` is a symlink into `/proc`, so
-# without it `ls -di` reports the LINK's inode — a number that has nothing to do with
-# the directory and would never match the path's.
-#
-# `ls -di`, NOT `stat`. `stat -c` is GNU and `stat -f` is BSD, and the `macos-shell`
-# job runs this suite with the GNU tools taken off `PATH`. `ls -di` prints the inode
-# first on both, and the value is taken by word splitting rather than by `read`.
-rb_setup_ino() {   # <path> ; its inode number, or nothing
-    set -- $(/usr/bin/env ls -di "$1" 2>/dev/null)
-    printf '%s' "${1-}"
-    return 0
-}
-rb_setup_ino_held() {   # the inode of the object descriptor 8 holds, or nothing
-    set -- $(/usr/bin/env ls -diL /dev/fd/8 2>/dev/null)
-    printf '%s' "${1-}"
-    return 0
-}
-# `[[`, NOT `[`, in every one of these. The condition decides whether a directory is
-# REMOVED, and `[` is a name; `[[` is a reserved word the parser handles and nothing can
-# stand in for.
-#
-# ONE `rmdir` AND NOTHING ELSE, which is the shape six rounds of review converged on
-# rather than a simplification. Every attempt to give the CONTENTS back needed a NAME,
-# and a name inside a directory a same-UID process can write to is one that may have been
-# substituted: `rm -rf` took a replacement's whole tree, a named `rm -f` took a
-# replacement's file, a ledger of what this run had created missed whatever a signal
-# landed in front of, and removing the directories unconditionally took a watcher's empty
-# directory at a name this run had not reached.
-#
-# SO NOTHING INSIDE IS REMOVED AT ALL. `rmdir` succeeds only on a directory that is
-# empty and refuses a symlink outright, so this can destroy no CONTENTS whatever has
-# happened at that name — an empty directory a racer left at the candidate is the one
-# thing it can take, and `docs/decisions/2026-08-26-reservation-inference.md` accepts
-# exactly that — which is the property each of those attempts was reaching for and none
-# of them held.
-#
-# WHAT IT COSTS is a failed setup leaving its own tree behind: one directory per refused
-# attempt, holding files this run wrote and nothing else. That is more litter than the
-# empty directory `docs/decisions/2026-08-26-reservation-inference.md` accounts for, and
-# `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records it — litter rather than loss,
-# which is the direction this file is for.
-rb_setup_give_back() {   # give back the reservation, if it is still this run's and empty
-    [[ $RB_OWNED = yes ]] \
-        || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
-        || return 0
-    [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
-    # THE SAME OBJECT, or there is nothing here this run made. Where the inode was never
-    # recorded the `mkdir` had not reported success, and the three tests above are what
-    # stands; where it was, the name must still resolve to it — and the held descriptor
-    # is what makes that number mean the same object rather than one that inherited its
-    # inode.
-    # NO RECORDED INODE, NO REMOVAL. An empty `RB_INO` means the `mkdir` never reported
-    # success or the identity could not be read, and in both cases a directory standing
-    # at this name is one this run cannot vouch for — a racer's, most likely, since the
-    # `mkdir` fails precisely when the name was already taken. Skipping the comparison
-    # and removing anyway is how an empty reservation belonging to somebody else was
-    # taken; requiring the record costs at most this run's own empty directory, left
-    # rather than given back.
-    [[ -n $RB_INO ]] || return 0
-    [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
-    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
-    return 0
-}
-# THE HANDLERS RE-RAISE. A trap REPLACES a signal's terminating action, so one that
-# merely returned would leave this shell resuming the work it was killed during — and,
-# after a successful write, reporting 0 for a run somebody killed. All four traps are
-# IGNORED before the first removal, in one statement: `trap -` restores the DEFAULT,
-# which for these is to terminate, so a second signal between two removals would kill
-# the shell mid-cleanup; and disarming after the cleanup rather than before leaves it
-# re-entrant.
-#
-# WHAT THEY ADD OVER THE `EXIT` TRAP ALONE IS SMALL, AND SAYING SO IS THE POINT.
-# Measured on bash 5: an untrapped fatal `TERM` still runs the `EXIT` trap and still
-# reports 143, so on these paths the two shapes are indistinguishable — and
-# `test-pr-setup.sh` asserts the INVARIANT, that the run does not report success and
-# that no contents of anyone else's are touched, rather than which route produced it.
-# What IS
-# left behind is this run's own tree wherever the signal arrived after a write — the same
-# residue as any other refusal, and for the same reason. They are here because
-# `pr-origin.sh` has them and the two helpers should not differ on a question this
-# file has already answered once. Do not read this as a claim that removing them
-# changes an outcome.
-rb_setup_on_signal() {   # <signal-name> ; give the reservation back and die of it
-    trap '' EXIT HUP INT TERM
-    rb_setup_give_back
-    trap - "$1"
-    kill -s "$1" "$$"
-}
-# SO THE REFUSALS ONLY SAY WHY AND STOP. Cleaning up in them as well meant a refusal
-# cleaned and then `exit` fired the trap and cleaned again — and the second pass is
-# the dangerous one, because an account watching the published path can recreate it
-# between the two.
+# AND THE TRAPS GO WITH IT. `EXIT`, `HUP`, `INT` and `TERM` were armed to run that
+# cleanup, and there is nothing left for them to do — measured on bash 5, an untrapped
+# fatal `TERM` ends the run with status 143, which is what a caller should see. A handler
+# that only re-raises is a handler that changes nothing.
+
+# THE REFUSALS SAY WHY AND STOP, and that is all they do. They used to clean up as well,
+# and then the `EXIT` trap cleaned up again behind them — the second pass being the
+# dangerous one, since an account watching the published path can recreate it between the
+# two. There is no cleanup at all now, so there is nothing to do twice.
 rb_setup_stop() {   # <reason> <status>
     echo "PR_SETUP status=error reason=$1" >&2
     exit "$2"
 }
-trap 'trap "" EXIT HUP INT TERM; rb_setup_give_back' EXIT
-trap 'rb_setup_on_signal HUP' HUP
-trap 'rb_setup_on_signal INT' INT
-trap 'rb_setup_on_signal TERM' TERM
 
-# THE DIRECTORY IS THE RESERVATION. `mkdir` without `-p` fails if anything is
-# already at the name — a file, a symlink or another account's directory — so the
-# exclusion is the create, not a test before it. Same rule as `pr-origin.sh`, and
-# for the same reason: a check-then-use here is a window somebody else can stand in.
-/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
+/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null \
     || { echo "PR_SETUP status=error reason=dir_not_reserved dir=$RB_DIR" >&2; exit 2; }
 # HELD OPEN FOR THE LIFE OF THIS PROCESS, which is what stops the inode being reused.
 # The descriptor is never read from; it exists so the object cannot be freed.
-# THE `2>/dev/null` IS ON A GROUP, NOT ON THE `exec`. Written as
-# `exec 8<"$RB_DIR" 2>/dev/null` the redirection has no command to apply to, so it
-# applies to THIS SHELL and permanently: every refusal below then printed its reason
-# into `/dev/null` and the caller got a status with no line to read. Around a group,
-# the stderr redirection is restored when the group ends and the descriptor the `exec`
-# opened is not.
-RB_HELD=no
-{ exec 8<"$RB_DIR"; } 2>/dev/null && RB_HELD=yes
-# RECORDED FROM THE DESCRIPTOR, and only where there is one: without the hold there is
-# nothing to record an identity FROM, and an inode read through the name would be the
-# number of whatever is there now.
-[[ $RB_HELD = yes ]] && RB_INO="$(rb_setup_ino_held)"
-
 # ── the origin, through the helper that reads it privileged ────────────────
 # NOT `git remote get-url` HERE. `pr-origin.sh` is where that read is hardened, and
 # a second copy of it is the duplication `CLAUDE.md` records paying for four times.
@@ -463,13 +332,6 @@ _rb_back="$(cat "$RB_DIR/origin" 2>/dev/null)" || rb_setup_stop origin_write 2
 # a same-UID process pre-creating `$RB_SETUP_DIR/pin` makes the call report 2, and the
 # driver retries once under a second fixed name.
 
-# THE EXIT TRAP IS RESET AND THE SIGNAL HANDLERS ARE NOT. Success means the caller
-# gets the directory, so the cleanup must not fire on the way out — but a `TERM`
-# arriving before the ready line is printed means the caller never reads anything, and
-# giving the reservation back is still the right answer there. `pr-origin.sh`
-# resets `EXIT` alone for the same reason: disarming the signals too left a window
-# where the helper was terminated with no cleanup at all.
-trap - EXIT
 
 echo "PR_SETUP status=ready origin=$RB_DIR/origin work=$RB_WORK_DIR"
 exit 0

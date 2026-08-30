@@ -553,18 +553,16 @@ underweighted as a non-blocking note. A NEW defect in that area is still a
 finding: each record accepts one named race and nothing else.
 
 **A third is accepted since 2026-08-29**, in
-`docs/decisions/2026-08-29-setup-leaf-cleanup.md`: `pr-setup.sh` gives its reservation
-back with ONE `rmdir` and removes NOTHING inside it, so a refusal or a signal after
-`work/`, the origin or the transport exists leaves this run's own tree in place. Every
-shape that gave the contents back needed a name a same-UID process may have substituted
-between the create and the removal, and each destroyed something — that record carries the
-table. `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup
-can destroy no CONTENTS whatever happened at that name: the cost is litter rather than
-loss. It takes nothing of anybody else's at all, including an empty directory a racer
-left at the candidate: the `rmdir` runs only where an inode was RECORDED and still
-resolves to the object this run's own `mkdir` made.
-Do not raise the leftover tree as a leak, and do not reintroduce a removal of anything
-inside the reservation. Raise a cost you think was underweighted as a non-blocking note.
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md`: `pr-setup.sh` removes NOTHING — not the
+files it wrote, not the transport, not the reservation itself — so a refusal leaves
+whatever it had made and nothing collects it. Every shape that removed something needed a
+NAME, and each destroyed something a reviewer found; that record carries the table,
+ending with the one that convicts the class: shell has no descriptor-relative removal, so
+every removal resolves a name AFTER whatever check preceded it. The traps went with the
+cleanup, there being nothing left for a handler to run. Do not raise the leftover
+directory as a leak, and do not reintroduce a removal of any kind — a fixture asserts the
+file contains none and arms no trap. Raise a cost you think was underweighted as a
+non-blocking note.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
