@@ -32,8 +32,8 @@
   the driver captured this script's output, ran `sed` over it, proved a record was there,
   proved it carried a `prior-review=` field, and cut the value out with
   `${rec##* prior-review=}`. Since 2.0.84 `post` writes it into a file, as `gate` writes
-  the head into its own, so the driver reads it with `$(<…)` and proves the assignment
-  took. The record still carries the value for whoever is reading the terminal.
+  the head into its own, so the driver reads it through a bound descriptor and refuses if
+  that read fails. The record still carries the value for whoever is reading the terminal.
 
   Nothing is checked less than before: what the driver stopped doing, the script does, and
   `test-pr-close-round.sh` covers both conditions and both spellings.

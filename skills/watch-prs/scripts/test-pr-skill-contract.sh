@@ -1680,9 +1680,16 @@ grep -qF 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 grep -qF 'CLOSED_REC' "$SKILL" \
     && die "the document still parses the closing record for the baseline" \
     || pass "…and no longer parses it out of the closing record"
+# WHAT IS COUNTED IS THE REFUSAL, not a postcondition on the assignment: there is no
+# longer one to count. The read-back comparison was it, and it went with the second
+# descriptor read that returns empty on macOS — a readonly name ends the shell at the
+# failed assignment instead, a transforming one is what step 2's probe is for, and a value
+# that arrives transformed anyway is refused by `pr-watch.sh`. The execution cases below
+# are what hold the behaviour; this only holds that both paths SAY something when the read
+# fails.
 [ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 2 ] \
-    && pass "…and proves the assignment took, on both paths that make it" \
-    || die "a recipe assigns the baseline without proving the assignment"
+    && pass "…and both paths refuse in their own words when that read fails" \
+    || die "a recipe reads the baseline without a refusal for a read that failed"
 # ── AND BOTH BASELINE READS ARE EXECUTED, NOT ONLY GREPPED ────────────────
 #
 # Every assertion above this point is a `grep` for the redirection, the assignment
