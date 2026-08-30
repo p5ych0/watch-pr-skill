@@ -282,9 +282,11 @@ RB_REMOTE="$(cat "$RB_DIR/o/origin" 2>/dev/null)" || rb_setup_stop origin_transp
 # holds the same origin as the file written below it, the directory is mode 700, and it
 # is inside a tree this session keeps for its working files anyway.
 #
-# THE FAILURE PATH STILL REMOVES IT, and must: `rmdir "$RB_DIR"` cannot give the
-# reservation back with a child in the way. That is the cleanup's problem rather than
-# this line's, and it is bounded there by the held descriptor and the recorded inode.
+# AND THE FAILURE PATH DOES NOT REMOVE IT EITHER. `rmdir "$RB_DIR"` cannot give the
+# reservation back with a child in the way, so a refusal after this point leaves the tree
+# — which is the accepted cost in
+# `docs/decisions/2026-08-29-setup-leaf-cleanup.md`, and the alternative was removing a
+# name a same-UID process may have substituted. Litter rather than loss.
 
 [ -n "$RB_REMOTE" ] || rb_setup_stop origin_empty 1
 # `$'\n'`, NOT `"$(printf '\n')"`. Command substitution strips trailing newlines, so
