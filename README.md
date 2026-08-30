@@ -971,12 +971,17 @@ plugin docs and open an issue.
   your shell, and a startup file that has fixed any of them — made it readonly, given
   it `declare -i`, or pointed it at another variable — is what that means. Setup
   cannot work around it: an assignment to a readonly name fails silently, and one
-  aimed elsewhere writes into whatever it was aimed at. **Start the loop from a shell
-  that does not set them** — a fresh one, or the same one with that startup file
-  edited. Unsetting them is not the way out, and for the first case it cannot be:
-  bash refuses to unset a readonly name at all, and `unset` on a nameref clears the
-  variable it points at rather than the nameref, which leaves you with the alias and
-  without whatever it aliased.
+  aimed elsewhere writes into whatever it was aimed at.
+
+  **Where a startup file is what declares them, edit or disable that declaration**, or
+  start a shell that does not read the file. A fresh shell is not enough on its own,
+  because it reads the same file and arrives with the same attribute. Where the name
+  was set by hand in the session you are in, a new shell is the whole fix.
+
+  Unsetting is not the way out either, and for two of the three it cannot be: bash
+  refuses to unset a readonly name at all, and `unset` on a nameref clears the variable
+  it points at rather than the nameref — leaving you with the alias, still not
+  assignable, and without whatever it aliased.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.
