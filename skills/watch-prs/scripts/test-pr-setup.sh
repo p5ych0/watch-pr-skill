@@ -507,7 +507,10 @@ _sigcase HUP 129
 # the second count below asserts of every handler in the file.
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries the table of what each earlier
 # shape destroyed.
-_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf')" || _rm_n=0
+# MATCHED AS COMMAND WORDS, NOT AS SPELLINGS. It listed `rm -f`, `rm -rf` and `rmdir`,
+# so a plain `rm "$RB_DIR/origin"` — or `unlink`, which needs no flags at all — was a
+# removal the scan reported as none. The flags are not what makes it one.
+_rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -cE '(^|[^[:alnum:]_/-])(rm|rmdir|unlink)([[:space:]]|$)')" || _rm_n=0
 [ "$_rm_n" -eq 0 ] \
     && pass "pr-setup.sh removes nothing at all, so no name it resolves can take another's object" \
     || die "pr-setup.sh has $_rm_n removals; it is meant to have none"
@@ -519,7 +522,7 @@ _tr_n=0; _tr_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '^trap ')" || _tr
 [ "$_tr_n" -eq 1 ] \
     && pass "…and one trap, which is the INT re-raise the measured behaviour needs" \
     || die "pr-setup.sh arms $_tr_n traps; it is meant to arm exactly the INT one"
-_trb_n=0; _trb_n="$(grep '^trap ' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf\|unlink')" || _trb_n=0
+_trb_n=0; _trb_n="$(grep '^trap ' "$SCRIPT" | grep -cE '(^|[^[:alnum:]_/-])(rm|rmdir|unlink)([[:space:]]|$)')" || _trb_n=0
 [ "$_trb_n" -eq 0 ] \
     && pass "…and no handler removes anything, so the class cannot come back behind a signal" \
     || die "$_trb_n of pr-setup.sh's traps remove something"

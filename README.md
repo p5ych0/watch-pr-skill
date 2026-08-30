@@ -950,8 +950,15 @@ plugin docs and open an issue.
   **Count those lines, not the `ABORT:` ones.** `pr-origin.sh` runs inside the helper
   and prints its own `ABORT:` lines when the checkout or an ancestor is the problem, so
   those do not correspond to attempts at all — there may be none, one, or two per
-  attempt. The `PR_SETUP status=error` lines are one per call, which is what the
-  one-versus-two diagnosis below rests on.
+  attempt. The `PR_SETUP status=error` lines are one per call *that refused*, which is
+  what the one-versus-two diagnosis below rests on.
+
+  **Zero of them is a third answer, and it is not a refusal.** A helper that was
+  interrupted or killed prints nothing and ends with the signal's status — 130 for
+  `INT`, 143 for `TERM`, 129 for `HUP` — so the abort you are reading came from a run
+  that was stopped rather than one that decided anything. Nothing is wrong with the
+  setup in that case; re-run it. Whatever the stopped run had already created is left
+  where it is, which is the same litter a refusal leaves.
 
   The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds

@@ -367,11 +367,15 @@ _rb_gone="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -nE 'RB_ORIGIN_DIR|RB_ORIGI
 # proof against it. What the removals were for does not survive examination: the
 # origin is `git remote get-url origin`, which anyone who can reach the checkout can
 # read anyway, and the directory is mode 700.
-case "$skill_flat" in
-    *'rm -f "$RB_SETUP_DIR'*|*'rm -rf "$RB_SETUP_DIR'*|*'rmdir "$RB_SETUP_DIR'*)
-        die "SKILL.md unlinks something under the published setup path" ;;
-    *)  pass "the driver unlinks nothing under the published setup path" ;;
-esac
+# MATCHED AS COMMAND WORDS, NOT AS SPELLINGS. Three exact strings were listed, so a
+# plain `rm "$RB_SETUP_DIR/origin"` — or `unlink`, which needs no flags — was a removal
+# through the published path that this case reported as none. The flags are not what
+# makes it one.
+if grep -qE '(^|[^[:alnum:]_/-])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$skill_flat"; then
+    die "SKILL.md unlinks something under the published setup path"
+else
+    pass "the driver unlinks nothing under the published setup path"
+fi
 
 # THE BLOCK LIFTS OUT WHOLE, from the probe that opens it to the `fi` that closes
 # it. One range, whole by construction: every refusal in it is an `else` arm, so a
@@ -417,7 +421,7 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
     && pass "this shell has declare -l, so the case-transforming states run" \
     || pass "this shell has no declare -l, so those states are skipped by name"
 
-# ── ONE GENERIC PROBE OVER THE THREE NAMES ────────────────────────────────
+# ── ONE GENERIC PROBE OVER EVERY NAME THE BLOCK ASSIGNS ───────────────────
 #
 # It used to be an enumeration tied to `pr-selfcheck.sh`'s `KNOWN` list, and that was
 # the wrong inventory: `KNOWN` is what the DRIVER reads, `GIT_DIR` is read by `git`
@@ -1181,7 +1185,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
               && case "$_nr_out" in *'OWNER=acme'*) false ;; *) true ;; esac; } \
                 || die "a nameref onto $_nr was accepted (rc=$_nr_rc out='$_nr_out')"
         done
-        pass "a nameref onto any of the three probed names is refused"
+        pass "a nameref onto any of the probed names is refused"
     else
         pass "this shell has no declare -n, so the alias states are skipped by name"
     fi
