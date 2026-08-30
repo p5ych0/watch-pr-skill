@@ -574,10 +574,12 @@ files it wrote, not the transport, not the reservation itself — so a refusal l
 whatever it had made and nothing collects it. Every shape that removed something needed a
 NAME, and each destroyed something a reviewer found; that record carries the table,
 ending with the one that convicts the class: shell has no descriptor-relative removal, so
-every removal resolves a name AFTER whatever check preceded it. The traps went with the
-cleanup, there being nothing left for a handler to run. Do not raise the leftover
-directory as a leak, and do not reintroduce a removal of any kind — a fixture asserts the
-file contains none and arms no trap. Raise a cost you think was underweighted as a
+every removal resolves a name AFTER whatever check preceded it. The cleanup traps went
+with the cleanup, there being nothing left for a handler to run; the one that stays is an
+`INT` re-raise, which removes nothing and exists because a non-interactive shell otherwise
+survives `INT` and publishes a ready line for a run somebody stopped. Do not raise the
+leftover directory as a leak, and do not reintroduce a removal of any kind — a fixture
+asserts the file contains none and that no handler removes anything. Raise a cost you think was underweighted as a
 non-blocking note.
 
 **The `--admin` merge mode is accepted too**, in

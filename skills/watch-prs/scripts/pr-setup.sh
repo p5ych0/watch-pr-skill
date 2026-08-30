@@ -12,14 +12,10 @@
 #      of them. This is `pr-origin.sh`'s distinction and it is the same one.
 #
 # NEITHER REFUSAL IS SIDE-EFFECT-FREE, and a caller should not read one as though it
-# were. The reservation is given back by ONE `rmdir`, which succeeds only while the
-# directory is EMPTY — so a refusal before anything was created takes the directory with
-# it, and one after `o/origin`, `work/` or the origin exists leaves this run's tree where
-# it is. NOTHING OF ANYBODY ELSE'S IS REMOVED, and that now includes an empty directory a
-# racer left at the candidate: the one `rmdir` runs only where an inode was RECORDED —
-# which needs this run's own `mkdir` to have reported success — and where the name still
-# resolves to it. Contents were never at risk, since `rmdir` refuses a directory holding
-# anything and refuses a symlink. That is the trade:
+# were. NOTHING IS EVER REMOVED — not the reservation, not the transport, not the files
+# written inside it — so a refusal at any point leaves whatever this run had made by then,
+# INCLUDING one that came immediately after the `mkdir` and made only an empty directory.
+# That is the trade:
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries what each attempt at removing
 # the contents destroyed. A caller that must not accumulate those is a caller that has to
 # collect them itself; the driver does not, because it retries under a second parent and
@@ -48,9 +44,9 @@
 #     name and creates it, and it must outlive the call — for the read, and for the four
 #     working files inside it that every later stage writes into. The driver removes
 #     nothing under it, deliberately: unlinking through a name published in argv can take
-#     what replaced it. What THIS file removes is a refused reservation, on its failure
-#     path only, and only when it is EMPTY — one `rmdir`, nothing inside it. A helper that removed it would be removing the thing it was
-#     asked to produce.
+#     what replaced it, and THIS file removes nothing for the same reason. A helper that
+#     removed the directory would in any case be removing the thing it was asked to
+#     produce.
 #   - PROVE THE PIN. `pr-origin.sh pin` asks whether a CHILD sees this repository,
 #     and the child that matters is one the driver starts. Proving it here would
 #     prove that this process exports, which is true by construction.
@@ -141,10 +137,19 @@ esac
 # whatever this run had written. Nothing collects it. That is litter, and the record
 # accepts it, because the alternative is loss.
 #
-# AND THE TRAPS GO WITH IT. `EXIT`, `HUP`, `INT` and `TERM` were armed to run that
-# cleanup, and there is nothing left for them to do — measured on bash 5, an untrapped
-# fatal `TERM` ends the run with status 143, which is what a caller should see. A handler
-# that only re-raises is a handler that changes nothing.
+# THE CLEANUP TRAPS GO WITH IT, and `INT` alone stays for a reason that is not cleanup.
+# `EXIT`, `HUP`, `INT` and `TERM` were armed to run that cleanup and there is nothing left
+# for them to do: measured on bash 5, an untrapped `HUP` ends the run with 129 and an
+# untrapped `TERM` with 143, which is what a caller should see.
+#
+# `INT` IS NOT ONE OF THOSE. Measured the same way, `kill -INT` at this process while
+# `pr-origin.sh` runs does not end it — the run continues, creates every working file and
+# publishes `status=ready`, so a caller reads a session somebody stopped as one that
+# succeeded. This handler removes NOTHING: it disarms itself and re-raises, which is the
+# whole of it, and the caller then sees 130 with whatever had been made left exactly where
+# a refusal leaves it. Where the signal was ignored on entry bash installs no handler at
+# all and the run carries on, which is what a process started with `INT` ignored should do.
+trap 'trap - INT; kill -INT "$$"' INT
 
 # THE REFUSALS SAY WHY AND STOP, and that is all they do. They used to clean up as well,
 # and then the `EXIT` trap cleaned up again behind them — the second pass being the

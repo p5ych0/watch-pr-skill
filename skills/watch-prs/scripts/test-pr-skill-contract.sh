@@ -362,9 +362,9 @@ _rb_gone="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -nE 'RB_ORIGIN_DIR|RB_ORIGI
     || die "a name the helper now owns is back in SKILL.md: $_rb_gone"
 # NOTHING THE DRIVER READ IS UNLINKED, and that is a removal rather than an omission.
 # `$RB_SETUP_DIR` is published in argv, so `rm -f "$RB_SETUP_DIR/pin/pin"` unlinks a
-# REPLACEMENT's own `pin` when the directory it names has been swapped — the same
-# defect `pr-setup.sh` answers with a held descriptor and a recorded inode, neither of
-# which this shell has. What the removals were for does not survive examination: the
+# REPLACEMENT's own `pin` when the directory it names has been swapped — the same defect
+# that left `pr-setup.sh` removing nothing either, since no name a shell can resolve is
+# proof against it. What the removals were for does not survive examination: the
 # origin is `git remote get-url origin`, which anyone who can reach the checkout can
 # read anyway, and the directory is mode 700.
 case "$skill_flat" in
@@ -954,9 +954,10 @@ FORGE
         || die "the empty-parent refusal is silent: '$_ep_out'"
 
     # ── what the read brings in is re-proved ──────────────────────────────
-    # A MISSING ENV FILE IS A REFUSAL, not a session with no values. The helper
-    # reported success here, which is the state a source can be the only thing to
-    # catch.
+    # A MISSING ORIGIN FILE IS A REFUSAL, not a session with no identity. The helper
+    # reports success here and writes nothing, so the driver's bound-descriptor read is
+    # the only thing between that and a run pinned to whatever `REVIEW_BUS_REMOTE`
+    # already held.
     _ne=0
     _ne_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
         FORGE_NOORIGIN=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '

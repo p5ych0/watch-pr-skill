@@ -38,9 +38,16 @@ The last row is the one that ends it. Shell has no descriptor-relative removal: 
 name after whatever check preceded it**, so there is no shape that removes anything here
 and cannot take something a same-UID process substituted.
 
-**The traps went with the cleanup**, because there was nothing left for a handler to run.
-Measured on bash 5: an untrapped fatal `TERM` ends the run with status 143, which is what
-a caller should see.
+**The cleanup traps went with the cleanup**, because there was nothing left for a handler
+to run. Measured on bash 5: an untrapped `TERM` ends the run with status 143 and an
+untrapped `HUP` with 129, which is what a caller should see.
+
+**`INT` is the exception, and it removes nothing either.** Measured the same way, a
+non-interactive shell does not die of `INT` delivered to it while it waits on a child: the
+run continues, writes every working file and publishes `status=ready`, so a caller reads a
+session somebody stopped as one that succeeded. The handler disarms itself and re-raises —
+that is the whole of it — and the reservation is left exactly as any other refusal leaves
+it.
 
 ## What is accepted, measured rather than argued
 
@@ -51,9 +58,10 @@ a caller should see.
 | a signal at any point | the same |
 | anything a same-UID process placed at or inside that name | **untouched** |
 
-`test-pr-setup.sh` stages each of those against the real helper, and asserts that the file
-contains NO removal of any kind and arms NO trap — so a shape that resolves a name for
-removal cannot come back without a case failing.
+`test-pr-setup.sh` stages each of those against the real helper — `TERM` and `INT` both
+delivered mid-run — and asserts that the file contains NO removal of any kind and that no
+handler it arms removes anything, so a shape that resolves a name for removal cannot come
+back, behind a signal or otherwise, without a case failing.
 
 ## What it costs
 

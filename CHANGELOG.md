@@ -66,8 +66,12 @@
   resolves the name again after the comparison.
 
   Shell has no descriptor-relative removal, so there is no shape that works. The helper
-  removes nothing now, and the traps went with the cleanup they existed to run: an
-  untrapped fatal signal ends the run with the status a caller should see. The cost is
+  removes nothing now, and the cleanup traps went with the cleanup they existed to run: an
+  untrapped `TERM` ends the run with 143 and an untrapped `HUP` with 129, which is what a
+  caller should see. `INT` is the one signal that needs a handler, and it removes nothing
+  either — measured, a non-interactive shell survives `INT` delivered while it waits on a
+  child, so the run went on to write every working file and publish `status=ready` for a
+  session somebody had stopped. The handler disarms itself and re-raises. The cost is
   litter rather than loss — one directory per refused attempt, holding whatever had been
   written — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with the table
   of what each earlier shape destroyed.

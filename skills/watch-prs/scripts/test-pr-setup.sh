@@ -332,10 +332,10 @@ _forge_origin() {   # _forge_origin <body>
     chmod +x "$_stage/pr-origin.sh"
     return 0
 }
-# THE THIRD ARGUMENT IS WHAT THE CLEANUP IS EXPECTED TO DO, and it is not always
-# "removed". Nothing is given back at all, at any stage: the name is published in argv,
+# WHAT EVERY CASE BELOW ASSERTS IS THAT THE REFUSAL TOOK NOTHING WITH IT. Nothing is
+# given back at any stage, an empty reservation included: the name is published in argv,
 # and every removal shape resolved a name a same-UID process may have substituted. That is
-# the property rather than a shortfall.
+# the property rather than a shortfall, so there is no per-case expectation to pass in.
 _stagecase() {   # _stagecase <reason> <status>
     local want="$1" wrc="$2" d o=0 oo
     d="$(mktemp -d "$TMP/st.XXXXXX")/dir"
@@ -423,20 +423,38 @@ rm -rf "$_rr"
 # Measured: bash terminates while waiting on the foreground child rather than deferring
 # to its return, so the run dies partway through with the reservation and the transport
 # in place and the later files never written.
-_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"
-kill -TERM "$PPID"'
-_sg="$(mktemp -d "$TMP/sg.XXXXXX")/dir"
-_sg_rc=0
-_sg_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_sg" 2>&1)" || _sg_rc=$?
-[ "$_sg_rc" -eq 143 ] \
-    && pass "an untrapped TERM ends the helper with 128+15, nothing having handled it" \
-    || die "the signal case gave rc=$_sg_rc '$_sg_out'"
-# AND WHAT HAD BEEN MADE IS STILL THERE, which is the half a text scan cannot reach: a
-# handler that removed the reservation would leave this true only for the transport, and
-# one that removed the tree would leave neither.
-{ [ -d "$_sg" ] && [ -f "$_sg/o/origin" ]; } \
-    && pass "…and the reservation and the transport inside it are left where they are" \
-    || die "the signal took something with it (dir=$([ -d "$_sg" ] && echo yes || echo no) transport=$([ -f "$_sg/o/origin" ] && echo yes || echo no))"
+#
+# AND `INT` IS WHAT MADE THIS SECTION NECESSARY. Non-interactively bash does not die of it
+# here: with no handler the run CONTINUES past the signal, writes every working file and
+# publishes `status=ready`, so a caller reads a session somebody stopped as one that
+# succeeded. `TERM` needs no handler and `INT` does, which is why both run rather than one
+# standing for the other.
+_sigcase() {   # _sigcase <signal> <status>
+    local sig="$1" want="$2" d rc=0 out
+    _forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"
+kill -'"$sig"' "$PPID"'
+    d="$(mktemp -d "$TMP/sg.XXXXXX")/dir"
+    out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$d" 2>&1)" || rc=$?
+    [ "$rc" -eq "$want" ] \
+        && pass "a $sig ends the helper with $want" \
+        || die "the $sig case gave rc=$rc '$out'"
+    # THE READY LINE IS ASSERTED ABSENT AS WELL AS THE STATUS, because the failure this
+    # case exists for is a run that carries on to the end: with `INT` unhandled the status
+    # was 0 AND `status=ready` was published, and a caller branches on both.
+    case "$out" in
+        *'status=ready'*) die "the $sig case published a ready line for a run that was stopped" ;;
+        *) pass "…with no ready line, so nothing downstream reads it as a session that started" ;;
+    esac
+    # AND WHAT HAD BEEN MADE IS STILL THERE, which is the half a text scan cannot reach: a
+    # handler that removed the reservation would leave this true only for the transport,
+    # and one that removed the tree would leave neither.
+    { [ -d "$d" ] && [ -f "$d/o/origin" ]; } \
+        && pass "…and the reservation and the transport inside it are left where they are" \
+        || die "the $sig case took something with it (dir=$([ -d "$d" ] && echo yes || echo no) transport=$([ -f "$d/o/origin" ] && echo yes || echo no))"
+    return 0
+}
+_sigcase TERM 143
+_sigcase INT 130
 
 # ── nothing is removed at all, which is the whole cleanup contract ────────
 # EVERY SHAPE THAT REMOVED ANYTHING NEEDED A NAME, and shell has no descriptor-relative
@@ -453,10 +471,18 @@ _rm_n=0; _rm_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm
 [ "$_rm_n" -eq 0 ] \
     && pass "pr-setup.sh removes nothing at all, so no name it resolves can take another's object" \
     || die "pr-setup.sh has $_rm_n removals; it is meant to have none"
+# THE TRAPS ARE COUNTED THE SAME WAY, and one is expected: `INT` is not fatal here without
+# a handler, so the run would otherwise continue and publish a ready line. What is asserted
+# of it is that no handler REMOVES anything — a body that did would put the whole class
+# back behind a signal, which is where it is hardest to see.
 _tr_n=0; _tr_n="$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '^trap ')" || _tr_n=0
-[ "$_tr_n" -eq 0 ] \
-    && pass "…and no traps, since a handler with no cleanup to run changes nothing" \
-    || die "pr-setup.sh arms $_tr_n traps with no cleanup for them to run"
+[ "$_tr_n" -eq 1 ] \
+    && pass "…and one trap, which is the INT re-raise the measured behaviour needs" \
+    || die "pr-setup.sh arms $_tr_n traps; it is meant to arm exactly the INT one"
+_trb_n=0; _trb_n="$(grep '^trap ' "$SCRIPT" | grep -c 'rmdir\|rm -f\|rm -rf\|unlink')" || _trb_n=0
+[ "$_trb_n" -eq 0 ] \
+    && pass "…and no handler removes anything, so the class cannot come back behind a signal" \
+    || die "$_trb_n of pr-setup.sh's traps remove something"
 
 # ── the creates are exclusive, so nothing is truncated through them ───────
 # A PLAIN `>` OPENS WITH O_TRUNC AND FOLLOWS SYMLINKS. This directory's name is
