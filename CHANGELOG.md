@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.86] — 2026-08-31
+
+- **The Copilot phase's first stage hands its sha back in a file, and the driver stops
+  asking the API twice.** `record` proves the head Codex signed, posts the signoff and
+  knows that sha — and the document then read it back with `pr-signoff.sh sha`, validated
+  the answer with a forty-hex regex and a status check, and branched on both. A second
+  round-trip and eleven lines of the one shell nothing can harden, for a value the stage
+  that had just run already held.
+
+  `record` takes a third argument now, the file to write it into, as
+  `pr-close-round.sh gate` has handed the head over since #202 and `post` the baseline
+  since #234. The file is emptied before anything can refuse, so a stopped stage cannot
+  leave a previous run's sha to be read as this one's; the write happens before the
+  comment is posted, with its status taken and the value read back, because afterwards the
+  signoff is on the PR and the stage cannot be un-run; and it is refused if it is the body
+  file, by path and by `-ef`, since the sha would overwrite the account being posted.
+
+  The stage runs as the `if` condition with it, so `PHASE_OUT` and `PHASE_RC` are gone
+  too — no capture to re-print, and no name for a startup file to have made readonly.
+  `case $?` in the `else` keeps the three answers apart, and the round-boundary pause
+  still reads the sha and names it, because the signoff is recorded either way.
+
+  Twelve lines restating the script's own header went with it. #239.
+
 ## [2.0.85] — 2026-08-30
 
 - **The round-close recipe is 2,258 characters shorter, and every one of them came out of

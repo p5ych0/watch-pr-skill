@@ -1488,14 +1488,14 @@ grep -qi 'precede the push' "$SKILL" \
 # driver ASKS, that it takes the status, that it checks the shape anyway, and that
 # no copy of the parser grew back. The behavioural coverage did not shrink — it
 # moved to the file that can run it, which is the whole point of the removal.
-# TWO, SINCE #123: the phase record in step 7 and the sha the gate is pinned to in
-# the resume path. The resume recipe's own two reads moved into
-# `pr-phase-state.sh`, which asks through the same helper and is covered by a
-# fixture that runs it.
+# ONE, SINCE #239: the sha the gate is pinned to in the RESUME path, where a later
+# session genuinely has to read the record back. Step 7's own read is gone — `record`
+# proved that sha and hands it over in a file, so asking the API again was a second
+# answer to a question this process had already settled.
 _sha_reads="$(grep -c 'pr-signoff.sh sha N' "$SKILL" || true)"
-[ "$_sha_reads" -eq 2 ] \
-    && pass "both head reads ask pr-signoff.sh for the sha alone" \
-    || die "expected two 'pr-signoff.sh sha' reads in SKILL.md, found $_sha_reads"
+[ "$_sha_reads" -eq 1 ] \
+    && pass "the one remaining head read asks pr-signoff.sh for the sha alone" \
+    || die "expected one 'pr-signoff.sh sha' read in SKILL.md, found $_sha_reads"
 # NO RECORD PARSING LEFT, IN ANY SHAPE. A `sed` over `PR_SIGNOFF` was the second
 # form this took, and `sed` is a name: one that prints a plausible forty hex and
 # exits 0 pins a merge to whatever it says.
@@ -2280,16 +2280,21 @@ _tail_ok=0
 [ "$_tail_ok" -eq 1 ] \
     && pass "the record block's ordinary path leaves it succeeding" \
     || die "the record block exits non-zero when the phase recorded normally"
-# …and the document uses that shape rather than the trailing `&&` that did not.
-grep -q 'if \[\[ \$PHASE_RC -eq 3 \]\]; then' "$SKILL" \
-    && pass "…and SKILL.md branches with an if, not a trailing &&" \
-    || die "the record block ends in a test whose false value becomes the block's status"
+# …AND THE DOCUMENT BRANCHES ON THE STAGE ITSELF. `PHASE_RC` is gone with #239: the
+# stage is the `if` condition, and the pause is a `3)` arm of a `case $?` in its
+# `else`, so no name holds the status and no trailing test can become the block's.
+grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" \
+    && pass "…and SKILL.md runs the record stage as the condition, with no name for its status" \
+    || die "the record stage's status goes through a variable; take it at the invocation"
+grep -q 'PHASE_RC' "$SKILL" \
+    && die "the phase status is held in a name again" \
+    || pass "…and PHASE_RC is gone with it"
 
 # THE TRANSITION'S TWO STAGES ARE IN ORDER, with the operator's decision between
 # them — `record` proves and posts, the document stops and asks, and only the
 # answer runs `open`. Anchored on the invocations, not on the usage comment that
 # lists both a few lines above them.
-_rec_ln="$(grep -n 'PHASE_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_rec_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _stop_ln="$(grep -n 'STOP — the next phase is the operator' "$SKILL" | head -1 | cut -d: -f1)" || true
 _open_ln="$(grep -n 'OPEN_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_rec_ln" ] && [ -n "$_stop_ln" ] && [ -n "$_open_ln" ] \

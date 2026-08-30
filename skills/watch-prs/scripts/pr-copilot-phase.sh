@@ -3,7 +3,7 @@
 # operator asks for it — open the Copilot pass on that same head, then close it on
 # Copilot's own clean verdict.
 #
-#   pr-copilot-phase.sh record <pr> <body-file>
+#   pr-copilot-phase.sh record <pr> <body-file> <sha-file>
 #   pr-copilot-phase.sh open   <pr> <codex-sha>
 #   pr-copilot-phase.sh close  <pr> <codex-sha> [both|codex-only]
 #
@@ -410,6 +410,25 @@ fi
 BODY_FILE="${2:-}"
 [[ -n $BODY_FILE ]] \
     || { echo "ABORT: a body file is required: the paragraph saying what the PR does and what the Codex phase changed."; exit 1; }
+# AND A FILE TO HAND THE SIGNED-OFF SHA BACK IN, because the caller needs it and asking
+# the API a second time is a second answer. This stage PROVES that sha, records it and
+# knows it; `pr-close-round.sh gate` has handed the head over the same way since #202 and
+# `post` the baseline since #234. The driver read it back with `pr-signoff.sh sha`, then
+# validated the result with a regex and a status check — a round-trip and eleven lines of
+# the one shell nothing can harden, for a value this process already holds. #239.
+SHA_FILE="${3:-}"
+[[ -n $SHA_FILE ]] \
+    || { echo "ABORT: a sha file is required: 'record' writes the signed-off commit into it for the caller to read back."; exit 1; }
+# NOT THE BODY FILE, by path and by `-ef`. The sha would overwrite the account this stage
+# is about to post, and a caller with a tidy scratch directory produces that by accident.
+if [[ $SHA_FILE = "$BODY_FILE" ]] || [[ $SHA_FILE -ef $BODY_FILE ]] 2>/dev/null; then
+    echo "ABORT: the sha file and the body file are the same file ('$SHA_FILE'); the sha would overwrite the account."
+    exit 1
+fi
+# EMPTIED FIRST, so a refusal cannot leave a PREVIOUS run's sha for the caller to read as
+# this one's. Empty is not a valid sha, so an emptied file is refused by the reader rather
+# than mistaken for an answer.
+> "$SHA_FILE" || { echo "ABORT: could not empty the sha file '$SHA_FILE'."; exit 1; }
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest
 # summary the thing read before the diff — so a truncated one is worse than none:
@@ -696,6 +715,17 @@ fi
 SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_MARKER" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
+
+# THE SHA IS HANDED BACK BEFORE THE POST, with the write's status taken and the value
+# read back. `printf` can report success and fail at the flush, and taking the status only
+# works while there is something left to refuse WITH: after the comment is posted the
+# signoff is on the PR and this stage cannot be un-run.
+printf '%s\n' "$CODEX_SHA" > "$SHA_FILE" \
+    || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
+_rb_sha_back="$(<"$SHA_FILE")" \
+    || { echo "ABORT: could not read back the signed-off sha from '$SHA_FILE'; nothing has been posted."; exit 1; }
+[[ $_rb_sha_back = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the signed-off sha did not survive being written to '$SHA_FILE'; nothing has been posted."; exit 1; }
 
 gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
     || { echo "ABORT: could not post the phase summary — the signoff is not recorded; do not request Copilot."; exit 1; }
