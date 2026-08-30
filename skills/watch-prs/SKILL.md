@@ -422,6 +422,8 @@ then
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
         # THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+        # AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         # AND A REFUSAL THERE STOPS BEFORE THE WATCH, the request having already gone out.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         PRIOR_REVIEW=

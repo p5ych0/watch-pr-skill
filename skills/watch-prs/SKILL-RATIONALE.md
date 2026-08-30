@@ -1410,12 +1410,21 @@ is the same defect — one document, one variable, two sites — and leaving the
 one unbound would be the copy that goes stale, which is the shape this repository has
 paid for more than once.
 
-AND IN THE SAME SHAPE, which is not a detail: a POSITIVE condition with the refusal
-in the `else`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, it does not refuse at
-all — measured, a failed redirection on a compound command gives `!` no status to
-invert, and both spellings take the ELSE branch, so a missing file fell through to the
-`case`, matched the empty arm, and armed the watch with nothing. That is how it was
-written when the binding was added, and only executing it found out.
+## AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
+
+`if { … } 9<"$PRIOR_FILE"; then <use>; else <refuse>; fi`, and never the negation with
+the refusal in the `then`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, this fence
+DOES NOT REFUSE AT ALL: measured on bash 5, a failed redirection on a compound command
+gives `!` no status to invert, and both spellings take the ELSE branch.
+
+    if ! { … } 9</nonexistent; then A; else B; fi   -> B
+    if   { … } 9</nonexistent; then A; else B; fi   -> B
+
+SO THE NEGATED FORM IS FAIL-OPEN HERE, which is the opposite of how it reads. A missing
+file fell through to the `case`, matched the empty arm, and armed the watch with no
+baseline — the hole the binding was added to close. That is how it was written when the
+binding landed, it survived a review round, and only EXECUTING the fence found it: every
+check on it was a `grep` for the redirection, which was present and correct throughout.
 
 ## AND A REFUSAL THERE STOPS BEFORE THE WATCH, the request having already gone out.
 
@@ -1461,9 +1470,19 @@ that rule in the document would be the duplication `CLAUDE.md` records paying fo
 repeatedly — and it would be the copy furthest from the code, in the shell least able
 to run it.
 
-WHAT THIS SHELL PROVES IS WHAT ONLY THIS SHELL CAN: that the ASSIGNMENT took. A
-readonly or value-transforming `PRIOR_REVIEW` defeats it in silence, and no helper can
-see that from outside the process.
+AND THERE IS NO ASSIGNMENT POSTCONDITION HERE ANY MORE, which is worth stating because
+there was one and it is gone. It compared the variable against a second read of the
+bound descriptor, and that second read is what does not work on macOS — the descriptor
+is duplicated rather than reopened, so it returns empty and the comparison refuses every
+non-empty baseline. It was removed rather than replaced, and each attribute it was meant
+to catch is answered elsewhere: a READONLY name ends the shell outright at the failed
+assignment, measured, rather than passing quietly; a value-TRANSFORMING or aliased one is
+what step 2's probe is for, before the request goes out; and a value that arrives
+transformed anyway is refused by `pr-watch.sh`, which validates what it is given as
+`--after-review`.
+
+SO NOTHING HERE CLAIMS TO PROVE THE ASSIGNMENT, and a claim saying otherwise would be a
+claim with no code under it.
 
 ## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
 

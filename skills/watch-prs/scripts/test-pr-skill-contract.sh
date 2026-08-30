@@ -1719,7 +1719,14 @@ _bl_run() {   # _bl_run <fence> <prior-file> ; prints "<rc>|<output>"
     printf '%s|%s' "$rc" "$out"
 }
 printf '%s\n' 4242 > "$_bl_dir/good"
+# THE STATUS IS PART OF EACH REFUSAL, not decoration. The opening fence exits 0 — the
+# request is posted, there is nothing to retry — and the round-close one exits 1, because
+# something is wrong and the round is closed. Swapped, the first looks retryable and a
+# session makes the request twice, and the second looks successful and the driver walks
+# into the watch. Both mutations keep the diagnostic and omit `TOOK:`, so only the status
+# tells them apart.
 for _f in close open; do
+    case "$_f" in close) _bl_rc=1 ;; *) _bl_rc=0 ;; esac
     _bl_ok="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/good")"
     case "${_bl_ok#*|}" in
         TOOK:\[4242\]) pass "the $_f fence reads a real baseline through the descriptor" ;;
@@ -1733,7 +1740,10 @@ for _f in close open; do
     # AND the continuation absent.
     case "${_bl_gone#*|}" in
         *TOOK:*) die "the $_f fence printed its refusal and carried on: '${_bl_gone}'" ;;
-        *'could not be read back'*) pass "…and REFUSES a baseline file that is not there, reaching nothing after it" ;;
+        *'could not be read back'*)
+            [ "${_bl_gone%%|*}" = "$_bl_rc" ] \
+                && pass "…and REFUSES a baseline file that is not there, with status $_bl_rc and nothing after it" \
+                || die "the $_f fence refused with status ${_bl_gone%%|*}, not $_bl_rc" ;;
         *) die "the $_f fence accepted a missing baseline file: '${_bl_gone}'" ;;
     esac
     if [ "$(id -u)" -ne 0 ]; then
@@ -1742,7 +1752,10 @@ for _f in close open; do
         chmod 600 "$_bl_dir/unreadable"
         case "${_bl_unr#*|}" in
             *TOOK:*) die "the $_f fence printed its refusal for an unreadable file and carried on: '${_bl_unr}'" ;;
-            *'could not be read back'*) pass "…and one it cannot read, which an empty read would have accepted" ;;
+            *'could not be read back'*)
+                [ "${_bl_unr%%|*}" = "$_bl_rc" ] \
+                    && pass "…and one it cannot read, with the same status" \
+                    || die "the $_f fence refused an unreadable file with status ${_bl_unr%%|*}, not $_bl_rc" ;;
             *) die "the $_f fence accepted an unreadable baseline file: '${_bl_unr}'" ;;
         esac
     else
