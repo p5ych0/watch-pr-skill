@@ -488,6 +488,11 @@ kill -'"$sig"' "$PPID"'
 }
 _sigcase TERM 143
 _sigcase INT 130
+# AND `HUP`, WHICH THE CONTRACT NAMES AND NOTHING EXERCISED. The structural count cannot
+# see WHICH signal the one trap is for: adding `HUP` to the `INT` handler keeps the count
+# at one and both cases above green, while making `HUP` re-raise as `INT` — and a handler
+# that returned instead would let the run publish a ready line.
+_sigcase HUP 129
 
 # ── nothing is removed at all, which is the whole cleanup contract ────────
 # EVERY SHAPE THAT REMOVED ANYTHING NEEDED A NAME, and shell has no descriptor-relative

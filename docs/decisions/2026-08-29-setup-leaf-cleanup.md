@@ -57,12 +57,15 @@ it.
 | a refusal after the reservation | the directory is **left**, with whatever had been written in it |
 | a refusal from `pr-origin.sh read` itself | the directory is left and is **empty** — that helper creates its own transport and gives it back on its own refusal path (#157), which is the one removal this contract does not cover and does not own |
 | a signal at any point | **whatever had been written by then is left** — `TERM` and `HUP` terminate by bash's own default with no handler at all, `INT` is re-raised by the one handler there is, and neither path removes anything, so a signal after the reader wrote `o/origin` leaves the reservation AND that transport |
-| anything a same-UID process placed at or inside that name | **untouched** |
+| anything a same-UID process placed at or inside that name | **untouched by this helper** — with one exception it does not own: an object at `<dir>/o/origin` is removed by `pr-origin.sh`'s own cleanup, which resolves that name (`rm -f "$OUT"`), so a replacement planted there between its write and its refusal goes with it |
 
-`test-pr-setup.sh` stages each of those against the real helper — `TERM` and `INT` both
+`test-pr-setup.sh` stages these against the real helper — `TERM`, `INT` and `HUP` all
 delivered mid-run — and asserts that the file contains NO removal of any kind and that no
 handler it arms removes anything, so a shape that resolves a name for removal cannot come
-back, behind a signal or otherwise, without a case failing.
+back, behind a signal or otherwise, without a case failing. What it does NOT stage is the
+exception in the last row: that removal is `pr-origin.sh`'s, governed by its own contract
+and its own fixture, and this record neither owns it nor accepts it on that helper's
+behalf.
 
 ## What it costs
 

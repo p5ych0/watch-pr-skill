@@ -1715,19 +1715,30 @@ the file that gets bound. `-O` is what stands there, so the residue is a replace
 the SAME account — which is not a boundary, since that account can edit this session's
 files directly.
 
-IT MATTERS LESS THAN IT DID, and that is worth saying rather than leaving the reader to
-work out. While this file was SOURCED, a replacement was arbitrary code in the
-operator's shell. It is a string now, and the identity parser and the child pin are two
-independent things it has to satisfy.
+ONE THING ABOUT IT IMPROVED AND THE REST DID NOT, and the difference is worth stating
+exactly. While this file was SOURCED, a replacement was arbitrary CODE in the operator's
+shell; it is a string now, so the worst case is a wrong repository rather than execution.
+WHAT IT IS NOT is a value two independent checks have to pass. `rb_identity` asks whether
+the string is a usable identity, not whether it is THIS checkout's, and `pr-origin.sh pin`
+reports `REVIEW_BUS_REMOTE` as a CHILD sees it — the value this shell just exported — so a
+planted-but-valid remote satisfies both, being what both are computed from. That is #230,
+open, and it is a property of this handoff on `main` as much as here.
 
 ## WHAT WAS READ IS PROVED HERE, because a file is not a promise.
 
 The helper proves the origin parses before it writes it. This shell proves it again,
 and the duplication is deliberate: what the helper can vouch for is the file it
 WROTE, and what this shell reads is the file that is THERE. Between the two is a
-directory under a shared parent, which is the same window
-`docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts for the transport
-name.
+directory under a shared parent, and a same-UID process that replaces the file in that
+window is what this shell binds.
+
+THAT WINDOW IS NOT AN ACCEPTED ONE, and it must not be attributed to the record that
+accepts the transport NAME. `docs/decisions/2026-08-26-transport-candidate-in-argv.md`
+accepts a squat on the candidate BEFORE the `mkdir`, and what makes it acceptable is
+measured: the exclusion means a squatter cannot put a value where setup will read it, so
+the cost is a denial of service and never a forged identity. Here the file exists and the
+helper has exited, so a replacement IS a forged identity — a different window with a
+different cost, which is #230 and open.
 
 So the identity is re-derived from the value that was READ rather than trusted, and a
 value that is empty, spans a line, or is not a usable identity is refused by expansion —
