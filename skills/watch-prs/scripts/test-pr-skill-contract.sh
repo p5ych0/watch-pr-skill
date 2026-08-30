@@ -1645,9 +1645,16 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" |
     || die "the document does not put the thread replies between gate and post (gate=$_gate_ln replies=$_res_ln post=$_post_ln)"
 # THE THREE ANSWERS ARE DISTINGUISHED. A pause read as a stop loses the operator's
 # decision; a stop read as success closes a round that did not close.
-[ "$(grep -c 'ROUND_RC' "$SKILL")" -ge 4 ] \
+#
+# ASSERTED AS THE THREE THINGS THAT HAVE TO HAPPEN TO THE STATUS rather than as a
+# COUNT of the name. It was `grep -c … -ge 4`, which was four because of the shape at
+# the time — a `case` on the status after the fence — and that `case` is gone: it sat
+# where a neutralised `exit` could fall into it and report success on a refused
+# baseline. A count would have made removing it look like a regression.
+grep -q 'ROUND_RC=\$?' "$SKILL" \
+    && grep -q 'if \[ "\$ROUND_RC" -eq 0 \]; then' "$SKILL" \
     && grep -q 'exit "\$ROUND_RC"' "$SKILL" \
-    && pass "…and both recipes pass the round-closer's status on" \
+    && pass "…and the round-closer's status is captured, branched on, and passed on" \
     || die "a recipe swallows the round-closer's status"
 
 # ── THE DRIVER READS THE BASELINE BACK ─────────────────────────────────────
@@ -1688,23 +1695,26 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 # descriptor read that returns empty on macOS — a readonly name ends the shell at the
 # failed assignment instead, a transforming one is what step 2's probe is for, and a value
 # that arrives transformed anyway is refused by `pr-watch.sh`. The execution cases below
-# are what hold the behaviour; this only holds that both paths SAY something when the read
-# fails.
+# are what hold the behaviour; this only holds that the round-close path SAYS something
+# when the read fails.
 [ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 1 ] \
     && pass "…and refuses in its own words when that read fails" \
     || die "the round-close recipe reads the baseline without a refusal for a read that failed"
-# ── AND BOTH BASELINE READS ARE EXECUTED, NOT ONLY GREPPED ────────────────
+# ── AND THE BASELINE READ IS EXECUTED, NOT ONLY GREPPED ──────────────────
 #
 # Every assertion above this point is a `grep` for the redirection, the assignment
 # or the diagnostic text, and all three stay green against a fence that no longer
-# refuses: the shape can be right while the behaviour is wrong. What has to hold is
+# refuses: the shape can be right while the behaviour is wrong. That is not
+# hypothetical — the sibling fence at step 2 was written `if ! { … }; then ABORT`,
+# which does not refuse at all, and every grep on it passed. What has to hold is
 # that a `$PRIOR_FILE` which is missing or unreadable REFUSES rather than reading as
 # the legitimate empty baseline — because an empty baseline arms the watch with
 # nothing, and on the automatic path a pass that finished during the CI wait is then
 # accepted as the answer to the request just made.
 #
-# LIFTED AND RUN, both fences, against a good file and a missing one. The abort arms
-# `exit`, so each runs in its own shell and the status and the output are the answer.
+# LIFTED AND RUN against a good file, a missing one, an unreadable one and an empty one.
+# The abort arms `exit`, so it runs in its own shell and the status and the output are the
+# answer. ONE fence: the opening request's read is `main`'s, unbound, and #238 carries it.
 _bl_dir="$TMP_CL/bl"; mkdir -p "$_bl_dir" || die "the baseline-read scratch directory could not be made"
 # The round-close fence is a whole `if … fi` at column 0.
 awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.sh"
@@ -1714,11 +1724,15 @@ awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.s
 # THE ABORT ARMS `exit`, so a sourced fence that refuses ends the wrapper before it can
 # report — which is why the refusal is read off the OUTPUT, not off a `||` that never
 # runs. The diagnostic is what an operator sees, so it is what the case asserts.
+# REPORTED FROM AN `EXIT` TRAP, because every arm of the fence now ends in `exit` —
+# including the success one, which is what stops a neutralised `exit` reaching the
+# continuation. Nothing after the source would run, so the trap is what observes the
+# value and the refusal text is what distinguishes the two.
 _bl_run() {   # _bl_run <fence> <prior-file> ; prints "<rc>|<output>"
     local out rc=0
     out="$(ROUND_RC=0 PRIOR_FILE="$2" bash -c '
-        . "$1" 2>/dev/null
-        printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"' _ "$1" 2>/dev/null)" || rc=$?
+        trap '"'"'printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"'"'"' EXIT
+        . "$1" 2>/dev/null' _ "$1" 2>/dev/null)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
 printf '%s\n' 4242 > "$_bl_dir/good"
@@ -1742,8 +1756,7 @@ for _f in close; do
     # watch with an empty baseline, which is the failure. The refusal has to be present
     # AND the continuation absent.
     case "${_bl_gone#*|}" in
-        *TOOK:*) die "the $_f fence printed its refusal and carried on: '${_bl_gone}'" ;;
-        *'could not be read back'*)
+        *'could not be read back'*TOOK:\[\]*)
             [ "${_bl_gone%%|*}" = "$_bl_rc" ] \
                 && pass "…and REFUSES a baseline file that is not there, with status $_bl_rc and nothing after it" \
                 || die "the $_f fence refused with status ${_bl_gone%%|*}, not $_bl_rc" ;;
@@ -1754,8 +1767,7 @@ for _f in close; do
         _bl_unr="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/unreadable")"
         chmod 600 "$_bl_dir/unreadable"
         case "${_bl_unr#*|}" in
-            *TOOK:*) die "the $_f fence printed its refusal for an unreadable file and carried on: '${_bl_unr}'" ;;
-            *'could not be read back'*)
+            *'could not be read back'*TOOK:\[\]*)
                 [ "${_bl_unr%%|*}" = "$_bl_rc" ] \
                     && pass "…and one it cannot read, with the same status" \
                     || die "the $_f fence refused an unreadable file with status ${_bl_unr%%|*}, not $_bl_rc" ;;
@@ -1764,6 +1776,20 @@ for _f in close; do
     else
         pass "running as root, so the unreadable-baseline state is skipped by name"
     fi
+    # AND A NEUTRALISED `exit` CANNOT REACH THE SUCCESS PATH. `exit` is a name the
+    # operator's shell can replace with one that RETURNS, so the refusal prints and
+    # carries on — and what it carries on INTO decides whether it held. It used to fall
+    # out of both `if`s into a final `exit "$ROUND_RC"` with `ROUND_RC` still 0, so the
+    # fence reported success on a baseline it had just refused. Nothing follows the fence
+    # now, and this runs it with `exit` defined as a function that returns.
+    _bl_ex="$(ROUND_RC=0 PRIOR_FILE="$_bl_dir/no-such-file" bash -c '
+        exit() { return "${1:-0}"; }
+        . "$1" 2>/dev/null
+        printf "FELLTHROUGH:rc=%s" "$?"' _ "$_bl_dir/$_f.sh" 2>/dev/null)"
+    case "$_bl_ex" in
+        *'FELLTHROUGH:rc=0'*) die "with a returning exit the $_f fence ends at status 0: '$_bl_ex'" ;;
+        *) pass "…and a returning \`exit\` cannot carry the refusal into a success" ;;
+    esac
     # AND AN EMPTY FILE IS STILL AN ANSWER, which is the distinction the whole change
     # rests on: a legitimate empty baseline must NOT be refused.
     : > "$_bl_dir/empty"

@@ -38,7 +38,7 @@
   Nothing is checked less than before: what the driver stopped doing, the script does, and
   `test-pr-close-round.sh` covers both conditions and both spellings.
 
-  **And the baseline file is BOUND before it is read, on both paths.** Reading it as
+  **And the round-close read BINDS the baseline file before reading it.** Reading it as
   `$(<"$PRIOR_FILE")` cannot tell a missing or unreadable file from an empty baseline, and
   empty is legitimate — the ordinary answer when the head has no review yet. So a scratch
   directory cleaned under a resumed session armed the watch with no baseline at all, and

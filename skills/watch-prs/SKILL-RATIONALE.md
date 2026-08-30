@@ -1381,6 +1381,27 @@ fell through, matched the empty arm, and armed the watch with no baseline. Every
 on it was a `grep` for the redirection, which was present and correct throughout, and
 only EXECUTING the fence found it.
 
+## AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
+
+Every arm of this fence ends in `exit` and then a reserved word, and NOTHING FOLLOWS
+THE `fi`. That is the containment `CLAUDE.md` describes: `exit` is a name the
+operator's shell can replace with one that RETURNS, so an abort arm can print its
+reason and carry straight on — and what it carries on INTO is the only thing that
+decides whether the refusal held.
+
+IT DID NOT HOLD BEFORE. The refusal sat in an inner `else`, and after the enclosing
+`fi` came a `case` on `$ROUND_RC` and `exit "$ROUND_RC"`. With a returning `exit`,
+the abort printed, fell out of both `if`s, and reached that final line with
+`ROUND_RC` still 0 — so the fence reported SUCCESS on a baseline it had just
+refused, and step 3 watched with the cleared value, which is the in-flight review
+being accepted as this round's answer.
+
+SO THE SUCCESS ARM CARRIES THE EXIT TOO, and the `ROUND_RC` diagnostic moved into
+the `else` of the outer `if` rather than sitting after it. Position is the
+containment: there is no code after the fence for a neutralised `exit` to fall into,
+and the reserved word after each `exit` leaves the arm non-zero for anything that
+reads it.
+
 ## AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
 
 By the time this read runs the summary is posted and the next pass requested. The

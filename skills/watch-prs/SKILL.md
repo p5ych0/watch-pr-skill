@@ -914,20 +914,22 @@ if [ "$ROUND_RC" -eq 0 ]; then
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     # AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     PRIOR_REVIEW=
     if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
-        [[ -n x ]]
+        exit 0   # the script printed the head it closed on
+        [[ -n "" ]]
     else
         echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'. The round IS closed; do not enter the wait step, and do not re-close the round."
         exit 1
         [[ -n "" ]]
     fi
+else
+    echo "The threads are answered but the round did not close: no summary was posted and no pass was requested. The reason is above; do not retry it blind."
+    exit "$ROUND_RC"
+    [[ -n "" ]]
 fi
-case "$ROUND_RC" in
-    0) ;;   # the script printed the head it closed on
-    *) echo "The threads are answered but the round did not close: no summary was posted and no pass was requested. The reason is above; do not retry it blind." ;;
-esac
-exit "$ROUND_RC"
 ```
 
 In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,
