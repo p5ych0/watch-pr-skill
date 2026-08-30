@@ -420,7 +420,9 @@ then
     # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
-        # THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO, and at a different cost.
+        # THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO.
+        # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+        # AND A REFUSAL THERE STOPS BEFORE THE WATCH, the request having already gone out.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         PRIOR_REVIEW=
         if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
@@ -909,6 +911,8 @@ Then, and only then:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if [ "$ROUND_RC" -eq 0 ]; then
     # A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
+    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    # AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     PRIOR_REVIEW=
     if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then

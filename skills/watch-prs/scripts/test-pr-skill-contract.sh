@@ -1698,7 +1698,10 @@ grep -qF 'CLOSED_REC' "$SKILL" \
 _bl_dir="$TMP_CL/bl"; mkdir -p "$_bl_dir" || die "the baseline-read scratch directory could not be made"
 # The round-close fence is a whole `if … fi` at column 0.
 awk '/^if \[ "\$ROUND_RC" -eq 0 \]; then$/, /^fi$/' "$SKILL" > "$_bl_dir/close.sh"
-# The opening fence's read is nested; lift its own `if ! … fi` and dedent it.
+# The opening fence's read is nested; lift its own `if { … }; then … else … fi` and
+# dedent it. POSITIVE condition with the refusal in the `else`: the negated spelling is
+# the one this pull request found takes the non-refusal branch after a failed
+# redirection, so it must not be described here as the shape to look for.
 awk '/^        PRIOR_REVIEW=$/{f=1} f{print} f&&/^        fi$/{exit}' "$SKILL" \
     | sed 's/^        //' > "$_bl_dir/open.sh"
 { [ -s "$_bl_dir/close.sh" ] && [ -s "$_bl_dir/open.sh" ] \
@@ -1723,8 +1726,14 @@ for _f in close open; do
         *) die "the $_f fence gave '${_bl_ok}' on a readable baseline" ;;
     esac
     _bl_gone="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/no-such-file")"
+    # THE DIAGNOSTIC IS NOT ENOUGH ON ITS OWN. A fence that printed it and then carried
+    # on — an `exit` removed, or turned into a `return` — appends `TOOK:` as well, and a
+    # check for the message alone accepts exactly that: the driver proceeding toward the
+    # watch with an empty baseline, which is the failure. The refusal has to be present
+    # AND the continuation absent.
     case "${_bl_gone#*|}" in
-        *'could not be read back'*) pass "…and REFUSES a baseline file that is not there" ;;
+        *TOOK:*) die "the $_f fence printed its refusal and carried on: '${_bl_gone}'" ;;
+        *'could not be read back'*) pass "…and REFUSES a baseline file that is not there, reaching nothing after it" ;;
         *) die "the $_f fence accepted a missing baseline file: '${_bl_gone}'" ;;
     esac
     if [ "$(id -u)" -ne 0 ]; then
@@ -1732,6 +1741,7 @@ for _f in close open; do
         _bl_unr="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/unreadable")"
         chmod 600 "$_bl_dir/unreadable"
         case "${_bl_unr#*|}" in
+            *TOOK:*) die "the $_f fence printed its refusal for an unreadable file and carried on: '${_bl_unr}'" ;;
             *'could not be read back'*) pass "…and one it cannot read, which an empty read would have accepted" ;;
             *) die "the $_f fence accepted an unreadable baseline file: '${_bl_unr}'" ;;
         esac

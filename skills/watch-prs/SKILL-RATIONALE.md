@@ -1360,6 +1360,18 @@ refusal arm and prints it unless `echo` has been shadowed, `post` asks the conte
 question again and refuses, so no summary is posted and no pass requested, and the
 allocation the paths come from cannot produce the aliased case at all.
 
+## AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
+
+By the time this read runs the summary is posted and the next pass requested. The
+refusal stops the watch — that is all it can do — and the message says the round IS
+closed precisely so the next session does not treat it as a round that failed.
+
+RE-CLOSING IS THE EXPENSIVE MISREADING. A session that ran the round-close recipe
+again would post a SECOND summary and request a SECOND pass on the same head, which
+is the duplicate the trigger rules exist to prevent, and the reviewer would answer a
+round nobody ran. The exit is a `1` because something is wrong, and the text is what
+stops that `1` being read as "the round did not close".
+
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
 Twenty-four lines of this block were the two invocations, the exit statuses and the
@@ -1389,22 +1401,33 @@ which is the fail-closed rule `CLAUDE.md` states. Reading through `/dev/fd/9` th
 reads the object that redirection opened rather than resolving the name a second
 time.
 
-THE ROUND IS ALREADY CLOSED WHEN THIS FIRES, and the message says so. The summary is
-posted and the pass requested, so the refusal stops the WAIT and must not read as a
-round that failed: a session told otherwise re-closes a closed round, which posts a
-second summary and requests a second pass.
+What it protects is the WAIT, and the claim below says what it must not do instead.
 
-## THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO, and at a different cost.
+## THE OPENING BASELINE IS BOUND BEFORE IT IS READ TOO.
 
-The same read, at step 2, with the same hole and a cheaper failure: nothing has been
-closed there, so a refusal costs the request rather than the round. It is written the
-same way because it is the same defect — one document, one variable, two sites — and
-leaving the older one unbound would be the copy that goes stale, which is the shape
-this repository has paid for more than once.
+The same read, at step 2, with the same hole. It is written the same way because it
+is the same defect — one document, one variable, two sites — and leaving the older
+one unbound would be the copy that goes stale, which is the shape this repository has
+paid for more than once.
 
-WHAT DIFFERS IS THE EXIT. Step 2's refusal is a `0`: the request has been made, and
-the operator is told the wait cannot be armed. Step 5's is a `1` and says the round
-is closed. Both stop before the watch, which is the only thing either can protect.
+AND IN THE SAME SHAPE, which is not a detail: a POSITIVE condition with the refusal
+in the `else`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, it does not refuse at
+all — measured, a failed redirection on a compound command gives `!` no status to
+invert, and both spellings take the ELSE branch, so a missing file fell through to the
+`case`, matched the empty arm, and armed the watch with nothing. That is how it was
+written when the binding was added, and only executing it found out.
+
+## AND A REFUSAL THERE STOPS BEFORE THE WATCH, the request having already gone out.
+
+Step 2's refusal exits `0`, and the difference from step 5 is what has happened by
+then: the request is POSTED. There is nothing to undo and nothing to retry — the pass
+is queued whatever this shell does next — so what the refusal protects is the WAIT,
+which would otherwise be armed with no baseline and take the previous terminal review
+as the answer.
+
+SO IT IS NOT A FAILED REQUEST, and must not read as one. A session told the request
+failed would make it again, and a second `@codex review` on the same head is the
+duplicate pass the trigger rules exist to prevent.
 
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 
