@@ -40,11 +40,11 @@ contents and cannot destroy something.
 cleanup can destroy no CONTENTS whatever has happened at that name, and the cost moves
 from loss to litter.
 
-**One thing it can still take, and that is accepted elsewhere.** A racer which creates
-the candidate between `RB_PREEXISTED=no` and this helper's `mkdir` has its EMPTY
-reservation removed — the measured cost in
-`docs/decisions/2026-08-26-reservation-inference.md`, which this record does not widen and
-does not repeat.
+**And it takes nothing of anybody else's at all**, including an empty directory a racer
+left at the candidate. The one `rmdir` runs only where an inode was RECORDED — which needs
+this run's own `mkdir` to have reported success — and where the name still resolves to it,
+so a racer's directory can never match. `2026-08-26-reservation-inference.md` measures that
+loss for `pr-origin.sh`, whose cleanup is its own; this record does not inherit it.
 
 | situation | measured outcome |
 | --- | --- |

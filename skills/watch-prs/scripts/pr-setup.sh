@@ -15,12 +15,11 @@
 # were. The reservation is given back by ONE `rmdir`, which succeeds only while the
 # directory is EMPTY — so a refusal before anything was created takes the directory with
 # it, and one after `o/origin`, `work/` or the origin exists leaves this run's tree where
-# it is. NO CONTENTS AND NO DATA ARE EVER REMOVED — `rmdir` refuses a directory holding
-# anything and refuses a symlink — with one exception the base ref already accepts: a
-# racer that creates the candidate between `RB_PREEXISTED=no` and this helper's `mkdir`
-# has its EMPTY reservation taken by the cleanup, which is
-# `docs/decisions/2026-08-26-reservation-inference.md`'s measured cost. That is the
-# trade:
+# it is. NOTHING OF ANYBODY ELSE'S IS REMOVED, and that now includes an empty directory a
+# racer left at the candidate: the one `rmdir` runs only where an inode was RECORDED —
+# which needs this run's own `mkdir` to have reported success — and where the name still
+# resolves to it. Contents were never at risk, since `rmdir` refuses a directory holding
+# anything and refuses a symlink. That is the trade:
 # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` carries what each attempt at removing
 # the contents destroyed. A caller that must not accumulate those is a caller that has to
 # collect them itself; the driver does not, because it retries under a second parent and
@@ -135,8 +134,9 @@ esac
 # and three facts are needed. `RB_OWNED` is certain and late — set after a successful
 # `mkdir`. `RB_PREEXISTED` covers the window before that: a name that held nothing
 # when this run began is one this run made. And `-O` refuses a name another ACCOUNT
-# holds, which neither flag can see — that is what stops a replacement's own `origin`
-# or `o/origin` being unlinked through a path this run no longer owns.
+# holds, which neither flag can see — that is what stops the reservation-level `rmdir`
+# taking a directory another account put at this name. Nothing inside is ever removed, so
+# these guards are about the directory itself and nothing else.
 RB_OWNED=no
 RB_PREEXISTED=no
 RB_INO=
@@ -144,8 +144,7 @@ RB_INO=
 # AND THE OBJECT ITSELF IS HELD, because ownership is not identity. `-O` refuses a
 # name another ACCOUNT holds and that is the boundary the record is about — but a
 # replacement made by this same account passes every test above, and the cleanup would
-# then unlink `env` and `o/origin` THROUGH a path that no longer names what this run
-# created.
+# then give back a directory this run never created.
 #
 # AN OPEN DESCRIPTOR IS WHAT MAKES THE INODE A DURABLE IDENTITY. A bare inode number
 # is not one: an inode freed by a `rmdir` can be handed straight back to the next
@@ -220,9 +219,15 @@ rb_setup_give_back() {   # give back the reservation, if it is still this run's 
     # stands; where it was, the name must still resolve to it — and the held descriptor
     # is what makes that number mean the same object rather than one that inherited its
     # inode.
-    if [[ -n $RB_INO ]]; then
-        [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
-    fi
+    # NO RECORDED INODE, NO REMOVAL. An empty `RB_INO` means the `mkdir` never reported
+    # success or the identity could not be read, and in both cases a directory standing
+    # at this name is one this run cannot vouch for — a racer's, most likely, since the
+    # `mkdir` fails precisely when the name was already taken. Skipping the comparison
+    # and removing anyway is how an empty reservation belonging to somebody else was
+    # taken; requiring the record costs at most this run's own empty directory, left
+    # rather than given back.
+    [[ -n $RB_INO ]] || return 0
+    [[ "$(rb_setup_ino "$RB_DIR")" = "$RB_INO" ]] || return 0
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
@@ -419,7 +424,14 @@ printf '%s\n' "$RB_REMOTE" > "$RB_DIR/origin" || rb_setup_stop origin_write 2
 # status alone does not prove the file holds the value; and a caller reading an empty
 # or truncated origin would pin the session to it.
 [ -s "$RB_DIR/origin" ] || rb_setup_stop origin_write 2
-[ "$(cat "$RB_DIR/origin" 2>/dev/null)" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
+# THE READ-BACK'S OWN STATUS IS TAKEN, and separately from the comparison. Written as
+# `[ "$(cat …)" = "$RB_REMOTE" ]` the substitution's status is DISCARDED — the `[`
+# supplies its own — so a read that printed the right bytes and then failed was accepted
+# as proof the write had landed. `CLAUDE.md` records the same shape for `gh`: anything a
+# command prints before failing is not data.
+_rb_back=""
+_rb_back="$(cat "$RB_DIR/origin" 2>/dev/null)" || rb_setup_stop origin_write 2
+[ "$_rb_back" = "$RB_REMOTE" ] || rb_setup_stop origin_write 2
 
 # ── why there is no probe for the storage the pin needs ────────────────────
 #

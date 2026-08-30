@@ -83,10 +83,10 @@
   check-then-use one level down.
 
   `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup can
-  now destroy no CONTENTS whatever has happened at that name — an empty directory a racer
-  left at the candidate is the one thing it can still take, which
-  `docs/decisions/2026-08-26-reservation-inference.md` already accepts. The cost moves
-  from loss to
+  now take nothing of anybody else's at all: contents are safe because `rmdir` refuses a
+  directory holding anything, and an empty directory a racer left at the candidate is safe
+  because the `rmdir` runs only where an inode was RECORDED and still resolves to the
+  object this run's own `mkdir` made. The cost moves from loss to
   litter: a refusal after anything exists leaves this run's own tree — one directory per
   refused attempt — which `docs/decisions/2026-08-29-setup-leaf-cleanup.md` records with
   the table of what each earlier shape destroyed. There is no pin-storage probe for the

@@ -539,6 +539,58 @@ _mw_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.s
     || die "the lost-write refusal removed a directory with contents in it"
 cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
 
+# ── no recorded identity, no reservation-level removal ────────────────────
+# AN EMPTY `RB_INO` MEANS THE `mkdir` NEVER REPORTED SUCCESS or the identity could not be
+# read, and in both cases a directory standing at this name is one this run cannot vouch
+# for — most likely a racer's, since the `mkdir` fails precisely when the name was taken.
+# Skipping the comparison and removing anyway is how somebody else's EMPTY reservation was
+# taken; the earlier no-descriptor case cannot see it, because a replacement holding files
+# survives the `rmdir` whether or not the guard is there.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'p="$(dirname "$2")"
+rm -rf "$p"
+mkdir -m 700 "$p"
+exit 1'
+grep -vF 'exec 8<"$RB_DIR"' "$SELF_DIR/pr-setup.sh" > "$_stage/pr-setup.sh"
+grep -qF 'exec 8<"$RB_DIR"' "$_stage/pr-setup.sh" \
+    && die "the empty-replacement stage did not patch pr-setup.sh; the case proves nothing" \
+    || pass "the empty-replacement stage is patched"
+_er="$(mktemp -d "$TMP/er.XXXXXX")/dir"
+_er_rc=0
+_er_out="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_er" 2>&1)" || _er_rc=$?
+[ -d "$_er" ] \
+    && pass "…so an EMPTY replacement is not given back in this run's place" \
+    || die "the cleanup removed an empty replacement with no recorded identity (rc=$_er_rc out='$_er_out')"
+rm -rf "$_er"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
+# ── a read-back that prints and then fails is not proof ───────────────────
+# ANYTHING A COMMAND PRINTS BEFORE FAILING IS NOT DATA, which `CLAUDE.md` records for
+# `gh` and applies here: written as `[ "$(cat …)" = "$RB_REMOTE" ]` the substitution's
+# status is DISCARDED, because the `[` supplies its own — so a read that emitted the right
+# bytes and then failed was accepted as proof the write had landed.
+#
+# STAGED WITH A `cat` ON `PATH` that prints the expected value and exits 1, ahead of the
+# real one. The helper resolves `cat` through `PATH` for this read, so a directory
+# prepended to it is the whole staging.
+for _c in pr-setup.sh loadlib.sh identitylib.sh; do cp "$SELF_DIR/$_c" "$_stage/$_c"; done
+_forge_origin 'printf "%s\n" "git@github.com:acme/widget.git" > "$2/origin"'
+_catdir="$TMP/catbin"; mkdir -p "$_catdir"
+# ONLY THE READ-BACK, NOT EVERY `cat`. The helper also reads `pr-origin.sh`'s transport
+# with `cat`, and a stub that failed both refused at `origin_transport` — before the line
+# this case is about, so it passed whichever shape the read-back had.
+printf '#!/usr/bin/env bash\n/bin/cat "$@"\ncase "$1" in */o/origin) exit 0 ;; */origin) exit 1 ;; esac\nexit 0\n' > "$_catdir/cat"
+chmod +x "$_catdir/cat"
+_cb="$(mktemp -d "$TMP/cb.XXXXXX")/dir"
+_cb_rc=0
+_cb_out="$(cd "$REPO" && run_limited 25 env PATH="$_catdir:$PATH" \
+    /usr/bin/env bash -p "$_stage/pr-setup.sh" "$_cb" 2>&1)" || _cb_rc=$?
+{ [ "$_cb_rc" -ne 0 ] && case "$_cb_out" in *'status=ready'*) false ;; *) true ;; esac; } \
+    && pass "a read-back that prints the right value and then fails is not accepted" \
+    || die "a failed read-back was taken as proof of the write (rc=$_cb_rc out='$_cb_out')"
+rm -rf "$_cb" "$_catdir"
+cp "$SELF_DIR/pr-setup.sh" "$_stage/pr-setup.sh"
+
 # ── a signal after the write is caught, and leaves the tree ───────────────
 # THE DEFAULT ACTION FOR `HUP`, `INT` AND `TERM` IS TO TERMINATE, so without a handler
 # the run ends with no cleanup at all and no status anyone can read — and the driver

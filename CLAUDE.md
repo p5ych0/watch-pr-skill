@@ -788,7 +788,7 @@ author side of that contract matters:
   the second-parent retry and never a forged identity, which
   `test-pr-skill-contract.sh` stages against the real helper; the reservation
   races cost one empty directory, lost or left behind, which `test-pr-origin.sh`
-  stages with `mkdir` on `PATH` as the racer; and the cleanup can destroy no CONTENTS,
+  stages with `mkdir` on `PATH` as the racer; and the cleanup takes nothing of anybody else's,
   which `test-pr-setup.sh` stages against the real helper and pins with a scan
   requiring exactly one `rmdir` in that function and no `rm`. Those cases are what the records
   rest on: **if a bound changes they fail**, which is what stops an accepted limit

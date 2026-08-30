@@ -576,9 +576,9 @@ shape that gave the contents back needed a name a same-UID process may have subs
 between the create and the removal, and each destroyed something — that record carries the
 table. `rmdir` succeeds only on an empty directory and refuses a symlink, so the cleanup
 can destroy no CONTENTS whatever happened at that name: the cost is litter rather than
-loss. The one thing it can still take is an EMPTY directory a racer left at the
-candidate, which `2026-08-26-reservation-inference.md` already accepts and this record
-does not widen.
+loss. It takes nothing of anybody else's at all, including an empty directory a racer
+left at the candidate: the `rmdir` runs only where an inode was RECORDED and still
+resolves to the object this run's own `mkdir` made.
 Do not raise the leftover tree as a leak, and do not reintroduce a removal of anything
 inside the reservation. Raise a cost you think was underweighted as a non-blocking note.
 
