@@ -41,7 +41,7 @@ The marker used to spell it out after the colon as well — 91 times, one distin
 spelling. It named the file and never the section, so it repeated this paragraph and
 located nothing the title does not. Dropping the 34-character suffix took 3,094
 characters out of a document the driver reads whole on every run; the two paragraphs you
-are reading are the 1,174 that replaced them, so the file is 1,920 shorter.
+are reading are the 1,176 that replaced them, so the file is 1,918 shorter.
 
 These rules bind you for every round. They are here because breaking them is what
 turns a three-round PR into a fifty-round one, and every line below was earned

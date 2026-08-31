@@ -2,13 +2,13 @@
 
 ## [2.0.87] — 2026-08-31
 
-- **`SKILL.md` is 1,920 characters shorter, and nothing was removed but a repeated
+- **`SKILL.md` is 1,918 characters shorter, and nothing was removed but a repeated
   sentence.** Every claim in its bash fences carried
   `# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md` underneath it — 91 of them, one distinct
   spelling. The line named the FILE and never the section, so the 91st copy told a reader
   exactly what the first did. Dropping the 34-character suffix removes 3,094 characters
   from a document the driver reads whole on every invocation; stating the destination once
-  above the first fence costs 1,174 back, which is where the net 1,920 comes from.
+  above the first fence costs 1,176 back, which is where the net 1,918 comes from.
 
   What locates an argument is the CLAIM TEXT, matched character for character against a
   heading in the rationale, which is what the contract test compares. The marker's only
