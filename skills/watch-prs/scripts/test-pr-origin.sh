@@ -406,6 +406,26 @@ case "${got#*|}" in
     *) die "the fragment redaction took the host or path with it: ${got#*|}" ;;
 esac
 
+# AND A CONTROL BYTE IN A PLANTED REMOTE DOES NOT REACH THE TERMINAL. `rb_identity`
+# accepts anything that parses, so a racer can plant a value carrying a carriage return or
+# an ANSI escape — which rewrites or hides the diagnostic that names it, in scrollback and
+# in session logs. The value is rendered with `%q`, so the bytes arrive as escapes.
+_credc="$(printf 'https://example.com/acme/widget.git\rFORGED-LINE')"
+got="$(run pin REVIEW_BUS_REMOTE="$_credc")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a control-byte pin that is not this origin is still refused" \
+    || die "a control-byte planted pin gave '${got}'"
+# THE RAW BYTE MUST BE ABSENT. Asserted against the byte itself rather than against a
+# rendering, so a different escape spelling still passes and a raw one cannot.
+case "${got#*|}" in
+    *"$(printf '\r')"*) die "the refusal emitted a raw carriage return: ${got#*|}" ;;
+    *)                   pass "…with the control byte escaped rather than emitted" ;;
+esac
+case "${got#*|}" in
+    *FORGED-LINE*) pass "…while the planted text is still shown, escaped" ;;
+    *) die "the refusal dropped the planted value instead of escaping it: ${got#*|}" ;;
+esac
+
 # AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
 # the directory has been created and before anything is written, so the cleanup must be
 # the one that removes only the directory. With the phase already `post` it removed the

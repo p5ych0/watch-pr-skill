@@ -875,9 +875,11 @@ fi
 # the driver then parses and pins. Every later post, signoff and merge is addressed by
 # that value, so the failure is a WRONG REPOSITORY rather than a stall.
 #
-# Nothing downstream caught it. The pin proves inheritance, not provenance;
-# `rb_identity` asks whether a string is a usable identity, not whether it is THIS
-# checkout's. Both agree with a planted-but-valid remote.
+# Nothing downstream caught it. The pin PROVED INHERITANCE AND NOTHING ELSE — that is the
+# behaviour this check replaced, stated in the past because the comparison below is what
+# changed it — and `rb_identity` asks whether a string is a usable identity, not whether it
+# is THIS checkout's, which is still true. Both agreed with a planted-but-valid remote,
+# being computed from it.
 #
 # So this asks the checkout. It is the question actually at stake — "is what you
 # exported the identity this checkout FETCHES from" — and this process is where it can
@@ -925,7 +927,14 @@ rb_redact() {   # prints its argument with any URL userinfo, query and fragment 
     case "$_auth" in
         *@*) _auth="***@${_auth##*@}" ;;
     esac
-    printf '%s://%s%s' "$_scheme" "$_auth" "$_path"
+    # `%q`, BECAUSE A REMOTE IS ATTACKER-CONTROLLED HERE AND THIS GOES TO A TERMINAL. The
+    # value being reported is the one a racer planted, and `rb_identity` accepts anything
+    # that parses — including a carriage return or an ANSI escape, which rewrite or hide
+    # the very diagnostic that names them, in scrollback and in session logs. `%q` renders
+    # control bytes as escapes, which is the same answer `pr-watch.sh` gives for helper
+    # output it prints. An ordinary remote has no shell-special byte in it and passes
+    # through unchanged.
+    printf '%q' "$_scheme://$_auth$_path"
 }
 
 if [[ $MODE = pin ]]; then
