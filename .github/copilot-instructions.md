@@ -588,20 +588,6 @@ readable origin ends with the reservation present and empty. That is stated in t
 and staged behaviourally on both sides. Raise a cost you think was underweighted as a
 non-blocking note.
 
-**A fourth is accepted since 2026-08-31**, in
-`docs/decisions/2026-08-31-pin-write-signal-window.md`: each write in `pr-origin.sh` is
-`{ RB_PHASE=post; printf …; } > "$OUT"`, so the leaf is OPEN before the phase marks it as
-this run's — and a signal delivered in that interval runs the pre-write cleanup, which is
-`rmdir` alone and cannot remove a directory that now holds a leaf. The transport is left
-behind. Flipping the phase first inverts the failure rather than removing it: a signal
-before the open would then run `rm -f "$OUT"` and delete a FOREIGN leaf where a same-UID
-process had put one, which is the direction the 2026-08-29 record already refuses. The two
-events cannot be made one — marking the leaf as ours needs the descriptor, and shell has
-no descriptor-relative removal. So the residue is litter rather than loss, and it is
-bounded by two things that ARE staged: a refusal before a write never removes a foreign
-leaf, and the flip lives inside the redirection rather than before it. Do not raise the
-window as a defect, and do not propose moving the flip earlier.
-
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection.
