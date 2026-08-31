@@ -903,8 +903,13 @@ fi
 # SCP-LIKE REMOTES ARE LEFT ALONE — the `user@host:path` form has no `://`, and its user
 # part is a login with no secret in it, so there is nothing to redact and rewriting it
 # would only make the message harder to match against the operator's config.
+# ONE EXIT, SO NO BRANCH CAN RETURN UNESCAPED. The first version escaped the `://` arm and
+# let the SCP-like one return early through a bare `%s` — so a planted `user@host:path` with
+# a carriage return in it reached the terminal raw, which is the whole failure the escaping
+# exists to stop. Every arm assigns and falls through to one `printf` now, which is a shape
+# a later arm cannot get wrong rather than a rule it has to remember.
 rb_redact() {   # prints its argument with any URL userinfo, query and fragment replaced
-    local _u="$1" _scheme _rest _auth _path
+    local _u="$1" _scheme _rest _auth _path _out
     # THE QUERY AND FRAGMENT GO FIRST, AND FROM EVERY FORM. A credential does not have to
     # be in the userinfo: `https://host/path.git?access_token=…` is a remote git
     # accepts, and the token is in the query. What identifies a remote for this message is
@@ -914,18 +919,23 @@ rb_redact() {   # prints its argument with any URL userinfo, query and fragment 
         *[?#]*) _u="${_u%%[?#]*}?***" ;;
     esac
     case "$_u" in
-        *://*) _scheme="${_u%%://*}"; _rest="${_u#*://}" ;;
-        *) printf '%s' "$_u"; return 0 ;;
-    esac
-    _path=""
-    case "$_rest" in
-        */*) _path="/${_rest#*/}"; _auth="${_rest%%/*}" ;;
-        *)   _auth="$_rest" ;;
-    esac
-    # THE LAST `@` IN THE AUTHORITY, because a password may contain one. Everything up to
-    # it is userinfo by definition; the host is what follows it.
-    case "$_auth" in
-        *@*) _auth="***@${_auth##*@}" ;;
+        *://*)
+            _scheme="${_u%%://*}"; _rest="${_u#*://}"
+            _path=""
+            case "$_rest" in
+                */*) _path="/${_rest#*/}"; _auth="${_rest%%/*}" ;;
+                *)   _auth="$_rest" ;;
+            esac
+            # THE LAST `@` IN THE AUTHORITY, because a password may contain one. Everything
+            # up to it is userinfo by definition; the host is what follows it.
+            case "$_auth" in
+                *@*) _auth="***@${_auth##*@}" ;;
+            esac
+            _out="$_scheme://$_auth$_path" ;;
+        # SCP-LIKE VALUES ARE NOT REWRITTEN, and that is a decision about REDACTION rather
+        # than about escaping: `user@host:path` has no `://` and its user part is a login
+        # with no secret in it. It still leaves through the same escape below.
+        *)  _out="$_u" ;;
     esac
     # `%q`, BECAUSE A REMOTE IS ATTACKER-CONTROLLED HERE AND THIS GOES TO A TERMINAL. The
     # value being reported is the one a racer planted, and `rb_identity` accepts anything
@@ -934,7 +944,7 @@ rb_redact() {   # prints its argument with any URL userinfo, query and fragment 
     # control bytes as escapes, which is the same answer `pr-watch.sh` gives for helper
     # output it prints. An ordinary remote has no shell-special byte in it and passes
     # through unchanged.
-    printf '%q' "$_scheme://$_auth$_path"
+    printf '%q' "$_out"
 }
 
 if [[ $MODE = pin ]]; then

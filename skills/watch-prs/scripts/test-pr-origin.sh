@@ -426,6 +426,23 @@ case "${got#*|}" in
     *) die "the refusal dropped the planted value instead of escaping it: ${got#*|}" ;;
 esac
 
+# AND AN SCP-LIKE VALUE IS ESCAPED TOO. That arm is not redacted — there is no userinfo
+# secret in `user@host:path` — but it reaches the same terminal, and the first version of
+# this escaping returned it early through a bare `%s`.
+_creds="$(printf 'git@example.com:acme/widget.git\rFORGED-SCP')"
+got="$(run pin REVIEW_BUS_REMOTE="$_creds")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "an SCP-like control-byte pin that is not this origin is still refused" \
+    || die "an SCP-like control-byte planted pin gave '${got}'"
+case "${got#*|}" in
+    *"$(printf '\r')"*) die "the refusal emitted a raw carriage return from the SCP-like arm: ${got#*|}" ;;
+    *)                   pass "…with the control byte escaped there too" ;;
+esac
+case "${got#*|}" in
+    *FORGED-SCP*) pass "…while the planted text is still shown, escaped" ;;
+    *) die "the SCP-like arm dropped the planted value instead of escaping it: ${got#*|}" ;;
+esac
+
 # AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
 # the directory has been created and before anything is written, so the cleanup must be
 # the one that removes only the directory. With the phase already `post` it removed the
