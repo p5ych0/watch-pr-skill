@@ -362,8 +362,27 @@ if [[ $STAGE = open ]]; then
     # path is named in argv, and a same-UID process can put a FIFO there between the
     # two. This read is on the same side of the revocation as the write, so a hang
     # here leaves the phase half advanced exactly as one there would.
-    _rb_prior_back="$(run_limited 10 /usr/bin/env bash -p -c 'printf "%s" "$(<"$1")"' _ "$PRIOR_FILE")" \
-        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
+    #
+    # AND THE READ'S OWN STATUS IS TAKEN, INSIDE THE CHILD. `printf "%s" "$(<"$1")"`
+    # exits 0 whatever the substitution did, so a path removed or made unreadable
+    # after the write came back as SUCCESS with empty output — and where there is
+    # legitimately no earlier Copilot review the baseline IS empty, so the comparison
+    # below passed and Copilot was requested against a file nothing can read. The
+    # watch then refuses, after the revocation and the request have gone out.
+    #
+    # AND THE DESCRIPTOR IS PROVED REGULAR. A writable non-regular path — `/dev/null`
+    # is the reachable one — takes both writes, reads back empty, and passes that same
+    # comparison; `pr-watch.sh` rejects the identical path as `not_regular`, but only
+    # once the phase is half open. The `-f` question is asked HERE, on the bound
+    # descriptor rather than on the name, so it is the file that was read.
+    _rb_prior_back="$(run_limited 10 /usr/bin/env bash -p -c '
+        { [ -f /dev/fd/9 ] || exit 6
+          IFS= read -r -d "" _r <&9
+          _s=$?
+        } 9<"$1" || exit 4
+        [ "$_s" -eq 0 ] && exit 5
+        printf "%s" "$_r"' _ "$PRIOR_FILE")" \
+        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE' — it is unreadable, not a regular file, or holds a NUL byte; Copilot has NOT been requested."; exit 1; }
     [[ $_rb_prior_back = "$PRIOR_REVIEW" ]] \
         || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
 

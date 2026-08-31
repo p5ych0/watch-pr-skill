@@ -1071,16 +1071,57 @@ if command -v mkfifo >/dev/null 2>&1; then
     grep -q -- '--add-reviewer' "$TMP/calls" \
         && die "Copilot was requested despite the unusable baseline path" \
         || pass "…with Copilot not requested"
-    # AND THE READ-BACK GOES THROUGH THE WATCHDOG, asserted structurally because the
-    # window itself needs a second process to hit. Without this the read is an
-    # unbounded `$(<…)` and a FIFO substituted after the write hangs the phase with
-    # the revocation already posted.
-    grep -q "run_limited 10 /usr/bin/env bash -p -c 'printf \"%s\" \"\$(<\"\$1\")\"'" "$DIR/pr-copilot-phase.sh" \
-        && pass "…and the read-back opens under the watchdog, not with a bare \$(<…)" \
-        || die "the baseline read-back is an unbounded open again"
     rm -rf "$TMP/rbdir"
 else
     pass "no mkfifo on this platform, so the read-back substitution is skipped by name"
+fi
+
+# A WRITABLE NON-REGULAR PATH IS REFUSED BEFORE COPILOT IS ASKED. `/dev/null` takes
+# both writes and reads back EMPTY — which is the legitimate "no earlier Copilot
+# review" — so the equality check passed and the phase opened against a path no watch
+# can use. `pr-watch.sh` rejects the same path, but only after the revocation and the
+# request have gone out. The `-f` question is asked on the BOUND DESCRIPTOR here, so
+# it is about the file that was actually read.
+if [ -c /dev/null ]; then
+    world; : > "$W/review-id.out"
+    got="$(run open 7 "$HEAD40" /dev/null)"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a writable non-regular baseline path stops the phase before Copilot is asked" \
+        || die "a /dev/null baseline path gave '${got}'"
+    grep -q -- '--add-reviewer' "$TMP/calls" \
+        && die "Copilot was requested with a baseline path no watch can read" \
+        || pass "…with Copilot not requested"
+else
+    pass "no /dev/null on this platform, so the device-path state is skipped by name"
+fi
+
+# AND A READ THAT FAILS IS NOT AN EMPTY BASELINE. `printf "%s" "$(<…)"` exits 0
+# whatever the substitution did, so a path the read-back cannot open came back as
+# SUCCESS with empty output — and where there is legitimately no earlier Copilot
+# review the baseline IS empty, so the comparison passed and the phase opened against
+# a file nothing can read. The watch then refuses, after the revocation and the request
+# have gone out.
+#
+# STAGED WITH A WRITE-ONLY FILE rather than by racing the window. `chmod 222` is the
+# same state a mid-window removal produces for the reader — both writes succeed and
+# the read cannot open — and it happens on every run instead of when the scheduler
+# allows. A timing case here passed against the unfixed helper, because the helper is
+# faster than any sleep the fixture can place.
+if [ "$(id -u)" != 0 ]; then
+    world; : > "$W/review-id.out"
+    _rbw="$TMP/rbwin"; rm -rf "$_rbw"; mkdir -p "$_rbw"
+    printf 'seed\n' > "$_rbw/prior.txt"; chmod 222 "$_rbw/prior.txt"
+    got="$(run open 7 "$HEAD40" "$_rbw/prior.txt")"
+    chmod 600 "$_rbw/prior.txt" 2>/dev/null
+    [ "${got%%|*}" = 1 ] \
+        && pass "…a baseline the read-back cannot open stops the phase, empty or not" \
+        || die "an unreadable baseline read-back gave '${got}'"
+    grep -q -- '--add-reviewer' "$TMP/calls" \
+        && die "Copilot was requested on a baseline the read-back could not read" \
+        || pass "…with Copilot not requested"
+    rm -rf "$_rbw"
+else
+    pass "running as root, so the unreadable read-back is skipped by name"
 fi
 
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —
