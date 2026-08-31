@@ -131,6 +131,14 @@ PR=""
 WHO=""
 AFTER_REVIEW=""
 AFTER_REVIEW_FILE=""
+# SUPPLIED-NESS IS TRACKED SEPARATELY FROM THE VALUE, for the value form only. An
+# empty `--after-review ""` is LEGITIMATE — it is what a first request on a fresh
+# head carries — so its emptiness cannot stand in for "not given", and a both-forms
+# check reading the value alone let `--after-review "" --after-review-file path`
+# through: the explicit "there is no prior review" was discarded and the file read
+# instead, which can hold an id that makes the watch wait out its whole timeout. The
+# FILE form needs no flag, because an empty path is refused where it arrives.
+AFTER_REVIEW_GIVEN=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -148,7 +156,7 @@ while [ "$#" -gt 0 ]; do
         # on it again. With this set, a terminal state whose authoritative review
         # is still that id is treated as "not yet".
         --after-review) [ "$#" -ge 2 ] || { echo "$0: --after-review needs a value" >&2; exit 2; }
-                    AFTER_REVIEW="$2"; shift 2 ;;
+                    AFTER_REVIEW="$2"; AFTER_REVIEW_GIVEN=yes; shift 2 ;;
         # THE SAME VALUE, FOR A CALLER THAT CANNOT HOLD ONE. `SKILL.md`'s bash runs
         # in the operator's own shell, where an assignment can be defeated by a
         # readonly name, a nameref or a transforming attribute — so the driver read
@@ -221,7 +229,7 @@ q() { printf '%q' "$1"; }
 # BOTH SPELLINGS AT ONCE IS A REFUSAL, not a precedence rule. They are the same
 # value by two routes, and a caller passing both has two answers in hand and no
 # reason to believe this one picked the right one.
-if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW" ]; then
+if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW_GIVEN" ]; then
     echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_both_forms" >&2
     exit 2
 fi

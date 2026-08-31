@@ -222,6 +222,27 @@ world; got="$(run record 7 "$TMP/body.md")"
     && pass "a clean Codex verdict records the phase" \
     || die "record gave '${got}'"
 
+# ── AND THE RESUME COMMAND IT PRINTS IS ONE THAT RUNS ─────────────────────
+#
+# `record` stops and asks, and the whole point of stopping is that the answer can
+# arrive in a LATER SESSION — which reaches `open` through this printed command and
+# nothing else. When the baseline file became required, the command still showed two
+# arguments, so following it aborted every time and the documented resume path was
+# dead. A stage that prints its own successor has to print one that works.
+# THE HEREDOC EXPANDS, so what is matched is the command an operator would COPY —
+# the PR and the sha resolved, the baseline a literal placeholder. Matching the
+# source spelling instead passes while the printed line says something else.
+_menu="${got#*|}"
+grep -qF "pr-copilot-phase.sh open 7 $HEAD40 <baseline-file>" <<<"$_menu" \
+    && pass "…and the resume command it prints carries the baseline file it now requires" \
+    || die "record advertises an open command that would abort: $_menu"
+# ASSERTED AGAINST THE STAGE'S OWN ARGUMENT COUNT, not against the text alone. A
+# renamed placeholder keeps the grep above green while the count moves underneath it.
+_open_args="$(grep -c 'PRIOR_FILE="${3:-}"' "$DIR/pr-copilot-phase.sh")"
+[ "$_open_args" = 1 ] \
+    && pass "…and that third argument is the one open reads" \
+    || die "open does not read a third argument; the printed command names one anyway"
+
 # ── AND THE SIGNED-OFF SHA IS HANDED BACK IN A FILE ───────────────────────
 # #239. The driver read it back with `pr-signoff.sh sha` and then validated the result
 # with a regex and a status check — a second round-trip to the API, and eleven lines of

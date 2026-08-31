@@ -897,6 +897,18 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
     && pass "…while an empty --after-review VALUE stays the legitimate 'no baseline' answer" \
     || die "an empty --after-review value was refused (rc=$rc out='$out')"
 
+# AND AN EXPLICITLY EMPTY VALUE FORM STILL COUNTS AS SUPPLIED. `--after-review ""`
+# is the legitimate "no prior review to wait past", so its emptiness cannot stand in
+# for "not given" — a both-forms check reading the VALUE let this pair through, and
+# the explicit "there is nothing to wait past" was discarded in favour of a file that
+# can hold an id the watch then waits out its whole timeout for.
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review "" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_both_forms' <<<"$out"; } \
+    && pass "…and an EMPTY value form still counts as supplied, so both together are refused" \
+    || die "an empty --after-review beside a file gave rc=$rc out='$out'"
+
 # AND THE OPTION NEEDS ITS VALUE. `shift 2` on a missing one left the same option in
 # $1 and the parser span forever, which is the defect the other options already carry
 # a case for.

@@ -825,7 +825,9 @@ Codex has signed off on $CODEX_SHA, and the signoff is recorded on the PR.
         REVIEWERS=codex-only, which requires the head to BE this commit and is
         therefore a narrower gate than the two-reviewer one, not a looser one
     (b) open the Copilot phase on the same head —
-        pr-copilot-phase.sh open $PR $CODEX_SHA
+        pr-copilot-phase.sh open $PR $CODEX_SHA <baseline-file>
+        where <baseline-file> is a writable path this session will hand to
+        pr-watch.sh --after-review-file; the driver uses its own \$PRIOR_FILE
 
 Nothing further happens until you say. This is resumable: the signoff is on the
 PR, so a later session can read it back with pr-signoff.sh.
