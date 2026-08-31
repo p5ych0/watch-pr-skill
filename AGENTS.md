@@ -170,7 +170,7 @@ and both were removed for costing more than they closed.
 ## Claims and their arguments in `SKILL.md`
 
 `SKILL.md`'s bash fences keep a one-line CLAIM beside the code and carry the
-ARGUMENT in `skills/watch-prs/SKILL-RATIONALE.md`, reached by a `# WHY:` pointer
+ARGUMENT in `skills/watch-prs/SKILL-RATIONALE.md`, marked by a bare `# WHY:`
 directly under the claim. The section heading IS the claim, character for
 character, and `test-pr-skill-contract.sh` proves the bijection: every claim has a
 section, every section has a claim, neither side repeats, the totals agree, and no

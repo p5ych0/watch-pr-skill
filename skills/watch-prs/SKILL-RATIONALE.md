@@ -30,7 +30,7 @@ belongs here.
   beside the code. It stays, and carries no pointer. Nothing is gained by moving
   two lines into a section and pointing at it;
 - a **claim** asserts why the code has its shape while the argument for it lives
-  here. It carries a `# WHY:`, and its section heading is the claim character for
+  here. It carries a bare `# WHY:`, and its section heading is the claim character for
   character.
 
 **ONE CLAIM PER INVARIANT.** Pairs may STACK above a single line of code, and a

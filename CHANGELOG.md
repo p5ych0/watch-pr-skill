@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.87] — 2026-08-31
+
+- **`SKILL.md` is 2,428 characters shorter, and nothing was removed but a repeated
+  sentence.** Every claim in its bash fences carried
+  `# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md` underneath it — 91 of them, one distinct
+  spelling, 2,400 characters of a document the driver reads whole on every invocation. The
+  line named the FILE and never the section, so the 91st copy told a reader exactly what
+  the first did.
+
+  What locates an argument is the CLAIM TEXT, matched character for character against a
+  heading in the rationale, which is what the contract test compares. The marker's only
+  remaining job is to say that the line above it is a claim, and a bare `# WHY:` does that.
+  The destination is stated once, above the first fence.
+
+  Every claim, every section and every check survives: the bijection still runs in both
+  directions, a pointer that annotates no code is still refused, and the scan that used to
+  watch for a pointer naming an unresolvable path now asserts that no marker carries a path
+  at all — a marker with none cannot name the wrong one. The claim count is unchanged at
+  91. #241.
+
 ## [2.0.86] — 2026-08-31
 
 - **The Copilot phase's first stage hands its sha back in a file, and the driver stops

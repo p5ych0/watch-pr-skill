@@ -4169,10 +4169,15 @@ local _wy_empty _wy_e_rc _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
     #    silently — and every one well formed, inside a bash fence, under a claim,
-    #    and annotating code. One equality closes a filename typo, a stray
-    #    character, a pointer outside every fence, and a pointer under code.
+    #    and annotating code. One equality closes a stray character, a pointer
+    #    outside every fence, and a pointer under code.
+    #
+    #    ANCHORED TO A WHOLE LINE, because the marker is now short enough to appear in
+    #    PROSE: the convention is stated once above the first fence and names the marker
+    #    there. An unanchored count took that sentence as a 92nd pointer. A pointer
+    #    outside a fence is still a whole line, so that half is unaffected.
     _wy_all=0; _wy_all_rc=0
-    _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all_rc=$?
+    _wy_all="$(grep -c '^[[:space:]]*# WHY:$' "$SKILL")" || _wy_all_rc=$?
     [ "$_wy_all_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
     [ "$_wy_all" -gt 0 ] \
         && pass "the lifted blocks point at their rationale ($_wy_all pointers)" \
@@ -4182,12 +4187,17 @@ if [ -f "$_wy_doc" ]; then
     # driver happens to be standing — the shell stays in the project under review
     # — and not `$CLAUDE_PLUGIN_ROOT`, which is UNSET in setup's second discovery
     # mode. `RB_SCRIPTS` is set and validated in both.
+# AND THE MARKER CARRIES NO PATH AT ALL, which is what removed the class this used to
+    # watch. It spelled `$RB_SCRIPTS/../SKILL-RATIONALE.md` — 91 times, one spelling — and
+    # the check here was that nobody wrote `docs/…` or `$CLAUDE_PLUGIN_ROOT/…` instead,
+    # neither of which resolves in both of setup's discovery modes. A marker with no path
+    # cannot name the wrong one, so what is asserted now is that none has come back.
     _wy_bad_ptr=0; _wy_bp_rc=0
-    _wy_bad_ptr="$(grep -c '# WHY: \(docs/\|\$CLAUDE_PLUGIN_ROOT\)' "$SKILL")" || _wy_bp_rc=$?
-    [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for unresolvable pointers (rc=$_wy_bp_rc)"
+    _wy_bad_ptr="$(grep -c '# WHY: ' "$SKILL")" || _wy_bp_rc=$?
+    [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers carrying a path (rc=$_wy_bp_rc)"
     [ "$_wy_bad_ptr" -eq 0 ] \
-        && pass "…and none resolves from the working directory or an unset plugin root" \
-        || die "$_wy_bad_ptr pointers are unresolvable in one of setup's two discovery modes"
+        && pass "…and none carries a path, so none can name an unresolvable one" \
+        || die "$_wy_bad_ptr pointers carry a path; the marker names no file and the convention is stated once"
 
     # 2. THE CLAIMS, from the bash fences, each paired with the pointer beneath it.
     #    The status is taken: fed straight into a comparison, a failed `awk` yields
@@ -4211,7 +4221,7 @@ if [ -f "$_wy_doc" ]; then
     #    only ones that could carry no argument at all.
     _wy_claims="$(awk '/^[[:space:]]*```bash$/ && !f {f=1; prev=""; next}
        f && /^[[:space:]]*```$/{f=0; next}
-       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SKILL-RATIONALE\.md$/) {
+       f { if ($0 ~ /^[[:space:]]*# WHY:$/) {
                if (prev ~ /^[[:space:]]*#/) { c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c); print c }
                else print "!!POINTER-NOT-UNDER-A-CLAIM!!" }
            prev=$0 }' "$SKILL")" || _wy_rc=$?
@@ -4265,12 +4275,12 @@ if [ -f "$_wy_doc" ]; then
     # would let a pair at the END of one satisfy the bijection while annotating
     # nothing — the pair is counted there and floats here.
     _wy_float="$(awk '/^[[:space:]]*```bash$/ && !f {f=1; prev=""; pend=0; next}
-       f && /^[[:space:]]*```$/{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++
+       f && /^[[:space:]]*```$/{ if (pend || prev ~ /^[[:space:]]*# WHY:$/) n++
                      f=0; prev=""; pend=0; next }
-       f { if (prev ~ /# WHY: \$RB_SCRIPTS/) pend=1
+       f { if (prev ~ /^[[:space:]]*# WHY:$/) pend=1
            if (pend && $0 !~ /^[[:space:]]*#/ && NF > 0) pend=0
            prev=$0 }
-       END{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
+       END{ if (pend || prev ~ /^[[:space:]]*# WHY:$/) n++; print n+0 }' "$SKILL")" || _wy_float=99
     [ "$_wy_float" -eq 0 ] \
         && pass "…and every claim and pointer has code after it before its fence closes" \
         || die "$_wy_float claim/pointer pairs annotate nothing; no code follows them in their fence"
@@ -4434,7 +4444,7 @@ grep -qF 'revoke, prove, baseline, request' "$SKILL" \
 # and a two-line rationale, so what it asserts is visible in the case itself rather
 # than depending on what block 8 happens to look like this month. `_wy_contract`
 # is the real one; nothing here re-implements a check.
-_wy_ptr='# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md'
+_wy_ptr='# WHY:'
 _wy_case() {   # <label> <expect: pass|fail> <skill-body> <doc-body> [indent]
     local _c_label="$1" _c_expect="$2" _c_skill="$3" _c_doc="$4" _c_dir _c_out
     _c_dir="$(mktemp_d)" || { die "no scratch directory for the '$_c_label' case"; return 0; }
