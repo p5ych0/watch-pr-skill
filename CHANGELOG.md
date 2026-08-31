@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.92] — 2026-08-31
+
+- **`SKILL.md` is 968 characters shorter, finishing the sweep #249 and #251 began.** The
+  self-check bullet "Can each new assertion actually fail?" ended with the reason given
+  word for word under **Prove a fix can fail** in the round rules, and the class bullet
+  retold the three-round incident the scope rules already tell. § 4 described how
+  `pr-findings.sh` paginates and argued why it is a script — an argument that helper
+  carries itself, in more detail, under its own heading — and § 5a explained the
+  `printf | grep` gate's over-reporting and the `pipefail` race behind it, which the
+  driver never applies.
+
+- **A contract check that could not fail now can.** `test-pr-skill-contract.sh` required
+  `hasNextPage` to appear at least once in `SKILL.md` and reported it as "the thread fetch
+  that remains in the document is paginated". No thread fetch remains — the only match was
+  the word inside a sentence *describing* the helper — so the check passed on prose and
+  would have gone on passing after a real unpaginated fetch was added. It asserts the
+  absence now, which is what is true: the document fetches no review threads itself,
+  because the paginated walk lives where its pagination is executed. #253.
+
 ## [2.0.91] — 2026-08-31
 
 - **`SKILL.md` is 1,308 characters shorter: it stops explaining helper internals to a

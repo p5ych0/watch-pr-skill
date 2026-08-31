@@ -4158,14 +4158,22 @@ grep -q 'cd "\$REPO_DIR" && /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-merge-gate.sh
     && pass "…and the gate is invoked from the captured repository root" \
     || die "a cd between setup and the merge would repoint every gate"
 
-# ── thread pagination ──────────────────────────────────────────────────────
-# A truncated thread list reads exactly like a shorter review. `SKILL.md` fetches
-# threads in ONE place now — step 4, where findings are read — because the merge
-# gate's own walk went into `pr-merge-gate.sh`, where a cursor cycle, a malformed
-# `hasNextPage` and a partial response are each an executed case.
-[ "$(grep -c 'hasNextPage' "$SKILL")" -ge 1 ] \
-    && pass "the thread fetch that remains in the document is paginated" \
-    || die "a thread fetch is not paginated"
+# ── the document fetches no threads at all ────────────────────────────────
+# A truncated thread list reads exactly like a shorter review, so the walk lives in
+# `pr-findings.sh` and `pr-merge-gate.sh`, where a cursor cycle, a malformed
+# `hasNextPage` and a partial response are each an EXECUTED case.
+#
+# THIS ASSERTS THE ABSENCE, because the presence was unassertable. It used to require
+# `hasNextPage` to appear at least once and called that "the thread fetch that remains
+# in the document is paginated" — but no thread fetch remains: the only match was the
+# word inside a SENTENCE DESCRIBING the helper, so the check reported PASS on prose
+# and would have gone on reporting it after a real unpaginated fetch was added. That is
+# the shape this repository records deleting a scanner over: a green tick for an
+# invariant nothing tested. What is true and worth pinning is that the walk is not here.
+_tp_fetch="$(grep -cE 'reviewThreads|pullRequest\(number' "$SKILL")" || _tp_fetch=0
+[ "$_tp_fetch" -eq 0 ] \
+    && pass "the document fetches no review threads itself; the paginated walk is the helpers'" \
+    || die "SKILL.md fetches review threads in $_tp_fetch place(s); that walk belongs in a helper where its pagination is executed"
 
 # ── the instruction files carry the scope + issue policy ───────────────────
 # These are what reach the reviewers; the loop depends on them, so a missing
