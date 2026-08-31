@@ -1490,7 +1490,11 @@ _res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | 
 # a separate command before the write no longer matches at all, which is the state this
 # check has to reject: it leaves a window in which a signal runs the leaf-removing cleanup
 # with nothing written.
-_res_phs="$(grep -n '{ RB_PHASE=post; printf ' "$SCRIPT" `# racy-pipeline-ok: the printf is inside the grep PATTERN, and the pipe is grep-to-cut` | cut -d: -f1)" || _res_phs=""
+# ANCHORED AT LINE START, so a COMMENT quoting the construct is not counted as one. The
+# file explains this shape in prose, and an unanchored pattern found the explanation and
+# reported three flips for two writes — the same prose-for-code confusion #253 spent three
+# rounds on, arriving here by a different door.
+_res_phs="$(grep -n '^[[:space:]]*{ RB_PHASE=post; printf ' "$SCRIPT" `# racy-pipeline-ok: the printf is inside the grep PATTERN, and the pipe is grep-to-cut` | cut -d: -f1)" || _res_phs=""
 _res_bare="$(grep -c '^[[:space:]]*RB_PHASE=post$' "$SCRIPT")" || _res_bare=0
 [ "$_res_bare" -eq 0 ] \
     && pass "the phase never flips as a command of its own, so no window precedes a write" \

@@ -102,9 +102,16 @@
 #          refusal that tidied it up would be this script deleting what it just
 #          refused to trust.
 #        - AFTER it — an UNSAFE ANCESTOR, the git read, an empty origin, a newline
-#          in it, a failed write — this script created the directory, so it gives
-#          the directory back before stopping. Nothing is left at the argument and
-#          there is nothing for the caller to collect.
+#          in it, the pin's mismatch, a failed write — this script created the
+#          directory, so it gives the directory back before stopping, and there is
+#          nothing for the caller to collect.
+#
+#          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal before a write
+#          gets `rmdir` alone, which cannot remove a directory holding a file. So a
+#          directory a same-UID process has replaced with a NON-EMPTY one survives
+#          the refusal. That residue is the point rather than a gap: the only way to
+#          empty it is to unlink a leaf by a name this run did not write, which is
+#          what the phase exists to prevent.
 #
 #          THE CLEANUP HAS ONE BODY AND THREE WAYS IN, and they are not the same
 #          thing. An ordinary refusal and any other abnormal end reach it through
@@ -445,12 +452,15 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # `rmdir` NECESSARILY fails on a directory holding its leaf, which is why the
 # post-write shape has to remove the leaf first.
 #
-# THE PHASE FLIPS IMMEDIATELY BEFORE EACH WRITE, which is after both walks and therefore
-# never on an unapproved path — but NOT at the walks themselves. The name becomes trusted
-# there; a leaf starts existing at the write, and between the two sit refusals: the origin
-# read's, and the pin's comparison against it. With the flip at the walks, each of those
-# ran the leaf-removing shape for a leaf the run had never created — and where a same-UID
-# process had replaced the directory meanwhile, that name is the replacement's file.
+# THE PHASE FLIPS INSIDE EACH WRITE'S OWN REDIRECTION, which is after both walks and so
+# never on an unapproved path — but NOT at the walks, and not as a command before the
+# write either. The name becomes trusted at the walks; a leaf starts existing when the
+# redirection OPENS, and between those sit refusals: the origin read's, and the pin's
+# comparison against it. With the flip at the walks each of those ran the leaf-removing
+# shape for a leaf the run had never created; as a separate command before the write, a
+# signal delivered between the two did the same on a smaller interval. A redirection on a
+# group is applied before the group runs, so `{ RB_PHASE=post; printf …; } > "$OUT"` has
+# the object open before the assignment executes and no interval at all.
 RB_PHASE=pre
 # WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
 # neither is signal-safe alone.

@@ -140,8 +140,15 @@ two and a second `rm -f` follows the replacement. `RB_PHASE` picks the shape: `r
 ALONE while no leaf can exist — it refuses a symlink outright, which is what makes it
 safe on a name the ancestry walks have not approved — and leaf-then-directory once a
 write has happened, since `rmdir` necessarily fails on a directory holding its leaf. The
-phase flips after the walks, which is where the name becomes trusted and is still before
-either write, so the leaf-removing shape never runs on an unapproved path. Every trap is
+phase flips INSIDE each write's own redirection — `{ RB_PHASE=post; printf …; } > "$OUT"`
+— which is after the walks, so the leaf-removing shape never runs on an unapproved path,
+and has no interval before the write for a signal to arrive in. It flipped at the walks
+until #230, and then as a command just before the write; both left a window in which a
+refusal or a signal ran the leaf-removing shape with nothing written, which against a
+replaced directory unlinks the replacement's file. The cost of the shape that has no
+window is a residue: a refusal before a write gets `rmdir` alone, so a directory somebody
+replaced with a NON-EMPTY one survives it, and that is deliberate — the alternative is
+unlinking a leaf by a name this run did not write. Every trap is
 IGNORED — `trap ''`, not `trap -` — before the first removal, in one statement, on both
 exit paths. `trap -` restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is
 to terminate: it stops re-entry and makes the cleanup interruptible instead, so a second
