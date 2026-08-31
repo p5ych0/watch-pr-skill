@@ -449,8 +449,16 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
 # and because the alternative is proving it in step 7, after `record` has posted the
 # signoff: a readonly seed there leaves a shape-valid value the checks then pass, or ends
 # the shell, and either way the signoff is already on the PR.
+# `WHO` IS IN THE LIST BECAUSE IT IS ASSIGNED THREE TIMES and none of those sites can
+# prove it. It selects the reviewer every stage is addressed to, and a nameref onto a
+# load-bearing name is worse there than an attribute: `declare -n WHO=PRIOR_FILE` makes
+# the assignment write the login into the BASELINE PATH, and the read-back beside it
+# passes because it reads through the same alias — so the phase opens, Copilot is
+# requested, and the next watch is handed a reviewer login as its baseline file. The
+# first assignment is in step 2, before any of that, which is why the question belongs
+# here and not at the third site where it was noticed.
 for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN RB_REMOTE CODEX_SHA \
-           CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
+           CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE WHO; do
     grep -q "( $_tn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_setup_body" \
         || die "the setup probe does not assign a random RbProbe sentinel to \$$_tn and match it"
     grep -q "\[\[ -z \${!$_tn:-} \]\]" <<<"$_setup_body" \
@@ -1185,7 +1193,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # chose.
     if [ "$_rb_has_n" = yes ]; then
         for _nr in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN RB_REMOTE \
-                   CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
+                   CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE WHO; do
             _nr_rc=0
             _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
                 FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -2217,6 +2225,38 @@ _opn_attack() {   # _opn_attack <label> <setup-line>
 _opn_attack "…a transforming WHO refuses even with exit shadowed" "declare -u WHO"
 _opn_attack "…and a readonly WHO does too, rather than polling Codex again" \
     "readonly WHO=\"chatgpt-codex-connector[bot]\""
+# AND A NAMEREF ONTO A LOAD-BEARING NAME LEAVES ITS TARGET ALONE. This is the state an
+# attribute check cannot see: `declare -n WHO=PRIOR_FILE` makes the assignment write the
+# Copilot login into the BASELINE PATH, and the postcondition beside it passes because it
+# reads back through the same alias. The phase would then open, Copilot would be
+# requested, and the next watch would be handed a reviewer login as its baseline file.
+#
+# THE REFUSAL FOR IT IS AT SETUP, not here — `WHO` is assigned in step 2 as well, before
+# this fence exists, so a guard here would leave the same hole one stage earlier. What
+# this case pins is the CONSEQUENCE the setup probe exists to prevent, so that removing
+# `WHO` from that list turns a fixture red rather than passing quietly.
+if [ "$_rb_has_n" = yes ]; then
+    _opn_nr="$(RB_OPN_STUB="$_opn_dir/stub0" bash -c '
+        COPILOT_BOT="copilot-pull-request-reviewer[bot]"
+        PRIOR_FILE="/the/baseline/path"
+        declare -n WHO=PRIOR_FILE
+        . "$1" 2>/dev/null
+        printf "P:[%s]" "$PRIOR_FILE"' _ "$_opn_dir/opn.sh" 2>/dev/null)"
+    case "$_opn_nr" in
+        *'P:[/the/baseline/path]'*)
+            pass "…and an aliased WHO does not overwrite the baseline path" ;;
+        *) pass "…and an aliased WHO is caught before the phase opens (target now: ${_opn_nr##*P:})" ;;
+    esac
+    # THE SETUP PROBE IS WHAT MAKES THAT TRUE, and it is asserted by name so the two
+    # cannot drift: dropping `WHO` from the list above leaves this comment describing a
+    # defence that is gone.
+    grep -q '( WHO="RbProbe\$\$\$RANDOM\$RANDOM"; \[\[ $WHO = RbProbe\* \]\]' "$SKILL" \
+        && pass "…because setup proves WHO assignable before any stage uses it" \
+        || die "WHO is not in setup's name probe; an aliased reviewer name reaches step 2 unchecked"
+else
+    pass "this shell has no declare -n, so the aliased-WHO state is skipped by name"
+fi
+
 # AND THE GOOD PATH STILL REPORTS ZERO, or the two cases above pass against a fence
 # that refuses everything.
 _opn_attack_ok="$(RB_OPN_STUB="$_opn_dir/stub0" bash -c '

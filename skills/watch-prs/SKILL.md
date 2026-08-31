@@ -232,6 +232,8 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
      && [[ -z ${!PRIOR_FILE:-} ]] ) 2>/dev/null \
    && ( HEAD_FILE="RbProbe$$$RANDOM$RANDOM"; [[ $HEAD_FILE = RbProbe* ]] \
      && [[ -z ${!HEAD_FILE:-} ]] ) 2>/dev/null \
+   && ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
+     && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
    && ( RB_REMOTE="RbProbe$$$RANDOM$RANDOM"; [[ $RB_REMOTE = RbProbe* ]] \
      && [[ -z ${!RB_REMOTE:-} ]] ) 2>/dev/null; then
     # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
@@ -355,7 +357,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE or HEAD_FILE — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
+    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi

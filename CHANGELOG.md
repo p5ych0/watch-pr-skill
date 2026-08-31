@@ -2,7 +2,7 @@
 
 ## [2.0.88] — 2026-08-31
 
-- **`SKILL.md` is 2,341 characters shorter, and the driving shell no longer names
+- **`SKILL.md` is 2,230 characters shorter, and the driving shell no longer names
   the review baseline at all.** The review id captured immediately before a request
   is what the next watch needs, and it used to come back into the operator's own
   shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
@@ -55,7 +55,14 @@
   that RETURNS, and the guard's `{ echo …; exit 1; }` then SUCCEEDED — so a readonly
   `WHO` left the Copilot rounds polling Codex, and a transforming one left them polling
   a login that is nobody's, which `pr-review-state.sh` never matches, so the phase
-  re-armed forever. #243.
+  re-armed forever.
+
+  `WHO` also joins setup's name probe, where every other name this session assigns is
+  already proved. It selects the reviewer every stage is addressed to and is assigned in
+  three places, none of which could prove it — and a nameref there is worse than an
+  attribute: `declare -n WHO=PRIOR_FILE` makes the assignment write the reviewer login
+  into the BASELINE PATH, and the check beside it passes because it reads back through
+  the same alias, so the next watch is handed a login as its file. #243.
 
 ## [2.0.87] — 2026-08-31
 
