@@ -32,9 +32,10 @@ arguments are there because the arguments are long and read once, while the clai
 read on every invocation.
 
 The marker used to spell the destination out after the colon — the rationale's path,
-91 times, one distinct spelling, 2,400 characters of a document the driver reads whole on
-every run. It named the file and never the section, so it repeated this paragraph and
-located nothing the title does not.
+91 times, one distinct spelling. It named the file and never the section, so it repeated
+this paragraph and located nothing the title does not. Dropping the 34-character suffix
+took 3,094 characters out of a document the driver reads whole on every run; the paragraph
+you are reading is the 666 that replaced them, so the file is 2,428 shorter.
 
 These rules bind you for every round. They are here because breaking them is what
 turns a three-round PR into a fifty-round one, and every line below was earned

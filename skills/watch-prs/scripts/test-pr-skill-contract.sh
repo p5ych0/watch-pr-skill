@@ -4190,17 +4190,16 @@ if [ -f "$_wy_doc" ]; then
         && pass "the lifted blocks point at their rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
 
-    # THE POINTER NAMES THE INSTALLED PLUGIN, not a path relative to wherever the
-    # driver happens to be standing — the shell stays in the project under review
-    # — and not `$CLAUDE_PLUGIN_ROOT`, which is UNSET in setup's second discovery
-    # mode. `RB_SCRIPTS` is set and validated in both.
-# AND EVERY ONE OF THEM IS THE BARE FORM, which is what removed the class this used
-    # to watch. It spelled `$RB_SCRIPTS/../SKILL-RATIONALE.md` — 91 times, one spelling —
-    # and the check here was that nobody wrote `docs/…` or `$CLAUDE_PLUGIN_ROOT/…`
-    # instead, neither of which resolves in both of setup's discovery modes. A marker with
-    # NOTHING after the colon cannot name the wrong file, so that is what is asserted —
-    # and asserted against the PREFIX count above, so anything after the colon, space or
-    # tab or otherwise, is a difference rather than a line neither check sees.
+    # THE POINTER NAMES NO FILE AT ALL, and that is what is asserted. It used to
+    # name the installed plugin — `$RB_SCRIPTS/../SKILL-RATIONALE.md`, 91 times, one
+    # spelling — and the check here was that nobody wrote `docs/…` or
+    # `$CLAUDE_PLUGIN_ROOT/…` instead, neither of which resolves in both of setup's
+    # discovery modes: the shell stays in the project under review, and
+    # `$CLAUDE_PLUGIN_ROOT` is UNSET in the second. A marker with NOTHING after the
+    # colon cannot name the wrong file, so the bare form is the stronger check and it
+    # replaced the class rather than guarding it. Asserted against the PREFIX count
+    # above, so anything after the colon — space, tab or otherwise — is a difference
+    # between two numbers rather than a line neither check sees.
     _wy_bare=0; _wy_bp_rc=0
     _wy_bare="$(grep -c '^[[:space:]]*# WHY:$' "$SKILL")" || _wy_bp_rc=$?
     [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for bare markers (rc=$_wy_bp_rc)"
