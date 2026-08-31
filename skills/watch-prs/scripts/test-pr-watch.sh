@@ -843,6 +843,59 @@ else
     pass "running as root, so the unreadable-baseline state is skipped by name"
 fi
 
+# A FIFO AT THAT PATH DOES NOT HANG THE WATCH. `9<` on a FIFO blocks waiting for a
+# writer, and the `-f` test that rejects it is on the far side of the redirection, so
+# it never runs — the watch stayed silent past its own `--timeout` and had to be killed
+# from outside. The open runs under the same watchdog every other probe here uses now.
+# The case is bounded by the harness too, so a regression HANGS the fixture rather than
+# the suite.
+if command -v mkfifo >/dev/null 2>&1; then
+    rm -f "$_bl"; mkfifo "$_bl" 2>/dev/null && {
+        out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+               run_limited 45 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+        { [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(blocked|not_regular)' <<<"$out"; } \
+            && pass "…and a FIFO at the baseline path is state=error rather than a hang" \
+            || die "a FIFO baseline path gave rc=$rc out='$out'"
+        grep -q 'PR_REVIEW_READY' <<<"$out" \
+            && die "a blocked baseline read still announced a review: $out" \
+            || pass "…announcing no review"
+    }
+    rm -f "$_bl"
+else
+    pass "no mkfifo on this platform, so the FIFO state is skipped by name"
+fi
+
+# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
+# holding one read back as the empty string — which is the legitimate "no prior review
+# to wait past" — and the watch announced the terminal review this round just handled
+# as the next one. Asserted on the CONSEQUENCE as well as the reason: no READY line.
+printf '\000' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
+    && pass "…and a NUL-only baseline file is refused, not read as an empty baseline" \
+    || die "a NUL-only baseline file gave rc=$rc out='$out'"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a NUL baseline let the stale review through as this round's: $out" \
+    || pass "…announcing no review"
+# AND A NUL BESIDE A REAL ID IS REFUSED TOO, so the check is about the byte rather
+# than about the value happening to come out empty.
+printf '99\000\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
+    && pass "…including a NUL beside an otherwise valid id" \
+    || die "a NUL beside an id gave rc=$rc out='$out'"
+
+# A DIRECTORY IS NOT A REGULAR FILE EITHER, and the reason says which.
+rm -f "$_bl"; mkdir -p "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(not_regular|unreadable)' <<<"$out"; } \
+    && pass "…and a directory at the baseline path is state=error" \
+    || die "a directory baseline path gave rc=$rc out='$out'"
+rmdir "$_bl"
+
 # A MALFORMED BASELINE IS REFUSED AT THE CALL, not an hour later. The four-arm check
 # in the loop runs on the first TERMINAL state, which may be far away; a caller that
 # handed over junk can still act on it now.

@@ -2,7 +2,7 @@
 
 ## [2.0.88] — 2026-08-31
 
-- **`SKILL.md` is 2,818 characters shorter, and the driving shell no longer names
+- **`SKILL.md` is 2,603 characters shorter, and the driving shell no longer names
   the review baseline at all.** The review id captured immediately before a request
   is what the next watch needs, and it used to come back into the operator's own
   shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
@@ -36,7 +36,15 @@
   caller expanding a name that was never assigned satisfies the argument count and
   hands over an empty string, which would skip the read entirely and leave the watch
   with no baseline at all — the same fail-open state, reached by passing the option
-  rather than by omitting it. #243.
+  rather than by omitting it.
+
+  An unreadable baseline is also a bounded question now. Opening the path can BLOCK —
+  a FIFO there waits for a writer that never comes, and the type check that would
+  reject it is on the far side of the redirection — so the open runs under the same
+  watchdog every other probe in the watch uses, and an expiry is `state=error` like
+  any other unreadable answer. And a NUL byte is not an empty baseline: `$(<file)`
+  drops NUL, so a file holding one read back as the empty string, which is the
+  legitimate "there is no prior review to wait past". #243.
 
 ## [2.0.87] — 2026-08-31
 
