@@ -1630,7 +1630,13 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # holding the summary, and a driver whose `exit` returns walks out of the gate's own
 # refusal arm and reaches this code anyway. A summary of exactly forty lowercase hex
 # characters would then read as a gated head.
-_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]' "$SKILL" | head -1 | cut -d: -f1)" || true
+#
+# BOTH HALVES ARE MATCHED. Anchoring on the pathname comparison alone left `-ef` free to
+# be deleted with the suite green — and `-ef` is the half that answers when the two names
+# differ, which is what a symlink in a scratch directory produces. The executed cases
+# below cover the same ground; this keeps the ORDERING assertion honest about what it is
+# anchored to.
+_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then$' "$SKILL" | head -1 | cut -d: -f1)" || true
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
     && pass "…and the head is proven, identity first, after the gate and before the replies" \
@@ -1687,6 +1693,24 @@ grep -q 'the same file' <<<"$_hp_out" \
     && pass "…naming the identity, not the content" \
     || die "the refusal does not name the aliasing: $_hp_out"
 
+# AND AN ALIAS WITH TWO DIFFERENT PATHNAMES, which is what `-ef` is for. The case above
+# passes the SAME string twice, so `!=` answers first and short-circuits — the `-ef` half
+# is never reached, and deleting it would leave the suite green. A symlink is the shape
+# an operator's scratch directory actually produces.
+if ln -sf "$_hp_dir/summary" "$_hp_dir/head-link" 2>/dev/null; then
+    _hp_lnk="$(_hp_run "$_hp_dir/head-link" "$_hp_dir/summary")"
+    case "${_hp_lnk##*S:}" in
+        0*) die "a symlinked head file was accepted as a gated head: $_hp_lnk" ;;
+        *)  pass "…and an alias reached by a different pathname is refused too" ;;
+    esac
+    grep -q 'the same file' <<<"$_hp_lnk" \
+        && pass "…naming the identity there as well" \
+        || die "the symlink refusal does not name the aliasing: $_hp_lnk"
+    rm -f "$_hp_dir/head-link"
+else
+    pass "no symlink support here, so the distinct-path alias is skipped by name"
+fi
+
 # A REAL GATED HEAD IN A FILE OF ITS OWN STILL PASSES, or the case above passes by
 # refusing everything.
 printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/head"
@@ -1711,6 +1735,19 @@ case "${_hp_hex##*S:}" in
     0*) die "a forty-character non-hex head was accepted: $_hp_hex" ;;
     *)  pass "…and a forty-character non-hex head is refused on the same read" ;;
 esac
+# AND ALL-HEX VALUES OF THE WRONG LENGTH, which are the ONLY inputs that reach the final
+# arm. Every other refusal case here matches `*[!0-9a-f]*` and is answered by the first
+# arm, so without these the length refusal could be deleted and the suite would stay
+# green — and a head file altered to hold a short or long hex value would reach the
+# irreversible replies.
+for _hp_len in 'abcdef01' 'abcdef0123456789abcdef0123456789abcdef0123'; do
+    printf '%s\n' "$_hp_len" > "$_hp_dir/head"
+    _hp_wl="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+    case "${_hp_wl##*S:}" in
+        0*) die "an all-hex head of ${#_hp_len} characters was accepted: $_hp_wl" ;;
+        *)  pass "…and an all-hex head of ${#_hp_len} characters is refused" ;;
+    esac
+done
 
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
