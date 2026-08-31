@@ -2236,16 +2236,29 @@ _opn_attack "…and a readonly WHO does too, rather than polling Codex again" \
 # this case pins is the CONSEQUENCE the setup probe exists to prevent, so that removing
 # `WHO` from that list turns a fixture red rather than passing quietly.
 if [ "$_rb_has_n" = yes ]; then
+    # THE STATUS IS TAKEN, because a refusal is the EXPECTED answer here and this file
+    # runs under `errexit`: a failing substitution in a bare assignment ends the fixture
+    # where it stands, and every case after it is silently not run. That is how this
+    # very case first reported PASS for the whole file while stopping at itself.
+    _opn_nr_rc=0
     _opn_nr="$(RB_OPN_STUB="$_opn_dir/stub0" bash -c '
         COPILOT_BOT="copilot-pull-request-reviewer[bot]"
         PRIOR_FILE="/the/baseline/path"
         declare -n WHO=PRIOR_FILE
         . "$1" 2>/dev/null
-        printf "P:[%s]" "$PRIOR_FILE"' _ "$_opn_dir/opn.sh" 2>/dev/null)"
+        printf "P:[%s]" "$PRIOR_FILE"' _ "$_opn_dir/opn.sh" 2>/dev/null)" || _opn_nr_rc=$?
+    # EITHER OUTCOME IS ACCEPTABLE AND BOTH ARE NAMED. The fence may refuse before the
+    # assignment, in which case the child never reaches its own report; or it may reach
+    # it, and then the target must be UNTOUCHED. What is never acceptable is the target
+    # carrying the reviewer login, which is the state the finding described.
     case "$_opn_nr" in
+        *'P:[copilot-pull-request-reviewer[bot]]'*)
+            die "an aliased WHO overwrote the baseline path with the reviewer login: $_opn_nr" ;;
         *'P:[/the/baseline/path]'*)
-            pass "…and an aliased WHO does not overwrite the baseline path" ;;
-        *) pass "…and an aliased WHO is caught before the phase opens (target now: ${_opn_nr##*P:})" ;;
+            pass "…and an aliased WHO leaves the baseline path untouched" ;;
+        *)  [ "$_opn_nr_rc" -ne 0 ] \
+                && pass "…and an aliased WHO is refused before the phase opens" \
+                || die "an aliased WHO neither refused nor reported its target: $_opn_nr" ;;
     esac
     # THE SETUP PROBE IS WHAT MAKES THAT TRUE, and it is asserted by name so the two
     # cannot drift: dropping `WHO` from the list above leaves this comment describing a

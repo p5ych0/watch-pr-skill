@@ -398,7 +398,18 @@ duplicate pass or a review nobody requested.
 
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
-WHO="$CODEX_BOT"
+# THE REVIEWER NAME IS PROVED WHERE IT IS SET, at every site that sets it.
+# WHY:
+if ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
+     && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
+   && { WHO="$CODEX_BOT"; [[ $WHO = "$CODEX_BOT" ]]; }
+then
+    [[ -n x ]]
+else
+    echo "ABORT: WHO is readonly, value-transforming, or aimed at another name, so every stage below would be addressed to the wrong reviewer — or would overwrite whatever WHO points at. Nothing has been posted."
+    exit 1
+    [[ -n "" ]]
+fi
 
 #   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
@@ -456,7 +467,8 @@ Do not sit in a polling loop by hand. `pr-watch.sh` blocks until there is
 something to act on and prints one line when the state changes:
 
 ```bash
-WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun
+WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun — set and PROVEN
+                        # in step 2 and step 7; this line only names which one
 # $PRIOR_FILE holds the authoritative review id captured BEFORE the request that
 # this watch is waiting on — written by step 2, step 5 and step 7. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
@@ -1163,7 +1175,11 @@ way — the signoff is on the PR, so a later session reads it back with
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"; then
     # THE REVIEWER SWITCH IS A CONDITION, because its refusal has somewhere to fall.
     # WHY:
-    if WHO="$COPILOT_BOT"; [[ $WHO = "$COPILOT_BOT" ]]; then
+    # AND THE NAME IS PROVED HERE, because setup's probe cannot reach forward.
+    # WHY:
+    if ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
+         && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
+       && { WHO="$COPILOT_BOT"; [[ $WHO = "$COPILOT_BOT" ]]; }; then
         [[ -n x ]]
     else
         echo "ABORT: WHO is readonly or value-transforming in this shell, so the rounds below would poll the wrong reviewer. The phase IS open and Copilot HAS been requested; do not re-open it."

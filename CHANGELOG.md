@@ -2,7 +2,7 @@
 
 ## [2.0.88] — 2026-08-31
 
-- **`SKILL.md` is 2,230 characters shorter, and the driving shell no longer names
+- **`SKILL.md` is 1,434 characters shorter, and the driving shell no longer names
   the review baseline at all.** The review id captured immediately before a request
   is what the next watch needs, and it used to come back into the operator's own
   shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
@@ -62,7 +62,11 @@
   three places, none of which could prove it — and a nameref there is worse than an
   attribute: `declare -n WHO=PRIOR_FILE` makes the assignment write the reviewer login
   into the BASELINE PATH, and the check beside it passes because it reads back through
-  the same alias, so the next watch is handed a login as its file. #243.
+  the same alias, so the next watch is handed a login as its file. Setup's proof is the
+  floor rather than the answer, because the driving shell is long-lived and a `declare
+  -n` executed afterwards is invisible to a probe that already passed — so the same
+  probe runs at each site that assigns the name, in a subshell, so that the write it
+  makes to prove the point cannot land on the target. #243.
 
 ## [2.0.87] — 2026-08-31
 

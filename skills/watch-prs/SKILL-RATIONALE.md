@@ -1455,6 +1455,48 @@ success arm. The refusal is an arm that is not taken rather than a statement tha
 to stop the shell, which is the same shape every other fence here uses and the reason
 `[[ -n "" ]]` is the last word in it.
 
+
+## AND THE NAME IS PROVED HERE, because setup's probe cannot reach forward.
+
+Setup proves every name this session assigns, `WHO` included. That proof is about the
+shell as it was AT SETUP, and the driving shell is long-lived: a `declare -n
+WHO=PRIOR_FILE` executed at any point afterwards is invisible to a probe that already
+passed. `test-pr-skill-contract.sh` establishes exactly that about the other probed
+names, so it is not a hypothetical about this one.
+
+A nameref is the case a postcondition cannot catch, because it reads back through the
+same alias. `WHO="$COPILOT_BOT"` writes the login into `PRIOR_FILE`, `[[ $WHO =
+"$COPILOT_BOT" ]]` reads `PRIOR_FILE` and agrees — so the phase opens, Copilot is
+requested, and the next watch is handed a reviewer login as its baseline path. The
+target is destroyed either way: an alias onto any session name replaces its value.
+
+The probe is the setup one, run where the assignment is. A SUBSHELL, so the write it
+performs to prove the point cannot reach the parent — through an alias that write lands
+on the target, and probing destructively in this shell would be the damage the probe
+exists to prevent. `[[ $WHO = RbProbe* ]]` catches a transforming attribute, because
+one succeeds and stores something else; `[[ -z ${!WHO:-} ]]` catches the alias, because
+for a nameref that expansion is the TARGET'S NAME rather than a value. And it is the
+first term of the `if`, so the assignment is inside an arm the refusal does not take.
+
+## THE REVIEWER NAME IS PROVED WHERE IT IS SET, at every site that sets it.
+
+There are two: this one, and the switch to Copilot in step 7. Setup proves `WHO` as
+well, and that proof is worth having — it stops a session starting at all against a
+shell that has already aimed the name somewhere — but it cannot reach forward, so it is
+the floor rather than the answer.
+
+Proving only the LATER site was the first attempt and it was wrong in a way worth
+recording: the earlier assignment has the same hole, so guarding the site where a
+reviewer happened to notice it would have shipped the identical defect one stage
+sooner. The rule is the site, not the incident.
+
+What each failure costs here is the whole run rather than one stage. `WHO` addresses
+every helper the round calls — the watch, the round close, the phase — so a readonly
+one leaves them all aimed at whatever the name already held, a transforming one at a
+login that is nobody's, and an alias overwrites the name it points at while agreeing
+with every check made of it. Nothing has been posted at this point, which is why the
+refusal here can be total.
+
 ## THE RECORD IS STILL PRINTED, and it is what an operator reads.
 
 `post` still ends with `PR_ROUND_CLOSED pr=… reviewer=… head=… mode=… prior-review=…`,
