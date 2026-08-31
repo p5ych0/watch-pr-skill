@@ -1808,8 +1808,9 @@ nothing an operator's function can stand in for. It is how `pr-origin.sh` has al
 sent a value back and how the pin already comes back a few lines below, so this is the
 document's existing answer rather than a new one.
 
-WHAT IT DOES NOT ANSWER is WHICH object was bound; that is #230, and it is a property of
-this handoff on `main` as much as here.
+WHAT IT DOES NOT ANSWER is WHICH object was bound. A swap still gets a value past this
+read; what it no longer gets is a session addressed to it, because `pr-origin.sh pin`
+re-reads the checkout and refuses a pin that is not its origin. #230.
 ## THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
 
 This block removed the env file after sourcing it and the pin leaf after reading it,
@@ -1917,8 +1918,10 @@ accepts the transport NAME. `docs/decisions/2026-08-26-transport-candidate-in-ar
 accepts a squat on the candidate BEFORE the `mkdir`, and what makes it acceptable is
 measured: the exclusion means a squatter cannot put a value where setup will read it, so
 the cost is a denial of service and never a forged identity. Here the file exists and the
-helper has exited, so a replacement IS a forged identity — a different window with a
-different cost, which is #230 and open.
+helper has exited, so a replacement reaches the driver — a different window with a
+different cost. What bounds that cost is the pin: it re-reads the checkout and refuses a
+value that is not this repository's origin, so the replacement stops the session rather
+than retargeting it. #230.
 
 So the identity is re-derived from the value that was READ rather than trusted, and a
 value that is empty, spans a line, or is not a usable identity is refused by expansion —
