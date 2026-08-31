@@ -299,8 +299,9 @@ rb_close_call_present \
 # BOUND BEFORE IT IS READ, AND NOT SOURCED AT ALL. This block SOURCED a file of
 # twelve assignments, and `.` is a NAME: in the operator's long-lived shell a function
 # by that name could delegate the earlier library load, read the genuine assignments
-# and hand back a different origin — after which `rb_identity` and the child pin both
-# agree with the forged value, because both are computed FROM it. Eleven of the twelve
+# and hand back a different origin — after which `rb_identity` agrees with the forged
+# value, because it is computed FROM it, as the child pin did until it began re-reading
+# the checkout (#230). Eleven of the twelve
 # were never information: the identity parser derives three, two are constants, and
 # the working directory and its four files are a literal suffix under a directory this
 # shell named itself. So the helper hands back the ORIGIN alone, in a file read with
@@ -766,8 +767,9 @@ FORGE
     # of its functions, so `.` is a name like any other: while the setup values arrived
     # by sourcing, a function by that name could read the genuine assignments and hand
     # back a different origin — and everything after agreed with it, because
-    # `rb_identity` derives `OWNER` and `REPO` FROM the value and the child pin reports
-    # back the export made FROM it. The transport is a `$(<…)` now, which the parser
+    # `rb_identity` derives `OWNER` and `REPO` FROM the value, and the child pin then
+    # reported back the export made FROM it (it re-reads the checkout now, #230). The
+    # transport is a `$(<…)` now, which the parser
     # performs with no command name in it, so the function is never invoked.
     _dot=0
     _dot_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \

@@ -141,8 +141,9 @@ esac
 # ── what the driver gets back ──────────────────────────────────────────────
 # ONE VALUE, READ AS DATA. This wrote a file of twelve assignments the driver SOURCED,
 # and `.` is a NAME — in the operator's long-lived shell a function by that name could
-# hand back a different origin, after which the identity derivation and the child pin
-# both agree with it because both are computed FROM it. Eleven of the twelve were
+# hand back a different origin, after which the identity derivation agrees with it because
+# it is computed FROM it — as the child pin did until it began re-reading the checkout
+# (#230). Eleven of the twelve were
 # never information: three the identity parser derives, two are constants, and the
 # working paths are a literal suffix under a directory the driver named.
 _got="$(cat "$ok_dir/origin" 2>/dev/null)" || _got="READ_FAILED"

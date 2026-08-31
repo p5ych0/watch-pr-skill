@@ -76,5 +76,7 @@ than loss**, which is the trade this record accepts.
 ## What is NOT accepted here
 
 The origin file the driver reads is a different question — about which object was BOUND
-rather than which was removed, with a session acting on another repository rather than a
-racer losing a file. That is #230, open.
+rather than which was removed. That was #230, and it is closed by the pin: `pr-origin.sh
+pin` re-reads the checkout and refuses a value that is not this repository's origin, so a
+replaced file stops the session rather than making it act on another repository. The swap
+itself is not prevented; its consequence is.

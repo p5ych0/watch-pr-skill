@@ -309,8 +309,9 @@ deriving it, so exporting it removes the dependency instead of guarding it.
 Wrapping each call in `(cd "$REPO_DIR" && …)` was the guard, and it was itself
 defeatable: `cd` is a name, and a function named `cd` that returns 0 without
 moving leaves the subshell reporting success from the wrong tree. This has no
-name in it to shadow — the value is read once, here, and travels in the
-environment.
+name in it to shadow — the value is read in SETUP rather than at every call site, and
+travels in the environment. (Setup reads it twice, the second time to confirm the pin is
+this checkout's; what does not happen is a derivation per stage.)
 
 `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 inspects HISTORY, which is a tree rather than an identity, so the merge gate
@@ -809,6 +810,29 @@ probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
 setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
 stage derived its identity from wherever the session happened to stand.
 
+
+## AND THE PIN IS THIS CHECKOUT'S ORIGIN, or the stage refuses.
+
+A separate invariant from the one above, and it needs its own claim because the bijection
+compares HEADINGS: folded into "what the pin proof proves", removing the re-read would
+leave every declared claim apparently intact.
+
+What the proof above answers is whether a CHILD inherits the exported value. That is about
+the export, not about where the value came from — and the value came through a file the
+driver opened after `pr-setup.sh` had exited, which a same-UID process can replace in
+between. `rb_identity` does not close that either: it asks whether a string is a usable
+identity, not whether it is this checkout's, so a planted-but-valid remote satisfies both
+by being what both are computed from.
+
+So `pr-origin.sh pin` re-reads the checkout and refuses a value that is not its origin.
+That question can only be asked there: `git` is a name in this shell and is not one in a
+privileged helper. It compares the FETCH url — `remote.origin.url`, which is the identity
+every `gh` call is addressed by — and not the push destination, which `pr-close-round.sh`
+validates separately and which this does not replace.
+
+The swap is not prevented; a value still reaches the driver. What it can no longer do is
+address a session. #230.
+
 ## THE ACCOUNT IS PROSE, AND MUST NOT BECOME A RECORD, A REQUEST, OR A FRAGMENT.
 
 THE BODY IS PROSE AND MUST NOT BECOME A RECORD. It is posted under YOUR identity,
@@ -848,9 +872,11 @@ somebody wrote.
 
 ## WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here.
 
-The session's origin is read once and exported as `REVIEW_BUS_REMOTE`, which this
-stage and everything it drives inherit — so this call has no cwd dependency and
-needs no wrapper.
+The session's origin is read at setup and exported as `REVIEW_BUS_REMOTE`, which this
+stage and everything it drives inherit — so this call has no cwd dependency and needs no
+wrapper. It is read a SECOND time before the session starts, by the pin, which refuses a
+value that is not that checkout's origin; both reads happen in setup and neither is
+repeated here.
 
 Do not add one. A `(cd … && …)` guard here is what the pin replaced, and `cd` is a
 name a function can take; a list of call sites to wrap is missing the next one,
@@ -1793,9 +1819,12 @@ else is assigned here and proved.
 which cannot re-exec out of its own functions. While the setup values arrived by
 SOURCING, a function named `.` could delegate the earlier `identitylib.sh` load, read
 the genuine assignments, and hand back a different origin — after which everything
-agreed with it, because `rb_identity` derives `OWNER` and `REPO` FROM the value and the
-child pin reports back the export made FROM it. The session then posts, signs off and
-merges in another repository with every check passing.
+agreed with it, because `rb_identity` derives `OWNER` and `REPO` FROM the value — and so
+did the child pin, which then reported back the export made FROM it and nothing else. The
+session posted, signed off and merged in another repository with every check passing. The
+pin re-reads the checkout now (#230), so that last agreement is gone; the argument for not
+sourcing is unaffected, because a function named `.` runs as CODE and that is a larger
+failure than a forged value.
 
 THAT IS AN INDEPENDENT OBLIGATION FROM HOW THE VALUE TRAVELS. A future edit could keep
 the single value and reintroduce a source to read it, which is why this claim and the
@@ -1808,8 +1837,9 @@ nothing an operator's function can stand in for. It is how `pr-origin.sh` has al
 sent a value back and how the pin already comes back a few lines below, so this is the
 document's existing answer rather than a new one.
 
-WHAT IT DOES NOT ANSWER is WHICH object was bound; that is #230, and it is a property of
-this handoff on `main` as much as here.
+WHAT IT DOES NOT ANSWER is WHICH object was bound. A swap still gets a value past this
+read; what it no longer gets is a session addressed to it, because `pr-origin.sh pin`
+re-reads the checkout and refuses a pin that is not its origin. #230.
 ## THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
 
 This block removed the env file after sourcing it and the pin leaf after reading it,
@@ -1894,11 +1924,17 @@ files directly.
 ONE THING ABOUT IT IMPROVED AND THE REST DID NOT, and the difference is worth stating
 exactly. While this file was SOURCED, a replacement was arbitrary CODE in the operator's
 shell; it is a string now, so the worst case is a wrong repository rather than execution.
-WHAT IT IS NOT is a value two independent checks have to pass. `rb_identity` asks whether
-the string is a usable identity, not whether it is THIS checkout's, and `pr-origin.sh pin`
-reports `REVIEW_BUS_REMOTE` as a CHILD sees it — the value this shell just exported — so a
-planted-but-valid remote satisfies both, being what both are computed from. That is #230,
-open, and it is a property of this handoff on `main` as much as here.
+
+AND THAT WORST CASE IS WHAT THE PIN NOW ANSWERS. `rb_identity` asks whether the string is
+a usable identity, not whether it is THIS checkout's, so it agrees with a planted-but-valid
+remote — it is computed from the same value. `pr-origin.sh pin` used to agree for the same
+reason, reporting `REVIEW_BUS_REMOTE` as a CHILD sees it and nothing more. It re-reads the
+checkout now and refuses a pin that is not the identity this checkout FETCHES from — the
+fetch URL, not the push destination, which `pr-close-round.sh` validates separately with
+`--push --all` and which this does not replace. That is the question actually at stake,
+is the question actually at stake and one this shell cannot ask: `git` is a name here and
+is not a name there. A swap still gets a value past the read; it no longer gets a session
+addressed to it. #230.
 
 ## WHAT WAS READ IS PROVED HERE, because a file is not a promise.
 
@@ -1913,8 +1949,10 @@ accepts the transport NAME. `docs/decisions/2026-08-26-transport-candidate-in-ar
 accepts a squat on the candidate BEFORE the `mkdir`, and what makes it acceptable is
 measured: the exclusion means a squatter cannot put a value where setup will read it, so
 the cost is a denial of service and never a forged identity. Here the file exists and the
-helper has exited, so a replacement IS a forged identity — a different window with a
-different cost, which is #230 and open.
+helper has exited, so a replacement reaches the driver — a different window with a
+different cost. What bounds that cost is the pin: it re-reads the checkout and refuses a
+value that is not this repository's origin, so the replacement stops the session rather
+than retargeting it. #230.
 
 So the identity is re-derived from the value that was READ rather than trusted, and a
 value that is empty, spans a line, or is not a usable identity is refused by expansion —

@@ -317,6 +317,171 @@ pin_out="$(<"$TMP/pin.value/pin")"
     && pass "…and an unset pin is an empty answer, not an error" \
     || die "an unset pin gave rc=$pin_rc out='$pin_out'"
 
+# ── …AND A PIN THAT IS NOT THIS CHECKOUT'S IS REFUSED ─────────────────────
+#
+# The hole #230 named. The origin crosses from `pr-setup.sh` to the driver as a NAMED
+# FILE, and a same-UID process that replaces it between the write and the driver's open
+# is what the driver parses, exports and pins. `pin` used to report the inherited value
+# and stop, so a planted-but-VALID remote came back equal to itself and every later post,
+# signoff and merge was addressed to the wrong repository.
+#
+# The planted value here is well-formed and parses — that is the point. What makes it
+# wrong is that it is not the identity this checkout fetches from. The pin is about the
+# FETCH url — `pr-close-round.sh` validates the push destination separately — so this
+# case is about provenance, not about where a push would land.
+got="$(run pin REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git')"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a pin that is not this checkout's origin is refused" \
+    || die "a planted pin gave '${got}'"
+case "${got#*|}" in
+    *not-this-one*) pass "…naming the value it was given" ;;
+    *)              die "the refusal does not name the planted value: ${got#*|}" ;;
+esac
+# AND IT WRITES NO PIN. A refusal that still left the planted value in the leaf would be
+# read back by the driver and pinned anyway.
+# RUN INSIDE THE CHECKOUT, as `run` does. Invoked from wherever the suite was started,
+# `pin` would refuse because it can read no origin AT ALL — and the assertion below would
+# pass on that refusal without ever reaching the mismatch it claims to cover.
+rm -rf "$TMP/plant"
+( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
+    HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" pin "$TMP/plant" ) >/dev/null 2>&1; plant_rc=$?
+{ [ "$plant_rc" != 0 ] && [ ! -e "$TMP/plant/pin" ]; } \
+    && pass "…and leaves no pin for the caller to read" \
+    || die "a refused pin left rc=$plant_rc and pin=[$(cat "$TMP/plant/pin" 2>/dev/null)]"
+# AND THE REFUSAL PRINTS NO CREDENTIALS. An HTTPS remote can carry
+# `https://user:token@host/…`, and this is the one refusal that names two whole remotes.
+# Setup diagnostics live in terminal scrollback and session logs, so a raw echo puts a
+# token where anyone reading them later finds it.
+_cred='https://alice:s3cr3t-token@example.com/acme/widget.git'
+got="$(run pin REVIEW_BUS_REMOTE="$_cred")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a credential-bearing pin that is not this origin is still refused" \
+    || die "a credential-bearing planted pin gave '${got}'"
+case "${got#*|}" in
+    *s3cr3t-token*) die "the refusal printed the token: ${got#*|}" ;;
+    *alice*)        die "the refusal printed the userinfo: ${got#*|}" ;;
+    *)              pass "…without printing the userinfo or the token" ;;
+esac
+# AND IT STILL SAYS WHICH REMOTE IT WAS, or the redaction has cost the operator the only
+# actionable part of the message.
+case "${got#*|}" in
+    *example.com/acme/widget.git*) pass "…while still naming the host and path" ;;
+    *) die "the refusal redacted more than the userinfo: ${got#*|}" ;;
+esac
+
+# AND A CREDENTIAL OUTSIDE THE USERINFO IS REDACTED TOO. A token does not have to be
+# between `//` and the `@`: `https://host/path.git?access_token=…` is a remote git
+# accepts, and the secret is in the query. Redacting only the userinfo would have printed
+# it in full.
+_credq='https://example.com/acme/widget.git?access_token=s3cr3t-query-token'
+got="$(run pin REVIEW_BUS_REMOTE="$_credq")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a query-credential pin that is not this origin is still refused" \
+    || die "a query-credential planted pin gave '${got}'"
+case "${got#*|}" in
+    *s3cr3t-query-token*) die "the refusal printed the query token: ${got#*|}" ;;
+    *access_token*)       die "the refusal printed the query parameter: ${got#*|}" ;;
+    *)                    pass "…without printing the query or its token" ;;
+esac
+case "${got#*|}" in
+    *example.com/acme/widget.git*) pass "…while still naming the host and path" ;;
+    *) die "the query redaction took the host or path with it: ${got#*|}" ;;
+esac
+
+# AND A SECRET AFTER `#` IS DROPPED BY THE SAME PATTERN, which is why it needs its own
+# case: `[?#]` covers both delimiters, and a regression narrowing it to `?` alone would
+# restore the leak with every case above still green.
+_credf='https://example.com/acme/widget.git#token=s3cr3t-fragment-token'
+got="$(run pin REVIEW_BUS_REMOTE="$_credf")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a fragment-credential pin that is not this origin is still refused" \
+    || die "a fragment-credential planted pin gave '${got}'"
+case "${got#*|}" in
+    *s3cr3t-fragment-token*) die "the refusal printed the fragment token: ${got#*|}" ;;
+    *)                       pass "…without printing the fragment or its token" ;;
+esac
+case "${got#*|}" in
+    *example.com/acme/widget.git*) pass "…while still naming the host and path" ;;
+    *) die "the fragment redaction took the host or path with it: ${got#*|}" ;;
+esac
+
+# AND A CONTROL BYTE IN A PLANTED REMOTE DOES NOT REACH THE TERMINAL. `rb_identity`
+# accepts anything that parses, so a racer can plant a value carrying a carriage return or
+# an ANSI escape — which rewrites or hides the diagnostic that names it, in scrollback and
+# in session logs. The value is rendered with `%q`, so the bytes arrive as escapes.
+_credc="$(printf 'https://example.com/acme/widget.git\rFORGED-LINE')"
+got="$(run pin REVIEW_BUS_REMOTE="$_credc")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a control-byte pin that is not this origin is still refused" \
+    || die "a control-byte planted pin gave '${got}'"
+# THE RAW BYTE MUST BE ABSENT. Asserted against the byte itself rather than against a
+# rendering, so a different escape spelling still passes and a raw one cannot.
+case "${got#*|}" in
+    *"$(printf '\r')"*) die "the refusal emitted a raw carriage return: ${got#*|}" ;;
+    *)                   pass "…with the control byte escaped rather than emitted" ;;
+esac
+case "${got#*|}" in
+    *FORGED-LINE*) pass "…while the planted text is still shown, escaped" ;;
+    *) die "the refusal dropped the planted value instead of escaping it: ${got#*|}" ;;
+esac
+
+# AND AN SCP-LIKE VALUE IS ESCAPED TOO. That arm is not redacted — there is no userinfo
+# secret in `user@host:path` — but it reaches the same terminal, and the first version of
+# this escaping returned it early through a bare `%s`.
+_creds="$(printf 'git@example.com:acme/widget.git\rFORGED-SCP')"
+got="$(run pin REVIEW_BUS_REMOTE="$_creds")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "an SCP-like control-byte pin that is not this origin is still refused" \
+    || die "an SCP-like control-byte planted pin gave '${got}'"
+case "${got#*|}" in
+    *"$(printf '\r')"*) die "the refusal emitted a raw carriage return from the SCP-like arm: ${got#*|}" ;;
+    *)                   pass "…with the control byte escaped there too" ;;
+esac
+case "${got#*|}" in
+    *FORGED-SCP*) pass "…while the planted text is still shown, escaped" ;;
+    *) die "the SCP-like arm dropped the planted value instead of escaping it: ${got#*|}" ;;
+esac
+
+# AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
+# the directory has been created and before anything is written, so the cleanup must be
+# the one that removes only the directory. With the phase already `post` it removed the
+# LEAF by name — and where a same-UID process has swapped the directory in the meantime,
+# that name is the replacement's file.
+#
+# WHAT THIS STAGES, EXACTLY. The window the finding names — this run creates the
+# directory, a same-UID process swaps it, and the MISMATCH refusal then fires — needs a
+# racer inside a span of a few milliseconds, and a fixture that tries to hit it would pass
+# on scheduling rather than on the code. So the window itself is covered STRUCTURALLY, by
+# the pairwise phase-flip assertion in the reservation section: one flip per write, each
+# after the walks and before the write it arms, so no refusal can reach the leaf-removing
+# shape.
+#
+# WHAT THIS CASE PROVES is the consequence, on the refusal that CAN be staged
+# deterministically: a foreign leaf is present, the helper refuses before writing
+# anything, and the file is still there afterwards. It reaches that refusal by the
+# exclusion rather than by the mismatch — the phase is pre-write at both — so it is
+# evidence about the cleanup shape, not about the mismatch's timing.
+rm -rf "$TMP/swap"; mkdir -p "$TMP/swap"
+printf 'someone-elses-pin\n' > "$TMP/swap/pin"
+if true; then
+    ( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
+        HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+        /usr/bin/env bash -p "$SCRIPT" pin "$TMP/swap" ) >/dev/null 2>&1; swap_rc=$?
+    { [ "$swap_rc" != 0 ] && [ -f "$TMP/swap/pin" ] \
+      && [ "$(cat "$TMP/swap/pin")" = "someone-elses-pin" ]; } \
+        && pass "…and a refused pin leaves a replacement's leaf untouched" \
+        || die "a refused pin removed or altered a leaf it did not write (rc=$swap_rc, pin=[$(cat "$TMP/swap/pin" 2>/dev/null)])"
+fi
+rm -rf "$TMP/swap"
+
+# AND THE MATCHING PIN IS STILL ACCEPTED, or the two cases above pass by refusing
+# everything — which would stop every session rather than the planted ones.
+got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
+{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+    && pass "…while the checkout's own origin still pins" \
+    || die "the genuine pin was refused: '${got}'"
+
 # ── MODES ARE NAMED, AND AN UNKNOWN ONE IS REFUSED ─────────────────────────
 got="$(run '')"
 { [ "${got%%|*}" = 1 ] && grep -qF 'a mode is required' <<<"${got#*|}"; } \
@@ -1383,13 +1548,52 @@ _res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
 # why the paragraph that claimed structural cover was false for two rounds. All
 # three line numbers must be positive before they are ordered — a pattern that
 # stops matching leaves zero, and zero precedes everything.
-_res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
+#
+# THERE IS ONE FLIP PER WRITE, AND THIS COUNTS THEM. A single flip after the walks was
+# the old shape, and it was too early: between the walks and a write there are refusals
+# — the origin read, and the pin's comparison against it — and a refusal with the phase
+# already `post` runs `rm -f "$OUT"` on a leaf this run never created, deleting a
+# replacement's file where a same-UID process has swapped the directory. So each write
+# is preceded by its own flip, and what has to hold is pairwise: as many flips as writes,
+# every flip after the walks, and each flip before the write it arms.
 _res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
-_res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
-{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -gt 0 ] && [ "$_res_wr" -gt 0 ] \
-  && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
-    && pass "…and the phase flips after the walks and before any write" \
-    || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
+#
+# THE FLIP IS INSIDE THE REDIRECTED GROUP, which is what makes the leaf exist before it.
+# So the pattern matches it there rather than on a line of its own — and a flip written as
+# a separate command before the write no longer matches at all, which is the state this
+# check has to reject: it leaves a window in which a signal runs the leaf-removing cleanup
+# with nothing written.
+# ANCHORED AT LINE START, so a COMMENT quoting the construct is not counted as one. The
+# file explains this shape in prose, and an unanchored pattern found the explanation and
+# reported three flips for two writes — the same prose-for-code confusion #253 spent three
+# rounds on, arriving here by a different door.
+_res_phs="$(grep -n '^[[:space:]]*{ RB_PHASE=post; printf ' "$SCRIPT" `# racy-pipeline-ok: the printf is inside the grep PATTERN, and the pipe is grep-to-cut` | cut -d: -f1)" || _res_phs=""
+_res_bare="$(grep -c '^[[:space:]]*RB_PHASE=post$' "$SCRIPT")" || _res_bare=0
+[ "$_res_bare" -eq 0 ] \
+    && pass "the phase never flips as a command of its own, so no window precedes a write" \
+    || die "RB_PHASE=post appears $_res_bare time(s) outside a redirected write group; a signal between it and the write removes a leaf that was never created"
+_res_wrs="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | cut -d: -f1)" || _res_wrs=""
+_res_np="$(grep -c '[0-9]' <<<"$_res_phs")" || _res_np=0
+_res_nw="$(grep -c '[0-9]' <<<"$_res_wrs")" || _res_nw=0
+{ [ "$_res_w2" -gt 0 ] && [ "$_res_np" -gt 0 ] && [ "$_res_np" -eq "$_res_nw" ]; } \
+    && pass "…and every write to \$OUT is armed by a phase flip of its own ($_res_np)" \
+    || die "phase flips and \$OUT writes do not correspond (walk=$_res_w2 flips=$_res_np writes=$_res_nw)"
+_res_bad=""
+_res_i=1
+while [ "$_res_i" -le "$_res_np" ]; do
+    _res_p="$(sed -n "${_res_i}p" <<<"$_res_phs")"
+    _res_w="$(sed -n "${_res_i}p" <<<"$_res_wrs")"
+    # THE SAME LINE, because the flip lives INSIDE the redirected group — that is what
+    # makes the leaf open before it. "Before the write" was the old invariant and it is
+    # the one that left the window; what has to hold now is that the two are one command,
+    # and that it is after the walks.
+    { [ "$_res_p" -gt "$_res_w2" ] && [ "$_res_p" -eq "$_res_w" ]; } \
+        || _res_bad="$_res_bad pair$_res_i(walk=$_res_w2 phase=$_res_p write=$_res_w)"
+    _res_i=$((_res_i + 1))
+done
+[ -z "$_res_bad" ] \
+    && pass "…each after the walks and inside the redirection it arms" \
+    || die "RB_PHASE=post is misplaced:$_res_bad"
 # …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
 # means the cleanup can run at a moment when the `mkdir` had already failed because
 # the name was taken, and a directory there that belongs to somebody else is

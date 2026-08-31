@@ -49,8 +49,10 @@
 #
 #   - VALIDATE WHAT IT READ. This writes the file; it cannot prove the file the driver
 #     reads is the one it wrote. The driver re-derives the identity from what it read,
-#     and assigns and proves every other value itself. WHICH object it opened is not
-#     something either side can settle today — see #230.
+#     and assigns and proves every other value itself. WHICH object it opened is settled
+#     later and elsewhere: `pr-origin.sh pin` re-reads the checkout and refuses a pin
+#     that is not its origin, so a replaced file stops the session instead of
+#     retargeting it. See #230.
 #   - KEEP THE DIRECTORY. It is the caller's, by construction: this helper is given a
 #     name and creates it, and it must outlive the call — for the read, and for the four
 #     working files inside it that every later stage writes into. The driver removes
@@ -70,11 +72,12 @@
 #
 # WHICH IS NOT THE SAME AS THE STRING BEING CHECKED, and this comment used to imply it
 # was. `rb_identity` asks whether the value IS a usable identity, not whether it is THIS
-# checkout's, and the child pin does not re-read the checkout either — `pr-origin.sh
-# pin` reports `REVIEW_BUS_REMOTE` as a child sees it, which is the value the driver
-# just exported. A planted-but-valid remote therefore agrees with both, because both are
-# computed FROM it. That is #230, and it is a property of this handoff on `main` as much
-# as here; nothing below closes it, and a reader should not be told otherwise.
+# checkout's, so a planted-but-valid remote agrees with it — it is computed FROM the
+# value. The child pin used to agree for the same reason, reporting `REVIEW_BUS_REMOTE`
+# as a child sees it and nothing more. It RE-READS THE CHECKOUT now and refuses a pin
+# that is not its origin, which is the provenance question neither of the checks here
+# can ask. Nothing below closes the swap itself: a replaced file still reaches the
+# driver, and what changed is that it can no longer address a session. #230.
 #
 # THE OTHER ELEVEN VALUES WERE NEVER INFORMATION. `OWNER`, `REPO` and `HOST` are what
 # `rb_identity` derives from the origin, and the driver runs it anyway; the two
@@ -293,8 +296,10 @@ done
 # SOURCED, and the source was the defect: `.` is a NAME, and `SKILL.md`'s bash runs in
 # the operator's long-lived shell where a function by that name can delegate the load,
 # read the genuine assignments and hand back a different origin — after which the
-# identity derivation and the child pin both agree with the forged value, because both
-# are computed from it.
+# identity derivation agrees with the forged value, because it is computed from it. The
+# child pin used to agree for the same reason and no longer does, re-reading the checkout
+# instead (#230). What keeps the source out is not that check: a function named `.` runs
+# as CODE, which is a larger failure than a forged value.
 #
 # WHAT MADE THE SOURCE UNNECESSARY is that eleven of those twelve values were never
 # information: `OWNER`, `REPO` and `HOST` are what `rb_identity` derives from the

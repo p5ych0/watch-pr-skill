@@ -191,7 +191,9 @@ scripts at all, choosing the parent directory to hand over, the READ itself, and
 assignments and read-backs after it, which exist to catch a readonly name or a nameref
 defeating the driver's own assignment — a helper cannot observe that, and neither can it prove
 the pin, since `pr-origin.sh pin` answers whether a CHILD OF THE DRIVER sees this
-repository. So do not raise "this should move into a script" against what is left,
+repository. That stage re-reads the checkout and refuses a pin that is not its origin
+(#230), which is the question this shell cannot ask: `git` is a name here and is not one
+there. So do not raise "this should move into a script" against what is left,
 and do not treat the residue as a reason to add another guard: two were built for it
 and both were removed for costing more than they closed.
 

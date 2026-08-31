@@ -394,9 +394,9 @@ Then:
    **`pr-copilot-phase.sh`**, which runs in **three stages with your decision
    at each boundary**. Every post they make — and `close` makes none in
    `codex-only`, where there was no Copilot review — goes to the repository **the
-   session started in** — the origin URL is read once during
-   setup and pinned, so changing directory partway through no longer decides which
-   project a signoff or a revocation lands on:
+   session started in** — the origin URL is read during setup and pinned, and read a
+   second time to confirm the pin is that checkout's, so changing directory partway
+   through no longer decides which project a signoff or a revocation lands on:
 
    - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
      against *that exact sha*, proves its checks are green — and then proves the
@@ -924,8 +924,8 @@ plugin docs and open an issue.
 - **`--add-reviewer @copilot` fails:** Copilot review is not available to the
   repository. That is not permission to skip the pass — decide explicitly.
 - **Reviews target the wrong repo:** identity derives from
-  `git remote get-url origin` — read by `pr-origin.sh`, **once at the start of the
-  session**, and pinned into `REVIEW_BUS_REMOTE` for every helper. (The read goes
+  `git remote get-url origin` — read by `pr-origin.sh` at the start of the session
+  and pinned into `REVIEW_BUS_REMOTE` for every helper. (The read goes
   through a helper, started as `/usr/bin/env bash -p`, rather than running `git` in
   your shell:
   a shell function called `git` would otherwise decide which project the session
@@ -936,6 +936,16 @@ plugin docs and open an issue.
   requests, and a `cd` into a second checkout used to send those to whatever pull
   request of *that* repository shared the number. If you genuinely need to switch
   repositories, start a new session rather than unsetting the pin.
+- **Setup aborts saying the pinned remote is not this checkout's origin:** the pin is
+  checked against the checkout before the session starts, so the value is read **twice**
+  — once to obtain it, once to confirm it is this repository's — and the two disagreed.
+  The ordinary cause is that origin or the git configuration that resolves it changed
+  between the two reads: a `git remote set-url`, or a `url.<base>.insteadOf` rule edited
+  mid-setup. Re-run, and the fresh read is used for both. The check exists because the
+  value crosses to the driver in a file, and a file can be replaced after it is written —
+  so a value that is not this checkout's origin stops the session instead of addressing
+  it at another repository. It compares the **fetch** URL; where a push lands is
+  validated separately, when a round closes.
 - **`ABORT: could not set this session up`:** `pr-setup.sh` refused, for any of the
   reasons it refuses for — it could not create the private directory it works in,
   it could not read a usable `origin` from the checkout, the origin is not one the
