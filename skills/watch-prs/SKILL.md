@@ -31,18 +31,6 @@ character, which is what `test-pr-skill-contract.sh` matches. Claims are here an
 arguments are there because the arguments are long and read once, while the claims are
 read on every invocation.
 
-That destination is spelled from `$RB_SCRIPTS` and never as a bare relative path,
-because this loop drives whatever checkout it is installed over: a relative path names
-the rationale of the project under review, where the shell stands and where no such file
-exists. `$CLAUDE_PLUGIN_ROOT` is no good either, being unset in setup's second discovery
-mode; `$RB_SCRIPTS` is set and validated in both.
-
-The marker used to spell it out after the colon as well — 91 times, one distinct
-spelling. It named the file and never the section, so it repeated this paragraph and
-located nothing the title does not. Dropping the 34-character suffix took 3,094
-characters out of a document the driver reads whole on every run; the two paragraphs you
-are reading are the 1,176 that replaced them, so the file is 1,918 shorter.
-
 These rules bind you for every round. They are here because breaking them is what
 turns a three-round PR into a fifty-round one, and every line below was earned
 that way rather than assumed.
@@ -68,27 +56,22 @@ rules meet like this:
 - If a **different pre-existing** defect of the same shape exists **outside this
   PR's diff**, do not pull it in, even when the finding names it.
 
-  This exclusion is about *pre-existing* problems only. Where your change breaks
-  an untouched consumer — a validator loosened, a producer's output altered, a
-  contract widened — repairing that consumer is not widening the PR, it is
-  finishing the change you already made. A regression is this round's work
-  wherever the file that has to change happens to sit, and a reviewer naming that
-  file is naming the fix, not asking you to adopt unrelated work. The reviewers are told to keep out-of-scope problems
-  out of inline comments for exactly this reason, so a named copy in an untouched
-  file is a reviewer mistake rather than an instruction — answer it on the thread,
-  record it as an issue, and reference the issue number in the summary. A defect
-  that has been there for a year is not made urgent by your having noticed it
-  mid-round, and widening the PR to reach it is the scope expansion these rules
-  exist to prevent.
+  The reviewers are told to keep out-of-scope problems out of inline comments, so
+  a named copy in an untouched file is a reviewer mistake rather than an
+  instruction — answer it on the thread, record it as an issue, and reference the
+  number in the summary.
 
 A *different* pre-existing defect found while fixing this one is not in scope,
 however tempting the proximity — "different" matters as much as "pre-existing",
 because the **same** defect in a copy this PR also changes is the finding itself,
 and the bullets above require fixing it with the rest. **A regression the fix itself introduces is a different
 matter entirely**: it is part of what this PR changed, so it is this round's work
-and must be corrected before the round closes. The distinction is whether the
-behaviour was already wrong before you touched it, not whether it is the defect
-the finding named.
+and must be corrected before the round closes, wherever the file that has to change
+happens to sit. Where you broke an untouched consumer — a validator loosened, a
+producer's output altered, a contract widened — repairing that consumer is not
+widening the PR, it is finishing the change you already made. The distinction is
+whether the behaviour was already wrong before you touched it, not whether it is the
+defect the finding named.
 
 **Do not build more than the finding requires.** The smallest change that makes
 the finding false is the correct change. Adding configuration nobody asked for, a
@@ -149,21 +132,12 @@ landed separately, before the PR that relied on it. `pr-watch.sh`'s clock guard
 carries such a comment for a limitation already settled that way.
 
 **Say what you did not do — as a disposition, never as a description.** Silence
-reads as "addressed", and the reviewer has no way to tell the difference. But the
-summary is posted in the same comment as the `@codex review` mention, and a
-mention that describes an *unfixed* defect is read as a task rather than as
-context: Codex then runs as a coding agent, commits in an environment with no
-remote, and the round is spent producing a commit that exists nowhere. That has
-happened here.
-
-So record the **disposition** in the past tense and nothing more — "one finding
-was answered on its thread rather than applied", "one is deferred to #11" — with a
-bare issue number where there is one. Do not restate the defect, its file, its
-consequence, or what closing it would take. Where a broader fix looks warranted,
-that discussion belongs **outside the review request** — an issue, and the
-operator — with at most "deferred to #N" in the summary itself; naming the
-decision in the mention is enough to make it a work order. **Write the summary as a record,
-never as a work order** below has the full rule and the incident it came from.
+reads as "addressed". Record the disposition in the past tense and nothing more —
+"one finding was answered on its thread rather than applied", "one is deferred to
+#11" — with a bare issue number where there is one, and never the defect, its
+file, its consequence or what closing it would take. **Write the summary as a
+record, never as a work order** below carries the rule, the reason and the
+incident it came from.
 
 ## Derive identity
 

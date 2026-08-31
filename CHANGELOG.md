@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.0.90] — 2026-08-31
+
+- **`SKILL.md` is 1,859 characters shorter, and no rule or reason was removed.** Its
+  largest section — the round rules, read whole on every invocation — stated three things
+  that are stated in full elsewhere.
+
+  Two paragraphs explained why the `# WHY:` destination is spelled from `$RB_SCRIPTS` and
+  then recounted that the marker used to carry that path 91 times and what removing it
+  measured. The first is a rule for whoever EDITS a marker, which is `CLAUDE.md`'s job and
+  where an author reads it; the second is history, which is this file's job. The driver
+  needs to know where a claim's argument lives, and the paragraph above them says so.
+
+  The scope rule was made three times: three bullets, then a paragraph on pre-existing
+  versus regression, then a third saying the same two distinctions in different words. It
+  is made once now, with both distinctions and every clause the contract test pins —
+  including the untouched-consumer regression, which is the rule and not decoration.
+
+  And the disposition rule was made twice, with the second copy ending by pointing at the
+  first: "**Write the summary as a record, never as a work order** below has the full rule
+  and the incident it came from". An abstract of a section three screens away is worth
+  less than the pointer alone, so what stays is the rule and the pointer. #249.
+
 ## [2.0.89] — 2026-08-31
 
 - **The gated head is read once.** Between the
