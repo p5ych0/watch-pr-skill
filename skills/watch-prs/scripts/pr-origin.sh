@@ -888,9 +888,9 @@ fi
 # remotes disagreed or the refusal says nothing actionable; what they do not need is the
 # secret between `//` and the `@`. The host and path survive.
 #
-# SCP-LIKE REMOTES ARE LEFT ALONE — `git@github.com:owner/repo` has no `://`, and its
-# `git@` is a username with no secret in it, so there is nothing to redact and rewriting
-# it would only make the message harder to match against the operator's config.
+# SCP-LIKE REMOTES ARE LEFT ALONE — the `user@host:path` form has no `://`, and its user
+# part is a login with no secret in it, so there is nothing to redact and rewriting it
+# would only make the message harder to match against the operator's config.
 rb_redact() {   # prints its argument with any URL userinfo replaced
     local _u="$1" _scheme _rest _auth _path
     case "$_u" in
@@ -926,14 +926,19 @@ if [[ $MODE = pin ]]; then
         [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
             || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$(rb_redact "$REVIEW_BUS_REMOTE")', origin '$(rb_redact "$_rb_origin")'); the value the driver exported did not come from this repository"
     fi
-    # THE PHASE FLIPS HERE, immediately before the write and after every refusal above
-    # it, so a run that never wrote a leaf never removes one.
-    RB_PHASE=post
+    # THE PHASE FLIPS INSIDE THE REDIRECTION, so the leaf is OPEN before it flips. As a
+    # separate command before the write it left a window of its own: a `TERM` delivered
+    # after the flip and before `printf` opened `$OUT` ran the leaf-removing cleanup with
+    # no leaf written, and against a replaced directory that unlinks the replacement's
+    # file. A redirection on a group is applied BEFORE the group runs, so by the time the
+    # assignment executes the object exists and is this run's — and if the open fails the
+    # group never runs, the phase never flips, and `rmdir` alone is what the refusal gets.
+    #
     # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
     # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
-    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
+    { RB_PHASE=post; printf '%s\n' "${REVIEW_BUS_REMOTE-}"; } > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
     # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
     # EXIT handler would remove the leaf this run just wrote, so it has to go. The
@@ -949,12 +954,12 @@ fi
 # would be the duplication `CLAUDE.md` records paying for. `read` calls it and writes what
 # it got; `pin` calls it to CHECK what it inherited. Neither derives the origin twice.
 rb_read_origin
-# THE PHASE FLIPS HERE TOO, for the same reason and against a defect that predates the
-# pin's: `rb_read_origin` refuses on a checkout with no origin, on a `git` that fails, and
-# on a value it cannot accept — all of them after the walks and all of them before any
-# write. With the flip at the walks, each of those removed a leaf this run had not made.
-RB_PHASE=post
-printf '%s\n' "$_rb_origin" > "$OUT" \
+# THE PHASE FLIPS INSIDE THIS REDIRECTION TOO, for the same reason and against a defect
+# that predates the pin's: `rb_read_origin` refuses on a checkout with no origin, on a
+# `git` that fails, and on a value it cannot accept — all after the walks and all before
+# any write. With the flip at the walks each of those removed a leaf this run had not
+# made; as a separate command before the write, a signal between the two did the same.
+{ RB_PHASE=post; printf '%s\n' "$_rb_origin"; } > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
 # stay armed through the final command.

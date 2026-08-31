@@ -1484,7 +1484,17 @@ _res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
 # is preceded by its own flip, and what has to hold is pairwise: as many flips as writes,
 # every flip after the walks, and each flip before the write it arms.
 _res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
-_res_phs="$(grep -n '^[[:space:]]*RB_PHASE=post$' "$SCRIPT" | cut -d: -f1)" || _res_phs=""
+#
+# THE FLIP IS INSIDE THE REDIRECTED GROUP, which is what makes the leaf exist before it.
+# So the pattern matches it there rather than on a line of its own — and a flip written as
+# a separate command before the write no longer matches at all, which is the state this
+# check has to reject: it leaves a window in which a signal runs the leaf-removing cleanup
+# with nothing written.
+_res_phs="$(grep -n '{ RB_PHASE=post; printf ' "$SCRIPT" `# racy-pipeline-ok: the printf is inside the grep PATTERN, and the pipe is grep-to-cut` | cut -d: -f1)" || _res_phs=""
+_res_bare="$(grep -c '^[[:space:]]*RB_PHASE=post$' "$SCRIPT")" || _res_bare=0
+[ "$_res_bare" -eq 0 ] \
+    && pass "the phase never flips as a command of its own, so no window precedes a write" \
+    || die "RB_PHASE=post appears $_res_bare time(s) outside a redirected write group; a signal between it and the write removes a leaf that was never created"
 _res_wrs="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | cut -d: -f1)" || _res_wrs=""
 _res_np="$(grep -c '[0-9]' <<<"$_res_phs")" || _res_np=0
 _res_nw="$(grep -c '[0-9]' <<<"$_res_wrs")" || _res_nw=0
@@ -1496,12 +1506,16 @@ _res_i=1
 while [ "$_res_i" -le "$_res_np" ]; do
     _res_p="$(sed -n "${_res_i}p" <<<"$_res_phs")"
     _res_w="$(sed -n "${_res_i}p" <<<"$_res_wrs")"
-    { [ "$_res_p" -gt "$_res_w2" ] && [ "$_res_p" -lt "$_res_w" ]; } \
+    # THE SAME LINE, because the flip lives INSIDE the redirected group — that is what
+    # makes the leaf open before it. "Before the write" was the old invariant and it is
+    # the one that left the window; what has to hold now is that the two are one command,
+    # and that it is after the walks.
+    { [ "$_res_p" -gt "$_res_w2" ] && [ "$_res_p" -eq "$_res_w" ]; } \
         || _res_bad="$_res_bad pair$_res_i(walk=$_res_w2 phase=$_res_p write=$_res_w)"
     _res_i=$((_res_i + 1))
 done
 [ -z "$_res_bad" ] \
-    && pass "…each after the walks and before the write it arms" \
+    && pass "…each after the walks and inside the redirection it arms" \
     || die "RB_PHASE=post is misplaced:$_res_bad"
 # …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
 # means the cleanup can run at a moment when the `mkdir` had already failed because

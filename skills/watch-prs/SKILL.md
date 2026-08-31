@@ -293,6 +293,8 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                 # WHY:
                 # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
                 # WHY:
+                # AND THE PIN IS THIS CHECKOUT'S ORIGIN, or the stage refuses.
+                # WHY:
                 # A SQUATTED PIN NAME COSTS A SECOND NAME, NOT THE SESSION.
                 # WHY:
                 RB_PIN_SEEN=

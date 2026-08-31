@@ -810,6 +810,29 @@ probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
 setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
 stage derived its identity from wherever the session happened to stand.
 
+
+## AND THE PIN IS THIS CHECKOUT'S ORIGIN, or the stage refuses.
+
+A separate invariant from the one above, and it needs its own claim because the bijection
+compares HEADINGS: folded into "what the pin proof proves", removing the re-read would
+leave every declared claim apparently intact.
+
+What the proof above answers is whether a CHILD inherits the exported value. That is about
+the export, not about where the value came from — and the value came through a file the
+driver opened after `pr-setup.sh` had exited, which a same-UID process can replace in
+between. `rb_identity` does not close that either: it asks whether a string is a usable
+identity, not whether it is this checkout's, so a planted-but-valid remote satisfies both
+by being what both are computed from.
+
+So `pr-origin.sh pin` re-reads the checkout and refuses a value that is not its origin.
+That question can only be asked there: `git` is a name in this shell and is not one in a
+privileged helper. It compares the FETCH url — `remote.origin.url`, which is the identity
+every `gh` call is addressed by — and not the push destination, which `pr-close-round.sh`
+validates separately and which this does not replace.
+
+The swap is not prevented; a value still reaches the driver. What it can no longer do is
+address a session. #230.
+
 ## THE ACCOUNT IS PROSE, AND MUST NOT BECOME A RECORD, A REQUEST, OR A FRAGMENT.
 
 THE BODY IS PROSE AND MUST NOT BECOME A RECORD. It is posted under YOUR identity,
