@@ -200,6 +200,8 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
      && [[ -z ${!RB_SETUP_DIR:-} ]] ) 2>/dev/null \
    && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
      && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null \
+   && ( CODEX_SHA="RbProbe$$$RANDOM$RANDOM"; [[ $CODEX_SHA = RbProbe* ]] \
+     && [[ -z ${!CODEX_SHA:-} ]] ) 2>/dev/null \
    && ( CODEX_BOT="RbProbe$$$RANDOM$RANDOM"; [[ $CODEX_BOT = RbProbe* ]] \
      && [[ -z ${!CODEX_BOT:-} ]] ) 2>/dev/null \
    && ( COPILOT_BOT="RbProbe$$$RANDOM$RANDOM"; [[ $COPILOT_BOT = RbProbe* ]] \
@@ -335,7 +337,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of the names this block assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE or HEAD_FILE — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
+    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE or HEAD_FILE — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi

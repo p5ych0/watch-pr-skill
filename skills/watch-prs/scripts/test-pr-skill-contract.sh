@@ -443,7 +443,13 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
 # THE PREFIX MATCH IS THE OTHER HALF, and it is what catches a readonly or a
 # transforming attribute — MIXED CASE, because an all-caps sentinel survives
 # `declare -u` unchanged and that attribute got through once.
-for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN RB_REMOTE \
+# CODEX_SHA IS IN THIS LIST SINCE #239, and it is the one that is not assigned in the
+# setup block at all — it is written in step 7, from the file `record` hands back. It is
+# probed HERE because that is where every name this session assigns is proved writable,
+# and because the alternative is proving it in step 7, after `record` has posted the
+# signoff: a readonly seed there leaves a shape-valid value the checks then pass, or ends
+# the shell, and either way the signoff is already on the PR.
+for _tn in RB_TMPPARENT RB_TMPPARENT2 RB_SETUP_DIR RB_PIN_SEEN RB_REMOTE CODEX_SHA \
            CODEX_BOT COPILOT_BOT SUMMARY_FILE REQUEST_FILE PRIOR_FILE HEAD_FILE; do
     grep -q "( $_tn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_setup_body" \
         || die "the setup probe does not assign a random RbProbe sentinel to \$$_tn and match it"
@@ -1247,7 +1253,7 @@ git@github.com:squatter/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" bash 
     # through to the call, where a transformed `RB_SETUP_DIR` names a directory the
     # operator chose.
     case "$_setup_body" in
-        *'ABORT: one of the names this block assigns —'*'is readonly, value-transforming, or aimed at another name'*)
+        *'ABORT: one of the names this session assigns —'*'is readonly, value-transforming, or aimed at another name'*)
             pass "…and the probe's refusal is an arm that says which names it is about" ;;
         *)  die "the probe refusal is not an arm with an abort" ;;
     esac

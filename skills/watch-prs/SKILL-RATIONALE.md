@@ -1435,8 +1435,8 @@ in this document is written as one.
 
 ## AND WHAT WAS READ IS PROVED A SHA, because an attribute can transform an assignment.
 
-The read succeeding does not mean the NAME holds what the file held. `CODEX_SHA` is not
-in setup's probe list, and this block runs in the operator's long-lived shell: declared
+The read succeeding does not mean the NAME holds what the file held. This block runs in
+the operator's long-lived shell: declared
 `declare -i`, a forty-digit sha is coerced to an integer the moment it is assigned —
 measured, `0000…0001` becomes `1` — and declared `declare -u` it comes back uppercased.
 Both assignments SUCCEED, so the condition is satisfied and the value is wrong.
@@ -1445,6 +1445,13 @@ WHAT IS WRONG WITH A WRONG VALUE HERE is that the signoff has already been poste
 corrupted sha is then named to the operator on the pause, or handed to `open` and the
 merge gates. So the length and the alphabet are checked inside the same condition,
 where a failure takes the refusal arm rather than continuing.
+
+AND `CODEX_SHA` IS IN SETUP'S PROBE, which is the other half and the earlier one. The
+shape check catches a value that arrived wrong; it cannot catch a READONLY seed, where
+the assignment fails and a shape-valid value the operator planted is what the checks
+then pass — or where the failed assignment ends the shell outright, which is loud but
+happens after `record` has posted the signoff. The probe answers both at setup, before
+anything is posted, which is where every other name this session assigns is answered.
 
 ## AND THE PAUSE ARM READS IT TOO, the signoff being recorded either way.
 
