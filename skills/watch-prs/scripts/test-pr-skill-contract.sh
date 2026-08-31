@@ -4172,12 +4172,19 @@ if [ -f "$_wy_doc" ]; then
     #    and annotating code. One equality closes a stray character, a pointer
     #    outside every fence, and a pointer under code.
     #
-    #    ANCHORED TO A WHOLE LINE, because the marker is now short enough to appear in
-    #    PROSE: the convention is stated once above the first fence and names the marker
-    #    there. An unanchored count took that sentence as a 92nd pointer. A pointer
-    #    outside a fence is still a whole line, so that half is unaffected.
+    #    ANCHORED AT LINE-LEADING COMMENT SYNTAX, because the marker is now short enough
+    #    to appear in PROSE: the convention is stated once above the first fence and names
+    #    the marker there, and an unanchored count took that sentence as a 92nd pointer.
+    #
+    #    COUNTED BY PREFIX, THEN VALIDATED AS THE BARE FORM — two steps, because one
+    #    exact-line count is a denominator that SHRINKS. `# WHY:` followed by a tab and a
+    #    path is not the exact line, so an exact count never saw it, and the path check
+    #    below wanted a SPACE after the colon and never saw it either: the claim above it
+    #    dropped out of the bijection and a path-bearing marker passed, both silently.
+    #    The prefix is what nothing may shrink; the bare form is what every one of them
+    #    must then be.
     _wy_all=0; _wy_all_rc=0
-    _wy_all="$(grep -c '^[[:space:]]*# WHY:$' "$SKILL")" || _wy_all_rc=$?
+    _wy_all="$(grep -c '^[[:space:]]*# WHY:' "$SKILL")" || _wy_all_rc=$?
     [ "$_wy_all_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
     [ "$_wy_all" -gt 0 ] \
         && pass "the lifted blocks point at their rationale ($_wy_all pointers)" \
@@ -4187,17 +4194,19 @@ if [ -f "$_wy_doc" ]; then
     # driver happens to be standing — the shell stays in the project under review
     # — and not `$CLAUDE_PLUGIN_ROOT`, which is UNSET in setup's second discovery
     # mode. `RB_SCRIPTS` is set and validated in both.
-# AND THE MARKER CARRIES NO PATH AT ALL, which is what removed the class this used to
-    # watch. It spelled `$RB_SCRIPTS/../SKILL-RATIONALE.md` — 91 times, one spelling — and
-    # the check here was that nobody wrote `docs/…` or `$CLAUDE_PLUGIN_ROOT/…` instead,
-    # neither of which resolves in both of setup's discovery modes. A marker with no path
-    # cannot name the wrong one, so what is asserted now is that none has come back.
-    _wy_bad_ptr=0; _wy_bp_rc=0
-    _wy_bad_ptr="$(grep -c '# WHY: ' "$SKILL")" || _wy_bp_rc=$?
-    [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers carrying a path (rc=$_wy_bp_rc)"
-    [ "$_wy_bad_ptr" -eq 0 ] \
-        && pass "…and none carries a path, so none can name an unresolvable one" \
-        || die "$_wy_bad_ptr pointers carry a path; the marker names no file and the convention is stated once"
+# AND EVERY ONE OF THEM IS THE BARE FORM, which is what removed the class this used
+    # to watch. It spelled `$RB_SCRIPTS/../SKILL-RATIONALE.md` — 91 times, one spelling —
+    # and the check here was that nobody wrote `docs/…` or `$CLAUDE_PLUGIN_ROOT/…`
+    # instead, neither of which resolves in both of setup's discovery modes. A marker with
+    # NOTHING after the colon cannot name the wrong file, so that is what is asserted —
+    # and asserted against the PREFIX count above, so anything after the colon, space or
+    # tab or otherwise, is a difference rather than a line neither check sees.
+    _wy_bare=0; _wy_bp_rc=0
+    _wy_bare="$(grep -c '^[[:space:]]*# WHY:$' "$SKILL")" || _wy_bp_rc=$?
+    [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for bare markers (rc=$_wy_bp_rc)"
+    [ "$_wy_bare" -eq "$_wy_all" ] \
+        && pass "…and all $_wy_all are bare, so none can name an unresolvable file" \
+        || die "$((_wy_all - _wy_bare)) of $_wy_all markers carry something after the colon; the marker names no file and the convention is stated once"
 
     # 2. THE CLAIMS, from the bash fences, each paired with the pointer beneath it.
     #    The status is taken: fed straight into a comparison, a failed `awk` yields
@@ -4505,6 +4514,18 @@ _wy_case "a pointer followed only by comments before the fence closes" fail \
 "# CLAIM ONE.
 $_wy_ptr
 # a trailing note, and no code after it" \
+"## CLAIM ONE.
+
+first argument"
+
+# REFUSED WHEN THE MARKER CARRIES ANYTHING AFTER THE COLON, including a TAB — the
+# spelling that evaded both halves at once: not the exact line the denominator counted,
+# and not the `# WHY: ` with a space the path check looked for. The claim above it left
+# the bijection and a path-bearing marker passed, both without a word.
+_wy_case "a marker with a tab and a path after the colon" fail \
+"# CLAIM ONE.
+# WHY:	docs/elsewhere.md
+x=1" \
 "## CLAIM ONE.
 
 first argument"
