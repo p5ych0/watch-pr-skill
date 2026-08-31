@@ -349,6 +349,38 @@ rm -rf "$TMP/plant"
 { [ "$plant_rc" != 0 ] && [ ! -e "$TMP/plant/pin" ]; } \
     && pass "…and leaves no pin for the caller to read" \
     || die "a refused pin left rc=$plant_rc and pin=[$(cat "$TMP/plant/pin" 2>/dev/null)]"
+# AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
+# the directory has been created and before anything is written, so the cleanup must be
+# the one that removes only the directory. With the phase already `post` it removed the
+# LEAF by name — and where a same-UID process has swapped the directory in the meantime,
+# that name is the replacement's file.
+#
+# WHAT THIS STAGES, EXACTLY. The window the finding names — this run creates the
+# directory, a same-UID process swaps it, and the MISMATCH refusal then fires — needs a
+# racer inside a span of a few milliseconds, and a fixture that tries to hit it would pass
+# on scheduling rather than on the code. So the window itself is covered STRUCTURALLY, by
+# the pairwise phase-flip assertion in the reservation section: one flip per write, each
+# after the walks and before the write it arms, so no refusal can reach the leaf-removing
+# shape.
+#
+# WHAT THIS CASE PROVES is the consequence, on the refusal that CAN be staged
+# deterministically: a foreign leaf is present, the helper refuses before writing
+# anything, and the file is still there afterwards. It reaches that refusal by the
+# exclusion rather than by the mismatch — the phase is pre-write at both — so it is
+# evidence about the cleanup shape, not about the mismatch's timing.
+rm -rf "$TMP/swap"; mkdir -p "$TMP/swap"
+printf 'someone-elses-pin\n' > "$TMP/swap/pin"
+if true; then
+    ( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
+        HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+        /usr/bin/env bash -p "$SCRIPT" pin "$TMP/swap" ) >/dev/null 2>&1; swap_rc=$?
+    { [ "$swap_rc" != 0 ] && [ -f "$TMP/swap/pin" ] \
+      && [ "$(cat "$TMP/swap/pin")" = "someone-elses-pin" ]; } \
+        && pass "…and a refused pin leaves a replacement's leaf untouched" \
+        || die "a refused pin removed or altered a leaf it did not write (rc=$swap_rc, pin=[$(cat "$TMP/swap/pin" 2>/dev/null)])"
+fi
+rm -rf "$TMP/swap"
+
 # AND THE MATCHING PIN IS STILL ACCEPTED, or the two cases above pass by refusing
 # everything — which would stop every session rather than the planted ones.
 got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
@@ -1422,13 +1454,34 @@ _res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
 # why the paragraph that claimed structural cover was false for two rounds. All
 # three line numbers must be positive before they are ordered — a pattern that
 # stops matching leaves zero, and zero precedes everything.
-_res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
+#
+# THERE IS ONE FLIP PER WRITE, AND THIS COUNTS THEM. A single flip after the walks was
+# the old shape, and it was too early: between the walks and a write there are refusals
+# — the origin read, and the pin's comparison against it — and a refusal with the phase
+# already `post` runs `rm -f "$OUT"` on a leaf this run never created, deleting a
+# replacement's file where a same-UID process has swapped the directory. So each write
+# is preceded by its own flip, and what has to hold is pairwise: as many flips as writes,
+# every flip after the walks, and each flip before the write it arms.
 _res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
-_res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
-{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -gt 0 ] && [ "$_res_wr" -gt 0 ] \
-  && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
-    && pass "…and the phase flips after the walks and before any write" \
-    || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
+_res_phs="$(grep -n '^[[:space:]]*RB_PHASE=post$' "$SCRIPT" | cut -d: -f1)" || _res_phs=""
+_res_wrs="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | cut -d: -f1)" || _res_wrs=""
+_res_np="$(grep -c '[0-9]' <<<"$_res_phs")" || _res_np=0
+_res_nw="$(grep -c '[0-9]' <<<"$_res_wrs")" || _res_nw=0
+{ [ "$_res_w2" -gt 0 ] && [ "$_res_np" -gt 0 ] && [ "$_res_np" -eq "$_res_nw" ]; } \
+    && pass "…and every write to \$OUT is armed by a phase flip of its own ($_res_np)" \
+    || die "phase flips and \$OUT writes do not correspond (walk=$_res_w2 flips=$_res_np writes=$_res_nw)"
+_res_bad=""
+_res_i=1
+while [ "$_res_i" -le "$_res_np" ]; do
+    _res_p="$(sed -n "${_res_i}p" <<<"$_res_phs")"
+    _res_w="$(sed -n "${_res_i}p" <<<"$_res_wrs")"
+    { [ "$_res_p" -gt "$_res_w2" ] && [ "$_res_p" -lt "$_res_w" ]; } \
+        || _res_bad="$_res_bad pair$_res_i(walk=$_res_w2 phase=$_res_p write=$_res_w)"
+    _res_i=$((_res_i + 1))
+done
+[ -z "$_res_bad" ] \
+    && pass "…each after the walks and before the write it arms" \
+    || die "RB_PHASE=post is misplaced:$_res_bad"
 # …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
 # means the cleanup can run at a moment when the `mkdir` had already failed because
 # the name was taken, and a directory there that belongs to somebody else is

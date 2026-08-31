@@ -693,11 +693,14 @@ _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
     || rb_refuse "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
 [[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse
-# THE NAME IS TRUSTED FROM HERE, and that is what the phase says. Every write is
-# below this line and every walk above it, so a signal arriving from now on gets
-# the shape that removes the leaf as well — and never gets it while the ancestry
-# is still unproven.
-RB_PHASE=post
+# THE NAME IS TRUSTED FROM HERE, and the walks are all above this line. The PHASE does
+# not flip here, though: it selects the cleanup SHAPE, and the leaf-removing shape is only
+# correct once this run has written a leaf. Between here and the write there are refusals
+# — the origin read, and the pin's comparison against it — and a refusal there with the
+# phase already `post` runs `rm -f "$OUT"` on a leaf this run never created. Where a
+# same-UID process has replaced the directory in the meantime, that deletes ITS file. So
+# the flip sits immediately before each write instead, and `rmdir` alone is what a refusal
+# gets until then.
 
 
 
@@ -884,6 +887,9 @@ if [[ $MODE = pin ]]; then
         [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
             || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$REVIEW_BUS_REMOTE', origin '$_rb_origin'); the value the driver exported did not come from this repository"
     fi
+    # THE PHASE FLIPS HERE, immediately before the write and after every refusal above
+    # it, so a run that never wrote a leaf never removes one.
+    RB_PHASE=post
     # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
     # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
@@ -904,6 +910,11 @@ fi
 # would be the duplication `CLAUDE.md` records paying for. `read` calls it and writes what
 # it got; `pin` calls it to CHECK what it inherited. Neither derives the origin twice.
 rb_read_origin
+# THE PHASE FLIPS HERE TOO, for the same reason and against a defect that predates the
+# pin's: `rb_read_origin` refuses on a checkout with no origin, on a `git` that fails, and
+# on a value it cannot accept — all of them after the walks and all of them before any
+# write. With the flip at the walks, each of those removed a leaf this run had not made.
+RB_PHASE=post
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
