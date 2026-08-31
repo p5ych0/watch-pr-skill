@@ -30,7 +30,13 @@
   `/dev/fd/N` duplicates rather than re-opens, so the second read drains empty and
   every non-empty baseline was refused — after the summary and the next pass had
   already gone out. That was #238, open against the opening path's copy of the same
-  read; removing the read closed it. #243.
+  read; removing the read closed it.
+
+  An empty baseline PATH is refused at the option, not only a missing argument: a
+  caller expanding a name that was never assigned satisfies the argument count and
+  hands over an empty string, which would skip the read entirely and leave the watch
+  with no baseline at all — the same fail-open state, reached by passing the option
+  rather than by omitting it. #243.
 
 ## [2.0.87] — 2026-08-31
 

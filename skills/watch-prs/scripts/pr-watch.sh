@@ -164,7 +164,18 @@ while [ "$#" -gt 0 ]; do
         # The two spellings are not two answers. `--after-review` is for a caller
         # holding the value in a hardened process of its own — `pr-close-round.sh`
         # waiting on the pass its push started — and both reach the same validation.
+        #
+        # AN EMPTY PATH IS REFUSED HERE, and it has to be here rather than at the read.
+        # A caller expanding an unset name — `--after-review-file "$PRIOR_FILE"` with
+        # `PRIOR_FILE` never assigned — satisfies the argument count and leaves this
+        # empty, and an empty value then skips the read block entirely: the watch runs
+        # with NO baseline and announces the already-terminal review as the new pass.
+        # That is the exact failure the baseline exists to prevent, reached by passing
+        # the option rather than by omitting it. `--after-review` keeps accepting an
+        # empty VALUE, which legitimately means "no prior review to wait past"; an
+        # empty PATH names no file and is never that answer.
         --after-review-file) [ "$#" -ge 2 ] || { echo "$0: --after-review-file needs a value" >&2; exit 2; }
+                    [ -n "$2" ] || { echo "$0: --after-review-file needs a path, and was given an empty one" >&2; exit 2; }
                     AFTER_REVIEW_FILE="$2"; shift 2 ;;
         -*) echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2 ;;
         *) if [ -z "$PR" ]; then PR="$1"; elif [ -z "$WHO" ]; then WHO="$1"; fi; shift ;;

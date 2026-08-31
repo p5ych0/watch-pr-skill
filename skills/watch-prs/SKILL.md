@@ -419,7 +419,9 @@ WHO="$CODEX_BOT"
 # WHY:
 # AND THE FILE IS NOT WRITTEN FROM THIS SHELL, because `cat` and `printf` are names.
 # WHY:
-# NOTHING HERE IS AN ASSIGNMENT, AND THE BASELINE NEVER BECOMES ONE.
+# NO NAME HOLDS THE STATUS, because a readonly one loses a refusal twice over.
+# WHY:
+# AND THE BASELINE NEVER BECOMES AN ASSIGNMENT EITHER.
 # WHY:
 # THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
 # WHY:
@@ -881,7 +883,9 @@ Then, and only then:
 # THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 # WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
-    # THE BASELINE STAYS IN THE FILE `post` WROTE, and the watch is the one that reads it.
+    # THE BASELINE STAYS IN THE FILE `post` WROTE.
+    # WHY:
+    # AND THE WATCH IS THE ONE THAT READS IT, where a failed read is not an empty baseline.
     # WHY:
     # THE RECORD IS STILL PRINTED, and it is what an operator reads.
     # WHY:
@@ -1146,9 +1150,13 @@ way — the signoff is on the PR, so a later session reads it back with
 # then.
 # PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 # WHY:
-# THE BASELINE GOES STRAIGHT INTO THE FILE THE WATCH READS, and nothing here parses it.
+# THE BASELINE GOES STRAIGHT INTO THE FILE THE WATCH READS.
 # WHY:
-# THE STAGE RUNS AS A CONDITION, so its output is not captured and its status is not held.
+# AND NOTHING HERE PARSES IT OUT OF THE RECORD.
+# WHY:
+# THE STAGE RUNS AS A CONDITION, so its output is not captured.
+# WHY:
+# AND ITS STATUS IS NOT HELD, because a round boundary is not a refusal.
 # WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"; then
     WHO="$COPILOT_BOT"

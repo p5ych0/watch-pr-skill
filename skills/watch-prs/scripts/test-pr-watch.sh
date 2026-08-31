@@ -875,6 +875,28 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
     && pass "…and passing both forms is refused rather than silently resolved" \
     || die "both baseline forms together gave rc=$rc out='$out'"
 
+# AND AN EMPTY PATH IS REFUSED, WHICH IS NOT THE SAME AS A MISSING ARGUMENT. A caller
+# expanding a name that was never assigned — `--after-review-file "$PRIOR_FILE"` —
+# satisfies the argument count and hands over an empty string, which used to skip the
+# read block entirely: the watch then ran with NO baseline and announced the
+# already-terminal review as the new pass. That is the failure the baseline exists to
+# prevent, reached by PASSING the option rather than by omitting it.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "" --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "…and an empty baseline PATH is refused rather than silently unarming the watch" \
+    || die "an empty --after-review-file path gave rc=$rc out='$out'"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "an empty baseline path let the stale review through: $out" \
+    || pass "…announcing no review"
+# AND THE VALUE FORM IS UNAFFECTED: an empty id there legitimately means "no prior
+# review to wait past", which is what the automatic path and a first request carry.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review "" --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "…while an empty --after-review VALUE stays the legitimate 'no baseline' answer" \
+    || die "an empty --after-review value was refused (rc=$rc out='$out')"
+
 # AND THE OPTION NEEDS ITS VALUE. `shift 2` on a missing one left the same option in
 # $1 and the parser span forever, which is the defect the other options already carry
 # a case for.
