@@ -4,7 +4,7 @@
 # Copilot's own clean verdict.
 #
 #   pr-copilot-phase.sh record <pr> <body-file> <sha-file>
-#   pr-copilot-phase.sh open   <pr> <codex-sha>
+#   pr-copilot-phase.sh open   <pr> <codex-sha> <baseline-file>
 #   pr-copilot-phase.sh close  <pr> <codex-sha> [both|codex-only]
 #
 #   0  recorded / opened / closed
@@ -91,19 +91,29 @@ set -uo pipefail
 # clearing happens here, before the bootstrap and before any argument is looked at, which
 # is the same place and the same reason `pr-close-round.sh` clears its head file.
 #
-# GUARDED, AND `record` ONLY. `open` and `close` take a sha as an argument and write no
-# file, so truncating a third argument there would destroy whatever the caller named. The
-# path must exist, be a regular file and contain a `/` — a bare name is not the driver's
-# handoff — and it must not be the BODY file, whose account this stage is about to post
-# and which the alias check below refuses properly.
+# GUARDED, AND PER STAGE. `close` takes a sha as an argument and writes no file, so
+# truncating a third argument there would destroy whatever the caller named. The path
+# must exist, be a regular file and contain a `/` — a bare name is not the driver's
+# handoff.
 # THE POSITIONS ARE THE PRE-`shift` ONES, which is where this runs: `$1` is the stage,
-# `$2` the PR, `$3` the body file and `$4` the sha file. Reading them as the post-`shift`
-# ones truncated the BODY — caught at once by the fixture, and worth naming here because
-# the two numberings differ only by this one statement's position.
+# `$2` the PR, and after that the stages differ — `record` takes `$3` the body file and
+# `$4` the sha file, `open` takes `$3` the codex sha and `$4` the baseline file. Reading
+# them as the post-`shift` ones truncated the BODY — caught at once by the fixture, and
+# worth naming here because the two numberings differ only by this statement's position.
+#
+# `record` also refuses to truncate its BODY file, whose account this stage is about to
+# post and which the alias check below refuses properly. `open` needs no such pairing:
+# its `$3` is a sha, not a path.
 if [[ ${1:-} = record ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]] \
    && [[ -n ${3:-} ]] && [[ ! ${4} -ef ${3} ]]; then
     > "${4}" || {
         echo "ABORT: the sha file '${4}' exists and cannot be emptied; a stale sha would be left for the caller to read."
+        exit 1
+    }
+fi
+if [[ ${1:-} = open ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]]; then
+    > "${4}" || {
+        echo "ABORT: the baseline file '${4}' exists and cannot be emptied; a stale review id would be left for the caller to read, and the watch would take a pass made before this request as the answer to it."
         exit 1
     }
 fi
@@ -195,6 +205,22 @@ if [[ $STAGE = open ]]; then
         || { echo "ABORT: 'open' needs the head Codex signed off, which 'record' reported and pr-signoff.sh reads back."; exit 1; }
     _why="$(sha_reason "$CODEX_SHA")" \
         || { echo "ABORT: the Codex-signed-off head is not a full OID ($_why: '$CODEX_SHA')."; exit 1; }
+
+    # THE BASELINE CROSSES IN A FILE, as the gated head does from `pr-close-round.sh
+    # gate` and the signed-off sha from `record`. It used to travel only in the
+    # `PR_COPILOT_PHASE_OPENED` record, which meant the driving shell captured this
+    # stage's stdout and cut the value out with `${OPEN_REC##* prior-review=}` — a
+    # parse, in the one shell nothing can harden, of a line whose field order is
+    # this file's to change. The record still carries it for whoever reads the
+    # terminal; nothing parses it. #243.
+    PRIOR_FILE="${3:-}"
+    [[ -n $PRIOR_FILE ]] \
+        || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
+    # EMPTIED AGAIN HERE. The first clearing is at the top of the file, before the
+    # bootstrap, and it declines a path that does not exist yet — so a caller naming
+    # one gets its clearing here. Empty is a LEGAL baseline, meaning no prior review,
+    # which is why the write below is status-checked rather than left to the reader.
+    > "$PRIOR_FILE" || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'."; exit 1; }
 
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
@@ -305,6 +331,19 @@ if [[ $STAGE = open ]]; then
     # Empty is a legitimate answer (no review yet); only a failed read is fatal.
     PRIOR_REVIEW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
+
+    # WRITTEN BEFORE THE REQUEST, WITH ITS STATUS TAKEN AND THE VALUE READ BACK.
+    # `printf` can report success and the write fail at the flush when the
+    # redirection closes, and after the request there is nothing left to refuse
+    # with — the phase would be irreversibly half-opened, with Copilot asked and the
+    # caller reading a truncated id as the baseline. Writing first costs nothing,
+    # because the driver reads the file only when this stage succeeds.
+    printf '%s\n' "$PRIOR_REVIEW" > "$PRIOR_FILE" \
+        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
+    _rb_prior_back="$(<"$PRIOR_FILE")" \
+        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
+    [[ $_rb_prior_back = "$PRIOR_REVIEW" ]] \
+        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
 
     # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
     # for, so entering the phase would poll for a review nobody asked for and then

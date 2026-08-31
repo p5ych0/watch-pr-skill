@@ -411,71 +411,27 @@ WHO="$CODEX_BOT"
 # as a record, or an `@codex review` on the automatic path, is refused rather than
 # published. `$REQUEST_FILE` was created empty at setup and an empty body is
 # refused, so a write that does not happen stops the request.
-# THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION.
+# THE REQUEST IS A SCRIPT.
 # WHY:
-# THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
+# THE REQUEST RUNS AS A CONDITION.
 # WHY:
-# ONE PROBE VALUE IS ENOUGH, and a second proves nothing the first does not.
+# THE BODY NEVER BECOMES SHELL SOURCE, because an account can close a heredoc.
 # WHY:
-# THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
+# AND THE FILE IS NOT WRITTEN FROM THIS SHELL, because `cat` and `printf` are names.
 # WHY:
-# THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
+# NOTHING HERE IS AN ASSIGNMENT, AND THE BASELINE NEVER BECOMES ONE.
 # WHY:
-if { ( PRIOR_REVIEW="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
-                    && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
-     || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
-then
-    # THE REQUEST IS A SCRIPT.
-    # WHY:
-    # THE REQUEST RUNS AS A CONDITION.
-    # WHY:
-    # THE BODY NEVER BECOMES SHELL SOURCE, because an account can close a heredoc.
-    # WHY:
-    # AND THE FILE IS NOT WRITTEN FROM THIS SHELL, because `cat` and `printf` are names.
-    # WHY:
-    # NOTHING HERE IS AN ASSIGNMENT.
-    # WHY:
-    # THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
-    # WHY:
-    # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
-    # WHY:
-    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
-        PRIOR_REVIEW="$(<"$PRIOR_FILE")"
-        # THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
-        # WHY:
-        if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
-            echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
-            exit 0
-            [[ -n "" ]]
-        else
-            # EMPTY IS AN ANSWER, THE PATTERN IS A LITERAL, AND THERE ARE TWO SHAPES.
-            # WHY:
-            case "$PRIOR_REVIEW" in
-                "") ;;
-                comment:)
-                    echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which names the comment channel with no id; do not enter the wait step."
-                    exit 0
-                    [[ -n "" ]] ;;
-                comment:*[!0-9]*)
-                    echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a comment id; do not enter the wait step."
-                    exit 0
-                    [[ -n "" ]] ;;
-                comment:*) ;;
-                *[!0-9]*)
-                    echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
-                    exit 0
-                    [[ -n "" ]] ;;
-            esac
-        fi
-    else
-        echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
-        exit 0
-        # THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
-        # WHY:
-        [[ -n "" ]]
-    fi
+# THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
+# WHY:
+# THE CONTINUATION IS THE `then` BRANCH HERE TOO.
+# WHY:
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+    [[ -n x ]]
 else
+    echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
     exit 0
+    # THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
+    # WHY:
     [[ -n "" ]]
 fi
 ```
@@ -497,18 +453,20 @@ something to act on and prints one line when the state changes:
 
 ```bash
 WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun
-# $PRIOR_REVIEW is the authoritative review id captured BEFORE the request that
-# this watch is waiting on — see step 2 and step 5. A re-request on an unchanged
-# head (after a dismissal, or after answering a finding rather than changing
-# code) has nothing else to tell the new pass from the old one, so without it the
-# first poll reports the PREVIOUS review as this round's answer.
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"; WATCH_RC=$?
+# $PRIOR_FILE holds the authoritative review id captured BEFORE the request that
+# this watch is waiting on — written by step 2, step 5 and step 7. A re-request on
+# an unchanged head (after a dismissal, or after answering a finding rather than
+# changing code) has nothing else to tell the new pass from the old one, so without
+# it the first poll reports the PREVIOUS review as this round's answer. It arrives
+# as a PATH: the value is never assigned in this shell, and an unreadable file is
+# `state=error` there rather than an empty baseline here.
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"; WATCH_RC=$?
 ```
 
 **Claude Code** — run it as this session's **Monitor** so the verdict surfaces
 into the chat by itself instead of being waited on:
 
-- `command`: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"`
+- `command`: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"`
 - `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
 - `persistent`: `true`
 
@@ -923,30 +881,12 @@ Then, and only then:
 # THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 # WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
-    # THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
+    # THE BASELINE STAYS IN THE FILE `post` WROTE, and the watch is the one that reads it.
     # WHY:
     # THE RECORD IS STILL PRINTED, and it is what an operator reads.
     # WHY:
-    # AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
-    # WHY:
-    # A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
-    # WHY:
-    # AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
-    # WHY:
-    # AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
-    # WHY:
-    # AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
-    # WHY:
-    # AND THE NAME IS NOT CLEARED FIRST, because a clear is an assignment to it as well.
-    # WHY:
-    if { [[ -f /dev/fd/9 ]] && PRIOR_REVIEW="$(<"/dev/fd/9")"; } 9<"$PRIOR_FILE"; then
-        exit 0   # the script printed the head it closed on
-        [[ -n "" ]]
-    else
-        echo "ABORT: the review baseline could not be read back from '$PRIOR_FILE'. The round IS closed; do not enter the wait step, and do not re-close the round."
-        exit 1
-        [[ -n "" ]]
-    fi
+    exit 0   # the script printed the head it closed on
+    [[ -n "" ]]
 else
     case $? in
         3) echo "Stopping here: the pass left only replies, so there is nothing to fix and no signoff. Read it with the operator."
@@ -1206,21 +1146,25 @@ way — the signoff is on the PR, so a later session reads it back with
 # then.
 # PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 # WHY:
-OPEN_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
-printf '%s\n' "$OPEN_OUT"
-[ "$OPEN_RC" -eq 0 ] \
-    || { echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."; exit "$OPEN_RC"; }
-WHO="$COPILOT_BOT"
-# THE BASELINE COMES BACK IN THE SUCCESS RECORD, AND THE RECORD IS WHAT IS CHECKED.
+# THE BASELINE GOES STRAIGHT INTO THE FILE THE WATCH READS, and nothing here parses it.
 # WHY:
-OPEN_REC="$(printf '%s\n' "$OPEN_OUT" | sed -n '/^PR_COPILOT_PHASE_OPENED /p' | tail -1)"
-[ -n "$OPEN_REC" ] \
-    || { echo "ABORT: the phase opened without reporting a record; step 3 would watch against a stale baseline."; exit 1; }
-case "$OPEN_REC" in
-    *' prior-review='*) ;;
-    *) echo "ABORT: the record carries no baseline field; step 3 would watch against a stale one."; exit 1 ;;
-esac
-PRIOR_REVIEW="${OPEN_REC##* prior-review=}"
+# THE STAGE RUNS AS A CONDITION, so its output is not captured and its status is not held.
+# WHY:
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"; then
+    WHO="$COPILOT_BOT"
+    [[ $WHO = "$COPILOT_BOT" ]] \
+        || { echo "ABORT: WHO could not be set to the Copilot reviewer; the phase IS open."; exit 1; }
+else
+    case $? in
+        3) echo "The phase stopped at a round boundary. This is not permission to skip the pass: decide with the operator."
+           exit 3
+           [[ -n "" ]] ;;
+        *) echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."
+           exit 1
+           [[ -n "" ]] ;;
+    esac
+    [[ -n "" ]]
+fi
 ```
 
 Keep `$CODEX_SHA` for step 8. It is the only record of what Codex approved.

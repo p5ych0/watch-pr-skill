@@ -886,17 +886,6 @@ repository wrong costs most: `open` posts a signoff revocation and requests a
 review. Both are inherited from the setup export rather than decided by the current
 directory, so there is nothing to wrap here either.
 
-## THE BASELINE COMES BACK IN THE SUCCESS RECORD, AND THE RECORD IS WHAT IS CHECKED.
-
-Not the value. A head with no Copilot review yet has no id, and `pr-watch.sh` takes
-an empty baseline as "wait on any terminal review" — so testing the VALUE for
-emptiness would abort here, after the pass has already been requested, leaving a
-review in flight that nothing is waiting for.
-
-What is checked is that the record arrived and carries the field at all. An absent
-record means the stage reported nothing, and step 3 would then watch against a
-baseline left over from the previous phase.
-
 ## THE MODE IS SET BEFORE ANYTHING IN STEP 8 RUNS, and `codex-only` is not a skip.
 
 `codex-only` means no Copilot review was ever requested, so there is no verdict to
@@ -1070,55 +1059,6 @@ the final `exit` the block reports success for a blocked, paused or queued merge
 and whatever runs it next carries on as though the PR had landed. The distinction
 the gate exists to draw survives only if it is passed on.
 
-## THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION.
-
-Nothing after a mutation can undo it. The read-back further down is a simple
-command: with `errexit` on and `PRIOR_REVIEW` already readonly it fails and ends
-your shell — but by then the request has been POSTED, so the pass is in flight and
-no watch is ever armed.
-
-The only place the question can be asked is before the request, where the same
-failure costs a stop and nothing else.
-
-## THE PROBE IS A SUBSHELL, because a failed readonly assignment here is fatal.
-
-It was assignments read back in YOUR shell, where a failed readonly assignment
-under `errexit` is FATAL — so the probe ended the session in exactly the state it
-exists to detect.
-
-A subshell inherits the attribute, fails for the same reason, and as a condition is
-exempt from `errexit`. The failure is reported rather than suffered.
-
-## ONE PROBE VALUE IS ENOUGH, and a second proves nothing the first does not.
-
-The probe used two unequal values, on the reasoning that one proves nothing against
-a readonly holding the probe's own value.
-
-It does. A readonly pre-seeded with the first value makes the subshell's assignment
-FAIL outright, and the comparison after it is never reached — so the case the
-second value was there for is caught before the second value would have been
-written. What it added was another assignment in a shell where a failed one is
-fatal. #148.
-
-## THE VALUE IS COMPARED INSIDE IT, because a transforming attribute succeeds.
-
-A TRANSFORMING attribute — `declare -i PRIOR_REVIEW` — lets the assignment succeed
-and stores something else, and a status-only probe accepts that: the request would
-go out and the ordinary empty baseline would come back rewritten.
-
-The comparison is inside the subshell because that is where the transformed value
-is, and reading it outside would be reading a different shell's variable.
-
-## THE PROBE IS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
-
-Written as a standalone guard the probe detects the readonly name and then cannot
-act on it: `exit` is a builtin your shell can replace with one that RETURNS, and
-the trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
-— so execution reached the request and posted it anyway, which is the state these
-probes exist to prevent.
-
-Only containment excludes it.
-
 ## THE REQUEST IS A SCRIPT.
 
 It was eighteen lines here that nothing executed, and what they do is post the
@@ -1159,16 +1099,31 @@ function's text rather than what you wrote.
 Your file tool is neither a heredoc nor a command: it does not go through this
 shell at all, which is what makes it the one way in that has no name to take.
 
-## NOTHING HERE IS AN ASSIGNMENT.
+## NOTHING HERE IS AN ASSIGNMENT, AND THE BASELINE NEVER BECOMES ONE.
 
-Written as `PRIOR_REVIEW="$(…)"` — inside the `if` or beside a `; REQ_RC=$?` — the
-capture is an assignment, and a startup file that has already made either name
-readonly makes it FAIL: with `errexit` on that ends your shell before any status is
-read, and without it the `if` is abandoned with NEITHER branch running, so a
-refused request falls straight through into the wait for a review nobody asked for.
+Two names could have carried something out of this call, and neither does.
 
-A failed assignment does not even fire an `||`, so there is no status to take. The
-answer is to have no assignment rather than to guard one.
+The STATUS is not captured. Written as `…; REQ_RC=$?` it is lost twice over: with
+`errexit` on, a documented refusal ends the shell at the assignment before anything
+reads it; without it, a startup file that has already made the name readonly `0`
+leaves the assignment failing silently at the benign value, and a request that never
+happened is followed by a wait for it. A command run as an `if` condition is exempt
+from `errexit` and leaves no name to seed.
+
+The BASELINE is not captured either, and since #243 it is not read into this shell
+at all. It used to be: the helper printed it, the driver read it back into
+`PRIOR_REVIEW`, and because that assignment can be defeated by a readonly name, a
+nameref or a transforming attribute, the driver carried a subshell probe to prove the
+name assignable before posting, a read-back to prove the assignment survived, and a
+four-arm `case` to prove the shape. The last of those was a second, weaker copy of
+the validation in `pr-watch.sh`, which checks both ids it compares — and `CLAUDE.md`
+records what a second copy of a rule costs: every field check in `recordlib.sh` was
+written out two or three times and every one was found missing from at least one copy.
+
+The value has ONE consumer. So it is redirected into `$PRIOR_FILE` and read where it
+is used, by a privileged helper that already knows what a review id looks like. That
+is `prefer removing the dependency over guarding it` applied to three guards at once,
+and it is the same answer `pr-origin.sh` gives: a path rather than a name.
 
 ## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
 
@@ -1187,25 +1142,6 @@ below, and from there into the wait for a review that was never requested.
 Ending the arm in `[[ -n "" ]]` makes the LIST report non-zero, which nothing here
 reads. What does hold is that the work sits inside the branch a refusal does not
 take.
-
-## EMPTY IS AN ANSWER, THE PATTERN IS A LITERAL, AND THERE ARE TWO SHAPES.
-
-EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is nothing to
-capture because the trigger preceded us; on the manual path Codex has usually not
-reviewed this head at all yet, which is the ordinary FIRST request — so the helper
-succeeds with an empty value and a digits-only test would abort after the request
-had already been posted. What is refused is a value that is neither shape.
-
-THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a validator in
-a variable is a second name a startup file can seed readonly, and a seeded pattern
-accepting a seeded value is a check that agrees with itself. `case` is a reserved
-word, so nothing can take its place either.
-
-AND THERE ARE TWO SHAPES, BECAUSE THERE ARE TWO CHANNELS. A reviewer's newest
-verdict arrives either as a submitted review, whose id is digits, or as a clean
-COMMENT on the head — which `pr-review-state.sh` reports as `comment:<id>` and
-`pr-watch.sh` accepts as a baseline. A digits-only test refuses the second AFTER
-the request has been posted, leaving a pass in flight that nothing waits for.
 
 ## THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
 
@@ -1309,73 +1245,6 @@ refusal arm and prints it unless `echo` has been shadowed, `post` asks the conte
 question again and refuses, so no summary is posted and no pass requested, and the
 allocation the paths come from cannot produce the aliased case at all.
 
-## AND THE CONDITION IS POSITIVE, because a failed redirection gives `!` nothing to invert.
-
-`if { … } 9<"$PRIOR_FILE"; then <use>; else <refuse>; fi`, and never the negation with
-the refusal in the `then`. Written `if ! { … } 9<"$PRIOR_FILE"; then ABORT`, this fence
-DOES NOT REFUSE AT ALL. Measured on bash 5.3.9:
-
-    { true; } 9</nonexistent                            -> status 1
-    ! { true; } 9</nonexistent                          -> status 1
-    if ! { true; } 9</nonexistent; then A; else B; fi    -> B
-    if   { true; } 9</nonexistent; then A; else B; fi    -> B
-
-The `!` LEAVES THE STATUS AT 1 rather than inverting it, so both spellings take the
-`else`. The version is named and all four are shown because this was raised as
-contradicting bash's semantics — the claim is meant to be re-run, not believed.
-
-SO THE NEGATED FORM IS FAIL-OPEN HERE, which is the opposite of how it reads. It was
-how this fence's sibling at step 2 was written when the binding landed: a missing file
-fell through, matched the empty arm, and armed the watch with no baseline. Every check
-on it was a `grep` for the redirection, which was present and correct throughout, and
-only EXECUTING the fence found it.
-
-## AND THE NAME IS NOT CLEARED FIRST, because a clear is an assignment to it as well.
-
-`PRIOR_REVIEW=` looks like hygiene and is a write. On a RESUMED round-close session
-step 2's assignability probe has not run — a session can enter here directly — and
-setup's probe list does not carry this name, so nothing upstream has established that
-writing it is safe. Declared a nameref onto `BASH_XTRACEFD`, the clear empties that
-variable and bash CLOSES the descriptor it referred to, which can be the session's own
-stdout, after `post` has already closed the round.
-
-NOTHING IS LOST BY DROPPING IT. The bound assignment overwrites the value on the
-success path, and every failure path `exit`s without reading it — so a stale value can
-never be consumed, which is the only thing the clear was for.
-
-## AND THE SUCCESS PATH IS THE CONTINUATION, so a neutralised `exit` cannot reach it.
-
-Every arm of this fence ends in `exit` and then a reserved word, and NOTHING FOLLOWS
-THE `fi`. That is the containment `CLAUDE.md` describes: `exit` is a name the
-operator's shell can replace with one that RETURNS, so an abort arm can print its
-reason and carry straight on — and what it carries on INTO is the only thing that
-decides whether the refusal held.
-
-IT DID NOT HOLD BEFORE. The refusal sat in an inner `else`, and after the enclosing
-`fi` came a `case` on `$ROUND_RC` and `exit "$ROUND_RC"`. With a returning `exit`,
-the abort printed, fell out of both `if`s, and reached that final line with
-`ROUND_RC` still 0 — so the fence reported SUCCESS on a baseline it had just
-refused, and step 3 watched with the cleared value, which is the in-flight review
-being accepted as this round's answer.
-
-SO THE SUCCESS ARM CARRIES THE EXIT TOO, and the `ROUND_RC` diagnostic moved into
-the `else` of the outer `if` rather than sitting after it. Position is the
-containment: there is no code after the fence for a neutralised `exit` to fall into,
-and the reserved word after each `exit` leaves the arm non-zero for anything that
-reads it.
-
-## AND A REFUSAL HERE MUST NOT RE-CLOSE THE ROUND, which is already closed.
-
-By the time this read runs the summary is posted and the next pass requested. The
-refusal stops the watch — that is all it can do — and the message says the round IS
-closed precisely so the next session does not treat it as a round that failed.
-
-RE-CLOSING IS THE EXPENSIVE MISREADING. A session that ran the round-close recipe
-again would post a SECOND summary and request a SECOND pass on the same head, which
-is the duplicate the trigger rules exist to prevent, and the reviewer would answer a
-round nobody ran. The exit is a `1` because something is wrong, and the text is what
-stops that `1` being read as "the round did not close".
-
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
 Twenty-four lines of this block were the two invocations, the exit statuses and the
@@ -1388,34 +1257,6 @@ repeatedly: the copy that is not beside the code is the one that goes stale.
 WHAT STAYS IS WHAT THE DRIVER HAS TO DECIDE — which stage runs when, that the
 replies go between them, and what each status means for the round. The rest is one
 line saying where to read it.
-
-## THE ASSIGNMENT IS PROVEN, because here there is something to prove it against.
-
-`CLAUDE.md` says to prove an assignment by reading the variable back, and the usual
-difficulty is that nothing else knows what the value should have been — a readonly
-name simply keeps whatever it held.
-
-The file does know. If this name was already readonly the assignment fails and the
-two disagree, which is the one case a check on the variable alone cannot see: the
-helper SUCCEEDED and the baseline is somebody else's.
-
-## A READ THAT FAILED IS NOT AN EMPTY BASELINE, so the file is BOUND before it is read.
-
-`PRIOR_REVIEW="$(<"$PRIOR_FILE")"` cannot tell those apart. A missing or unreadable
-file makes the substitution EMPTY, and empty is a legitimate baseline — the ordinary
-answer when the head has no review yet — so the value passes every test after it and
-the watch arms with no baseline at all. On the automatic path that is the defect the
-baseline exists to prevent: a pass that finished during the CI wait is then accepted
-as the answer to the request just made.
-
-THE REDIRECTION IS WHAT DISTINGUISHES THEM. `9<"$PRIOR_FILE"` fails if the file is
-not there or cannot be read, and a failed redirection fails the whole compound
-command — so "could not read" and "read an empty value" take different branches,
-which is the fail-closed rule `CLAUDE.md` states. Reading through `/dev/fd/9` then
-reads the object that redirection opened rather than resolving the name a second
-time.
-
-What it protects is the WAIT, and the claim below says what it must not do instead.
 
 ## THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 
@@ -1497,19 +1338,67 @@ properties of `pr-copilot-phase.sh`, not of this block, and restating them here 
 the second copy this repository keeps paying for. What this block relies on is only that
 the file holds a sha or the read fails, which the claims above and below it cover.
 
-## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
+## THE BASELINE STAYS IN THE FILE `post` WROTE, and the watch is the one that reads it.
 
-`post` writes the review baseline into the file it is given, as `gate` writes the
-head into its own — #234. Before that it came back only in the `PR_ROUND_CLOSED`
-record, so this shell captured the script's stdout, ran `sed` over it, proved a
-record was there, proved it carried a `prior-review=` field, and cut the value out
-with `${rec##* prior-review=}`.
+`post` writes the next round's baseline into `$PRIOR_FILE` before it requests the
+pass, with the write's status taken and the value read back — after the request there
+is nothing left to refuse with, and the round would be irreversibly half-closed.
 
-TWELVE EXECUTABLE LINES FOR ONE VALUE, in the shell that cannot re-exec away from
-its operator's functions — `sed` is a name, the capture is an assignment, and the
-record's shape was a thing to parse. The file needs none of it: `$(<…)` is handled
-by the parser, and the value was validated by the helper that produced it.
+What the driver then does with that file is nothing. It used to read it back through a
+bound descriptor into `PRIOR_REVIEW`, with a refusal for a read that failed, because a
+failed read is not an empty baseline and empty is legitimate — an unreadable file would
+otherwise arm the watch with no baseline at all, and the first poll would accept the
+terminal review this round just handled.
 
+That whole arm is gone with #243. `pr-watch.sh --after-review-file` binds the descriptor,
+distinguishes an unreadable file from an empty one as `state=error`, and validates the
+shape, so the rule lives once in the process that consumes the value. It also closed
+#238 by removal rather than by binding: the opening path's read-back compared the
+assignment against a SECOND read of the same descriptor, and on macOS and the BSDs
+`/dev/fd/N` duplicates rather than re-opens, so the second read drains empty and every
+non-empty baseline was refused — on a job that runs on Ubuntu and cannot see it.
+
+The record still carries the baseline, and that is deliberate: it is what an operator
+reads to see which pass this round is waiting past. Nothing parses it.
+
+
+## THE BASELINE GOES STRAIGHT INTO THE FILE THE WATCH READS, and nothing here parses it.
+
+`open` captures the review id immediately before it requests Copilot — read earlier, a
+pass already in flight on this unchanged head could finish during the probes or the
+revocation, and the watch would accept a review made BEFORE the request as the answer
+to it.
+
+That value used to reach the driver only through the `PR_COPILOT_PHASE_OPENED` record.
+The driver captured the stage's whole output, selected the record with `sed`, proved it
+was there, proved it carried the field, and cut the value out with
+`${OPEN_REC##* prior-review=}` — a parse of a line whose field order belongs to the
+helper, performed in the one shell nothing can harden, over four names any of which a
+startup file can make readonly. The `prior-review=` field is also the LAST one for
+exactly that expansion's sake, which made the record's field order load-bearing for a
+reason that had nothing to do with reading it.
+
+`open` writes `$PRIOR_FILE` instead, before the request, with the write's status taken
+and the value read back — the arrangement `gate` uses for the head and `record` for the
+signed-off sha. The record still prints the baseline for whoever reads the terminal.
+Nothing parses it. #243.
+
+## THE STAGE RUNS AS A CONDITION, so its output is not captured and its status is not held.
+
+`OPEN_OUT="$(… 2>&1)"; OPEN_RC=$?` was two names in the operator's shell, and both were
+load-bearing: `OPEN_OUT` because the baseline was cut out of it, `OPEN_RC` because
+`open` returns 3 at a round boundary and that is not a refusal.
+
+With the baseline in a file there is nothing to capture, so the stage runs as the `if`
+condition — exempt from `errexit`, with its output going straight to the terminal where
+an operator reads it — and the three answers are told apart by `case $?` in the `else`,
+where `case` is a reserved word and `$?` is taken first. A readonly `OPEN_RC` used to
+leave the status at whatever the name already held, which at `0` reads a refusal as a
+phase that opened.
+
+The one assignment left is `WHO`, and it is read back: it selects the reviewer every
+later stage is addressed to, and a nameref or a readonly there would send the Copilot
+rounds at Codex.
 ## THE RECORD IS STILL PRINTED, and it is what an operator reads.
 
 `post` still ends with `PR_ROUND_CLOSED pr=… reviewer=… head=… mode=… prior-review=…`,
@@ -1520,28 +1409,6 @@ round closed on and which pass was requested, and it is what a transcript preser
 WHAT CHANGED IS ONLY WHO READS IT. The driver used to, by parsing; it does not now.
 Dropping the record because nothing machine-readable consumes it would take the
 operator's account of the round with it.
-
-## AND THE VALUE IS NOT RE-VALIDATED HERE, because the helpers either side of it do.
-
-`post` took it from `pr-review-state.sh review-id`, which validates it, and
-`pr-watch.sh` refuses a baseline it cannot use as `--after-review`. A third copy of
-that rule in the document would be the duplication `CLAUDE.md` records paying for
-repeatedly — and it would be the copy furthest from the code, in the shell least able
-to run it.
-
-AND THERE IS NO ASSIGNMENT POSTCONDITION HERE ANY MORE, which is worth stating because
-there was one and it is gone. It compared the variable against a second read of the
-bound descriptor, and that second read is what does not work on macOS — the descriptor
-is duplicated rather than reopened, so it returns empty and the comparison refuses every
-non-empty baseline. It was removed rather than replaced, and each attribute it was meant
-to catch is answered elsewhere: a READONLY name ends the shell outright at the failed
-assignment, measured, rather than passing quietly; a value-TRANSFORMING or aliased one is
-what step 2's probe is for, before the request goes out; and a value that arrives
-transformed anyway is refused by `pr-watch.sh`, which validates what it is given as
-`--after-review`.
-
-SO NOTHING HERE CLAIMS TO PROVE THE ASSIGNMENT, and a claim saying otherwise would be a
-claim with no code under it.
 
 ## THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
 

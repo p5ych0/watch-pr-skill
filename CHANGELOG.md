@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.88] — 2026-08-31
+
+- **`SKILL.md` is 2,818 characters shorter, and the driving shell no longer names
+  the review baseline at all.** The review id captured immediately before a request
+  is what the next watch needs, and it used to come back into the operator's own
+  shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
+  back through a bound descriptor, and `pr-copilot-phase.sh open` reported it in a
+  record the driver cut apart with `${OPEN_REC##* prior-review=}`.
+
+  An assignment in that shell can be defeated by a readonly name, a nameref or a
+  transforming attribute, so each of those carried its own defences — an
+  assignability probe with the comparison inside a subshell, a read-back against a
+  second read of the file, and a four-arm shape check before entering the wait. That
+  last one was a SECOND, WEAKER COPY of the validation `pr-watch.sh` already runs on
+  both ids it compares, and a copy of a rule is what this repository has repeatedly
+  found missing from one of its copies.
+
+  The value has one consumer. `pr-watch.sh` takes `--after-review-file` now, reads
+  the file itself and validates it there; `open` writes the file as `gate` writes the
+  gated head and `record` the signed-off sha. The records still carry the baseline
+  for whoever is reading the terminal, and nothing parses them.
+
+  Two failures go with it. An unreadable baseline file is `state=error` rather than
+  an empty baseline — empty is legal, meaning "no prior review to wait past", so
+  degrading to it would let a failed read arm the watch with nothing and accept the
+  review this round just handled. And the round close's read-back compared its
+  assignment against a second read of the same descriptor: on macOS and the BSDs
+  `/dev/fd/N` duplicates rather than re-opens, so the second read drains empty and
+  every non-empty baseline was refused — after the summary and the next pass had
+  already gone out. That was #238, open against the opening path's copy of the same
+  read; removing the read closed it. #243.
+
 ## [2.0.87] — 2026-08-31
 
 - **`SKILL.md` is 1,918 characters shorter, and nothing was removed but a repeated

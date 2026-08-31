@@ -1668,49 +1668,56 @@ grep -q 'ROUND_RC' "$SKILL" \
     && die "the round-closer's status is held in a name again" \
     || pass "…and ROUND_RC is gone with it"
 
-# ── THE DRIVER READS THE BASELINE BACK ─────────────────────────────────────
-# The script reads the review id immediately before it requests the pass, and
-# step 3's watch needs exactly that value. A child cannot assign a variable in its
-# parent, so it reports the value instead — and without this the watch keeps the
-# OLDER baseline, against which the terminal review this round just handled is
-# newer, and is therefore accepted at once as the answer to a request nobody has
-# answered yet.
-# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and a read that
-# FAILED has to be refused rather than carried on from. A recipe that carries on
-# regardless satisfies a count while step 3 watches against the parent's older
-# baseline — which is the defect, not the spelling. What is NOT asserted is a
-# postcondition on the assignment itself: there is none, and the contract below says
-# why.
-# OUT OF THE FILE, NOT OUT OF THE RECORD, since #234. `post` writes the baseline
-# into the file it is given, as `gate` writes the head into its own, so the twelve
-# lines that captured stdout, `sed`-ed a record out of it, proved the record was
-# there and carried the field, and cut the value out with `${rec##* prior-review=}`
-# are gone. The record still carries it for whoever reads the terminal.
-# READ THROUGH A BOUND DESCRIPTOR, not by name: `$(<"$PRIOR_FILE")` cannot tell a
-# missing file from an empty baseline, and empty is legitimate — so an unreadable
-# file armed the watch with no baseline at all. The redirection fails where the read
-# would have returned empty, which is the distinction `CLAUDE.md`'s fail-closed rule
-# is about.
-# THE ROUND-CLOSE READ ONLY. The opening request's read has the same shape and the same
-# hole, and hardening it was reverted out of this change: it is pre-existing on `main` and
-# unrelated to the round-close reduction, which `CLAUDE.md` says gets FILED rather than
-# fixed mid-work. #238 carries it.
-[ "$(grep -c '9<"\$PRIOR_FILE"' "$SKILL")" -eq 1 ] \
-    && pass "the round-close recipe binds the baseline file before reading it" \
-    || die "the round-close read does not bind \$PRIOR_FILE; a failed read is then an empty baseline"
-grep -qF 'CLOSED_REC' "$SKILL" \
-    && die "the document still parses the closing record for the baseline" \
-    || pass "…and no longer parses it out of the closing record"
-# WHAT IS COUNTED IS THE REFUSAL, not a postcondition on the assignment: there is no
-# longer one to count. The read-back comparison was it, and it went with the second
-# descriptor read that returns empty on macOS — a readonly name ends the shell at the
-# failed assignment instead, a transforming one is what step 2's probe is for, and a value
-# that arrives transformed anyway is refused by `pr-watch.sh`. The execution cases below
-# are what hold the behaviour; this only holds that the round-close path SAYS something
-# when the read fails.
-[ "$(grep -c 'the review baseline could not be read back' "$SKILL")" -ge 1 ] \
-    && pass "…and refuses in its own words when that read fails" \
-    || die "the round-close recipe reads the baseline without a refusal for a read that failed"
+# ── THE DRIVER NEVER NAMES THE BASELINE ────────────────────────────────────
+# The review id captured immediately before a request is what step 3's watch needs,
+# and it used to arrive in this shell: `pr-request-review.sh` printed it into a
+# file the driver read back into `PRIOR_REVIEW`, `pr-close-round.sh post` wrote it
+# for the same read, and `pr-copilot-phase.sh open` reported it in a record the
+# driver cut apart with `${OPEN_REC##* prior-review=}`.
+#
+# All three cost the same thing. `SKILL.md`'s bash runs in the operator's own shell,
+# so the assignment can be defeated by a readonly name, a nameref or a transforming
+# attribute — and the driver therefore carried an assignability probe, a read-back
+# comparison, and a four-arm shape check before entering the wait. That shape check
+# was a SECOND, WEAKER COPY of the one in `pr-watch.sh`, which validates both ids it
+# compares; `CLAUDE.md` records what a second copy of a rule costs.
+#
+# The value has ONE consumer, so it crosses in a file the caller names and is read
+# and validated where it is used. What is asserted here is the invariant that makes
+# all of that unnecessary: the name does not appear in the document at all. #243.
+_pr_hits="$(grep -n 'PRIOR_REVIEW' "$SKILL")" || _pr_hits=""
+[ -z "$_pr_hits" ] \
+    && pass "the driver never names the review baseline" \
+    || die "PRIOR_REVIEW is back in SKILL.md; the baseline crosses in \$PRIOR_FILE and is read by pr-watch.sh: $_pr_hits"
+# AND NOTHING PARSES IT OUT OF A RECORD EITHER. The records still carry the field
+# for whoever reads the terminal — that is what makes a run legible — but a driver
+# that cuts a value out of one is depending on the field ORDER of a line the helper
+# owns, in the shell that can least afford a parse.
+grep -q 'prior-review=' "$SKILL" \
+    && die "the driver parses a baseline out of a record again; the helper writes \$PRIOR_FILE and pr-watch.sh reads it" \
+    || pass "…and parses none out of a helper's record"
+# AND THE THREE WRITERS ALL NAME THE SAME FILE. A stage that wrote somewhere else
+# would leave the watch reading the PREVIOUS round's id — which is the exact failure
+# `--after-review` exists to prevent, arriving by a new route.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
+    && pass "…the opening request writes the baseline into \$PRIOR_FILE" \
+    || die "the opening request does not redirect its answer into \$PRIOR_FILE"
+grep -q 'pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"' "$SKILL" \
+    && pass "…the round close is given it too" \
+    || die "the round close is not given \$PRIOR_FILE"
+grep -q 'pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"' "$SKILL" \
+    && pass "…and so is the phase open" \
+    || die "pr-copilot-phase.sh open is not given \$PRIOR_FILE; the phase would open and the watch read a stale baseline"
+# AND THE WATCH READS THAT FILE RATHER THAN A VALUE. `--after-review` takes an id
+# and is for a caller holding one in a hardened process of its own; the driver is
+# not that caller.
+grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"' "$SKILL" \
+    && pass "…and the watch is armed from the file, not from a name" \
+    || die "the watch is not invoked with --after-review-file \$PRIOR_FILE"
+grep -q 'pr-watch.sh N "$WHO" --after-review "' "$SKILL" \
+    && die "the driver passes --after-review with a value; that form needs a name this shell cannot hold" \
+    || pass "…and never passes the value form"
+
 # ── AND A TRANSFORMING ATTRIBUTE CANNOT CORRUPT THE PHASE SHA ────────────
 #
 # The read succeeding does not mean the NAME holds what the file held. This block runs in
@@ -1769,173 +1776,6 @@ for _ph_case in "|$_ph_letters" "-i|$_ph_digits" "-u|$_ph_letters"; do
         *) die "declare $_ph_at gave '$_ph_out' — neither the value nor a refusal" ;;
     esac
 done
-
-# ── AND THE BASELINE READ IS EXECUTED, NOT ONLY GREPPED ──────────────────
-#
-# Every assertion above this point is a `grep` for the redirection, the assignment
-# or the diagnostic text, and all three stay green against a fence that no longer
-# refuses: the shape can be right while the behaviour is wrong. That is not
-# hypothetical — the sibling fence at step 2 was written `if ! { … }; then ABORT`,
-# which does not refuse at all, and every grep on it passed. What has to hold is
-# that a `$PRIOR_FILE` which is missing or unreadable REFUSES rather than reading as
-# the legitimate empty baseline — because an empty baseline arms the watch with
-# nothing, and on the automatic path a pass that finished during the CI wait is then
-# accepted as the answer to the request just made.
-#
-# LIFTED AND RUN against a good file, a missing one, an unreadable one and an empty one.
-# The abort arms `exit`, so it runs in its own shell and the status and the output are the
-# answer. ONE fence: the opening request's read is `main`'s, unbound, and #238 carries it.
-_bl_dir="$TMP_CL/bl"; mkdir -p "$_bl_dir" || die "the baseline-read scratch directory could not be made"
-# The round-close fence is a whole `if … fi` at column 0.
-awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-close-round.sh post N/, /^fi$/' "$SKILL" \
-    | sed '1s|^if .*|if "$RB_POST_STUB"; then|' > "$_bl_dir/close.sh"
-{ [ -s "$_bl_dir/close.sh" ] && grep -q '9<"$PRIOR_FILE"' "$_bl_dir/close.sh"; } \
-    && pass "the baseline-read fence lifts, so the cases below reach the code they name" \
-    || die "the baseline-read fence did not lift; the execution cases prove nothing"
-# THE ABORT ARMS `exit`, so a sourced fence that refuses ends the wrapper before it can
-# report — which is why the refusal is read off the OUTPUT, not off a `||` that never
-# runs. The diagnostic is what an operator sees, so it is what the case asserts.
-# REPORTED FROM AN `EXIT` TRAP, because every arm of the fence now ends in `exit` —
-# including the success one, which is what stops a neutralised `exit` reaching the
-# continuation. Nothing after the source would run, so the trap is what observes the
-# value and the refusal text is what distinguishes the two.
-_bl_run() {   # _bl_run <fence> <prior-file> ; prints "<rc>|<output>"
-    local out rc=0
-    out="$(RB_POST_STUB="${3:-true}" PRIOR_FILE="$2" bash -c '
-        trap '"'"'printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"'"'"' EXIT
-        . "$1" 2>/dev/null' _ "$1" 2>/dev/null)" || rc=$?
-    printf '%s|%s' "$rc" "$out"
-}
-printf '%s\n' 4242 > "$_bl_dir/good"
-# THE STATUS IS PART OF EACH REFUSAL, not decoration. The opening fence exits 0 — the
-# request is posted, there is nothing to retry — and the round-close one exits 1, because
-# something is wrong and the round is closed. Swapped, the first looks retryable and a
-# session makes the request twice, and the second looks successful and the driver walks
-# into the watch. Both mutations keep the diagnostic and omit `TOOK:`, so only the status
-# tells them apart.
-for _f in close; do
-    _bl_rc=1
-    _bl_ok="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/good")"
-    case "$_bl_ok" in
-        # THE STATUS TOO. `exit 0` turned into `exit 1` still yields the value, and the
-        # driver would then STOP after a round that closed cleanly instead of going on to
-        # the watch — a success the fence reports as a failure.
-        0\|TOOK:\[4242\]) pass "the $_f fence reads a real baseline through the descriptor, and continues" ;;
-        *) die "the $_f fence gave '${_bl_ok}' on a readable baseline" ;;
-    esac
-    _bl_gone="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/no-such-file")"
-    # THE DIAGNOSTIC IS NOT ENOUGH ON ITS OWN. A fence that printed it and then carried
-    # on — an `exit` removed, or turned into a `return` — appends `TOOK:` as well, and a
-    # check for the message alone accepts exactly that: the driver proceeding toward the
-    # watch with an empty baseline, which is the failure. The refusal has to be present
-    # AND the continuation absent.
-    # THE STATUS AND THE MESSAGE. The `EXIT` trap prints `TOOK:` on every path now, so
-    # its presence is no longer what distinguishes a refusal from a fall-through — the
-    # returning-`exit` case below is what covers that. What these hold is that the fence
-    # refuses, says why, and ends non-zero, and that it never carries the VALUE through.
-    case "${_bl_gone#*|}" in
-        *TOOK:\[4242\]*) die "the $_f fence carried a value through its refusal: '${_bl_gone}'" ;;
-        *'could not be read back'*)
-            [ "${_bl_gone%%|*}" = "$_bl_rc" ] \
-                && pass "…and REFUSES a baseline file that is not there, with status $_bl_rc" \
-                || die "the $_f fence refused with status ${_bl_gone%%|*}, not $_bl_rc" ;;
-        *) die "the $_f fence accepted a missing baseline file: '${_bl_gone}'" ;;
-    esac
-    if [ "$(id -u)" -ne 0 ]; then
-        : > "$_bl_dir/unreadable"; chmod 000 "$_bl_dir/unreadable"
-        _bl_unr="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/unreadable")"
-        chmod 600 "$_bl_dir/unreadable"
-        case "${_bl_unr#*|}" in
-            *TOOK:\[4242\]*) die "the $_f fence carried a value through its refusal: '${_bl_unr}'" ;;
-            *'could not be read back'*)
-                [ "${_bl_unr%%|*}" = "$_bl_rc" ] \
-                    && pass "…and one it cannot read, with the same status" \
-                    || die "the $_f fence refused an unreadable file with status ${_bl_unr%%|*}, not $_bl_rc" ;;
-            *) die "the $_f fence accepted an unreadable baseline file: '${_bl_unr}'" ;;
-        esac
-    else
-        pass "running as root, so the unreadable-baseline state is skipped by name"
-    fi
-    # AND A NEUTRALISED `exit` CANNOT REACH THE SUCCESS PATH. `exit` is a name the
-    # operator's shell can replace with one that RETURNS, so the refusal prints and
-    # carries on — and what it carries on INTO decides whether it held. It used to fall
-    # out of both `if`s into a final `exit "$ROUND_RC"` with `ROUND_RC` still 0, so the
-    # fence reported success on a baseline it had just refused. Nothing follows the fence
-    # now, and this runs it with `exit` defined as a function that returns.
-    _bl_ex="$(RB_POST_STUB=true PRIOR_FILE="$_bl_dir/no-such-file" bash -c '
-        exit() { return "${1:-0}"; }
-        . "$1" 2>/dev/null
-        printf "FELLTHROUGH:rc=%s" "$?"' _ "$_bl_dir/$_f.sh" 2>/dev/null)"
-    case "$_bl_ex" in
-        *'FELLTHROUGH:rc=0'*) die "with a returning exit the $_f fence ends at status 0: '$_bl_ex'" ;;
-        *) pass "…and a returning \`exit\` cannot carry the refusal into a success" ;;
-    esac
-    # AND A FAILED `post` DOES NOT REACH THE READ, even with `[` shadowed. The status
-    # was captured into `ROUND_RC` and branched on with `[`, both names the operator's
-    # shell owns: a function called `[` returning success routed a stopped or paused
-    # `post` into the arm that reads the baseline and entered the watch on a pass nobody
-    # requested. The stage is the `if` condition now, which no function can stand in for.
-    for _bl_st in 1 3; do
-        printf '#!/usr/bin/env bash\nexit %s\n' "$_bl_st" > "$_bl_dir/post$_bl_st"
-        chmod +x "$_bl_dir/post$_bl_st"
-        _bl_frc=0
-        _bl_fail="$(RB_POST_STUB="$_bl_dir/post$_bl_st" PRIOR_FILE="$_bl_dir/good" bash -c '
-            [() { return 0; }
-            trap '"'"'printf "TOOK:[%s]" "${PRIOR_REVIEW-unset}"'"'"' EXIT
-            . "$1" 2>/dev/null' _ "$_bl_dir/$_f.sh" 2>/dev/null)" || _bl_frc=$?
-        # THE STATUS AND THE MESSAGE, not just that the read was skipped. `post` pauses
-        # with 3 when the pass it waited on left only replies, and that is an operator
-        # DECISION; folding it into the generic refusal loses it, and a `3)` arm changed
-        # to `exit 1` skips the read just the same.
-        case "$_bl_st" in 3) _bl_want='left only replies' ;; *) _bl_want='did not close' ;; esac
-        case "$_bl_fail" in
-            *TOOK:\[4242\]*) die "a post that exited $_bl_st still reached the baseline read" ;;
-        esac
-        { [ "$_bl_frc" -eq "$_bl_st" ] && case "$_bl_fail" in *"$_bl_want"*) true ;; *) false ;; esac; } \
-            && pass "…and a post that exits $_bl_st ends at $_bl_st with its own words, even with [ shadowed" \
-            || die "a post that exited $_bl_st gave rc=$_bl_frc '$_bl_fail'"
-    done
-    # AND AN EMPTY FILE IS STILL AN ANSWER, which is the distinction the whole change
-    # rests on: a legitimate empty baseline must NOT be refused.
-    : > "$_bl_dir/empty"
-    _bl_empty="$(_bl_run "$_bl_dir/$_f.sh" "$_bl_dir/empty")"
-    case "$_bl_empty" in
-        0\|TOOK:\[\]) pass "…while an empty baseline is carried through, not refused" ;;
-        *) die "the $_f fence refused a legitimately empty baseline: '${_bl_empty}'" ;;
-    esac
-done
-
-# AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. `pr-review-state.sh review-id`
-# returns nothing when the current head has no review — every round that pushes a
-# new commit, and every Copilot round — and `pr-watch.sh` takes an empty value as
-# "wait on any terminal review". Testing the VALUE aborted on all of those AFTER
-# the summary was posted and the pass requested, so the watch was never armed and
-# a retry posted both a second time.
-grep -qF '[ -n "$PRIOR_REVIEW" ]' "$SKILL" \
-    && die "the driver tests the baseline VALUE for emptiness; an empty baseline is legitimate and the request has already been made by then" \
-    || pass "…while an empty baseline is carried through rather than rejected"
-# AND THE ONE RECORD STILL PARSED IS THE COPILOT PHASE'S, not the round's. Since
-# #235 the round-close path reads `$PRIOR_FILE`; `pr-copilot-phase.sh open` has no
-# such file and still reports its baseline in `PR_COPILOT_PHASE_OPENED`, so the two
-# assertions below are about THAT parser. They were written for the round-close
-# recipe and outlived it by one commit — matching only the Copilot parser while
-# their fixtures still spelled `PR_ROUND_CLOSED`, which is a check that cannot fail
-# for the thing it names.
-grep -qF "*' prior-review='*)" "$SKILL" \
-    && pass "…and the phase-open record is told apart by the field's presence, not by what is in it" \
-    || die "the driver cannot tell a phase-open record missing the baseline field from one whose field is empty"
-grep -qF 'PRIOR_REVIEW="${OPEN_REC##* prior-review=}"' "$SKILL" \
-    && pass "…and that is the only record the driver still parses a baseline out of" \
-    || die "the Copilot phase-open recipe no longer reads its baseline out of its record"
-# THE EXPANSION ITSELF IS EXECUTED, against both answers it must keep apart. The
-# greps above prove `SKILL.md` uses this expansion; only running it proves the
-# expansion is right, and a `##` that ate one character too many would satisfy
-# every grep here. The fixtures are phase-open records, which is what is parsed.
-_rec_full='PR_COPILOT_PHASE_OPENED pr=7 head=abc prior-review=42'
-_rec_none='PR_COPILOT_PHASE_OPENED pr=7 head=abc prior-review='
-{ [ "${_rec_full##* prior-review=}" = 42 ] && [ -z "${_rec_none##* prior-review=}" ]; } \
-    && pass "…and the expansion keeps a present baseline and an empty one apart" \
-    || die "the baseline expansion reads '${_rec_full##* prior-review=}' and '${_rec_none##* prior-review=}'"
 
 # ── THE ROUND-CLOSING ORDER IS TESTED IN `test-pr-close-round.sh` ──────────
 #
@@ -2149,43 +1989,23 @@ grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
 grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE"' "$SKILL" \
     && die "the opening account is written into the round-summary file; a first round that fails to write its summary would post it as one" \
     || pass "…and the opening account has a file of its own"
-# AND NO WRITABLE NAME CARRIES ITS ANSWER BACK. A capture written as
-# `PRIOR_REVIEW="$(helper …)"` inside the condition is an ASSIGNMENT, and a
-# startup file that has already made that name readonly makes it fail — which
-# abandons the `if` with NEITHER branch running, so a refused request falls
-# through into the wait. A plain command with its output redirected has no
-# assignment to fail. Same question, same answer as `pr-origin.sh`: a path rather
-# than a name.
-grep -q 'if ! PRIOR_REVIEW=' "$SKILL" \
-    && die "the request's answer is captured into a variable in the condition; a readonly name there abandons the if with neither branch running" \
-    || pass "…and its answer comes back in a file, not a name"
-# AND ITS VALIDATOR IS A LITERAL. A pattern held in a variable is a second name a
-# startup file can seed readonly, and a seeded pattern accepting a seeded value is
-# a check that agrees with itself.
-grep -q 'RX_PRIOR' "$SKILL" \
-    && die "the baseline is validated against a pattern held in a variable; use a literal" \
-    || pass "…and is validated against a literal pattern"
-# AND THE READ-BACK IS PROVEN AGAINST THE FILE. `CLAUDE.md` says to prove an
-# assignment by reading the variable back, and the OPENING path still does exactly
-# that — `[[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]`, by name, which is where its own
-# hole is and which #238 carries. The ROUND-CLOSE path does not: its comparison went
-# with the second descriptor read, for the reason below, and what answers each
-# attribute instead is recorded in `SKILL-RATIONALE.md`.
-# AND THE DESCRIPTOR IS READ ONCE. `/dev/fd/N` is a symlink on Linux, so opening it
-# re-opens the file at offset 0 and a second read works; on macOS and the BSDs it
-# DUPLICATES the descriptor and shares its offset, so the first read drains it and
-# the second returns empty. A read-back comparison there refuses every non-empty
-# baseline — at step 2 leaving a posted request with no watch, and at step 5
-# aborting after the summary and the next pass have gone out. The `macos-shell` job
-# runs on Ubuntu and cannot see it.
-#
-# NOTHING IS LOST BY DROPPING IT THERE. A readonly `PRIOR_REVIEW` does not
-# reach it: measured, the failed assignment inside the group ends the shell outright,
-# which is the fail-closed answer. What the comparison was for is covered by the
-# redirection, which fails where a read would have returned empty.
-[ "$(grep -c 'PRIOR_REVIEW="\$(<"/dev/fd/9")"' "$SKILL")" -eq 1 ] \
-    && pass "…and that bound descriptor is read once, not twice" \
-    || die "the baseline descriptor is read more than once; on macOS the second read is empty"
+# AND NO NAME CARRIES ITS ANSWER BACK AT ALL. A capture written as
+# `PRIOR_REVIEW="$(helper …)"` inside the condition is an ASSIGNMENT, and a startup
+# file that has already made that name readonly makes it fail — which abandons the
+# `if` with NEITHER branch running, so a refused request falls through into the
+# wait. The redirection into `$PRIOR_FILE` has no assignment to fail, and since #243
+# the value is not read into this shell on any path: the driver's whole side of the
+# baseline is a path. Asserted by absence in § THE DRIVER NEVER NAMES THE BASELINE.
+# AND THERE IS NO DESCRIPTOR READ LEFT TO GET WRONG. Both baseline read-backs went
+# with #243, and the platform hazard they carried is worth recording because it is
+# what a re-introduction would step on again: `/dev/fd/N` is a symlink on Linux, so
+# opening it re-opens the file at offset 0 and a second read works; on macOS and the
+# BSDs it DUPLICATES the descriptor and shares its offset, so the first read drains
+# it and the second returns empty. A read-back comparison there refuses every
+# non-empty baseline — at step 2 leaving a posted request with no watch, at step 5
+# aborting after the summary and the next pass have gone out — and the `macos-shell`
+# job runs on Ubuntu and cannot see it. #238 was open against that read; removing the
+# read closed it.
 # AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
 # lost twice: with `errexit` on, a documented refusal ends the shell at the
 # assignment before anything reads it; without it, a startup file that has already
@@ -2204,72 +2024,33 @@ grep -q '^[^#]*REQ_RC=' "$SKILL" \
 grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
-# THE OPENING PATH'S OWN SPELLING, which is `main`'s: it reads `$PRIOR_FILE` by name.
-# Pointed at the round-close read instead, this stayed green through anything done to
-# the opening one — including removing it. #238 changes that read; this assertion moves
-# with it then.
-grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
-    && pass "…and the read-back is inside that branch, not after it" \
-    || die "the baseline read-back is not inside the request's success branch; a shadowed exit reaches it"
-# AND THE NAME IT READS INTO IS PROVEN ASSIGNABLE BEFORE THE REQUEST GOES OUT.
-# That read-back is a simple command: with `errexit` on and `PRIOR_REVIEW` already
-# readonly it fails and ends the shell — after the request has been POSTED, so the
-# pass is in flight and no watch is ever armed. Nothing after a mutation can undo
-# that; the question has to be asked before it, where the same failure costs a
-# stop and nothing else.
+# AND THE SUCCESS ARM CARRIES THE CONTINUATION. There is no read-back to place
+# inside it since #243 — which closed #238 by removing the read rather than binding
+# it — so what is asserted is that the arm exists and the refusal is the one not
+# taken.
+grep -q '^    \[\[ -n x \]\]$' "$SKILL" \
+    && pass "…and the success arm is the continuation, not a statement after a guard" \
+    || die "the opening request has no success arm; a shadowed exit in the refusal walks into the wait"
+# AND NO NAME NEEDS PROVING, BECAUSE NONE IS ASSIGNED. This is where the driver
+# probed `PRIOR_REVIEW` for readonly and transforming attributes before posting —
+# a subshell with the comparison inside it, its refusal naming both attributes, and
+# the request nested in its success arm so a shadowed `exit` could not walk past.
+# Every one of those was load-bearing while the value came back into this shell.
 #
-# A SUBSHELL WITH THE COMPARISON INSIDE IT. An assignment read back HERE is an
-# assignment in the operator's shell, and a failed readonly one under `errexit` is
-# fatal — that would end the session in the state the probe exists to REPORT. One
-# probe is enough there, because a readonly pre-seeded with the probe's own value
-# makes the subshell's assignment fail outright and the comparison is never
-# reached; and the comparison is what catches a TRANSFORMING attribute such as
-# `declare -i PRIOR_REVIEW`, where the assignment SUCCEEDS and stores something
-# else — a status-only probe accepts that, and the request goes out with the
-# baseline rewritten. #148.
-_rb_prp_ln="$(grep -n '( PRIOR_REVIEW="RbProbe\$\$\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
-_rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
-{ [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
-    && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
-    || die "PRIOR_REVIEW is not probed before the request (probe=$_rb_prp_ln request=$_rb_req_ln)"
-grep -q '^PRIOR_REVIEW=[Pp]robe-' "$SKILL" \
-    && die "PRIOR_REVIEW is probed with a bare assignment; under errexit that ends the operator's shell" \
-    || pass "…and not with a bare assignment, which errexit makes fatal"
-# AND ITS REFUSAL NAMES BOTH ATTRIBUTES. The other two probes have runtime cases
-# that read their message; this one cannot, because exercising it means POSTING a
-# request — so the wording is asserted textually, or reverting it to "readonly"
-# alone would leave every assertion here green while the operator was sent looking
-# for an attribute that is not there.
-grep -qF 'ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell' "$SKILL" \
-    && pass "…and its refusal names both attributes the probe rejects" \
-    || die "the PRIOR_REVIEW refusal does not name the transforming attribute; a declare -i name reads as a readonly"
-
-# …AND THE OTHER TWO ARE RUN RATHER THAN MATCHED, ONE HARNESS UP. `PRIOR_REVIEW`
-# is the one that cannot be: exercising it means POSTING a request, so what it
-# shares with the other two is the RULE, and the rule is what those runs prove.
+# #243 removed the dependency instead of guarding it, which is the rule `CLAUDE.md`
+# states for exactly this: a guard is a name, and a removed dependency stays removed.
+# The baseline is written by the helper, read by `pr-watch.sh`, and never assigned
+# here — so there is no attribute to detect, no refusal to word, and no arm to nest.
+# The invariant that replaced all of it is asserted by ABSENCE, in § THE DRIVER NEVER
+# NAMES THE BASELINE above.
 #
-# WHERE THOSE RUNS LIVE MOVED WITH THE CODE. The transport-parent probe is now the
-# setup block's own, exercised against the lifted block in § the probed names,
-# attacked — readonly, `declare -i`, `declare -l`, `declare -u`, a nameref, a
-# shadowed `echo`, a neutralised `exit` and an interactive shell, each asserted on
-# the CONSEQUENCE rather than on the message. The working-directory allocation is
-# no longer in this document at all: `pr-setup.sh` makes the directory and the four
-# files, and `test-pr-setup.sh` is where a readonly or transforming name is staged
-# against it. TWO HARNESSES FOR ONE PROBE was what this file had while the second
-# lift still resolved, and the duplicate is what let the first one rot unnoticed
-# through a redesign — the lift kept matching a `fi` that had moved.
-# AND THE REQUEST IS THE PROBES' SUCCESS ARM, not a statement after them. Written
-# as standalone guards they detect the readonly name and then cannot act on it —
-# `exit` is a builtin a startup file can replace with one that RETURNS, and a
-# trailing reserved word only gives the `if` a false status nothing consumes, so
-# execution reached the request and posted it anyway.
-grep -q '^if { ( PRIOR_REVIEW="RbProbe\$\$\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" \
-    && pass "…and the probe is a condition whose success arm holds the request" \
-    || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
-grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
-    && pass "…with the request nested inside it" \
-    || die "the request is not nested inside the probes' success arm"
-
+# WHERE THE PROBE RUNS THAT REMAIN LIVE: the transport-parent probe is the setup
+# block's own, exercised against the lifted block in § the probed names, attacked —
+# readonly, `declare -i`, `declare -l`, `declare -u`, a nameref, a shadowed `echo`, a
+# neutralised `exit` and an interactive shell, each asserted on the CONSEQUENCE rather
+# than on the message. The working-directory allocation is not in this document at
+# all: `pr-setup.sh` makes the directory and the four files, and `test-pr-setup.sh`
+# stages a readonly or transforming name against it.
 
 # ── the round summary and the review request are ONE comment ───────────────
 # The mention IS the request, so splitting them divides the record the reviewer
@@ -2385,7 +2166,7 @@ grep -q 'PHASE_RC' "$SKILL" \
 # lists both a few lines above them.
 _rec_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _stop_ln="$(grep -n 'STOP — the next phase is the operator' "$SKILL" | head -1 | cut -d: -f1)" || true
-_open_ln="$(grep -n 'OPEN_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_open_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_rec_ln" ] && [ -n "$_stop_ln" ] && [ -n "$_open_ln" ] \
     && [ "$_rec_ln" -lt "$_stop_ln" ] && [ "$_stop_ln" -lt "$_open_ln" ]; } \
     && pass "the Copilot phase opens only after the stop the operator answers" \
@@ -3484,13 +3265,19 @@ else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
 
-# ── the re-request id is captured and passed, not merely available ────────
+# ── the re-request baseline is passed, not merely available ───────────────
 # A flag nothing invokes is inert: `--after-review` shipped and the driver never
 # called `review-id` nor passed the option, so a same-head re-request still
-# accepted the previous terminal review immediately.
-grep -q 'pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"' "$SKILL" \
-    && pass "the watch is invoked with the pre-request review id" \
-    || die "--after-review is documented but never passed"
+# accepted the previous terminal review immediately. The file form is asserted in
+# § THE DRIVER NEVER NAMES THE BASELINE; what is checked here is that the helper
+# still offers both, since `pr-close-round.sh` holds its own value and uses the
+# other one.
+grep -q '\-\-after-review-file) ' "$SCRIPT_DIR/pr-watch.sh" \
+    && pass "pr-watch.sh accepts the file form the driver passes" \
+    || die "pr-watch.sh has no --after-review-file; the driver's baseline goes nowhere"
+grep -q '\-\-after-review) ' "$SCRIPT_DIR/pr-watch.sh" \
+    && pass "…and the value form its hardened callers use" \
+    || die "pr-watch.sh lost --after-review; pr-close-round.sh passes its push baseline that way"
 
 grep -q 'ERRF' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…using stderr, so the message does not pollute the compared value" \
@@ -3525,15 +3312,14 @@ grep -q 'before merging' "$SKILL" \
 # ── EVERY documented watch invocation carries the baseline ────────────────
 # The shell example passed --after-review while the Monitor command beside it did
 # not, leaving the feature inert in the mode Claude Code is told to use.
-# The baseline is a VARIABLE now, not one name: the automatic path waits out the
-# pass its own push started, and that wait's baseline is the id from before the
-# push rather than the one for the request that follows. What must never happen is
-# a watch with no baseline at all.
+# The baseline is a FILE now, one path every writer names, so what must never happen
+# is a watch with no baseline at all — a watch that omits it accepts the previous
+# terminal review on the first poll.
 watch_calls="$(grep -c 'pr-watch.sh N "\$WHO"' "$SKILL")"
-watch_pinned="$(grep -cE 'pr-watch.sh N "\$WHO" --after-review "\$[A-Z_]+"' "$SKILL")"
+watch_pinned="$(grep -cE 'pr-watch.sh N "\$WHO" --after-review-file "\$[A-Z_]+"' "$SKILL")"
 [ "$watch_calls" -eq "$watch_pinned" ] \
     && pass "every documented watch invocation passes a review baseline" \
-    || die "$((watch_calls - watch_pinned)) watch invocation(s) omit --after-review"
+    || die "$((watch_calls - watch_pinned)) watch invocation(s) omit --after-review-file"
 # ── the operator instructions match the workflow ──────────────────────────
 # README told operators that with automatic review on the summary must precede the
 # push and that no mention may be sent, which is the opposite of what the driver
@@ -3560,8 +3346,8 @@ fi
 # is that the driver did not keep a second copy: a `PRIOR_REVIEW=` of its own
 # beside the capture would decide the question in the one place nothing executes,
 # and the helper's answer would be overwritten by it.
-grep -q 'PRIOR_REVIEW=""' "$SKILL" \
-    && die "SKILL.md decides the automatic path's baseline itself; that rule lives in pr-request-review.sh, where the suite runs it" \
+grep -qE '^[^#]*PRIOR_REVIEW=' "$SKILL" \
+    && die "SKILL.md assigns the baseline itself; that value is the helper's, and \$PRIOR_FILE is where it stays" \
     || pass "the baseline is decided once, by the helper the suite runs"
 grep -q 'the trigger preceded us' "$SKILL" \
     && pass "…and the driver says why that path has none" \

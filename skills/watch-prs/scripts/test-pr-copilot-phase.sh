@@ -160,6 +160,10 @@ run() {   # run <stage> [args…] ; prints "<rc>|<output>"
     # what the driver does with one of the working files setup creates. A case about the
     # argument itself passes its own third argument and this does nothing. #239.
     if [ "${1:-}" = record ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/sha.txt"; fi
+    # AND THE BASELINE FILE FOR `open`, on the same terms and for the same reason: the
+    # driver hands `open` one of setup's working files, and a case about that argument
+    # itself passes a third and this does nothing. #243.
+    if [ "${1:-}" = open ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/prior.txt"; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
@@ -957,6 +961,57 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested after the phase was reopened mid-revocation" \
     || pass "…with Copilot not requested"
 
+# ── `open` HANDS THE BASELINE BACK IN A FILE ───────────────────────────────
+#
+# The value used to reach the driver only through the `PR_COPILOT_PHASE_OPENED`
+# record, which meant the driving shell captured this stage's output and cut the
+# field out of it. It writes the file now, and these cases are about the file
+# rather than the record. #243.
+world; run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
+[ "$(cat "$TMP/prior.txt")" = 42 ] \
+    && pass "open writes the captured baseline into the file the caller named" \
+    || die "open wrote '$(cat "$TMP/prior.txt")' as the baseline, not the id it captured"
+# AND WRITES IT BEFORE THE REQUEST. After `--add-reviewer` there is nothing left to
+# refuse with: the pass is in flight, and a caller reading a truncated id would arm
+# the watch against a review that is not the one it is waiting for.
+before 'pr-review-state.sh review-id' 'gh pr edit' \
+    && pass "…and captures it before Copilot is requested" \
+    || die "the baseline is captured after the request: $(cat "$TMP/calls")"
+
+# AN EMPTY BASELINE IS WRITTEN, NOT SKIPPED. No prior Copilot review is the ordinary
+# first pass, and `pr-watch.sh` reads empty as "there is nothing to wait past" — so
+# the file must exist and be empty rather than be left as it was.
+world; : > "$W/review-id.out"; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
+run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
+# ASSERTED ON THE VALUE A READER GETS, not on the file's size. `printf '%s\n' ""`
+# leaves one byte, so `-s` is true on a file that every reader sees as empty —
+# `$(<…)` strips trailing newlines, which is how `pr-watch.sh` reads it.
+{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
+    && pass "…and an empty baseline is written over a stale one, not left behind" \
+    || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
+
+# A REFUSAL LEAVES NO STALE BASELINE EITHER. The clearing happens at the top of the
+# file, before the bootstrap and before any argument is looked at, so an abort above
+# the write cannot leave the previous round's id for the caller to read as this
+# round's — which would arm the watch against a pass that already finished.
+world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
+printf '1\n' > "$W/head.rc"
+run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
+{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
+    && pass "…and a refusal before the write leaves no stale baseline" \
+    || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
+
+# AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —
+# Copilot requested, the revocation posted — with no baseline anywhere, and the
+# watch would take the previous terminal review as this round's answer.
+world; got="$(run open 7 "$HEAD40" "")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a baseline file is required' <<<"${got#*|}"; } \
+    && pass "…and an omitted baseline file stops the phase before anything is posted" \
+    || die "open without a baseline file gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested despite the missing baseline file" \
+    || pass "…with Copilot not requested"
+
 # THE THREE CONSTRAINTS TOGETHER, in the order they have to hold: the phase is
 # proved after the revocation, and the baseline is still the LAST thing read
 # before the request. Neither can be satisfied by moving the other.
@@ -1250,6 +1305,10 @@ _RB_SHADOW_N='BASH_FUNC_[%%=() { if [[ $1 = "-n" && -z $2 && ! -f $W/n.fired ]];
 shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[`
     local out rc=0
     if [ "${1:-}" = record ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/sha.txt"; fi
+    # AND THE BASELINE FILE FOR `open`, on the same terms and for the same reason: the
+    # driver hands `open` one of setup's working files, and a case about that argument
+    # itself passes a third and this does nothing. #243.
+    if [ "${1:-}" = open ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/prior.txt"; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         "${_RB_SHADOW:-$_RB_SHADOW_BRACKET}" \

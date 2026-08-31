@@ -298,7 +298,10 @@ Then:
    containing a line equal to the delimiter end it and have the rest parsed as
    shell. The answer comes back in a file for the same reason: a variable is a
    name, and one your startup files have already made readonly would make the
-   capture fail silently. The loop is *phased*:
+   capture fail silently. It STAYS in that file — the loop hands the path to
+   `pr-watch.sh --after-review-file`, which reads and validates it in a process
+   your shell cannot reach, so the review id never becomes a variable here at all.
+   The loop is *phased*:
    Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
    Running both every round buys a Copilot pass on every intermediate commit and
    mixes its findings into rounds that were not about them.
@@ -307,7 +310,10 @@ Then:
    runs as the session's Monitor, so the verdict surfaces into the chat by
    itself. It is armed and re-armed as part of each round without asking you —
    see **Watching without prompts**. An unreadable state is a stop, never
-   "no findings".
+   "no findings" — and so is an unreadable baseline file, because an empty
+   baseline legitimately means "there is no earlier review to wait past", and a
+   failed read that quietly became one would let the watch report the review the
+   round just answered as the next one.
 
    Every comment on the review counts as a finding, replies included. A reviewer
    sometimes delivers a clean verdict as a reply, and that is *not* exempted:

@@ -3,6 +3,7 @@
 # line whenever the state changes and one final line when it is.
 #
 #   pr-watch.sh <pr> <reviewer-login> [--interval SECONDS] [--timeout SECONDS]
+#               [--after-review ID | --after-review-file PATH]
 #
 #   0  a terminal state was reached — the last line says which
 #   1  the timeout expired first
@@ -129,6 +130,7 @@ TIMEOUT="${PR_WATCH_TIMEOUT:-3600}"
 PR=""
 WHO=""
 AFTER_REVIEW=""
+AFTER_REVIEW_FILE=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -147,6 +149,23 @@ while [ "$#" -gt 0 ]; do
         # is still that id is treated as "not yet".
         --after-review) [ "$#" -ge 2 ] || { echo "$0: --after-review needs a value" >&2; exit 2; }
                     AFTER_REVIEW="$2"; shift 2 ;;
+        # THE SAME VALUE, FOR A CALLER THAT CANNOT HOLD ONE. `SKILL.md`'s bash runs
+        # in the operator's own shell, where an assignment can be defeated by a
+        # readonly name, a nameref or a transforming attribute — so the driver read
+        # the baseline back into `PRIOR_REVIEW`, proved the name assignable first,
+        # and re-validated the shape before entering the wait. That last part was a
+        # SECOND, WEAKER COPY of the four-arm check below, and CLAUDE.md records
+        # what a second copy of a rule costs: every field check in `recordlib.sh`
+        # was written out two or three times and every one was found missing from
+        # at least one copy. The value has one consumer, so it crosses in a file the
+        # caller names and is validated HERE, once — the arrangement #202 gave the
+        # gated head and #240 the Codex signoff sha.
+        #
+        # The two spellings are not two answers. `--after-review` is for a caller
+        # holding the value in a hardened process of its own — `pr-close-round.sh`
+        # waiting on the pass its push started — and both reach the same validation.
+        --after-review-file) [ "$#" -ge 2 ] || { echo "$0: --after-review-file needs a value" >&2; exit 2; }
+                    AFTER_REVIEW_FILE="$2"; shift 2 ;;
         -*) echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2 ;;
         *) if [ -z "$PR" ]; then PR="$1"; elif [ -z "$WHO" ]; then WHO="$1"; fi; shift ;;
     esac
@@ -187,6 +206,44 @@ case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
 # `%q` collapses newlines and control bytes into escapes, so nothing a helper
 # emits can start a line of its own.
 q() { printf '%q' "$1"; }
+
+# BOTH SPELLINGS AT ONCE IS A REFUSAL, not a precedence rule. They are the same
+# value by two routes, and a caller passing both has two answers in hand and no
+# reason to believe this one picked the right one.
+if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW" ]; then
+    echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_both_forms" >&2
+    exit 2
+fi
+# AN UNREADABLE BASELINE FILE IS state=error, NEVER AN EMPTY BASELINE. Empty is a
+# legal answer meaning "there was no prior review to wait past", so degrading to it
+# would make a failed read say exactly what "the first request on a fresh head"
+# says — and the watch would then accept the previous terminal review as this
+# round's, which is the whole failure `--after-review` exists to prevent. The read
+# is bound to a descriptor rather than repeated on the path: the file is named in
+# argv, so a same-UID process can replace what that name resolves to between a
+# test and a use.
+if [ -n "$AFTER_REVIEW_FILE" ]; then
+    if { [ -f /dev/fd/9 ] && AFTER_REVIEW="$(<"/dev/fd/9")"; } 9<"$AFTER_REVIEW_FILE"; then
+        :
+    else
+        echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_unreadable detail=$(q "$AFTER_REVIEW_FILE")" >&2
+        exit 2
+    fi
+    # THE SHAPE IS PROVED HERE TOO, not only in the loop. The check below runs on
+    # the first TERMINAL state, which may be an hour away; a malformed baseline is
+    # a caller error and belongs at the call, where the caller can still act on it.
+    case "$AFTER_REVIEW" in
+        ""|*[0-9]) ;;
+        comment:*[0-9]) ;;
+        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
+           exit 2 ;;
+    esac
+    case "${AFTER_REVIEW#comment:}" in
+        ""|*[!0-9]*) [ -z "$AFTER_REVIEW" ] || {
+              echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
+              exit 2; } ;;
+    esac
+fi
 
 # An ABSOLUTE deadline, measured against the clock rather than accumulated from
 # the sleeps. Counting only the naps excluded every second spent inside the head,
