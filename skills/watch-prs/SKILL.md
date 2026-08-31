@@ -467,18 +467,11 @@ into the chat by itself instead of being waited on:
 watch is how the loop notices anything at all; a round that ends without one
 leaves the driver waiting on a verdict nothing will report. `pr-watch.sh` exits
 when it reaches a terminal state, so **one arming covers one verdict**: every
-review request in step 2 needs its own, for the reviewer named by `$WHO`.
-
-Treat it as part of requesting the review, not as a separate decision to put to
-the operator. It reads no secrets, changes nothing, and stopping it costs one
-`TaskStop` — so a prompt per round buys nothing and turns an automatic loop back
-into a manual one. If the harness prompts anyway, that is a permissions gap
-rather than a question worth relaying; `README.md § Watching without prompts`
-says what to add.
-
-Re-arm on `WATCH_RC` 1 as well: a timeout means the verdict has not arrived yet,
-not that the round is over. Only `0` (verdict in hand), `2` (fail closed) and `4`
-(the operator decides) end the watch for that round.
+review request in step 2 needs its own, for the reviewer named by `$WHO`. It
+reads no secrets, changes nothing, and stopping it costs one `TaskStop`, so a
+prompt per round buys nothing and turns an automatic loop back into a manual one
+— and a harness that prompts anyway is a permissions gap rather than a question
+worth relaying, which `README.md § Watching without prompts` answers.
 
 It prints on **change**, not on every poll, so a long wait does not bury the
 session in identical lines:
@@ -511,17 +504,13 @@ forbidden. So the operator's answer has to become state:
 - **it was a clean verdict** — record the signoff for that reviewer and head, the
   same `**Review-Signoff:**` line step 7 writes — reviewer and head in backticks,
   and optionally a third field, the time of the verdict being signed off, which
-  the phase adds when it can read it. **That third field is what a later
-  revocation is ordered against**: a signoff stands only if no revocation is newer
-  than the verdict it answers, so one posted while the phase was proving still
-  reopens the phase even though the signoff was written after it. A revocation in
-  the same second reopens it too, because the two cannot be ordered and treating
-  that as "the signoff stands" is the answer the rule exists to stop. Where there
-  is nothing to compare — no third field, or a revocation whose own time cannot be
-  read — the last record wins, as it always did. The merge gate accepts it *for
-  this shape only*: a `source=replies-only` verdict plus a recorded signoff naming
-  that head merges, and says so in its output. A review with real findings is not
-  a question anyone was asked, so a signoff never carries one.
+  the phase adds when it can read it. **Include it whenever you have it**: it is
+  what a later revocation is ordered against, and `pr-signoff.sh` decides that
+  ordering — without it a revocation can only be placed by position. The merge
+  gate accepts the record *for this shape only*: a `source=replies-only` verdict
+  plus a recorded signoff naming that head merges, and says so in its output. A
+  review with real findings is not a question anyone was asked, so a signoff never
+  carries one.
 
   **RECORD IT AFTER READING, NOT BEFORE.** The signoff must be newer than the
   LATEST of that review and its newest reply — a head is not a moment, and the
@@ -945,10 +934,8 @@ the same boundary for the same reason.
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
 ```
 
-Counting **per reviewer** is what makes the number mean something: the Codex
-phase and the Copilot phase are separate loops, and a shared counter would let
-nine Codex rounds plus one Copilot round trip a pause that neither loop had
-reached.
+The count is **per reviewer**: the Codex phase and the Copilot phase are separate
+loops with separate boundaries.
 
 - `0` — carry on.
 - `3` — **stop and decide with the operator.** A review loop that never pauses is
@@ -1025,17 +1012,10 @@ reached.
 - `2` — the count could not be established. Fail closed: do not re-request as if
   it were round one.
 
-The boundary is **crossed, not landed on**. It was a `rounds % threshold == 0`
-test, which assumes the counter advances by one per call — it does not, because a
-single round can contribute several countable heads, and a real PR went 35 → 41
-across two rounds with the pause at 40 never firing. The test is now an
-inequality against the last acknowledged count, which no step can jump over.
-
 A round is a **distinct PR head that received a submitted review**, derived from
 GitHub each time — so two reviewers on one commit is one round, a re-review of an
 unchanged head does not inflate it, and the count survives a new session or a new
-machine. v1 kept this in a `/tmp` file, so the pause it promised quietly
-disappeared whenever that file did.
+machine.
 
 ## 7. Codex is clean — now the Copilot phase
 

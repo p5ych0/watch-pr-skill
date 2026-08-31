@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.0.91] — 2026-08-31
+
+- **`SKILL.md` is 1,308 characters shorter: it stops explaining helper internals to a
+  driver that never applies them.** The driver's contract with a helper is its arguments,
+  its exit statuses and what to do about each; how the helper reaches its answer is argued
+  in the helper, where whoever changes it will read it.
+
+  § 3 worked through `pr-signoff.sh`'s reader logic — a signoff stands unless a revocation
+  is newer than the verdict it answers, equal seconds reopen the phase, with nothing to
+  compare position decides. The driver evaluates none of that; it writes the record. What
+  stays is why the verdict time is worth including.
+
+  § 3 also stated the arming rule three times: a bolded sentence, a paragraph arguing half
+  of it, and a third listing which statuses end the watch — which is the `WATCH_RC` table
+  immediately below, row by row.
+
+  § 6 recounted `pr-round-count.sh`'s algorithm and history: the `rounds % threshold == 0`
+  test, a real PR stepping 35 → 41 over it, the inequality that replaced it, and v1's
+  `/tmp` file. That helper carries all of it, which was verified before removal. What the
+  driver acts on stays — the count is per reviewer, what a round is, who may acknowledge
+  one. #251.
+
 ## [2.0.90] — 2026-08-31
 
 - **`SKILL.md` is 1,859 characters shorter, and no rule or reason was removed.** Its
