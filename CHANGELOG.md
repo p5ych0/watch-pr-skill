@@ -17,7 +17,10 @@
   the word inside a sentence *describing* the helper — so the check passed on prose and
   would have gone on passing after a real unpaginated fetch was added. It asserts the
   absence now, which is what is true: the document fetches no review threads itself,
-  because the paginated walk lives where its pagination is executed. #253.
+  because the paginated walk lives where its pagination is executed — and it reads the
+  FENCES rather than the file, so a sentence naming a GraphQL field is not accused of
+  calling one. Prose is where this document explains what the helpers do; what counts as
+  a fetch is what a shell would run. #253.
 
 ## [2.0.91] — 2026-08-31
 

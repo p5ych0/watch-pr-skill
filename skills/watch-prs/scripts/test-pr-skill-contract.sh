@@ -4170,10 +4170,37 @@ grep -q 'cd "\$REPO_DIR" && /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-merge-gate.sh
 # and would have gone on reporting it after a real unpaginated fetch was added. That is
 # the shape this repository records deleting a scanner over: a green tick for an
 # invariant nothing tested. What is true and worth pinning is that the walk is not here.
-_tp_fetch="$(grep -cE 'reviewThreads|pullRequest\(number' "$SKILL")" || _tp_fetch=0
-[ "$_tp_fetch" -eq 0 ] \
+#
+# AND IT READS THE FENCES, NOT THE DOCUMENT. The first version of this replacement
+# scanned the whole file — which made a sentence NAMING the field a failure, so a check
+# written to stop reporting on prose reported on prose in the other direction. Prose is
+# where this document explains what the helpers do; it must be able to name a GraphQL
+# field without being accused of calling one. What is a fetch is what a shell would run.
+_tp_scan() {   # _tp_scan <markdown-file> ; prints the number of fenced thread fetches
+    awk '/^[[:space:]]*```bash[[:space:]]*$/{f=1;next} /^[[:space:]]*```[[:space:]]*$/{f=0;next} f' \
+        "$1" 2>/dev/null | grep -cE 'reviewThreads|pullRequest\(number' || true
+}
+_tp_code="$TMP_CL/tp-code.sh"
+awk '/^[[:space:]]*```bash[[:space:]]*$/{f=1;next} /^[[:space:]]*```[[:space:]]*$/{f=0;next} f' \
+    "$SKILL" > "$_tp_code" || die "the document's fenced code could not be extracted"
+[ -s "$_tp_code" ] \
+    && pass "the document's fenced code extracts, so the scan below reads something" \
+    || die "no fenced code extracted from SKILL.md; the thread-fetch scan would pass vacuously"
+[ "$(_tp_scan "$SKILL")" -eq 0 ] \
     && pass "the document fetches no review threads itself; the paginated walk is the helpers'" \
-    || die "SKILL.md fetches review threads in $_tp_fetch place(s); that walk belongs in a helper where its pagination is executed"
+    || die "SKILL.md fetches review threads in $(_tp_scan "$SKILL") fenced place(s); that walk belongs in a helper where its pagination is executed"
+# AND THE SCAN IS SHOWN TO TELL THE TWO APART, on staged documents rather than by
+# reading it. The first version failed on a SENTENCE naming the field, which is how this
+# check earned its second round; without these a later widening back to the whole file
+# would be invisible until someone wrote that sentence again.
+printf 'Prose about how `pr-findings.sh` walks `reviewThreads` with a cursor,\nand about `pullRequest(number: N)` too.\n' > "$TMP_CL/tp-prose.md"
+[ "$(_tp_scan "$TMP_CL/tp-prose.md")" -eq 0 ] \
+    && pass "…and prose naming the GraphQL field is not a fetch" \
+    || die "a sentence naming reviewThreads was counted as a fetch"
+printf 'text\n\n```bash\ngh api graphql -f query=%s{ pullRequest(number: 1) { reviewThreads { nodes { id } } } }%s\n```\n' "'" "'" > "$TMP_CL/tp-code.md"
+[ "$(_tp_scan "$TMP_CL/tp-code.md")" -eq 1 ] \
+    && pass "…while a fenced query is" \
+    || die "a fenced reviewThreads query was not counted as a fetch"
 
 # ── the instruction files carry the scope + issue policy ───────────────────
 # These are what reach the reviewers; the loop depends on them, so a missing
