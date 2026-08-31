@@ -225,13 +225,28 @@ world; got="$(run record 7 "$TMP/body.md")"
 [ "$(cat "$TMP/sha.txt" 2>/dev/null)" = "$HEAD40" ] \
     && pass "…and writes the signed-off sha into the file the caller named" \
     || die "the sha file holds '$(cat "$TMP/sha.txt" 2>/dev/null)', not $HEAD40"
-# …AND IT IS EMPTIED FIRST, so a refusal cannot leave a PREVIOUS run's sha to be read as
-# this one's. Staged with a body file that is missing, which refuses after the emptying.
+# …AND IT IS EMPTIED BEFORE ANY REFUSAL, including one that happens before the argument
+# checks. Two cases: a body file that is missing, which refuses after the bootstrap, and a
+# PR number that is not a number, which refuses during argument validation — the clearing
+# for that one has to be at the top of the file, above the bootstrap, or the previous run's
+# sha survives and the caller reads it as this one's.
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 got="$(run record 7 "$TMP/nope.md")"
 { [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
     && pass "…and a refusal leaves no stale sha behind it" \
     || die "a refused record left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
+world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
+got="$(run record notanumber "$TMP/body.md")"
+{ [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
+    && pass "…and so does one that refuses before the arguments are even checked" \
+    || die "an early refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
+# …AND THE BODY FILE IS NEVER TRUNCATED BY EITHER CLEARING, which is what the guards
+# exclude. Staged as the alias: the account must survive to be refused properly.
+world; printf 'the account\n' > "$TMP/body.md"
+got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && [ -s "$TMP/body.md" ]; } \
+    && pass "…and neither clearing truncates the body file it is aliased to" \
+    || die "the alias refusal emptied the account: '$(cat "$TMP/body.md" 2>/dev/null)'"
 # …AND THE FILE IS NOT THE BODY FILE, by path and under another name.
 world; got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the account' <<<"${got#*|}"; } \

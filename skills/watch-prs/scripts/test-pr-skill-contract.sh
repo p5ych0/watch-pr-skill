@@ -1497,7 +1497,10 @@ grep -qi 'precede the push' "$SKILL" \
 # ONE, SINCE #239: the sha the gate is pinned to in the RESUME path, where a later
 # session genuinely has to read the record back. Step 7's own read is gone — `record`
 # proved that sha and hands it over in a file, so asking the API again was a second
-# answer to a question this process had already settled.
+# answer to a question this process had already settled. `CODEX_SHA` is in setup's probe
+# with every other name the session assigns, so a readonly or aliased one is refused
+# before anything is posted; the shape check in step 7 is the other half, for a value
+# that arrives wrong rather than a name that was never writable.
 _sha_reads="$(grep -c 'pr-signoff.sh sha N' "$SKILL" || true)"
 [ "$_sha_reads" -eq 1 ] \
     && pass "the one remaining head read asks pr-signoff.sh for the sha alone" \
@@ -1710,12 +1713,18 @@ grep -qF 'CLOSED_REC' "$SKILL" \
     || die "the round-close recipe reads the baseline without a refusal for a read that failed"
 # ── AND A TRANSFORMING ATTRIBUTE CANNOT CORRUPT THE PHASE SHA ────────────
 #
-# The read succeeding does not mean the NAME holds what the file held. `CODEX_SHA` is
-# not in setup's probe list, and this block runs in the operator's long-lived shell:
-# `declare -i` coerces a forty-digit sha to an integer on assignment — measured,
-# `0000…0001` becomes `1` — and `declare -u` returns it uppercased. Both assignments
-# SUCCEED, so a condition that only reads is satisfied by a wrong value, and by then
-# the signoff has been posted.
+# The read succeeding does not mean the NAME holds what the file held. This block runs in
+# the operator's long-lived shell: `declare -i` coerces a forty-digit sha to an integer on
+# assignment — measured, `0000…0001` becomes `1` — and `declare -u` returns it uppercased.
+# Both assignments SUCCEED, so a condition that only reads is satisfied by a wrong value,
+# and by then the signoff has been posted.
+#
+# THIS IS THE SECOND HALF, NOT THE ONLY ONE. `CODEX_SHA` is in setup's probe — the cases
+# above assert that — so a name that is readonly, transforming or aliased AT SETUP is
+# refused before anything is posted. What is left for here is a name that was fine then
+# and is not now: a long-lived shell can redeclare it between setup and step 7, and the
+# probe cannot reach forward. So the value is proved where it is used as well as where the
+# name was first written.
 _ph_dir="$TMP_CL/ph"; mkdir -p "$_ph_dir" || die "the phase-sha scratch directory could not be made"
 awk '/^    if \{ \[\[ -f \/dev\/fd\/9 \]\] && CODEX_SHA=/, /^    fi$/' "$SKILL" \
     | sed 's/^    //' > "$_ph_dir/read.sh"
@@ -2328,17 +2337,38 @@ grep -qi 'do not ask' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-# THE ORDINARY PATH LEAVES THE BLOCK SUCCEEDING. The last command in a block IS
-# the block's status, and `[ "$PHASE_RC" -eq 3 ] && …` is FALSE when the phase
-# recorded normally — so a driver saw a step that did everything right exit 1, and
-# would stop or retry instead of reaching the operator decision. Executed rather
-# than grepped: the shape of the last statement is the whole defect.
-_tail_ok=0
-( PHASE_RC=0; CODEX_SHA=abc
-  if [ "$PHASE_RC" -eq 3 ]; then echo "pause"; exit 3; fi ) >/dev/null 2>&1 && _tail_ok=1
-[ "$_tail_ok" -eq 1 ] \
-    && pass "the record block's ordinary path leaves it succeeding" \
-    || die "the record block exits non-zero when the phase recorded normally"
+# THE FENCE IS LIFTED AND RUN AGAINST EACH STATUS THE STAGE CAN REPORT. It used to be a
+# synthetic `( PHASE_RC=0; if [ … -eq 3 ] … )` re-enacting the driver's branch, which
+# stopped testing the driver the moment the branch changed — the shape it re-enacted is
+# not in the document any more. A stub stands in for the stage, so 0, 3 and 1 all drive
+# the real fence: 0 continues with the sha read, 3 reads the sha and stops at 3 naming it,
+# and 1 refuses.
+_rec_dir="$TMP_CL/rec"; mkdir -p "$_rec_dir" || die "the record-fence scratch directory could not be made"
+awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-copilot-phase.sh record N/, /^fi$/' "$SKILL" \
+    | sed '1s|^if .*|if "$RB_REC_STUB"; then|' > "$_rec_dir/rec.sh"
+{ [ -s "$_rec_dir/rec.sh" ] && grep -q '9<"$HEAD_FILE"' "$_rec_dir/rec.sh"; } \
+    && pass "the record fence lifts, so the cases below reach the code they name" \
+    || die "the record fence did not lift; the cases prove nothing"
+printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$_rec_dir/sha"
+for _rec_st in 0 3 1; do
+    printf '#!/usr/bin/env bash\nexit %s\n' "$_rec_st" > "$_rec_dir/stub$_rec_st"
+    chmod +x "$_rec_dir/stub$_rec_st"
+    _rec_rc=0
+    _rec_out="$(RB_REC_STUB="$_rec_dir/stub$_rec_st" HEAD_FILE="$_rec_dir/sha" bash -c '
+        trap '"'"'printf "SHA:[%s]" "${CODEX_SHA-unset}"'"'"' EXIT
+        . "$1" 2>/dev/null' _ "$_rec_dir/rec.sh" 2>/dev/null)" || _rec_rc=$?
+    case "$_rec_st|$_rec_rc|$_rec_out" in
+        '0|0|SHA:[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]')
+            pass "a recorded phase continues, with the sha read from the file" ;;
+        0*) die "the record fence on 0 gave rc=$_rec_rc '$_rec_out'" ;;
+        '3|3|'*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*)
+            pass "…a paused one stops at 3 and names the sha the operator may merge on" ;;
+        3*) die "the record fence on 3 gave rc=$_rec_rc '$_rec_out'" ;;
+        '1|1|'*'did not advance'*)
+            pass "…and a stopped one refuses without reading anything" ;;
+        *) die "the record fence on 1 gave rc=$_rec_rc '$_rec_out'" ;;
+    esac
+done
 # …AND THE DOCUMENT BRANCHES ON THE STAGE ITSELF. `PHASE_RC` is gone with #239: the
 # stage is the `if` condition, and the pause is a `3)` arm of a `case $?` in its
 # `else`, so no name holds the status and no trailing test can become the block's.

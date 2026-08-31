@@ -84,6 +84,30 @@ fi
 
 set -uo pipefail
 
+# ── THE SHA FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE ─────────────────────
+# A refusal above the truncation further down — an unreadable library, a PR number that
+# is not a number — leaves the PREVIOUS run's sha in the file, and the caller reads it as
+# this one's: a signoff that was never posted, on a commit from another round. So the
+# clearing happens here, before the bootstrap and before any argument is looked at, which
+# is the same place and the same reason `pr-close-round.sh` clears its head file.
+#
+# GUARDED, AND `record` ONLY. `open` and `close` take a sha as an argument and write no
+# file, so truncating a third argument there would destroy whatever the caller named. The
+# path must exist, be a regular file and contain a `/` — a bare name is not the driver's
+# handoff — and it must not be the BODY file, whose account this stage is about to post
+# and which the alias check below refuses properly.
+# THE POSITIONS ARE THE PRE-`shift` ONES, which is where this runs: `$1` is the stage,
+# `$2` the PR, `$3` the body file and `$4` the sha file. Reading them as the post-`shift`
+# ones truncated the BODY — caught at once by the fixture, and worth naming here because
+# the two numberings differ only by this one statement's position.
+if [[ ${1:-} = record ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]] \
+   && [[ -n ${3:-} ]] && [[ ! ${4} -ef ${3} ]]; then
+    > "${4}" || {
+        echo "ABORT: the sha file '${4}' exists and cannot be emptied; a stale sha would be left for the caller to read."
+        exit 1
+    }
+fi
+
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
@@ -425,13 +449,17 @@ if [[ $SHA_FILE = "$BODY_FILE" ]] || [[ $SHA_FILE -ef $BODY_FILE ]] 2>/dev/null;
     echo "ABORT: the sha file and the body file are the same file ('$SHA_FILE'); the sha would overwrite the account."
     exit 1
 fi
-# EMPTIED HERE, so a refusal below cannot leave a PREVIOUS run's sha for the caller to
-# read as this one's. Empty is not a valid sha, so an emptied file is refused by the reader
-# rather than mistaken for an answer.
+# EMPTIED AGAIN HERE, and the first clearing is at the top of the file — before the
+# bootstrap, where a refusal would otherwise leave the previous run's sha behind. This one
+# covers the path the guard up there declines to take: it requires the file to EXIST
+# already, so a caller naming a path that is not there yet gets its clearing here instead.
+# Empty is not a valid sha, so an emptied file is refused by the reader rather than
+# mistaken for an answer.
 #
-# NOT BEFORE EVERY REFUSAL, and the exception is the two checks above rather than an
-# oversight: a sha file that IS the body file must not be truncated, because the account
-# this stage is about to post is what would be destroyed. Those refusals leave it alone.
+# NEITHER CLEARING TOUCHES THE BODY FILE, and that is deliberate rather than an oversight:
+# a sha file that IS the body file must not be truncated, because the account this stage
+# is about to post is what would be destroyed. Both guards exclude it, and the alias check
+# above refuses it properly.
 > "$SHA_FILE" || { echo "ABORT: could not empty the sha file '$SHA_FILE'."; exit 1; }
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest

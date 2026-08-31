@@ -11,10 +11,12 @@
 
   `record` takes a third argument now, the file to write it into, as
   `pr-close-round.sh gate` has handed the head over since #202 and `post` the baseline
-  since #234. The file is emptied early, so a stopped stage cannot leave a previous run's
-  sha to be read as this one's — though not before the two alias checks, which refuse
-  without truncating, since a sha file that IS the body file would have the account
-  destroyed by the clearing; the write happens before the
+  since #234. The file is emptied at the top of the helper, above the bootstrap and the
+  argument checks, so a stage that stops anywhere cannot leave a previous run's sha to be
+  read as this one's — a refusal during PR validation would otherwise do exactly that.
+  Neither clearing touches the body file, which is what both guards exclude, since a sha
+  file that IS the body file would have the account destroyed by the clearing meant to
+  protect the caller; the write happens before the
   comment is posted, with its status taken and the value read back, because afterwards the
   signoff is on the PR and the stage cannot be un-run; and it is refused if it is the body
   file, by path and by `-ef`, since the sha would overwrite the account being posted.
