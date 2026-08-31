@@ -298,7 +298,10 @@ Then:
    containing a line equal to the delimiter end it and have the rest parsed as
    shell. The answer comes back in a file for the same reason: a variable is a
    name, and one your startup files have already made readonly would make the
-   capture fail silently. The loop is *phased*:
+   capture fail silently. It STAYS in that file — the loop hands the path to
+   `pr-watch.sh --after-review-file`, which reads and validates it in a process
+   your shell cannot reach, so the review id never becomes a variable here at all.
+   The loop is *phased*:
    Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
    Running both every round buys a Copilot pass on every intermediate commit and
    mixes its findings into rounds that were not about them.
@@ -307,7 +310,10 @@ Then:
    runs as the session's Monitor, so the verdict surfaces into the chat by
    itself. It is armed and re-armed as part of each round without asking you —
    see **Watching without prompts**. An unreadable state is a stop, never
-   "no findings".
+   "no findings" — and so is an unreadable baseline file, because an empty
+   baseline legitimately means "there is no earlier review to wait past", and a
+   failed read that quietly became one would let the watch report the review the
+   round just answered as the next one.
 
    Every comment on the review counts as a finding, replies included. A reviewer
    sometimes delivers a clean verdict as a reply, and that is *not* exempted:
@@ -404,8 +410,8 @@ Then:
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
      everything a machine reads back is composed by the script;
-   - `open <PR> <sha>` runs only on the answer, and proves the phase is still
-     open before it changes anything: the head is unmoved, Codex's **live verdict**
+   - `open <PR> <sha> <baseline-file>` runs only on the answer, and proves the phase
+     is still open before it changes anything: the head is unmoved, Codex's **live verdict**
      on that sha is clean, and the **recorded Codex signoff** still names it. A
      recorded signoff is history, not a current verdict — and a revocation is how a
      phase is deliberately reopened, while GitHub keeps serving the old clean
@@ -415,7 +421,11 @@ Then:
      is why `open` can stop for you rather than proceeding. All of it runs **three
      times** — up front, before the revocation, and again after it — because none
      of these need the head to move, and the revocation is itself a change with the
-     request still to come. The order is revoke → prove → baseline → request: the
+     request still to come. The **baseline file** is a writable path it captures the
+     current Copilot review id into, before requesting the pass; hand that same path
+     to `pr-watch.sh --after-review-file` for the rounds that follow, or the first
+     poll accepts a review made before the request. The loop uses one of the working
+     files set up at the start. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

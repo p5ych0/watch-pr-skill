@@ -1,5 +1,97 @@
 # Changelog
 
+## [2.0.88] — 2026-08-31
+
+- **`SKILL.md` is 1,156 characters shorter, and the driving shell no longer names
+  the review baseline at all.** The review id captured immediately before a request
+  is what the next watch needs, and it used to come back into the operator's own
+  shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
+  back through a bound descriptor, and `pr-copilot-phase.sh open` reported it in a
+  record the driver cut apart with `${OPEN_REC##* prior-review=}`.
+
+  An assignment in that shell can be defeated by a readonly name, a nameref or a
+  transforming attribute, so each of those carried its own defences — an
+  assignability probe with the comparison inside a subshell, a read-back against a
+  second read of the file, and a four-arm shape check before entering the wait. That
+  last one was a SECOND, WEAKER COPY of the validation `pr-watch.sh` already runs on
+  both ids it compares, and a copy of a rule is what this repository has repeatedly
+  found missing from one of its copies.
+
+  The value has one consumer. `pr-watch.sh` takes `--after-review-file` now, reads
+  the file itself and validates it there; `open` writes the file as `gate` writes the
+  gated head and `record` the signed-off sha. The records still carry the baseline
+  for whoever is reading the terminal, and nothing parses them.
+
+  Two failures go with it. An unreadable baseline file is `state=error` rather than
+  an empty baseline — empty is legal, meaning "no prior review to wait past", so
+  degrading to it would let a failed read arm the watch with nothing and accept the
+  review this round just handled. And the round close's read-back compared its
+  assignment against a second read of the same descriptor: on macOS and the BSDs
+  `/dev/fd/N` duplicates rather than re-opens, so the second read drains empty and
+  every non-empty baseline was refused — after the summary and the next pass had
+  already gone out. That was #238, open against the opening path's copy of the same
+  read; removing the read closed it.
+
+  An empty baseline PATH is refused at the option, not only a missing argument: a
+  caller expanding a name that was never assigned satisfies the argument count and
+  hands over an empty string, which would skip the read entirely and leave the watch
+  with no baseline at all — the same fail-open state, reached by passing the option
+  rather than by omitting it.
+
+  An unreadable baseline is also a bounded question now. Opening the path can BLOCK —
+  a FIFO there waits for a writer that never comes, and the type check that would
+  reject it is on the far side of the redirection — so the open runs under the same
+  watchdog every other probe in the watch uses, and an expiry is `state=error` like
+  any other unreadable answer. And a NUL byte is not an empty baseline: `$(<file)`
+  drops NUL, so a file holding one read back as the empty string, which is the
+  legitimate "there is no prior review to wait past". The read is bounded by the
+  watch's OWN remaining deadline rather than a fixed limit, so `--timeout` still means
+  what it says, and `pr-copilot-phase.sh open` bounds its two baseline WRITES the same
+  way — opening a path for writing blocks for a reader, and the second of those writes
+  is after the revocation has been posted, where a hang leaves the phase half advanced.
+
+  And the reviewer switch that follows a successful `open` is a condition rather than
+  an assignment and a guard. `exit` is a builtin a startup file can replace with one
+  that RETURNS, and the guard's `{ echo …; exit 1; }` then SUCCEEDED — so a readonly
+  `WHO` left the Copilot rounds polling Codex, and a transforming one left them polling
+  a login that is nobody's, which `pr-review-state.sh` never matches, so the phase
+  re-armed forever.
+
+  `WHO` also joins setup's name probe, where every other name this session assigns is
+  already proved. It selects the reviewer every stage is addressed to and is assigned in
+  three places, none of which could prove it — and a nameref there is worse than an
+  attribute: `declare -n WHO=PRIOR_FILE` makes the assignment write the reviewer login
+  into the BASELINE PATH, and the check beside it passes because it reads back through
+  the same alias, so the next watch is handed a login as its file. Setup's proof is the
+  floor rather than the answer, because the driving shell is long-lived and a `declare
+  -n` executed afterwards is invisible to a probe that already passed — so the same
+  probe runs at each site that assigns the name, in a subshell, so that the write it
+  makes to prove the point cannot land on the target. The wait step's third assignment
+  is REMOVED rather than given a third probe: it only restated a value already set, and
+  an assignment is where a nameref does its damage. #243.
+
+- **`pr-selfcheck.sh` counts `{ VAR= }` as an assignment.** A guarded assignment written
+  as the second term of a condition is where `SKILL.md` proves a name before mutating it,
+  and the scan looked for a line start or a `;` before the name — so it reported a
+  variable as never assigned in a document that assigns it twice. Respelling the source
+  to suit the scan was the other option and it is the wrong way round: `{ VAR=` is valid
+  Bash and means what it says. The brace has to follow a command separator, or brace
+  text inside a STRING — `echo "{ VAR=$VAR"` — counted as an assignment and a quoted
+  line could talk the check out of a finding.
+
+- **`pr-watch.sh` refuses a reviewer this loop does not drive.** The login arrives from
+  the driving shell, where it is a variable an operator's startup file can have aimed
+  elsewhere. Unrecognised, the watch polled to its deadline and reported a TIMEOUT,
+  which the driver re-arms — so a corrupted reviewer looked exactly like a slow one,
+  indefinitely. `pr-close-round.sh` has made this check since it was written; this is
+  the copy that was missing.
+
+- **An expired deadline no longer skips the baseline validation.** `--timeout 0` made
+  the pre-read clock report the ordinary timeout before the file was opened at all, so a
+  missing, malformed or NUL-carrying baseline came back as `state=timeout` — which the
+  driver re-arms, making a caller error indistinguishable from a slow reviewer. A bad
+  argument is bad whatever the clock says.
+
 ## [2.0.87] — 2026-08-31
 
 - **`SKILL.md` is 1,918 characters shorter, and nothing was removed but a repeated

@@ -765,6 +765,295 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
     && pass "without --after-review the terminal state is reported as before" \
     || die "the flagless path changed behaviour (rc=$rc out='$out')"
 
+# ── a reviewer this loop does not drive is refused, not polled ────────────
+#
+# The login arrives from `SKILL.md`'s own shell, where it is a variable an operator's
+# startup file can have aimed elsewhere — a nameref onto a path hands this stage a FILE
+# NAME as the reviewer. Nothing here can prove what happened in that shell, and guarding
+# the driver one name at a time is the shape this repository records paying for twice.
+# What this process can do is refuse a login that is nobody. Unrecognised, the watch
+# polled to its deadline and reported a TIMEOUT, which the driver re-arms — so a
+# corrupted reviewer looked exactly like a slow one, indefinitely.
+out="$(run_limited 30 "$SCRIPT" 7 "/tmp/some/baseline/path" --interval 1 --timeout 4 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unknown_reviewer' <<<"$out"; } \
+    && pass "a reviewer this loop does not drive is refused before the first poll" \
+    || die "an unknown reviewer gave rc=$rc out='$out'"
+grep -q 'state=timeout' <<<"$out" \
+    && die "an unknown reviewer was reported as a timeout, which the driver re-arms: $out" \
+    || pass "…and is not reported as a timeout"
+# AND BOTH REAL REVIEWERS ARE ACCEPTED, or the check above passes by refusing everyone.
+for _wr in "$BOT" "copilot-pull-request-reviewer[bot]"; do
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+           run_limited 30 "$SCRIPT" 7 "$_wr" --interval 1 --timeout 6 2>&1)"; rc=$?
+    grep -q 'reason=unknown_reviewer' <<<"$out" \
+        && die "$_wr was refused as an unknown reviewer: $out" \
+        || pass "…while $_wr is accepted"
+done
+
+# ── the same baseline, arriving in a FILE ─────────────────────────────────
+#
+# `SKILL.md`'s bash runs in the operator's own shell, where an assignment can be
+# defeated by a readonly name, a nameref or a transforming attribute — so the driver
+# used to read this value back into `PRIOR_REVIEW` behind an assignability probe, a
+# read-back comparison and a four-arm shape check that was a second, weaker copy of
+# the validation below. The value has one consumer, so it crosses in a file and is
+# read here. `--after-review` stays for a caller holding the id in a hardened process
+# of its own — `pr-close-round.sh` waiting on the pass its own push started. #243.
+_bl="$TMP/baseline"
+
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 4 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'state=awaiting_new_review' <<<"$out"; } \
+    && pass "a baseline read from a file holds back the stale review, exactly as the value form does" \
+    || die "the file form did not hold back a stale review (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "the previous review was announced as this round's: $out" \
+    || pass "…and no READY line is emitted for it"
+
+# A NEW review on the same head is still the answer, so the file form is not simply
+# refusing everything — which is how a baseline check passes a stale-review case
+# while being broken.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
+    && pass "…while a new review on that head is still reported" \
+    || die "the file form rejected a new review (rc=$rc out='$out')"
+
+# THE TRAILING NEWLINE A WRITER LEAVES IS NOT PART OF THE ID. Every writer uses
+# `printf '%s\n'`, and the comparison is a string equality against an id with none —
+# so a baseline that kept its newline would never match, and the watch would report
+# the stale review as this round's answer. `$(<…)` strips it; this is the case that
+# says so.
+printf '99\n\n\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 4 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'state=awaiting_new_review' <<<"$out"; } \
+    && pass "…and trailing newlines are not part of the id" \
+    || die "a baseline with trailing newlines did not match (rc=$rc out='$out')"
+
+# AN EMPTY FILE IS A LEGAL BASELINE, meaning there was no prior review to wait past.
+# This is the case the unreadable one must NOT be allowed to look like.
+: > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
+    && pass "…an empty baseline file means 'nothing to wait past' and the review is reported" \
+    || die "an empty baseline file was not treated as no baseline (rc=$rc out='$out')"
+
+# AND A FILE THAT CANNOT BE READ IS state=error, NOT AN EMPTY BASELINE. Degrading to
+# empty would make a failed read say exactly what the case above says, and the watch
+# would then accept the previous terminal review as this round's — the whole failure
+# the baseline exists to prevent, arriving through the read instead of through the
+# absence of a flag.
+rm -f "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
+    && pass "…while a missing baseline file is state=error, not an empty baseline" \
+    || die "a missing baseline file gave rc=$rc out='$out'"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a failed baseline read still announced a review: $out" \
+    || pass "…and announces no review"
+
+if [ "$(id -u)" != 0 ]; then
+    printf '99\n' > "$_bl"; chmod 000 "$_bl"
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+    chmod 600 "$_bl"
+    { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
+        && pass "…and so is an unreadable one" \
+        || die "an unreadable baseline file gave rc=$rc out='$out'"
+else
+    pass "running as root, so the unreadable-baseline state is skipped by name"
+fi
+
+# A FIFO AT THAT PATH DOES NOT HANG THE WATCH. `9<` on a FIFO blocks waiting for a
+# writer, and the `-f` test that rejects it is on the far side of the redirection, so
+# it never runs — the watch stayed silent past its own `--timeout` and had to be killed
+# from outside. The open runs under the same watchdog every other probe here uses now.
+# The case is bounded by the harness too, so a regression HANGS the fixture rather than
+# the suite.
+if command -v mkfifo >/dev/null 2>&1; then
+    rm -f "$_bl"; mkfifo "$_bl" 2>/dev/null && {
+        # THE DEADLINE IS LONGER THAN THE READ'S OWN LIMIT, so this case exercises the
+        # BLOCKED answer. With a shorter one the deadline expires first and the run is
+        # an ordinary timeout — which is the case below, and the two must not be the
+        # same fixture or whichever answer the clock happens to produce passes.
+        out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+               run_limited 60 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 40 2>&1)"; rc=$?
+        { [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(blocked|not_regular)' <<<"$out"; } \
+            && pass "…and a FIFO at the baseline path is state=error rather than a hang" \
+            || die "a FIFO baseline path gave rc=$rc out='$out'"
+        grep -q 'PR_REVIEW_READY' <<<"$out" \
+            && die "a blocked baseline read still announced a review: $out" \
+            || pass "…announcing no review"
+    }
+    rm -f "$_bl"
+else
+    pass "no mkfifo on this platform, so the FIFO state is skipped by name"
+fi
+
+# AND A SHORT DEADLINE MAKES THAT EXPIRY THE ORDINARY TIMEOUT. The probe's own limit
+# is capped by the watch's remaining budget, so with `--timeout 1` a blocked open
+# exhausts the DEADLINE rather than the read's own allowance — and that is status 1,
+# which the driver re-arms, not `state=error`, which stops the round over a clock the
+# caller set. The two answers have to stay apart or `--timeout` decides whether a
+# stuck file is reported as one.
+if command -v mkfifo >/dev/null 2>&1; then
+    rm -f "$_bl"; mkfifo "$_bl" 2>/dev/null && {
+        out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+               run_limited 45 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 1 2>&1)"; rc=$?
+        [ "$rc" -eq 1 ] \
+            && pass "…and with a deadline shorter than the read's own limit it is the ordinary timeout" \
+            || die "a short-deadline blocked baseline gave rc=$rc out='$out'"
+        grep -q 'state=timeout' <<<"$out" \
+            && pass "…reported as a timeout rather than an unreadable state" \
+            || die "no timeout record for the short-deadline blocked read: $out"
+    }
+    rm -f "$_bl"
+else
+    pass "no mkfifo on this platform, so the short-deadline block is skipped by name"
+fi
+
+# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
+# holding one read back as the empty string — which is the legitimate "no prior review
+# to wait past" — and the watch announced the terminal review this round just handled
+# as the next one. Asserted on the CONSEQUENCE as well as the reason: no READY line.
+printf '\000' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
+    && pass "…and a NUL-only baseline file is refused, not read as an empty baseline" \
+    || die "a NUL-only baseline file gave rc=$rc out='$out'"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a NUL baseline let the stale review through as this round's: $out" \
+    || pass "…announcing no review"
+# AND A NUL BESIDE A REAL ID IS REFUSED TOO, so the check is about the byte rather
+# than about the value happening to come out empty.
+printf '99\000\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
+    && pass "…including a NUL beside an otherwise valid id" \
+    || die "a NUL beside an id gave rc=$rc out='$out'"
+
+# A DIRECTORY IS NOT A REGULAR FILE EITHER, and the reason says which.
+rm -f "$_bl"; mkdir -p "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(not_regular|unreadable)' <<<"$out"; } \
+    && pass "…and a directory at the baseline path is state=error" \
+    || die "a directory baseline path gave rc=$rc out='$out'"
+rmdir "$_bl"
+
+# A MALFORMED BASELINE IS REFUSED AT THE CALL, not an hour later. The four-arm check
+# in the loop runs on the first TERMINAL state, which may be far away; a caller that
+# handed over junk can still act on it now.
+printf 'not-an-id\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
+    && pass "…and a malformed baseline is refused at the call, not on the first terminal state" \
+    || die "a malformed baseline file gave rc=$rc out='$out'"
+printf 'comment:\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
+    && pass "…including the comment channel named with no id" \
+    || die "a bare 'comment:' baseline gave rc=$rc out='$out'"
+printf 'comment:100\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -ne 2 ] \
+    && pass "…while the comment-channel shape the round close writes is accepted" \
+    || die "a comment:<id> baseline was refused: rc=$rc out='$out'"
+
+# BOTH FORMS AT ONCE IS A REFUSAL, not a precedence rule. They are the same value by
+# two routes, and a caller passing both has two answers and no reason to think this
+# one picked the right half.
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_both_forms' <<<"$out"; } \
+    && pass "…and passing both forms is refused rather than silently resolved" \
+    || die "both baseline forms together gave rc=$rc out='$out'"
+
+# AND AN EMPTY PATH IS REFUSED, WHICH IS NOT THE SAME AS A MISSING ARGUMENT. A caller
+# expanding a name that was never assigned — `--after-review-file "$PRIOR_FILE"` —
+# satisfies the argument count and hands over an empty string, which used to skip the
+# read block entirely: the watch then ran with NO baseline and announced the
+# already-terminal review as the new pass. That is the failure the baseline exists to
+# prevent, reached by PASSING the option rather than by omitting it.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "" --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "…and an empty baseline PATH is refused rather than silently unarming the watch" \
+    || die "an empty --after-review-file path gave rc=$rc out='$out'"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "an empty baseline path let the stale review through: $out" \
+    || pass "…announcing no review"
+# AND THE VALUE FORM IS UNAFFECTED: an empty id there legitimately means "no prior
+# review to wait past", which is what the automatic path and a first request carry.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review "" --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "…while an empty --after-review VALUE stays the legitimate 'no baseline' answer" \
+    || die "an empty --after-review value was refused (rc=$rc out='$out')"
+
+# AND AN EXPLICITLY EMPTY VALUE FORM STILL COUNTS AS SUPPLIED. `--after-review ""`
+# is the legitimate "no prior review to wait past", so its emptiness cannot stand in
+# for "not given" — a both-forms check reading the VALUE let this pair through, and
+# the explicit "there is nothing to wait past" was discarded in favour of a file that
+# can hold an id the watch then waits out its whole timeout for.
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review "" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_both_forms' <<<"$out"; } \
+    && pass "…and an EMPTY value form still counts as supplied, so both together are refused" \
+    || die "an empty --after-review beside a file gave rc=$rc out='$out'"
+
+# AND THE OPTION NEEDS ITS VALUE. `shift 2` on a missing one left the same option in
+# $1 and the parser span forever, which is the defect the other options already carry
+# a case for.
+out="$(run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'needs a value' <<<"$out"; } \
+    && pass "…and a valueless --after-review-file is usage, not a hang" \
+    || die "--after-review-file with no value gave rc=$rc out='$out'"
+
+# ── an expired deadline does not skip the baseline validation ─────────────
+#
+# `--timeout 0` made the pre-read clock report the ordinary timeout before the file was
+# opened at all, so a missing, malformed or NUL-carrying baseline came back as
+# `state=timeout` — which the driver RE-ARMS. A caller error was then indistinguishable
+# from a slow reviewer, forever. A bad argument is bad whatever the clock says.
+printf '\000' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
+    && pass "a NUL baseline is refused even with the deadline already expired" \
+    || die "--timeout 0 with a NUL baseline gave rc=$rc out='$out'"
+printf 'not-an-id\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
+    && pass "…and so is a malformed one" \
+    || die "--timeout 0 with a malformed baseline gave rc=$rc out='$out'"
+rm -f "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
+    && pass "…and so is a missing one" \
+    || die "--timeout 0 with a missing baseline gave rc=$rc out='$out'"
+# AND A GOOD BASELINE WITH AN EXPIRED DEADLINE IS STILL THE ORDINARY TIMEOUT, or the
+# three cases above pass because the expiry stopped being honoured at all.
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
+    && pass "…while a good baseline with an expired deadline is still the timeout" \
+    || die "--timeout 0 with a good baseline gave rc=$rc out='$out'"
+
 # ── a buffer read that prints and then fails is not a probe result ────────
 # `probe` reads the child output back from a temp file. A `cat` that emitted a
 # complete, plausible record and then failed came back as the child's SUCCESS, so

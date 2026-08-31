@@ -3,6 +3,7 @@
 # line whenever the state changes and one final line when it is.
 #
 #   pr-watch.sh <pr> <reviewer-login> [--interval SECONDS] [--timeout SECONDS]
+#               [--after-review ID | --after-review-file PATH]
 #
 #   0  a terminal state was reached — the last line says which
 #   1  the timeout expired first
@@ -114,6 +115,10 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_REVIEW_WATCH state=error"
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
+# The two reviewer logins this loop drives, so the argument can be REFUSED rather than
+# polled for an hour. See the reviewer check below.
+rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_REVIEW_WATCH state=error" var || exit 2
+rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_REVIEW_WATCH state=error" var || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # STARTED PRIVILEGED AT EVERY CALL SITE BELOW, not folded into this variable.
@@ -129,6 +134,15 @@ TIMEOUT="${PR_WATCH_TIMEOUT:-3600}"
 PR=""
 WHO=""
 AFTER_REVIEW=""
+AFTER_REVIEW_FILE=""
+# SUPPLIED-NESS IS TRACKED SEPARATELY FROM THE VALUE, for the value form only. An
+# empty `--after-review ""` is LEGITIMATE — it is what a first request on a fresh
+# head carries — so its emptiness cannot stand in for "not given", and a both-forms
+# check reading the value alone let `--after-review "" --after-review-file path`
+# through: the explicit "there is no prior review" was discarded and the file read
+# instead, which can hold an id that makes the watch wait out its whole timeout. The
+# FILE form needs no flag, because an empty path is refused where it arrives.
+AFTER_REVIEW_GIVEN=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -146,7 +160,35 @@ while [ "$#" -gt 0 ]; do
         # on it again. With this set, a terminal state whose authoritative review
         # is still that id is treated as "not yet".
         --after-review) [ "$#" -ge 2 ] || { echo "$0: --after-review needs a value" >&2; exit 2; }
-                    AFTER_REVIEW="$2"; shift 2 ;;
+                    AFTER_REVIEW="$2"; AFTER_REVIEW_GIVEN=yes; shift 2 ;;
+        # THE SAME VALUE, FOR A CALLER THAT CANNOT HOLD ONE. `SKILL.md`'s bash runs
+        # in the operator's own shell, where an assignment can be defeated by a
+        # readonly name, a nameref or a transforming attribute — so the driver read
+        # the baseline back into `PRIOR_REVIEW`, proved the name assignable first,
+        # and re-validated the shape before entering the wait. That last part was a
+        # SECOND, WEAKER COPY of the four-arm check below, and CLAUDE.md records
+        # what a second copy of a rule costs: every field check in `recordlib.sh`
+        # was written out two or three times and every one was found missing from
+        # at least one copy. The value has one consumer, so it crosses in a file the
+        # caller names and is validated HERE, once — the arrangement #202 gave the
+        # gated head and #240 the Codex signoff sha.
+        #
+        # The two spellings are not two answers. `--after-review` is for a caller
+        # holding the value in a hardened process of its own — `pr-close-round.sh`
+        # waiting on the pass its push started — and both reach the same validation.
+        #
+        # AN EMPTY PATH IS REFUSED HERE, and it has to be here rather than at the read.
+        # A caller expanding an unset name — `--after-review-file "$PRIOR_FILE"` with
+        # `PRIOR_FILE` never assigned — satisfies the argument count and leaves this
+        # empty, and an empty value then skips the read block entirely: the watch runs
+        # with NO baseline and announces the already-terminal review as the new pass.
+        # That is the exact failure the baseline exists to prevent, reached by passing
+        # the option rather than by omitting it. `--after-review` keeps accepting an
+        # empty VALUE, which legitimately means "no prior review to wait past"; an
+        # empty PATH names no file and is never that answer.
+        --after-review-file) [ "$#" -ge 2 ] || { echo "$0: --after-review-file needs a value" >&2; exit 2; }
+                    [ -n "$2" ] || { echo "$0: --after-review-file needs a path, and was given an empty one" >&2; exit 2; }
+                    AFTER_REVIEW_FILE="$2"; shift 2 ;;
         -*) echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2 ;;
         *) if [ -z "$PR" ]; then PR="$1"; elif [ -z "$WHO" ]; then WHO="$1"; fi; shift ;;
     esac
@@ -187,6 +229,22 @@ case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
 # `%q` collapses newlines and control bytes into escapes, so nothing a helper
 # emits can start a line of its own.
 q() { printf '%q' "$1"; }
+
+# THE REVIEWER IS ONE THIS LOOP DRIVES, OR THIS IS NOT A WAIT WORTH STARTING. The name
+# arrives from `SKILL.md`'s own shell, where it is a variable an operator's startup file
+# can have aimed somewhere else — a nameref onto a path hands this stage a FILE NAME as
+# the reviewer. Nothing here can prove what happened in that shell, and guarding the
+# driver one name at a time is the list-of-names shape `CLAUDE.md` records paying for
+# twice. What this process CAN do is refuse a login that is nobody: unrecognised, the
+# watch would poll until its deadline and report a timeout, which the driver re-arms —
+# so a corrupted reviewer looks exactly like a slow one, forever. `pr-close-round.sh`
+# has made this same check since it was written; this is the copy that was missing.
+case "$WHO" in
+    "$RB_CODEX_BOT"|"$RB_COPILOT_BOT") ;;
+    *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$(q "$WHO") state=error reason=unknown_reviewer" >&2
+       exit 2 ;;
+esac
+
 
 # An ABSOLUTE deadline, measured against the clock rather than accumulated from
 # the sleeps. Counting only the naps excluded every second spent inside the head,
@@ -342,6 +400,116 @@ remaining_s() {   # sets $REMAINING; 1 = unreadable clock, 2 = deadline passed
     REMAINING="$r"
     return 0
 }
+
+# BOTH SPELLINGS AT ONCE IS A REFUSAL, not a precedence rule. They are the same
+# value by two routes, and a caller passing both has two answers in hand and no
+# reason to believe this one picked the right one.
+if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW_GIVEN" ]; then
+    echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_both_forms" >&2
+    exit 2
+fi
+# THE READ IS BOUNDED, because opening the path can block forever. A FIFO at that
+# name — supplied directly, or substituted by a same-UID process between the caller
+# naming it and this open — makes `9<` wait for a writer that never arrives, and the
+# `-f` test that would reject it is on the far side of the redirection and never
+# runs. Measured: the watch stayed silent past its own `--timeout` and had to be
+# killed from outside. A type check BEFORE the open would not fix it either, since
+# the open is what blocks and the check it follows can be raced. So the open itself
+# runs under the same watchdog every other probe here uses, and an expiry is
+# `state=error` like any unreadable answer.
+#
+# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
+# holding one read back as the empty string — which is the LEGITIMATE "there is no
+# prior review to wait past" — and the watch would announce the terminal review this
+# round just handled as the next one. Measured: bash warned about the ignored null
+# byte and the run reported an ordinary timeout. The child reads with `read -d ""`
+# instead, whose delimiter IS the NUL: finding one is a successful read and that is
+# what makes it a refusal, while an ordinary file ends at EOF with status 1 and the
+# whole content assigned. The trailing newline every writer leaves is stripped by the
+# capture, as before.
+if [ -n "$AFTER_REVIEW_FILE" ]; then
+    # The child's statuses, and they are distinct because each names a different
+    # thing to tell an operator: 4 the open failed, 5 a NUL byte, 6 not a regular
+    # file. 124 is the watchdog's, from `probe` itself.
+    # THE BUDGET IS THE WATCH'S OWN, not a fixed number. `--timeout 1` must not spend
+    # ten seconds inside this read before reporting; `--timeout` bounds the whole
+    # watch, and a step that ignores it makes the contract mean nothing. An exhausted
+    # budget here is the ORDINARY timeout, because that is what it is: the deadline
+    # passed before there was an answer.
+    #
+    # AN ALREADY-EXPIRED DEADLINE DOES NOT SKIP THE VALIDATION. `--timeout 0` made this
+    # first read report the ordinary timeout before the file was opened at all — so a
+    # missing, malformed or NUL-carrying baseline came back as `state=timeout`, which
+    # the driver RE-ARMS, and a caller error was indistinguishable from a slow reviewer.
+    # A bad argument is bad whatever the clock says; the deadline decides how long to
+    # WAIT, not whether the input was well formed. So an expired budget still runs the
+    # read, with the minimum bound below, and the timeout is reported afterwards.
+    remaining_s; _bl_rrc=$?; _bl_rem="$REMAINING"
+    _bl_expired=
+    [ "$_bl_rrc" -eq 2 ] && { _bl_expired=yes; _bl_rem=0; }
+    { [ "$_bl_rrc" -eq 0 ] || [ -n "$_bl_expired" ]; } \
+        || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    # A SHORT LIMIT OF ITS OWN, CAPPED BY THE REMAINING BUDGET. Spending the WHOLE
+    # budget here collapses two different answers into one status: an expiry would
+    # mean both "this open is stuck" and "the watch ran out of time", and the caller
+    # branches on those differently — `state=error` stops the round, a timeout is
+    # re-armed. Ten seconds is long enough that no reachable filesystem read hits it
+    # and short enough to leave the deadline meaning what it says.
+    # AND THE BOUND IS AT LEAST ONE SECOND. `probe` floors its own limit at 1, so a 0
+    # here would not shorten anything; making it explicit is what stops an expired
+    # deadline reading as "do not bother opening it".
+    _bl_lim=10
+    [ "$_bl_rem" -lt "$_bl_lim" ] && _bl_lim="$_bl_rem"
+    [ "$_bl_lim" -lt 1 ] && _bl_lim=1
+    _bl_out="$(probe "$_bl_lim" /usr/bin/env bash -p -c '
+        { [ -f /dev/fd/9 ] || exit 6
+          IFS= read -r -d "" _r <&9
+          _s=$?
+        } 9<"$1" || exit 4
+        [ "$_s" -eq 0 ] && exit 5
+        printf %s "$_r"' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+    case "$_bl_rc" in
+        0) AFTER_REVIEW="$_bl_out" ;;
+        5) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_nul detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;
+        6) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_not_regular detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;
+        # AN EXPIRY IS ASKED WHICH DEADLINE IT HIT. If the watch's own has passed, this
+        # is the ORDINARY timeout — status 1, which the driver re-arms — because that
+        # is what happened: the deadline expired while the read was in progress.
+        # Reporting `state=error` there stops the round over a clock the caller set.
+        # With budget left it is the read that is stuck, which is a different answer
+        # and a different status.
+        # AND THE THIRD CLOCK READ HAS ITS OWN ANSWER. `remaining_s` reports 2 for a
+        # passed deadline and 1 for a clock it cannot read, and only the first is a
+        # timeout — falling through on a 1 blamed a baseline path that may be fine and
+        # sent the operator to the wrong recovery.
+        124) remaining_s; _bl_r3=$?
+             [ "$_bl_r3" -eq 2 ] && timed_out
+             [ "$_bl_r3" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+             echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_blocked detail=$(q "$AFTER_REVIEW_FILE")" >&2
+             exit 2 ;;
+        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_unreadable detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;
+    esac
+    # THE SHAPE IS PROVED HERE TOO, not only in the loop. The check below runs on
+    # the first TERMINAL state, which may be an hour away; a malformed baseline is
+    # a caller error and belongs at the call, where the caller can still act on it.
+    case "$AFTER_REVIEW" in
+        ""|*[0-9]) ;;
+        comment:*[0-9]) ;;
+        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
+           exit 2 ;;
+    esac
+    case "${AFTER_REVIEW#comment:}" in
+        ""|*[!0-9]*) [ -z "$AFTER_REVIEW" ] || {
+              echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
+              exit 2; } ;;
+    esac
+    # THE TIMEOUT IS REPORTED HERE, after the baseline has been proved good. Reported
+    # before it, a caller error was re-armed as a slow reviewer.
+    [ -n "$_bl_expired" ] && timed_out
+fi
 waited=0
 last=""
 while :; do
