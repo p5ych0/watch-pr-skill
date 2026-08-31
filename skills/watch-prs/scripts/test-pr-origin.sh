@@ -326,7 +326,9 @@ pin_out="$(<"$TMP/pin.value/pin")"
 # signoff and merge was addressed to the wrong repository.
 #
 # The planted value here is well-formed and parses — that is the point. What makes it
-# wrong is that it is not what `fetch` and `push` would use in this checkout.
+# wrong is that it is not the identity this checkout fetches from. The pin is about the
+# FETCH url — `pr-close-round.sh` validates the push destination separately — so this
+# case is about provenance, not about where a push would land.
 got="$(run pin REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git')"
 { [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
     && pass "a pin that is not this checkout's origin is refused" \
@@ -337,10 +339,13 @@ case "${got#*|}" in
 esac
 # AND IT WRITES NO PIN. A refusal that still left the planted value in the leaf would be
 # read back by the driver and pinned anyway.
+# RUN INSIDE THE CHECKOUT, as `run` does. Invoked from wherever the suite was started,
+# `pin` would refuse because it can read no origin AT ALL — and the assertion below would
+# pass on that refusal without ever reaching the mismatch it claims to cover.
 rm -rf "$TMP/plant"
-run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
+( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
     HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    /usr/bin/env bash -p "$SCRIPT" pin "$TMP/plant" >/dev/null 2>&1; plant_rc=$?
+    /usr/bin/env bash -p "$SCRIPT" pin "$TMP/plant" ) >/dev/null 2>&1; plant_rc=$?
 { [ "$plant_rc" != 0 ] && [ ! -e "$TMP/plant/pin" ]; } \
     && pass "…and leaves no pin for the caller to read" \
     || die "a refused pin left rc=$plant_rc and pin=[$(cat "$TMP/plant/pin" 2>/dev/null)]"

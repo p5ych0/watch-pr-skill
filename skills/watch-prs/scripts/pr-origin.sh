@@ -859,9 +859,15 @@ fi
 # checkout's. Both agree with a planted-but-valid remote.
 #
 # So this asks the checkout. It is the question actually at stake — "is what you
-# exported what `fetch` and `push` would use here" — and this process is where it can
+# exported the identity this checkout FETCHES from" — and this process is where it can
 # be asked: privileged, in the checkout, with `git` not a name anything can shadow.
-# #230.
+#
+# THE FETCH URL, AND NOT THE PUSH DESTINATION. `git remote get-url origin` without
+# `--push` answers `remote.origin.url`; a checkout that sets `remote.origin.pushurl`
+# pushes somewhere this never looks. That is the right half to pin, because it is the
+# identity every `gh` call is addressed by — but it is not a push guard, and
+# `pr-close-round.sh` keeps its own `--push --all` validation for the destination.
+# Saying "what fetch and push would use" would make that one read as redundant. #230.
 if [[ $MODE = pin ]]; then
     # AN EMPTY PIN IS STILL A REAL ANSWER, and it is answered before anything is
     # verified. The caller is asking what a child inherits, and "nothing" is the reply

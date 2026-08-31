@@ -296,8 +296,10 @@ done
 # SOURCED, and the source was the defect: `.` is a NAME, and `SKILL.md`'s bash runs in
 # the operator's long-lived shell where a function by that name can delegate the load,
 # read the genuine assignments and hand back a different origin — after which the
-# identity derivation and the child pin both agree with the forged value, because both
-# are computed from it.
+# identity derivation agrees with the forged value, because it is computed from it. The
+# child pin used to agree for the same reason and no longer does, re-reading the checkout
+# instead (#230). What keeps the source out is not that check: a function named `.` runs
+# as CODE, which is a larger failure than a forged value.
 #
 # WHAT MADE THE SOURCE UNNECESSARY is that eleven of those twelve values were never
 # information: `OWNER`, `REPO` and `HOST` are what `rb_identity` derives from the

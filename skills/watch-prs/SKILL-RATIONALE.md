@@ -1793,9 +1793,12 @@ else is assigned here and proved.
 which cannot re-exec out of its own functions. While the setup values arrived by
 SOURCING, a function named `.` could delegate the earlier `identitylib.sh` load, read
 the genuine assignments, and hand back a different origin — after which everything
-agreed with it, because `rb_identity` derives `OWNER` and `REPO` FROM the value and the
-child pin reports back the export made FROM it. The session then posts, signs off and
-merges in another repository with every check passing.
+agreed with it, because `rb_identity` derives `OWNER` and `REPO` FROM the value — and so
+did the child pin, which then reported back the export made FROM it and nothing else. The
+session posted, signed off and merged in another repository with every check passing. The
+pin re-reads the checkout now (#230), so that last agreement is gone; the argument for not
+sourcing is unaffected, because a function named `.` runs as CODE and that is a larger
+failure than a forged value.
 
 THAT IS AN INDEPENDENT OBLIGATION FROM HOW THE VALUE TRAVELS. A future edit could keep
 the single value and reintroduce a source to read it, which is why this claim and the
@@ -1900,7 +1903,9 @@ AND THAT WORST CASE IS WHAT THE PIN NOW ANSWERS. `rb_identity` asks whether the 
 a usable identity, not whether it is THIS checkout's, so it agrees with a planted-but-valid
 remote — it is computed from the same value. `pr-origin.sh pin` used to agree for the same
 reason, reporting `REVIEW_BUS_REMOTE` as a CHILD sees it and nothing more. It re-reads the
-checkout now and refuses a pin that is not what `fetch` and `push` would use here, which
+checkout now and refuses a pin that is not the identity this checkout FETCHES from — the
+fetch URL, not the push destination, which `pr-close-round.sh` validates separately with
+`--push --all` and which this does not replace. That is the question actually at stake,
 is the question actually at stake and one this shell cannot ask: `git` is a name here and
 is not a name there. A swap still gets a value past the read; it no longer gets a session
 addressed to it. #230.
