@@ -1051,6 +1051,38 @@ else
     pass "no mkfifo on this platform, so the FIFO state is skipped by name"
 fi
 
+# AND THE READ-BACK IS BOUNDED TOO, which is a SEPARATE window from the write. The
+# write finishing does not make the next open safe: the path is named in argv, and a
+# same-UID process can put a FIFO there between the two. Staged by substituting the
+# path after the write, through a `mkfifo` shim on PATH that runs when the helper's
+# own bounded writer exits — the closest a self-contained case gets to that window
+# without a second process. Both opens are on the same side of the revocation, so a
+# hang at either leaves the phase half advanced.
+if command -v mkfifo >/dev/null 2>&1; then
+    world; rm -rf "$TMP/rbdir"; mkdir -p "$TMP/rbdir"
+    _rb_path="$TMP/rbdir/prior.txt"
+    # A DIRECTORY WHERE THE READ EXPECTS A FILE is the substitution this can stage
+    # deterministically: the write creates the file, and the read then meets something
+    # it cannot read. What is asserted is that the stage REFUSES rather than continuing.
+    got="$(run open 7 "$HEAD40" "$TMP/rbdir")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a baseline path that cannot be written or read back stops the phase" \
+        || die "a directory baseline path gave '${got}'"
+    grep -q -- '--add-reviewer' "$TMP/calls" \
+        && die "Copilot was requested despite the unusable baseline path" \
+        || pass "…with Copilot not requested"
+    # AND THE READ-BACK GOES THROUGH THE WATCHDOG, asserted structurally because the
+    # window itself needs a second process to hit. Without this the read is an
+    # unbounded `$(<…)` and a FIFO substituted after the write hangs the phase with
+    # the revocation already posted.
+    grep -q "run_limited 10 /usr/bin/env bash -p -c 'printf \"%s\" \"\$(<\"\$1\")\"'" "$DIR/pr-copilot-phase.sh" \
+        && pass "…and the read-back opens under the watchdog, not with a bare \$(<…)" \
+        || die "the baseline read-back is an unbounded open again"
+    rm -rf "$TMP/rbdir"
+else
+    pass "no mkfifo on this platform, so the read-back substitution is skipped by name"
+fi
+
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —
 # Copilot requested, the revocation posted — with no baseline anywhere, and the
 # watch would take the previous terminal review as this round's answer.

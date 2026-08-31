@@ -420,7 +420,15 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
     remaining_s; _bl_rrc=$?; _bl_rem="$REMAINING"
     [ "$_bl_rrc" -eq 2 ] && timed_out
     [ "$_bl_rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    _bl_out="$(probe "$_bl_rem" /usr/bin/env bash -p -c '
+    # A SHORT LIMIT OF ITS OWN, CAPPED BY THE REMAINING BUDGET. Spending the WHOLE
+    # budget here collapses two different answers into one status: an expiry would
+    # mean both "this open is stuck" and "the watch ran out of time", and the caller
+    # branches on those differently — `state=error` stops the round, a timeout is
+    # re-armed. Ten seconds is long enough that no reachable filesystem read hits it
+    # and short enough to leave the deadline meaning what it says.
+    _bl_lim=10
+    [ "$_bl_rem" -lt "$_bl_lim" ] && _bl_lim="$_bl_rem"
+    _bl_out="$(probe "$_bl_lim" /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9
           _s=$?
@@ -433,8 +441,15 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
            exit 2 ;;
         6) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_not_regular detail=$(q "$AFTER_REVIEW_FILE")" >&2
            exit 2 ;;
-        124) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_blocked detail=$(q "$AFTER_REVIEW_FILE")" >&2
-           exit 2 ;;   # the read outlived the budget: a blocked open, not a slow reviewer
+        # AN EXPIRY IS ASKED WHICH DEADLINE IT HIT. If the watch's own has passed, this
+        # is the ORDINARY timeout — status 1, which the driver re-arms — because that
+        # is what happened: the deadline expired while the read was in progress.
+        # Reporting `state=error` there stops the round over a clock the caller set.
+        # With budget left it is the read that is stuck, which is a different answer
+        # and a different status.
+        124) remaining_s; [ $? -eq 2 ] && timed_out
+             echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_blocked detail=$(q "$AFTER_REVIEW_FILE")" >&2
+             exit 2 ;;
         *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_unreadable detail=$(q "$AFTER_REVIEW_FILE")" >&2
            exit 2 ;;
     esac

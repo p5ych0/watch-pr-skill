@@ -358,7 +358,11 @@ if [[ $STAGE = open ]]; then
     # posted, so a hang leaves the phase half-advanced with nothing said about it.
     run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$PRIOR_FILE" "$PRIOR_REVIEW" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
-    _rb_prior_back="$(<"$PRIOR_FILE")" \
+    # BOUNDED TOO, because the write finishing does not make the next open safe: the
+    # path is named in argv, and a same-UID process can put a FIFO there between the
+    # two. This read is on the same side of the revocation as the write, so a hang
+    # here leaves the phase half advanced exactly as one there would.
+    _rb_prior_back="$(run_limited 10 /usr/bin/env bash -p -c 'printf "%s" "$(<"$1")"' _ "$PRIOR_FILE")" \
         || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
     [[ $_rb_prior_back = "$PRIOR_REVIEW" ]] \
         || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }

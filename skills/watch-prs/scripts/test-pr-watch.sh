@@ -851,8 +851,12 @@ fi
 # the suite.
 if command -v mkfifo >/dev/null 2>&1; then
     rm -f "$_bl"; mkfifo "$_bl" 2>/dev/null && {
+        # THE DEADLINE IS LONGER THAN THE READ'S OWN LIMIT, so this case exercises the
+        # BLOCKED answer. With a shorter one the deadline expires first and the run is
+        # an ordinary timeout — which is the case below, and the two must not be the
+        # same fixture or whichever answer the clock happens to produce passes.
         out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-               run_limited 45 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+               run_limited 60 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 40 2>&1)"; rc=$?
         { [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(blocked|not_regular)' <<<"$out"; } \
             && pass "…and a FIFO at the baseline path is state=error rather than a hang" \
             || die "a FIFO baseline path gave rc=$rc out='$out'"
@@ -863,6 +867,28 @@ if command -v mkfifo >/dev/null 2>&1; then
     rm -f "$_bl"
 else
     pass "no mkfifo on this platform, so the FIFO state is skipped by name"
+fi
+
+# AND A SHORT DEADLINE MAKES THAT EXPIRY THE ORDINARY TIMEOUT. The probe's own limit
+# is capped by the watch's remaining budget, so with `--timeout 1` a blocked open
+# exhausts the DEADLINE rather than the read's own allowance — and that is status 1,
+# which the driver re-arms, not `state=error`, which stops the round over a clock the
+# caller set. The two answers have to stay apart or `--timeout` decides whether a
+# stuck file is reported as one.
+if command -v mkfifo >/dev/null 2>&1; then
+    rm -f "$_bl"; mkfifo "$_bl" 2>/dev/null && {
+        out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+               run_limited 45 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 1 2>&1)"; rc=$?
+        [ "$rc" -eq 1 ] \
+            && pass "…and with a deadline shorter than the read's own limit it is the ordinary timeout" \
+            || die "a short-deadline blocked baseline gave rc=$rc out='$out'"
+        grep -q 'state=timeout' <<<"$out" \
+            && pass "…reported as a timeout rather than an unreadable state" \
+            || die "no timeout record for the short-deadline blocked read: $out"
+    }
+    rm -f "$_bl"
+else
+    pass "no mkfifo on this platform, so the short-deadline block is skipped by name"
 fi
 
 # AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
