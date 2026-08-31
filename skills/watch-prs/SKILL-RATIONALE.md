@@ -309,8 +309,9 @@ deriving it, so exporting it removes the dependency instead of guarding it.
 Wrapping each call in `(cd "$REPO_DIR" && …)` was the guard, and it was itself
 defeatable: `cd` is a name, and a function named `cd` that returns 0 without
 moving leaves the subshell reporting success from the wrong tree. This has no
-name in it to shadow — the value is read once, here, and travels in the
-environment.
+name in it to shadow — the value is read in SETUP rather than at every call site, and
+travels in the environment. (Setup reads it twice, the second time to confirm the pin is
+this checkout's; what does not happen is a derivation per stage.)
 
 `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 inspects HISTORY, which is a tree rather than an identity, so the merge gate
@@ -848,9 +849,11 @@ somebody wrote.
 
 ## WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here.
 
-The session's origin is read once and exported as `REVIEW_BUS_REMOTE`, which this
-stage and everything it drives inherit — so this call has no cwd dependency and
-needs no wrapper.
+The session's origin is read at setup and exported as `REVIEW_BUS_REMOTE`, which this
+stage and everything it drives inherit — so this call has no cwd dependency and needs no
+wrapper. It is read a SECOND time before the session starts, by the pin, which refuses a
+value that is not that checkout's origin; both reads happen in setup and neither is
+repeated here.
 
 Do not add one. A `(cd … && …)` guard here is what the pin replaced, and `cd` is a
 name a function can take; a list of call sites to wrap is missing the next one,

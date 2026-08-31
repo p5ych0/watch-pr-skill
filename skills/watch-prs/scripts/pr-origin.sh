@@ -81,9 +81,12 @@
 #      pre-existing case: where `<dir>` was already there and already held an
 #      `origin` or a `pin`, the `mkdir` refuses before anything is written and that
 #      leaf — the caller's, or somebody else's — is still there afterwards. Absence
-#      is guaranteed only for a refusal AFTER this script created the directory,
-#      where the EXIT cleanup, in its post-write phase, removes the leaf and the
-#      directory together.
+#      is guaranteed only for a refusal AFTER this script WROTE, where the EXIT cleanup,
+#      in its post-write phase, removes the leaf and the directory together. Between the
+#      `mkdir` and the write the shape is `rmdir` alone, so an ordinary refusal there
+#      still leaves nothing — but a directory a same-UID process has replaced with a
+#      non-empty one is not removed, and that residue is deliberate: the alternative is
+#      unlinking a leaf by a name this run did not write.
 #
 #      WHAT IS AT THE ARGUMENT ON A NON-ZERO STATUS DEPENDS ON WHICH SIDE OF THE
 #      `mkdir` the refusal happened, and the two are opposite. That is a different
@@ -442,9 +445,12 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # `rmdir` NECESSARILY fails on a directory holding its leaf, which is why the
 # post-write shape has to remove the leaf first.
 #
-# THE PHASE FLIPS WHERE THE NAME BECOMES TRUSTED, after both walks — which is also
-# before either write, so the leaf-removing shape is never the one running on an
-# unapproved path.
+# THE PHASE FLIPS IMMEDIATELY BEFORE EACH WRITE, which is after both walks and therefore
+# never on an unapproved path — but NOT at the walks themselves. The name becomes trusted
+# there; a leaf starts existing at the write, and between the two sit refusals: the origin
+# read's, and the pin's comparison against it. With the flip at the walks, each of those
+# ran the leaf-removing shape for a leaf the run had never created — and where a same-UID
+# process had replaced the directory meanwhile, that name is the replacement's file.
 RB_PHASE=pre
 # WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
 # neither is signal-safe alone.
@@ -804,10 +810,12 @@ done
 # containing a space. Each fix was correct about the case it named and produced
 # the next one, because the thing being rebuilt is git's config machinery.
 #
-# So there is ONE call and it is the ordinary one. `git remote get-url origin`,
-# under the operator's own config, is what `fetch` and `push` consult; agreeing
-# with it is the property this file needs, and re-deriving it is how that property
-# was repeatedly lost.
+# So there is ONE call and it is the ordinary one. `git remote get-url origin`, under the
+# operator's own config, is what `fetch` consults — and what `push` consults only where
+# no `remote.origin.pushurl` is set, since this call omits `--push`. Agreeing with the
+# FETCH url is the property this file needs, because that is the identity every `gh` call
+# is addressed by; where a push lands is `pr-close-round.sh`'s question and it validates
+# that separately. Re-deriving either is how the agreement was repeatedly lost.
 #
 # THE LOCKOUT THAT USED TO BE HERE DEFENDED NOTHING. It shut the operator's global
 # and system config out of the resolution so a carried file could not contribute
@@ -871,6 +879,37 @@ fi
 # identity every `gh` call is addressed by — but it is not a push guard, and
 # `pr-close-round.sh` keeps its own `--push --all` validation for the destination.
 # Saying "what fetch and push would use" would make that one read as redundant. #230.
+# CREDENTIALS ARE NOT PRINTED, and the mismatch refusal is the one place two whole
+# remotes would otherwise be named. An HTTPS remote can carry `https://user:token@host/…`,
+# and setup diagnostics live in terminal scrollback and session logs — so a refusal that
+# echoed both raw values would put a token there for anyone who later reads them.
+#
+# THE USERINFO IS REPLACED, NOT THE WHOLE VALUE. The operator needs to see WHICH two
+# remotes disagreed or the refusal says nothing actionable; what they do not need is the
+# secret between `//` and the `@`. The host and path survive.
+#
+# SCP-LIKE REMOTES ARE LEFT ALONE — `git@github.com:owner/repo` has no `://`, and its
+# `git@` is a username with no secret in it, so there is nothing to redact and rewriting
+# it would only make the message harder to match against the operator's config.
+rb_redact() {   # prints its argument with any URL userinfo replaced
+    local _u="$1" _scheme _rest _auth _path
+    case "$_u" in
+        *://*) _scheme="${_u%%://*}"; _rest="${_u#*://}" ;;
+        *) printf '%s' "$_u"; return 0 ;;
+    esac
+    _path=""
+    case "$_rest" in
+        */*) _path="/${_rest#*/}"; _auth="${_rest%%/*}" ;;
+        *)   _auth="$_rest" ;;
+    esac
+    # THE LAST `@` IN THE AUTHORITY, because a password may contain one. Everything up to
+    # it is userinfo by definition; the host is what follows it.
+    case "$_auth" in
+        *@*) _auth="***@${_auth##*@}" ;;
+    esac
+    printf '%s://%s%s' "$_scheme" "$_auth" "$_path"
+}
+
 if [[ $MODE = pin ]]; then
     # AN EMPTY PIN IS STILL A REAL ANSWER, and it is answered before anything is
     # verified. The caller is asking what a child inherits, and "nothing" is the reply
@@ -885,7 +924,7 @@ if [[ $MODE = pin ]]; then
         # write a pin for.
         rb_read_origin
         [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
-            || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$REVIEW_BUS_REMOTE', origin '$_rb_origin'); the value the driver exported did not come from this repository"
+            || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$(rb_redact "$REVIEW_BUS_REMOTE")', origin '$(rb_redact "$_rb_origin")'); the value the driver exported did not come from this repository"
     fi
     # THE PHASE FLIPS HERE, immediately before the write and after every refusal above
     # it, so a run that never wrote a leaf never removes one.

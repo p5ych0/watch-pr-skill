@@ -349,6 +349,27 @@ rm -rf "$TMP/plant"
 { [ "$plant_rc" != 0 ] && [ ! -e "$TMP/plant/pin" ]; } \
     && pass "…and leaves no pin for the caller to read" \
     || die "a refused pin left rc=$plant_rc and pin=[$(cat "$TMP/plant/pin" 2>/dev/null)]"
+# AND THE REFUSAL PRINTS NO CREDENTIALS. An HTTPS remote can carry
+# `https://user:token@host/…`, and this is the one refusal that names two whole remotes.
+# Setup diagnostics live in terminal scrollback and session logs, so a raw echo puts a
+# token where anyone reading them later finds it.
+_cred='https://alice:s3cr3t-token@example.com/acme/widget.git'
+got="$(run pin REVIEW_BUS_REMOTE="$_cred")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a credential-bearing pin that is not this origin is still refused" \
+    || die "a credential-bearing planted pin gave '${got}'"
+case "${got#*|}" in
+    *s3cr3t-token*) die "the refusal printed the token: ${got#*|}" ;;
+    *alice*)        die "the refusal printed the userinfo: ${got#*|}" ;;
+    *)              pass "…without printing the userinfo or the token" ;;
+esac
+# AND IT STILL SAYS WHICH REMOTE IT WAS, or the redaction has cost the operator the only
+# actionable part of the message.
+case "${got#*|}" in
+    *example.com/acme/widget.git*) pass "…while still naming the host and path" ;;
+    *) die "the refusal redacted more than the userinfo: ${got#*|}" ;;
+esac
+
 # AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
 # the directory has been created and before anything is written, so the cleanup must be
 # the one that removes only the directory. With the phase already `post` it removed the

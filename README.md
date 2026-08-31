@@ -394,9 +394,9 @@ Then:
    **`pr-copilot-phase.sh`**, which runs in **three stages with your decision
    at each boundary**. Every post they make — and `close` makes none in
    `codex-only`, where there was no Copilot review — goes to the repository **the
-   session started in** — the origin URL is read once during
-   setup and pinned, so changing directory partway through no longer decides which
-   project a signoff or a revocation lands on:
+   session started in** — the origin URL is read during setup and pinned, and read a
+   second time to confirm the pin is that checkout's, so changing directory partway
+   through no longer decides which project a signoff or a revocation lands on:
 
    - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
      against *that exact sha*, proves its checks are green — and then proves the
