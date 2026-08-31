@@ -200,6 +200,8 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
      && [[ -z ${!RB_SETUP_DIR:-} ]] ) 2>/dev/null \
    && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
      && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null \
+   && ( CODEX_SHA="RbProbe$$$RANDOM$RANDOM"; [[ $CODEX_SHA = RbProbe* ]] \
+     && [[ -z ${!CODEX_SHA:-} ]] ) 2>/dev/null \
    && ( CODEX_BOT="RbProbe$$$RANDOM$RANDOM"; [[ $CODEX_BOT = RbProbe* ]] \
      && [[ -z ${!CODEX_BOT:-} ]] ) 2>/dev/null \
    && ( COPILOT_BOT="RbProbe$$$RANDOM$RANDOM"; [[ $COPILOT_BOT = RbProbe* ]] \
@@ -335,7 +337,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of the names this block assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE or HEAD_FILE — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
+    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE or HEAD_FILE — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi
@@ -1098,15 +1100,9 @@ Ask Copilot:
 
 ```bash
 # THE PHASE IS A SCRIPT, IN THREE STAGES with the operator's decision at each
-# boundary.
-#
-#   pr-copilot-phase.sh record N "$SUMMARY_FILE"   # prove, record, then ask
-#   pr-copilot-phase.sh open   N "$CODEX_SHA"      # only on the answer (b)
-#   pr-copilot-phase.sh close  N "$CODEX_SHA" "$REVIEWERS"   # step 8: Copilot clean
-#
-#     0  recorded / opened / closed
-#     1  stopped — the reason is on stdout; the phase did NOT advance
-#     3  paused  — a round boundary. Decide with the operator
+# boundary. Its invocations and its statuses are in its own header, beside the code
+# they describe; what matters here is that the stages are separate calls and that the
+# decision between them is the operator's.
 #
 # WRITE THE ACCOUNT FIRST: one paragraph on what the PR does and what the Codex
 # phase changed. If Codex approved on the first pass with no fix rounds, say so.
@@ -1127,28 +1123,39 @@ cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."
 EOF
 # WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-PHASE_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
-printf '%s\n' "$PHASE_OUT"
-case "$PHASE_RC" in
-    0|3) ;;   # 3 is a pause, and the signoff is recorded either way
-    *) echo "The phase did not advance and no signoff was recorded. The reason is above; do not retry it blind."; exit "$PHASE_RC" ;;
-esac
-# THE SIGNED-OFF HEAD IS READ BACK FROM THE RECORD, on the pause as well as on 0.
+# THE SIGNED-OFF HEAD COMES OUT OF THE FILE `record` WROTE, not from a second lookup.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SHA_RC=$?
-RX_PHASE_SHA40='^[0-9a-f]{40}$'
-# THE STATUS AND THE SHAPE, because neither covers the other.
+# THE STAGE RUNS AS A CONDITION, so no name holds its status.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-if [[ $SHA_RC -eq 0 ]] && [[ $CODEX_SHA =~ $RX_PHASE_SHA40 ]]; then
-    if [[ $PHASE_RC -eq 3 ]]; then
-        echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
-        exit 3
+# AND WHAT WAS READ IS PROVED A SHA, because an attribute can transform an assignment.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND THE PAUSE ARM READS IT TOO, the signoff being recorded either way.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" "$HEAD_FILE"; then
+    if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")" \
+         && [[ ${#CODEX_SHA} -eq 40 ]] && [[ $CODEX_SHA != *[!0-9a-f]* ]]; } 9<"$HEAD_FILE"; then
+        [[ -n x ]]
+    else
+        echo "ABORT: no usable Codex signoff sha could be read back for this phase; step 8 would have nothing to gate on."
+        exit 1
+        [[ -n "" ]]
     fi
 else
-    echo "ABORT: no Codex signoff could be read back for this phase (rc=$SHA_RC, sha='$CODEX_SHA'); step 8 would have nothing to gate on"
-    exit 1
-    # THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken away.
-    # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+    case $? in
+        3) if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")" \
+                && [[ ${#CODEX_SHA} -eq 40 ]] && [[ $CODEX_SHA != *[!0-9a-f]* ]]; } 9<"$HEAD_FILE"; then
+               echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
+               exit 3
+               [[ -n "" ]]
+           else
+               echo "ABORT: the phase paused but no usable signoff sha could be read back; step 8 would have nothing to gate on."
+               exit 1
+               [[ -n "" ]]
+           fi ;;
+        *) echo "The phase did not advance and no signoff was recorded. The reason is above; do not retry it blind."
+           exit 1
+           [[ -n "" ]] ;;
+    esac
     [[ -n "" ]]
 fi
 ```

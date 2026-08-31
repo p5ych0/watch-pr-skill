@@ -3,7 +3,7 @@
 # operator asks for it — open the Copilot pass on that same head, then close it on
 # Copilot's own clean verdict.
 #
-#   pr-copilot-phase.sh record <pr> <body-file>
+#   pr-copilot-phase.sh record <pr> <body-file> <sha-file>
 #   pr-copilot-phase.sh open   <pr> <codex-sha>
 #   pr-copilot-phase.sh close  <pr> <codex-sha> [both|codex-only]
 #
@@ -83,6 +83,30 @@ if [[ $- != *p* ]]; then
 fi
 
 set -uo pipefail
+
+# ── THE SHA FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE ─────────────────────
+# A refusal above the truncation further down — an unreadable library, a PR number that
+# is not a number — leaves the PREVIOUS run's sha in the file, and the caller reads it as
+# this one's: a signoff that was never posted, on a commit from another round. So the
+# clearing happens here, before the bootstrap and before any argument is looked at, which
+# is the same place and the same reason `pr-close-round.sh` clears its head file.
+#
+# GUARDED, AND `record` ONLY. `open` and `close` take a sha as an argument and write no
+# file, so truncating a third argument there would destroy whatever the caller named. The
+# path must exist, be a regular file and contain a `/` — a bare name is not the driver's
+# handoff — and it must not be the BODY file, whose account this stage is about to post
+# and which the alias check below refuses properly.
+# THE POSITIONS ARE THE PRE-`shift` ONES, which is where this runs: `$1` is the stage,
+# `$2` the PR, `$3` the body file and `$4` the sha file. Reading them as the post-`shift`
+# ones truncated the BODY — caught at once by the fixture, and worth naming here because
+# the two numberings differ only by this one statement's position.
+if [[ ${1:-} = record ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]] \
+   && [[ -n ${3:-} ]] && [[ ! ${4} -ef ${3} ]]; then
+    > "${4}" || {
+        echo "ABORT: the sha file '${4}' exists and cannot be emptied; a stale sha would be left for the caller to read."
+        exit 1
+    }
+fi
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
@@ -410,6 +434,33 @@ fi
 BODY_FILE="${2:-}"
 [[ -n $BODY_FILE ]] \
     || { echo "ABORT: a body file is required: the paragraph saying what the PR does and what the Codex phase changed."; exit 1; }
+# AND A FILE TO HAND THE SIGNED-OFF SHA BACK IN, because the caller needs it and asking
+# the API a second time is a second answer. This stage PROVES that sha, records it and
+# knows it; `pr-close-round.sh gate` has handed the head over the same way since #202 and
+# `post` the baseline since #234. The driver read it back with `pr-signoff.sh sha`, then
+# validated the result with a regex and a status check — a round-trip and eleven lines of
+# the one shell nothing can harden, for a value this process already holds. #239.
+SHA_FILE="${3:-}"
+[[ -n $SHA_FILE ]] \
+    || { echo "ABORT: a sha file is required: 'record' writes the signed-off commit into it for the caller to read back."; exit 1; }
+# NOT THE BODY FILE, by path and by `-ef`. The sha would overwrite the account this stage
+# is about to post, and a caller with a tidy scratch directory produces that by accident.
+if [[ $SHA_FILE = "$BODY_FILE" ]] || [[ $SHA_FILE -ef $BODY_FILE ]] 2>/dev/null; then
+    echo "ABORT: the sha file and the body file are the same file ('$SHA_FILE'); the sha would overwrite the account."
+    exit 1
+fi
+# EMPTIED AGAIN HERE, and the first clearing is at the top of the file — before the
+# bootstrap, where a refusal would otherwise leave the previous run's sha behind. This one
+# covers the path the guard up there declines to take: it requires the file to EXIST
+# already, so a caller naming a path that is not there yet gets its clearing here instead.
+# Empty is not a valid sha, so an emptied file is refused by the reader rather than
+# mistaken for an answer.
+#
+# NEITHER CLEARING TOUCHES THE BODY FILE, and that is deliberate rather than an oversight:
+# a sha file that IS the body file must not be truncated, because the account this stage
+# is about to post is what would be destroyed. Both guards exclude it, and the alias check
+# above refuses it properly.
+> "$SHA_FILE" || { echo "ABORT: could not empty the sha file '$SHA_FILE'."; exit 1; }
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest
 # summary the thing read before the diff — so a truncated one is worse than none:
@@ -696,6 +747,17 @@ fi
 SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_MARKER" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
+
+# THE SHA IS HANDED BACK BEFORE THE POST, with the write's status taken and the value
+# read back. `printf` can report success and fail at the flush, and taking the status only
+# works while there is something left to refuse WITH: after the comment is posted the
+# signoff is on the PR and this stage cannot be un-run.
+printf '%s\n' "$CODEX_SHA" > "$SHA_FILE" \
+    || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
+_rb_sha_back="$(<"$SHA_FILE")" \
+    || { echo "ABORT: could not read back the signed-off sha from '$SHA_FILE'; nothing has been posted."; exit 1; }
+[[ $_rb_sha_back = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the signed-off sha did not survive being written to '$SHA_FILE'; nothing has been posted."; exit 1; }
 
 gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
     || { echo "ABORT: could not post the phase summary — the signoff is not recorded; do not request Copilot."; exit 1; }

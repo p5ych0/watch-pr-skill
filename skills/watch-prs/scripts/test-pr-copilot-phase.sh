@@ -156,6 +156,10 @@ world() {   # world ; the state in which the phase advances cleanly
 }
 run() {   # run <stage> [args…] ; prints "<rc>|<output>"
     local out rc=0
+    # THE SHA FILE IS SUPPLIED FOR `record` WHEN THE CALLER GAVE ONLY THE BODY, which is
+    # what the driver does with one of the working files setup creates. A case about the
+    # argument itself passes its own third argument and this does nothing. #239.
+    if [ "${1:-}" = record ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/sha.txt"; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
@@ -213,6 +217,83 @@ world; got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 0 ] && grep -qF "PR_PHASE_RECORDED pr=7 reviewer=$CODEXBOT codex-sha=$HEAD40" <<<"${got#*|}"; } \
     && pass "a clean Codex verdict records the phase" \
     || die "record gave '${got}'"
+
+# ── AND THE SIGNED-OFF SHA IS HANDED BACK IN A FILE ───────────────────────
+# #239. The driver read it back with `pr-signoff.sh sha` and then validated the result
+# with a regex and a status check — a second round-trip to the API, and eleven lines of
+# the one shell nothing can harden, for a value this stage proved and holds.
+[ "$(cat "$TMP/sha.txt" 2>/dev/null)" = "$HEAD40" ] \
+    && pass "…and writes the signed-off sha into the file the caller named" \
+    || die "the sha file holds '$(cat "$TMP/sha.txt" 2>/dev/null)', not $HEAD40"
+# …AND IT IS EMPTIED BEFORE ANY REFUSAL, including one that happens before the argument
+# checks. Two cases: a body file that is missing, which refuses after the bootstrap, and a
+# PR number that is not a number, which refuses during argument validation — the clearing
+# for that one has to be at the top of the file, above the bootstrap, or the previous run's
+# sha survives and the caller reads it as this one's.
+world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
+got="$(run record 7 "$TMP/nope.md")"
+{ [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
+    && pass "…and a refusal leaves no stale sha behind it" \
+    || die "a refused record left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
+world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
+got="$(run record notanumber "$TMP/body.md")"
+{ [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
+    && pass "…and so does one that refuses before the arguments are even checked" \
+    || die "an early refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
+# …AND EVEN WHEN THE BOOTSTRAP ITSELF REFUSES, which is the case the other two cannot
+# see: both of those reach argument handling with the libraries already loaded, so they
+# pass just as well with the truncation back below the bootstrap. This one empties a
+# library in a copy of the tree, so `rb_load` refuses at the top of the file — before any
+# argument is looked at and before the later truncation is reachable at all.
+world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
+rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
+: > "$TMP/broken/recordlib.sh"
+_bs_rc=0
+_bs_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$TMP/broken/pr-copilot-phase.sh" record 7 "$TMP/body.md" "$TMP/sha.txt" 2>&1)" || _bs_rc=$?
+{ [ "$_bs_rc" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
+    && pass "…and a record that cannot bootstrap leaves no stale sha either" \
+    || die "a bootstrap refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (rc=$_bs_rc out='$_bs_out')"
+# AND IT REFUSED FOR THE REASON THIS CASE IS ABOUT, not for an argument it never reached.
+case "$_bs_out" in
+    *reason=recordlib_empty*|*reason=loadlib_*)
+        pass "…having refused in the bootstrap, before any argument was looked at" ;;
+    *)  die "the bootstrap case refused for another reason: '$_bs_out'" ;;
+esac
+
+# …AND THE BODY FILE IS NEVER TRUNCATED BY EITHER CLEARING, which is what the guards
+# exclude. Staged as the alias: the account must survive to be refused properly.
+world; printf 'the account\n' > "$TMP/body.md"
+got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && [ -s "$TMP/body.md" ]; } \
+    && pass "…and neither clearing truncates the body file it is aliased to" \
+    || die "the alias refusal emptied the account: '$(cat "$TMP/body.md" 2>/dev/null)'"
+# …AND THE FILE IS NOT THE BODY FILE, by path and under another name.
+world; got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the account' <<<"${got#*|}"; } \
+    && pass "…and a sha file that IS the body file is refused" \
+    || die "the sha/body alias gave '$got'"
+world; ln -sf "$TMP/body.md" "$TMP/salias.txt"
+got="$(run record 7 "$TMP/body.md" "$TMP/salias.txt")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'overwrite the account' <<<"${got#*|}"; } \
+    && pass "…and so is a symlink to it" \
+    || die "the symlinked sha/body alias gave '$got'"
+rm -f "$TMP/salias.txt"
+# …AND A SHA FILE THAT CANNOT BE WRITTEN STOPS THE STAGE BEFORE THE POST, which is the
+# ordering that matters: after the comment the signoff is on the PR and the stage cannot
+# be un-run. A DIRECTORY at the path takes neither the truncation nor the write.
+world; rm -rf "$TMP/shadir"; mkdir -p "$TMP/shadir"
+got="$(run record 7 "$TMP/body.md" "$TMP/shadir")"
+{ [ "${got%%|*}" = 1 ] && grep -qF "$TMP/shadir" <<<"${got#*|}"; } \
+    && pass "…and a sha file it cannot write stops the stage" \
+    || die "the unwritable sha file gave '$got'"
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "the stage posted the signoff before handing the sha back" \
+    || pass "…before the signoff was posted"
+rm -rf "$TMP/shadir"
+# BACK TO A CLEAN RECORD for the assertions below, which read this run's output.
+world; got="$(run record 7 "$TMP/body.md")"
 grep -qF "pr-copilot-phase.sh open 7 $HEAD40" <<<"${got#*|}" \
     && pass "…and the stop names the command that opens the phase" \
     || die "the operator stop does not say how to resume: '${got#*|}'"
@@ -1168,6 +1249,7 @@ _RB_SHADOW_NE='BASH_FUNC_[%%=() { if [[ $2 = "-ne" && $1 = "$3" ]]; then return 
 _RB_SHADOW_N='BASH_FUNC_[%%=() { if [[ $1 = "-n" && -z $2 && ! -f $W/n.fired ]]; then : > "$W/n.fired"; return 0; fi; builtin [ "$@"; }'
 shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[`
     local out rc=0
+    if [ "${1:-}" = record ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/sha.txt"; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         "${_RB_SHADOW:-$_RB_SHADOW_BRACKET}" \

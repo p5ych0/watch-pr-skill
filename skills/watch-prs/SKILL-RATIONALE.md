@@ -856,57 +856,6 @@ Do not add one. A `(cd … && …)` guard here is what the pin replaced, and `cd
 name a function can take; a list of call sites to wrap is missing the next one,
 which is the shape `CLAUDE.md` records paying for twice.
 
-## THE SIGNED-OFF HEAD IS READ BACK FROM THE RECORD, on the pause as well as on 0.
-
-Step 8 needs the full 40 characters of it, and a child cannot assign a variable
-here — so it is read back from the record `record` just wrote.
-
-READ ON THE PAUSE TOO. The boundary message offers "merge on the Codex signoff",
-and that path needs this sha: exiting without it made the operator re-run a phase
-that had already been proved clean, just to recover a value that was printed and
-thrown away.
-
-ASKED OF THE HELPER THAT OWNS THE RECORD, rather than parsed out of the stage's
-stdout. This was ~90 lines of expansion-only code against `PR_PHASE_RECORDED …
-codex-sha=`, and every one of them was paid for in review: a truncated record that
-could not overwrite a stale candidate, a bare `PR_PHASE_RECORDED` with no trailing
-space, `xcodex-sha=` matching as the field, a greedy `##*codex-sha=` reading the
-value after a LATER substring. Nine rounds on #74, for a fact the PR itself
-already holds.
-
-`sha` PRINTS THE HEAD ALONE, and stdout carries that value or nothing — every
-reason goes to stderr, so there is no record shape here to get wrong and no `sed`
-in the path. That matters beyond tidiness: `sed` is a NAME, and one that prints a
-plausible forty hex and exits 0 pins a merge to whatever it says. The rule about
-what a well-formed record is stays in `recordlib.sh`, where it is tested. Issue
-#89.
-
-IT IS A ROUND TRIP, and that is the trade. `record` posted the signoff and this
-reads it straight back, so a stale or eventually-consistent read is a failure mode
-the parse did not have — but it is the same read a RESUMED session makes at the
-bottom of `SKILL.md`, so the exposure is the system's rather than this step's, and
-it fails as a stop rather than as a silent empty. A revocation landing in between
-reads as status 1, which is a refusal here: the phase it would open is no longer
-closed.
-
-## THE STATUS AND THE SHAPE, because neither covers the other.
-
-A status of 1 with an empty answer is the phase not being closed. A status of 0
-with something that is not 40 hex cannot happen through the helper, and is checked
-anyway — because this value is what every gate in step 8 is pinned to, and a gate
-pinned to a value nobody validated is a gate in name only.
-
-## THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken away.
-
-`echo` and `exit` are builtins a function can shadow, and with both shadowed this
-branch says nothing and returns 0 — a failed read indistinguishable from an
-ordinary phase, which is the reading that lets the driver carry on.
-
-`[[ … ]]` is a reserved word, so this branch ends non-zero whatever has been done
-to the builtins, and the block's status is the last signal left. It is the same
-containment the setup block's abort arms use, reached by the same argument: an
-`exit` that returns is not a refusal.
-
 ## PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 
 `open` proves three things, and all three are needed because NONE of them requires
@@ -1483,6 +1432,70 @@ three answers apart with a reserved word, `$?` taken before anything can replace
 
 AND A CONDITION IS EXEMPT FROM `errexit`, which is the same reason every other stage
 in this document is written as one.
+
+## AND WHAT WAS READ IS PROVED A SHA, because an attribute can transform an assignment.
+
+The read succeeding does not mean the NAME holds what the file held. This block runs in
+the operator's long-lived shell: declared
+`declare -i`, a forty-digit sha is coerced to an integer the moment it is assigned —
+measured, `0000…0001` becomes `1` — and declared `declare -u` it comes back uppercased.
+Both assignments SUCCEED, so the condition is satisfied and the value is wrong.
+
+WHAT IS WRONG WITH A WRONG VALUE HERE is that the signoff has already been posted: the
+corrupted sha is then named to the operator on the pause, or handed to `open` and the
+merge gates. So the length and the alphabet are checked inside the same condition,
+where a failure takes the refusal arm rather than continuing.
+
+AND `CODEX_SHA` IS IN SETUP'S PROBE, which is the other half and the earlier one. The
+shape check catches a value that arrived wrong; it cannot catch a READONLY seed, where
+the assignment fails and a shape-valid value the operator planted is what the checks
+then pass — or where the failed assignment ends the shell outright, which is loud but
+happens after `record` has posted the signoff. The probe answers both at setup, before
+anything is posted, which is where every other name this session assigns is answered.
+
+## AND THE PAUSE ARM READS IT TOO, the signoff being recorded either way.
+
+A `3` is a round boundary, not a failure: `record` posts the signoff and THEN pauses, so
+the sha exists and the operator is told which commit they may merge on. An arm that
+skipped the read would stop without naming it, which is the one thing the operator needs
+at that boundary.
+
+IT IS THE SAME READ AND THE SAME PROOF, written out twice because this shell has no
+function to hold it in — `return` is a name, and `readonly -f` defeats a definition made
+here. That duplication is the price, and it is the one this document pays everywhere a
+value crosses.
+
+## THE STAGE RUNS AS A CONDITION, so no name holds its status.
+
+The same shape every other stage in this document uses, and for the same reasons: a
+condition is exempt from `errexit`, and there is no `PHASE_RC` for a startup file to
+have made readonly or transforming. It was a capture — `PHASE_OUT="$(… 2>&1)"` with the
+status into `PHASE_RC` — because the output had to be re-printed and the sha parsed out
+of the record that followed. Neither is true now: the sha crosses in a file, and the
+stage prints its own account straight to the terminal.
+
+THE THREE ANSWERS ARE TOLD APART BY `case $?` IN THE `else`, with `case` a reserved
+word and `$?` taken before anything else runs. The `3` is a round boundary and the
+signoff IS recorded, so that arm reads the sha and names it to the operator; a `1` is a
+stage that did not advance, and there is nothing to read.
+
+## THE SIGNED-OFF HEAD COMES OUT OF THE FILE `record` WROTE, not from a second lookup.
+
+`record` proves that sha, records it and holds it. The driver read it back with
+`pr-signoff.sh sha`, then validated the answer with a regex and a status check —
+a second round-trip to the API and eleven lines of the one shell nothing can harden,
+for a value the stage that just ran already had. It writes it into a caller-named file
+now, as `pr-close-round.sh gate` has handed the head over since #202 and `post` the
+baseline since #234. #239.
+
+WHAT THE HELPER DOES WITH THAT FILE IS THE HELPER'S TO ARGUE, and it does, beside the
+code: that it empties the file early — though not before the alias checks, which refuse
+without truncating, since a sha file that IS the body file would have its account
+destroyed by the clearing — and that it writes and reads back the value BEFORE the
+comment is posted, there being nothing left to refuse with afterwards. Those are
+properties of `pr-copilot-phase.sh`, not of this block, and restating them here would be
+the second copy this repository keeps paying for. What this block relies on is only that
+the file holds a sha or the read fails, which the claims above and below it cover.
 
 ## THE BASELINE COMES OUT OF THE FILE `post` WROTE, not out of its output.
 
