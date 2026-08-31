@@ -870,17 +870,25 @@ else
 fi
 # THE FILE IS READ ONCE, because two reads are two different values.
 # WHY:
-case "$(<"$HEAD_FILE")" in
-    *[!0-9a-f]*|"")
-        echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-        exit 1
-        [[ -n "" ]] ;;
-    ????????????????????????????????????????)
-        [[ -n x ]] ;;
-    *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-        exit 1
-        [[ -n "" ]] ;;
-esac
+# AND ITS IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past.
+# WHY:
+if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+    case "$(<"$HEAD_FILE")" in
+        *[!0-9a-f]*|"")
+            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+            exit 1
+            [[ -n "" ]] ;;
+        ????????????????????????????????????????)
+            [[ -n x ]] ;;
+        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+            exit 1
+            [[ -n "" ]] ;;
+    esac
+else
+    echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
+    exit 1
+    [[ -n "" ]]
+fi
 ```
 
 **Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.

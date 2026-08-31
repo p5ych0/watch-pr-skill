@@ -1277,11 +1277,35 @@ is refused. No name holds the value, because a name in this shell is one an oper
 startup file can have made readonly or aimed elsewhere — which is why the two reads were
 there in the first place, and why the answer is one read rather than one variable.
 
-The aliasing test that used to wrap all of this is gone with it. It re-refused a head file
-that is the summary file, which `gate` already refuses by `=` and by `-ef` before it
-empties anything — and this code runs only in the arm where `gate` exited 0, so the branch
-could not fire. `CLAUDE.md` records what a second copy of a rule costs; an unreachable one
-costs the same and proves less.
+The aliasing test that wraps all of this STAYS, and removing it was a mistake worth
+recording. The reasoning was that `gate` already refuses a head file that is the summary
+file, by `=` and by `-ef`, so a second refusal in the arm reached only when `gate` exited
+0 could never fire.
+
+Both halves of that are wrong. `gate` refuses the aliased pair BEFORE it empties anything
+— it has to, or the refusal would destroy the account it is protecting — so on exactly
+that path the file is left holding the SUMMARY. And this code is not reached only on
+success: `exit` is a builtin a startup file can replace with one that RETURNS, so a driver
+that takes the gate's refusal arm walks out of it, past the `fi`, and arrives here anyway.
+A summary that is forty lowercase hexadecimal characters then reads as a gated head, and
+the threads are resolved claiming a head no gate wrote.
+
+
+## AND ITS IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past.
+
+The content check answers "is this a commit id". It cannot answer "did a gate write this",
+and on one path those differ: `gate` refuses a head file that IS the summary file before
+it empties anything, so the file is left holding the account. Forty lowercase hexadecimal
+characters of summary satisfy a content check perfectly.
+
+That path is reachable. `exit` is a builtin a startup file can replace with one that
+RETURNS, so a driver taking the gate's refusal arm walks out of it and past the `fi` — the
+arm ends in a reserved word, which gives the `if` a status nothing here reads. So the
+identity question is asked FIRST, by `=` and by `-ef`, the same pair `gate` uses, and the
+content read sits inside the arm where the answer was no.
+
+Both tests, not one. `-ef` compares the files and answers nothing when the path does not
+exist; `=` compares the names and catches that case.
 
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 

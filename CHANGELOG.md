@@ -2,7 +2,7 @@
 
 ## [2.0.89] — 2026-08-31
 
-- **The gated head is read once, and the check that cannot fire is gone.** Between the
+- **The gated head is read once.** Between the
   gate and the thread replies, `SKILL.md` proved the head file `pr-close-round.sh gate`
   had just written — in two steps, an outer `case` for the LENGTH and an inner one, on a
   SECOND read of the same path, for the alphabet. A value that is forty characters when
@@ -14,12 +14,20 @@
   between a gate that did not write a head and a round that resolves threads claiming it
   did. One read and one `case` with three arms answers both questions at once.
 
-  The aliasing test that wrapped it is removed. It re-refused a head file that is the
-  summary file, which `gate` already refuses by `=` and by `-ef`, in the arm reached only
-  when `gate` exited 0 — a branch that could not fire. The contract check that anchored on
-  it moved to the read itself, and now requires exactly ONE occurrence at any indent: the
-  old form required zero at column zero, which passed while the same read sat twice inside
-  the branch. #247.
+  The aliasing test that wraps it STAYS, and it is now proven by execution rather than by
+  position. `gate` refuses a head file that is the summary file BEFORE it empties
+  anything, so on that path the file holds the SUMMARY — and a driver whose `exit` returns
+  walks out of the gate's refusal arm and reaches this code anyway, where forty lowercase
+  hexadecimal characters of summary would read as a gated head. The identity is asked
+  first, by `=` and by `-ef`, and the content read sits inside the arm where the answer
+  was no.
+
+  The contract test lifts and RUNS that proof: the alias with a hex-shaped summary and a
+  returning `exit`, a real head in a file of its own, a non-OID, and a forty-character
+  non-hex value — the last being the one the two reads used to answer on separate passes.
+  The duplicate check also required ZERO occurrences of the read at column zero, which
+  passed the whole time the same read sat TWICE inside the branch; it requires exactly one
+  at any indent now. #247.
 
 ## [2.0.88] — 2026-08-31
 
