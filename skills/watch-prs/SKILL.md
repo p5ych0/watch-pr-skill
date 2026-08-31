@@ -26,16 +26,22 @@ settings page.
 ## How to work this loop
 
 **A comment marked `# WHY:` is a CLAIM, and its argument is the identically-titled
-section of `skills/watch-prs/SKILL-RATIONALE.md`** — located by the title, character for
+section of `$RB_SCRIPTS/../SKILL-RATIONALE.md`** — located by the title, character for
 character, which is what `test-pr-skill-contract.sh` matches. Claims are here and
 arguments are there because the arguments are long and read once, while the claims are
 read on every invocation.
 
-The marker used to spell the destination out after the colon — the rationale's path,
-91 times, one distinct spelling. It named the file and never the section, so it repeated
-this paragraph and located nothing the title does not. Dropping the 34-character suffix
-took 3,094 characters out of a document the driver reads whole on every run; the paragraph
-you are reading is the 666 that replaced them, so the file is 2,428 shorter.
+That destination is spelled from `$RB_SCRIPTS` and never as a bare relative path,
+because this loop drives whatever checkout it is installed over: a relative path names
+the rationale of the project under review, where the shell stands and where no such file
+exists. `$CLAUDE_PLUGIN_ROOT` is no good either, being unset in setup's second discovery
+mode; `$RB_SCRIPTS` is set and validated in both.
+
+The marker used to spell it out after the colon as well — 91 times, one distinct
+spelling. It named the file and never the section, so it repeated this paragraph and
+located nothing the title does not. Dropping the 34-character suffix took 3,094
+characters out of a document the driver reads whole on every run; the two paragraphs you
+are reading are the 1,174 that replaced them, so the file is 1,920 shorter.
 
 These rules bind you for every round. They are here because breaking them is what
 turns a three-round PR into a fifty-round one, and every line below was earned
