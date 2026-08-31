@@ -2,7 +2,7 @@
 
 ## [2.0.88] — 2026-08-31
 
-- **`SKILL.md` is 1,248 characters shorter, and the driving shell no longer names
+- **`SKILL.md` is 1,156 characters shorter, and the driving shell no longer names
   the review baseline at all.** The review id captured immediately before a request
   is what the next watch needs, and it used to come back into the operator's own
   shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
@@ -75,7 +75,22 @@
   and the scan looked for a line start or a `;` before the name — so it reported a
   variable as never assigned in a document that assigns it twice. Respelling the source
   to suit the scan was the other option and it is the wrong way round: `{ VAR=` is valid
-  Bash and means what it says.
+  Bash and means what it says. The brace has to follow a command separator, or brace
+  text inside a STRING — `echo "{ VAR=$VAR"` — counted as an assignment and a quoted
+  line could talk the check out of a finding.
+
+- **`pr-watch.sh` refuses a reviewer this loop does not drive.** The login arrives from
+  the driving shell, where it is a variable an operator's startup file can have aimed
+  elsewhere. Unrecognised, the watch polled to its deadline and reported a TIMEOUT,
+  which the driver re-arms — so a corrupted reviewer looked exactly like a slow one,
+  indefinitely. `pr-close-round.sh` has made this check since it was written; this is
+  the copy that was missing.
+
+- **An expired deadline no longer skips the baseline validation.** `--timeout 0` made
+  the pre-read clock report the ordinary timeout before the file was opened at all, so a
+  missing, malformed or NUL-carrying baseline came back as `state=timeout` — which the
+  driver re-arms, making a caller error indistinguishable from a slow reviewer. A bad
+  argument is bad whatever the clock says.
 
 ## [2.0.87] — 2026-08-31
 

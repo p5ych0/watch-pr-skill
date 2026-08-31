@@ -1497,6 +1497,26 @@ login that is nobody's, and an alias overwrites the name it points at while agre
 with every check made of it. Nothing has been posted at this point, which is why the
 refusal here can be total.
 
+
+## THE REQUEST IS INSIDE THIS ARM, not a fence after it.
+
+The proof above refuses by printing and calling `exit`, and `exit` is a builtin a
+startup file can replace with one that RETURNS. Written as its own fence, the refusal
+then ended that fence and the NEXT one posted the review anyway — with `WHO` still
+readonly, still transforming, or still aimed at another name, so the round that follows
+polls a reviewer nobody can be.
+
+Ending the arm in `[[ -n "" ]]` does not answer it. That makes the compound command
+report non-zero, and nothing reads the status of a fence in a Markdown document; what
+the reserved word buys is that the LIST fails rather than reporting the refusal as
+success, which matters only where something is reading. Containment is POSITION: the
+work has to sit in a branch the refusal does not enter.
+
+So the request is nested. The proof is the `if`, its success arm holds the request and
+the request's own arms, and the refusal is the `else` — the shape every other fence in
+this document already had, and the one this site was missing because the proof was
+added later than the request it protects.
+
 ## THE RECORD IS STILL PRINTED, and it is what an operator reads.
 
 `post` still ends with `PR_ROUND_CLOSED pr=… reviewer=… head=… mode=… prior-review=…`,

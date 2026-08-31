@@ -2036,7 +2036,9 @@ grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
 # inside it since #243 — which closed #238 by removing the read rather than binding
 # it — so what is asserted is that the arm exists and the refusal is the one not
 # taken.
-grep -q '^    \[\[ -n x \]\]$' "$SKILL" \
+# INDENTED, because the request is now NESTED inside the reviewer proof's own arm — a
+# refusal there used to end its fence and let the next one post the request anyway.
+grep -q '^        \[\[ -n x \]\]$' "$SKILL" \
     && pass "…and the success arm is the continuation, not a statement after a guard" \
     || die "the opening request has no success arm; a shadowed exit in the refusal walks into the wait"
 # AND NO NAME NEEDS PROVING, BECAUSE NONE IS ASSIGNED. This is where the driver
@@ -2177,13 +2179,29 @@ _w2_dir="$TMP_CL/w2"; mkdir -p "$_w2_dir" || die "the step-2 scratch directory c
 # was nothing to run rather than because the guard was gone, which is a proof that a
 # renamed variable would satisfy just as well. The range starts at the line above the
 # fence and that line is harmless to source.
-awk '/^AUTO_REVIEW=/, /^fi$/' "$SKILL" > "$_w2_dir/w2.sh"
+awk '/^AUTO_REVIEW=/, /^fi$/' "$SKILL" \
+    | sed 's|^\( *\)if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh.*|\1if "$RB_W2_REQ"; then|' \
+    > "$_w2_dir/w2.sh"
 { [ -s "$_w2_dir/w2.sh" ] && grep -q 'WHO="$CODEX_BOT"' "$_w2_dir/w2.sh"; } \
     && pass "the step-2 reviewer assignment lifts, so the cases below reach the code they name" \
     || die "the step-2 reviewer assignment did not lift; the cases prove nothing"
+# AND THE REQUEST IS INSIDE THE LIFTED RANGE, which is the invariant rather than a
+# property of the lift. The range runs from `AUTO_REVIEW=` to the first `fi` at column
+# zero: with the request nested in the proof's success arm that is the OUTER `fi` and
+# the request is inside it, and with the request in a fence of its own the range ends
+# before it — which is exactly the defect, so this is where it is named.
+grep -q 'if "$RB_W2_REQ"; then' "$_w2_dir/w2.sh" \
+    && pass "…and the opening request is inside the reviewer proof, not a fence after it" \
+    || die "the opening request is outside the reviewer proof's arm; a returning exit reaches it"
+# THE REQUEST STUB RECORDS THAT IT RAN, because the whole question is whether a refused
+# proof still reaches the mutation. `SKILL.md` posts the opening request there; a stub
+# that merely succeeds would let a walk-past look like an ordinary run.
+printf '#!/usr/bin/env bash\nprintf RAN > "$RB_W2_MARK"\nexit 0\n' > "$_w2_dir/req"
+chmod +x "$_w2_dir/req"
 
 # THE ORDINARY RUN FIRST, or the attacks below pass against a fence that never worked.
-_w2_ok="$(bash -c '
+rm -f "$_w2_dir/mark"
+_w2_ok="$(RB_W2_REQ="$_w2_dir/req" RB_W2_MARK="$_w2_dir/mark" bash -c '
     CODEX_BOT="chatgpt-codex-connector[bot]"
     . "$1" 2>/dev/null; printf "S:%s WHO:[%s]" "$?" "${WHO-unset}"' _ "$_w2_dir/w2.sh" 2>/dev/null)"
 case "$_w2_ok" in
@@ -2191,6 +2209,9 @@ case "$_w2_ok" in
         pass "…an unhindered step 2 sets WHO to Codex and continues" ;;
     *) die "the step-2 assignment on a clean shell gave '$_w2_ok'" ;;
 esac
+[ -f "$_w2_dir/mark" ] \
+    && pass "…and the request runs on that path, so the marker means something" \
+    || die "the request did not run on the clean path; the walk-past case below proves nothing"
 
 # A NAMEREF INTRODUCED AFTER SETUP, aimed at the baseline path. The target must be
 # untouched, and the fence must not continue — the opening request is the NEXT fence and
@@ -2220,11 +2241,17 @@ fi
 # against, because this fence has the same shape and the same last word.
 _w2_attack() {   # _w2_attack <label> <setup-line>
     local _o _r=0
-    _o="$(bash -c '
+    rm -f "$_w2_dir/mark"
+    _o="$(RB_W2_REQ="$_w2_dir/req" RB_W2_MARK="$_w2_dir/mark" bash -c '
         CODEX_BOT="chatgpt-codex-connector[bot]"
         '"$2"'
         exit() { return 0; }
         . "$1" 2>/dev/null; printf "S:%s" "$?"' _ "$_w2_dir/w2.sh" 2>/dev/null)" || _r=$?
+    # THE MUTATION IS THE ASSERTION, not the status. A refusal that reports non-zero and
+    # posts the request anyway is the failure — the review goes out addressed to a
+    # reviewer name this shell could not prove.
+    [ -f "$_w2_dir/mark" ] \
+        && die "$1 — but the opening request was posted anyway"
     case "$_o" in
         *S:*) ;;
         *) die "$1 produced no status: [$_o]"; return 0 ;;

@@ -765,6 +765,31 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
     && pass "without --after-review the terminal state is reported as before" \
     || die "the flagless path changed behaviour (rc=$rc out='$out')"
 
+# ── a reviewer this loop does not drive is refused, not polled ────────────
+#
+# The login arrives from `SKILL.md`'s own shell, where it is a variable an operator's
+# startup file can have aimed elsewhere — a nameref onto a path hands this stage a FILE
+# NAME as the reviewer. Nothing here can prove what happened in that shell, and guarding
+# the driver one name at a time is the shape this repository records paying for twice.
+# What this process can do is refuse a login that is nobody. Unrecognised, the watch
+# polled to its deadline and reported a TIMEOUT, which the driver re-arms — so a
+# corrupted reviewer looked exactly like a slow one, indefinitely.
+out="$(run_limited 30 "$SCRIPT" 7 "/tmp/some/baseline/path" --interval 1 --timeout 4 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unknown_reviewer' <<<"$out"; } \
+    && pass "a reviewer this loop does not drive is refused before the first poll" \
+    || die "an unknown reviewer gave rc=$rc out='$out'"
+grep -q 'state=timeout' <<<"$out" \
+    && die "an unknown reviewer was reported as a timeout, which the driver re-arms: $out" \
+    || pass "…and is not reported as a timeout"
+# AND BOTH REAL REVIEWERS ARE ACCEPTED, or the check above passes by refusing everyone.
+for _wr in "$BOT" "copilot-pull-request-reviewer[bot]"; do
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+           run_limited 30 "$SCRIPT" 7 "$_wr" --interval 1 --timeout 6 2>&1)"; rc=$?
+    grep -q 'reason=unknown_reviewer' <<<"$out" \
+        && die "$_wr was refused as an unknown reviewer: $out" \
+        || pass "…while $_wr is accepted"
+done
+
 # ── the same baseline, arriving in a FILE ─────────────────────────────────
 #
 # `SKILL.md`'s bash runs in the operator's own shell, where an assignment can be
@@ -995,6 +1020,39 @@ out="$(run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'needs a value' <<<"$out"; } \
     && pass "…and a valueless --after-review-file is usage, not a hang" \
     || die "--after-review-file with no value gave rc=$rc out='$out'"
+
+# ── an expired deadline does not skip the baseline validation ─────────────
+#
+# `--timeout 0` made the pre-read clock report the ordinary timeout before the file was
+# opened at all, so a missing, malformed or NUL-carrying baseline came back as
+# `state=timeout` — which the driver RE-ARMS. A caller error was then indistinguishable
+# from a slow reviewer, forever. A bad argument is bad whatever the clock says.
+printf '\000' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
+    && pass "a NUL baseline is refused even with the deadline already expired" \
+    || die "--timeout 0 with a NUL baseline gave rc=$rc out='$out'"
+printf 'not-an-id\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
+    && pass "…and so is a malformed one" \
+    || die "--timeout 0 with a malformed baseline gave rc=$rc out='$out'"
+rm -f "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
+    && pass "…and so is a missing one" \
+    || die "--timeout 0 with a missing baseline gave rc=$rc out='$out'"
+# AND A GOOD BASELINE WITH AN EXPIRED DEADLINE IS STILL THE ORDINARY TIMEOUT, or the
+# three cases above pass because the expiry stopped being honoured at all.
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
+    && pass "…while a good baseline with an expired deadline is still the timeout" \
+    || die "--timeout 0 with a good baseline gave rc=$rc out='$out'"
 
 # ── a buffer read that prints and then fails is not a probe result ────────
 # `probe` reads the child output back from a temp file. A `cat` that emitted a

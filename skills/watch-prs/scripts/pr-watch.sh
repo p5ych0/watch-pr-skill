@@ -115,6 +115,10 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_REVIEW_WATCH state=error"
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
+# The two reviewer logins this loop drives, so the argument can be REFUSED rather than
+# polled for an hour. See the reviewer check below.
+rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_REVIEW_WATCH state=error" var || exit 2
+rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_REVIEW_WATCH state=error" var || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # STARTED PRIVILEGED AT EVERY CALL SITE BELOW, not folded into this variable.
@@ -225,6 +229,21 @@ case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
 # `%q` collapses newlines and control bytes into escapes, so nothing a helper
 # emits can start a line of its own.
 q() { printf '%q' "$1"; }
+
+# THE REVIEWER IS ONE THIS LOOP DRIVES, OR THIS IS NOT A WAIT WORTH STARTING. The name
+# arrives from `SKILL.md`'s own shell, where it is a variable an operator's startup file
+# can have aimed somewhere else — a nameref onto a path hands this stage a FILE NAME as
+# the reviewer. Nothing here can prove what happened in that shell, and guarding the
+# driver one name at a time is the list-of-names shape `CLAUDE.md` records paying for
+# twice. What this process CAN do is refuse a login that is nobody: unrecognised, the
+# watch would poll until its deadline and report a timeout, which the driver re-arms —
+# so a corrupted reviewer looks exactly like a slow one, forever. `pr-close-round.sh`
+# has made this same check since it was written; this is the copy that was missing.
+case "$WHO" in
+    "$RB_CODEX_BOT"|"$RB_COPILOT_BOT") ;;
+    *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$(q "$WHO") state=error reason=unknown_reviewer" >&2
+       exit 2 ;;
+esac
 
 
 # An ABSOLUTE deadline, measured against the clock rather than accumulated from
@@ -417,17 +436,31 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
     # watch, and a step that ignores it makes the contract mean nothing. An exhausted
     # budget here is the ORDINARY timeout, because that is what it is: the deadline
     # passed before there was an answer.
+    #
+    # AN ALREADY-EXPIRED DEADLINE DOES NOT SKIP THE VALIDATION. `--timeout 0` made this
+    # first read report the ordinary timeout before the file was opened at all — so a
+    # missing, malformed or NUL-carrying baseline came back as `state=timeout`, which
+    # the driver RE-ARMS, and a caller error was indistinguishable from a slow reviewer.
+    # A bad argument is bad whatever the clock says; the deadline decides how long to
+    # WAIT, not whether the input was well formed. So an expired budget still runs the
+    # read, with the minimum bound below, and the timeout is reported afterwards.
     remaining_s; _bl_rrc=$?; _bl_rem="$REMAINING"
-    [ "$_bl_rrc" -eq 2 ] && timed_out
-    [ "$_bl_rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    _bl_expired=
+    [ "$_bl_rrc" -eq 2 ] && { _bl_expired=yes; _bl_rem=0; }
+    { [ "$_bl_rrc" -eq 0 ] || [ -n "$_bl_expired" ]; } \
+        || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     # A SHORT LIMIT OF ITS OWN, CAPPED BY THE REMAINING BUDGET. Spending the WHOLE
     # budget here collapses two different answers into one status: an expiry would
     # mean both "this open is stuck" and "the watch ran out of time", and the caller
     # branches on those differently — `state=error` stops the round, a timeout is
     # re-armed. Ten seconds is long enough that no reachable filesystem read hits it
     # and short enough to leave the deadline meaning what it says.
+    # AND THE BOUND IS AT LEAST ONE SECOND. `probe` floors its own limit at 1, so a 0
+    # here would not shorten anything; making it explicit is what stops an expired
+    # deadline reading as "do not bother opening it".
     _bl_lim=10
     [ "$_bl_rem" -lt "$_bl_lim" ] && _bl_lim="$_bl_rem"
+    [ "$_bl_lim" -lt 1 ] && _bl_lim=1
     _bl_out="$(probe "$_bl_lim" /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9
@@ -473,6 +506,9 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
               echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
               exit 2; } ;;
     esac
+    # THE TIMEOUT IS REPORTED HERE, after the baseline has been proved good. Reported
+    # before it, a caller error was re-armed as a slow reviewer.
+    [ -n "$_bl_expired" ] && timed_out
 fi
 waited=0
 last=""

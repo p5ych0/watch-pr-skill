@@ -105,6 +105,21 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "…while an unassigned name beside it is still a finding" \
     || die "the brace case blinded the scan (rc=$rc out='$out')"
 
+# …AND BRACE TEXT INSIDE A STRING IS NOT AN ASSIGNMENT. Accepting a bare `{` matched
+# `echo "{ VAR=$VAR"` and credited the variable, so a quoted line could talk this check
+# out of a finding — a weaker check than the one it replaced. A brace group begins only
+# where a command may begin, so the brace has to follow a separator.
+R="$(mkroot '# skill
+```bash
+OWNER=acme
+echo "{ SUMMARY_FILE=$SUMMARY_FILE"
+```
+')"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'SUMMARY_FILE' <<<"$out"; } \
+    && pass "brace text inside a string does not count as an assignment" \
+    || die "quoted brace text credited SUMMARY_FILE as assigned (rc=$rc out='$out')"
+
 # …AND A VARIABLE THE SHELL ITSELF SUPPLIES IS NOT ONE. `TMPDIR` and `RANDOM` are
 # read by the setup block and assigned by nobody, which is correct — and until the
 # list said so, the gate reported a finding on every session for a name `SKILL.md`

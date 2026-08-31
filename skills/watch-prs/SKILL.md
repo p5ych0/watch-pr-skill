@@ -404,12 +404,8 @@ if ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
      && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
    && { WHO="$CODEX_BOT"; [[ $WHO = "$CODEX_BOT" ]]; }
 then
-    [[ -n x ]]
-else
-    echo "ABORT: WHO is readonly, value-transforming, or aimed at another name, so every stage below would be addressed to the wrong reviewer — or would overwrite whatever WHO points at. Nothing has been posted."
-    exit 1
-    [[ -n "" ]]
-fi
+    # THE REQUEST IS INSIDE THIS ARM, not a fence after it.
+    # WHY:
 
 #   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
@@ -440,13 +436,18 @@ fi
 # WHY:
 # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 # WHY:
-if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
-    [[ -n x ]]
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+        [[ -n x ]]
+    else
+        echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
+        exit 0
+        # THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
+        # WHY:
+        [[ -n "" ]]
+    fi
 else
-    echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
-    exit 0
-    # THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
-    # WHY:
+    echo "ABORT: WHO is readonly, value-transforming, or aimed at another name, so every stage below would be addressed to the wrong reviewer — or would overwrite whatever WHO points at. Nothing has been posted."
+    exit 1
     [[ -n "" ]]
 fi
 ```

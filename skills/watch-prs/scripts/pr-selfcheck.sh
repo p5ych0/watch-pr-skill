@@ -372,9 +372,18 @@ if [ -f "$SKILL" ]; then
     # next line was reported as never assigned. The alternative was respelling the source to
     # suit the scanner, which is the tail wagging the dog: `{ VAR=` is valid Bash and means
     # what it says.
+    #
+    # THE BRACE MUST FOLLOW A COMMAND SEPARATOR, and that restriction is the whole of it.
+    # Accepting a bare `\{` matched brace text inside a STRING — `echo "{ VAR=$VAR"` — and
+    # credited the variable as assigned, which turned this check into one that could be
+    # talked out of a finding by quoted data. A brace group only begins where a command may
+    # begin, so the alternation is line start, `;`, `&&` or `||`; a `{` after a quote is
+    # none of those. That is not a lexer and does not pretend to be one: it is the same
+    # uppercase-convention bargain the rest of this check makes, and its hole is stated —
+    # a `;` inside a quoted string, before brace text, would still match.
     assigned="$(printf '%s\n' "$code" \
-        | nomatch grep -oE '(^|;|\{)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-        | sed -E 's/^[;{[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
+        | nomatch grep -oE '(^|;|&&|\|\|)[[:space:]]*(\{[[:space:]]+)?(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
+        | sed -E 's/^[;&|{[:space:]]*(local[[:space:]]+)?//; s/^[{[:space:]]*//; s/=$//' | sort -u)"; chk assigned $?
     # …plus the variables a SOURCED library assigns. SKILL.md loads
     # `identitylib.sh` and calls `rb_identity`, which SETS `HOST`, `OWNER` and
     # `REPO` rather than printing them — so those names are assigned, just not in
