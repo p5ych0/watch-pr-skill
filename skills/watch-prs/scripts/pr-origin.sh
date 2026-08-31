@@ -904,7 +904,7 @@ fi
 rb_redact() {   # prints its argument with any URL userinfo, query and fragment replaced
     local _u="$1" _scheme _rest _auth _path
     # THE QUERY AND FRAGMENT GO FIRST, AND FROM EVERY FORM. A credential does not have to
-    # be in the userinfo: `https://host/org/repo.git?access_token=…` is a remote git
+    # be in the userinfo: `https://host/path.git?access_token=…` is a remote git
     # accepts, and the token is in the query. What identifies a remote for this message is
     # the scheme, host and path, so nothing diagnostic is lost by dropping what follows
     # them — and this runs before the scheme test so an SCP-like value is covered too.
