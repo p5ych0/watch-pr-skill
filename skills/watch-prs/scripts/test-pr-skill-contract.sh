@@ -1622,7 +1622,21 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # hold either: the realistic corruption is an operator's own scratch directory or a
 # resumed session, not a racer defeating the check, and against those a check works.
 # It was removed and restored in the same pull request, on that finding.
-_hf_guard_ln="$(grep -n '^if \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then' "$SKILL" | head -1 | cut -d: -f1)" || true
+#
+# THE ANCHOR IS THE IDENTITY REFUSAL, which is the FIRST thing this proof does. It was
+# briefly moved to the content read on the reasoning that `gate` had already refused an
+# aliased pair so the branch could not fire — which is wrong, and the paragraph above
+# says why: `gate` refuses that pair BEFORE it empties anything, so the file is left
+# holding the summary, and a driver whose `exit` returns walks out of the gate's own
+# refusal arm and reaches this code anyway. A summary of exactly forty lowercase hex
+# characters would then read as a gated head.
+#
+# BOTH HALVES ARE MATCHED. Anchoring on the pathname comparison alone left `-ef` free to
+# be deleted with the suite green — and `-ef` is the half that answers when the two names
+# differ, which is what a symlink in a scratch directory produces. The executed cases
+# below cover the same ground; this keeps the ORDERING assertion honest about what it is
+# anchored to.
+_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then$' "$SKILL" | head -1 | cut -d: -f1)" || true
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
     && pass "…and the head is proven, identity first, after the gate and before the replies" \
@@ -1631,10 +1645,110 @@ _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)
 # the file and validates it with `sha_reason` before anything is posted, so a second
 # driver-side check there guards nothing that has not already been guarded — the
 # threads are answered by then either way.
-_hf_dup="$(grep -c '^case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
-[ "$_hf_dup" -eq 0 ] \
-    && pass "…and the post fence does not repeat it, the script refusing there itself" \
-    || die "the post fence still re-proves the head file in $_hf_dup place(s)"
+#
+# COUNTED AT ANY INDENT, AND EXACTLY ONE. The old count required ZERO at column zero,
+# which passed while the same read sat indented inside the aliasing branch — and it would
+# have passed with the read appearing twice there, which is what it did: the check read
+# the file once for its LENGTH and again for its ALPHABET, so a value that was forty
+# characters on the first read and something else on the second satisfied both. One read
+# is the invariant; requiring exactly one occurrence is what states it.
+_hf_dup="$(grep -c 'case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
+[ "$_hf_dup" -eq 1 ] \
+    && pass "…and the head file is read exactly once, with the post fence not repeating it" \
+    || die "the head file is read in $_hf_dup place(s); it must be read once, before the replies"
+
+# ── AND THE PROOF IS RUN, against the alias plus a returning `exit` ───────
+#
+# The state no `grep` distinguishes: `HEAD_FILE` aliases `SUMMARY_FILE`, the summary is
+# forty lowercase hexadecimal characters, and `exit` returns. `gate` refuses the aliased
+# pair BEFORE emptying, so the file holds the summary; the driver walks out of the gate's
+# refusal arm because `exit` returned; and a content-only check reads the summary as a
+# gated head, after which the threads are resolved claiming a head nobody wrote.
+_hp_dir="$TMP_CL/hp"; mkdir -p "$_hp_dir" || die "the head-proof scratch directory could not be made"
+awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_dir/hp.sh"
+{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'case "$(<"$HEAD_FILE")" in' "$_hp_dir/hp.sh"; } \
+    && pass "the head proof lifts, so the cases below reach the code they name" \
+    || die "the head proof did not lift; the cases prove nothing"
+
+# WHAT IS ASSERTED IS THE SOURCED UNIT'S STATUS, not a marker after it. Nothing follows
+# the refusal INSIDE the fence — that is what the shape is for — so a `printf` placed
+# after the `.` runs whatever the fence did, and asserting on it proves only that `exit`
+# was shadowed. Each refusal arm ends in `[[ -n "" ]]`, so a refusal reports non-zero
+# even with `exit` returning, and the success arm ends in `[[ -n x ]]`.
+_hp_run() {   # _hp_run <head-file> <summary-file> ; prints "S:<status> <output>"
+    HEAD_FILE="$1" SUMMARY_FILE="$2" bash -c '
+        exit() { return 0; }
+        . "$1" 2>/dev/null; _s=$?
+        printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null
+}
+
+# THE ALIAS, with a summary that is a valid-looking OID and `exit` returning.
+printf '%s' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/summary"
+_hp_out="$(_hp_run "$_hp_dir/summary" "$_hp_dir/summary")"
+case "${_hp_out##*S:}" in
+    0*) die "an aliased head file holding a hex-shaped summary was accepted as a gated head: $_hp_out" ;;
+    *)  pass "…and an aliased head file is refused before its content is read" ;;
+esac
+grep -q 'the same file' <<<"$_hp_out" \
+    && pass "…naming the identity, not the content" \
+    || die "the refusal does not name the aliasing: $_hp_out"
+
+# AND AN ALIAS WITH TWO DIFFERENT PATHNAMES, which is what `-ef` is for. The case above
+# passes the SAME string twice, so `!=` answers first and short-circuits — the `-ef` half
+# is never reached, and deleting it would leave the suite green. A symlink is the shape
+# an operator's scratch directory actually produces.
+if ln -sf "$_hp_dir/summary" "$_hp_dir/head-link" 2>/dev/null; then
+    _hp_lnk="$(_hp_run "$_hp_dir/head-link" "$_hp_dir/summary")"
+    case "${_hp_lnk##*S:}" in
+        0*) die "a symlinked head file was accepted as a gated head: $_hp_lnk" ;;
+        *)  pass "…and an alias reached by a different pathname is refused too" ;;
+    esac
+    grep -q 'the same file' <<<"$_hp_lnk" \
+        && pass "…naming the identity there as well" \
+        || die "the symlink refusal does not name the aliasing: $_hp_lnk"
+    rm -f "$_hp_dir/head-link"
+else
+    pass "no symlink support here, so the distinct-path alias is skipped by name"
+fi
+
+# A REAL GATED HEAD IN A FILE OF ITS OWN STILL PASSES, or the case above passes by
+# refusing everything.
+printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/head"
+: > "$_hp_dir/sum"
+_hp_ok="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+case "${_hp_ok##*S:}" in
+    0*) pass "…while a real gated head in a file of its own continues" ;;
+    *)  die "a valid gated head was refused: $_hp_ok" ;;
+esac
+# AND A NON-OID IN A FILE OF ITS OWN IS STILL REFUSED, which is the content half.
+printf 'not a commit id\n' > "$_hp_dir/head"
+_hp_bad="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+case "${_hp_bad##*S:}" in
+    0*) die "a head file holding no commit id was accepted: $_hp_bad" ;;
+    *)  pass "…and a head file holding no commit id is still refused" ;;
+esac
+# AND A HEAD OF THE RIGHT LENGTH THAT IS NOT HEX, which the single read has to catch on
+# the same pass as the length — two reads answered those separately.
+printf '%s\n' 'ZZZZZZ0123456789abcdef0123456789abcdef01' > "$_hp_dir/head"
+_hp_hex="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+case "${_hp_hex##*S:}" in
+    0*) die "a forty-character non-hex head was accepted: $_hp_hex" ;;
+    *)  pass "…and a forty-character non-hex head is refused on the same read" ;;
+esac
+# AND ALL-HEX VALUES OF THE WRONG LENGTH, which are the ONLY inputs that reach the final
+# arm. Every other refusal case here matches `*[!0-9a-f]*` and is answered by the first
+# arm, so without these the length refusal could be deleted and the suite would stay
+# green — and a head file altered to hold a short or long hex value would reach the
+# irreversible replies.
+for _hp_len in 'abcdef01' 'abcdef0123456789abcdef0123456789abcdef0123'; do
+    printf '%s\n' "$_hp_len" > "$_hp_dir/head"
+    _hp_wl="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+    case "${_hp_wl##*S:}" in
+        0*) die "an all-hex head of ${#_hp_len} characters was accepted: $_hp_wl" ;;
+        *)  pass "…and an all-hex head of ${#_hp_len} characters is refused" ;;
+    esac
+done
+
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
 # posted — and nothing in the script's own tests would notice, because the script

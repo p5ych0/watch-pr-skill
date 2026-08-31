@@ -868,16 +868,19 @@ else
            [[ -n "" ]] ;;
     esac
 fi
-if [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+# THE FILE IS READ ONCE, because two reads are two different values.
+# WHY:
+# AND ITS IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past.
+# WHY:
+if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
     case "$(<"$HEAD_FILE")" in
+        *[!0-9a-f]*|"")
+            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+            exit 1
+            [[ -n "" ]] ;;
         ????????????????????????????????????????)
-            case "$(<"$HEAD_FILE")" in
-                *[!0-9a-f]*)
-                    echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-                    exit 1
-                    [[ -n "" ]] ;;
-            esac ;;
-        *)            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+            [[ -n x ]] ;;
+        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
             exit 1
             [[ -n "" ]] ;;
     esac
