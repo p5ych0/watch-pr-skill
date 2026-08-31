@@ -1434,6 +1434,27 @@ the loop waiting for a pass nobody asked for.
 `case $?` in the `else` takes it instead — `case` is a reserved word, and `$?` is
 taken first, before any command can replace it.
 
+
+## THE REVIEWER SWITCH IS A CONDITION, because its refusal has somewhere to fall.
+
+`WHO` selects the reviewer every round below is addressed to, and it is the one
+assignment this fence still makes. Both ways it can fail are silent: a readonly `WHO`
+keeps the value it already had, which is Codex — so the Copilot rounds would poll the
+reviewer that is already clean — and a transforming attribute such as `declare -u`
+stores a login that is not anyone's, which `pr-review-state.sh` compares exactly, so
+Copilot's verdict is never recognised and the phase re-arms forever.
+
+Written as an assignment followed by a guard, the refusal did not hold. `exit` is a
+builtin a startup file can replace with one that RETURNS, and a `{ echo …; exit 1; }`
+group whose last command returns 0 SUCCEEDS — so the `||` was satisfied, execution
+carried on past it, and the rounds ran against the wrong login with Copilot already
+requested.
+
+So the assignment and its proof are the `if` CONDITION, and the continuation is the
+success arm. The refusal is an arm that is not taken rather than a statement that has
+to stop the shell, which is the same shape every other fence here uses and the reason
+`[[ -n "" ]]` is the last word in it.
+
 ## THE RECORD IS STILL PRINTED, and it is what an operator reads.
 
 `post` still ends with `PR_ROUND_CLOSED pr=… reviewer=… head=… mode=… prior-review=…`,

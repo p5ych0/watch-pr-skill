@@ -343,70 +343,6 @@ probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limi
     return "$rc"
 }
 
-# BOTH SPELLINGS AT ONCE IS A REFUSAL, not a precedence rule. They are the same
-# value by two routes, and a caller passing both has two answers in hand and no
-# reason to believe this one picked the right one.
-if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW_GIVEN" ]; then
-    echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_both_forms" >&2
-    exit 2
-fi
-# THE READ IS BOUNDED, because opening the path can block forever. A FIFO at that
-# name — supplied directly, or substituted by a same-UID process between the caller
-# naming it and this open — makes `9<` wait for a writer that never arrives, and the
-# `-f` test that would reject it is on the far side of the redirection and never
-# runs. Measured: the watch stayed silent past its own `--timeout` and had to be
-# killed from outside. A type check BEFORE the open would not fix it either, since
-# the open is what blocks and the check it follows can be raced. So the open itself
-# runs under the same watchdog every other probe here uses, and an expiry is
-# `state=error` like any unreadable answer.
-#
-# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
-# holding one read back as the empty string — which is the LEGITIMATE "there is no
-# prior review to wait past" — and the watch would announce the terminal review this
-# round just handled as the next one. Measured: bash warned about the ignored null
-# byte and the run reported an ordinary timeout. The child reads with `read -d ""`
-# instead, whose delimiter IS the NUL: finding one is a successful read and that is
-# what makes it a refusal, while an ordinary file ends at EOF with status 1 and the
-# whole content assigned. The trailing newline every writer leaves is stripped by the
-# capture, as before.
-if [ -n "$AFTER_REVIEW_FILE" ]; then
-    # The child's statuses, and they are distinct because each names a different
-    # thing to tell an operator: 4 the open failed, 5 a NUL byte, 6 not a regular
-    # file. 124 is the watchdog's, from `probe` itself.
-    _bl_out="$(probe 10 /usr/bin/env bash -p -c '
-        { [ -f /dev/fd/9 ] || exit 6
-          IFS= read -r -d "" _r <&9
-          _s=$?
-        } 9<"$1" || exit 4
-        [ "$_s" -eq 0 ] && exit 5
-        printf %s "$_r"' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
-    case "$_bl_rc" in
-        0) AFTER_REVIEW="$_bl_out" ;;
-        5) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_nul detail=$(q "$AFTER_REVIEW_FILE")" >&2
-           exit 2 ;;
-        6) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_not_regular detail=$(q "$AFTER_REVIEW_FILE")" >&2
-           exit 2 ;;
-        124) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_blocked detail=$(q "$AFTER_REVIEW_FILE")" >&2
-           exit 2 ;;
-        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_unreadable detail=$(q "$AFTER_REVIEW_FILE")" >&2
-           exit 2 ;;
-    esac
-    # THE SHAPE IS PROVED HERE TOO, not only in the loop. The check below runs on
-    # the first TERMINAL state, which may be an hour away; a malformed baseline is
-    # a caller error and belongs at the call, where the caller can still act on it.
-    case "$AFTER_REVIEW" in
-        ""|*[0-9]) ;;
-        comment:*[0-9]) ;;
-        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
-           exit 2 ;;
-    esac
-    case "${AFTER_REVIEW#comment:}" in
-        ""|*[!0-9]*) [ -z "$AFTER_REVIEW" ] || {
-              echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
-              exit 2; } ;;
-    esac
-fi
-
 # A probe that hit the remaining deadline IS the timeout, not an unreadable
 # state: the wait ended because `--timeout` elapsed, which is what rc 1 means.
 # Reporting it as rc 2 would tell the caller the state could not be read, and the
@@ -445,6 +381,78 @@ remaining_s() {   # sets $REMAINING; 1 = unreadable clock, 2 = deadline passed
     REMAINING="$r"
     return 0
 }
+
+# BOTH SPELLINGS AT ONCE IS A REFUSAL, not a precedence rule. They are the same
+# value by two routes, and a caller passing both has two answers in hand and no
+# reason to believe this one picked the right one.
+if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW_GIVEN" ]; then
+    echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_both_forms" >&2
+    exit 2
+fi
+# THE READ IS BOUNDED, because opening the path can block forever. A FIFO at that
+# name — supplied directly, or substituted by a same-UID process between the caller
+# naming it and this open — makes `9<` wait for a writer that never arrives, and the
+# `-f` test that would reject it is on the far side of the redirection and never
+# runs. Measured: the watch stayed silent past its own `--timeout` and had to be
+# killed from outside. A type check BEFORE the open would not fix it either, since
+# the open is what blocks and the check it follows can be raced. So the open itself
+# runs under the same watchdog every other probe here uses, and an expiry is
+# `state=error` like any unreadable answer.
+#
+# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
+# holding one read back as the empty string — which is the LEGITIMATE "there is no
+# prior review to wait past" — and the watch would announce the terminal review this
+# round just handled as the next one. Measured: bash warned about the ignored null
+# byte and the run reported an ordinary timeout. The child reads with `read -d ""`
+# instead, whose delimiter IS the NUL: finding one is a successful read and that is
+# what makes it a refusal, while an ordinary file ends at EOF with status 1 and the
+# whole content assigned. The trailing newline every writer leaves is stripped by the
+# capture, as before.
+if [ -n "$AFTER_REVIEW_FILE" ]; then
+    # The child's statuses, and they are distinct because each names a different
+    # thing to tell an operator: 4 the open failed, 5 a NUL byte, 6 not a regular
+    # file. 124 is the watchdog's, from `probe` itself.
+    # THE BUDGET IS THE WATCH'S OWN, not a fixed number. `--timeout 1` must not spend
+    # ten seconds inside this read before reporting; `--timeout` bounds the whole
+    # watch, and a step that ignores it makes the contract mean nothing. An exhausted
+    # budget here is the ORDINARY timeout, because that is what it is: the deadline
+    # passed before there was an answer.
+    remaining_s; _bl_rrc=$?; _bl_rem="$REMAINING"
+    [ "$_bl_rrc" -eq 2 ] && timed_out
+    [ "$_bl_rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    _bl_out="$(probe "$_bl_rem" /usr/bin/env bash -p -c '
+        { [ -f /dev/fd/9 ] || exit 6
+          IFS= read -r -d "" _r <&9
+          _s=$?
+        } 9<"$1" || exit 4
+        [ "$_s" -eq 0 ] && exit 5
+        printf %s "$_r"' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+    case "$_bl_rc" in
+        0) AFTER_REVIEW="$_bl_out" ;;
+        5) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_nul detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;
+        6) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_not_regular detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;
+        124) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_blocked detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;   # the read outlived the budget: a blocked open, not a slow reviewer
+        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_unreadable detail=$(q "$AFTER_REVIEW_FILE")" >&2
+           exit 2 ;;
+    esac
+    # THE SHAPE IS PROVED HERE TOO, not only in the loop. The check below runs on
+    # the first TERMINAL state, which may be an hour away; a malformed baseline is
+    # a caller error and belongs at the call, where the caller can still act on it.
+    case "$AFTER_REVIEW" in
+        ""|*[0-9]) ;;
+        comment:*[0-9]) ;;
+        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
+           exit 2 ;;
+    esac
+    case "${AFTER_REVIEW#comment:}" in
+        ""|*[!0-9]*) [ -z "$AFTER_REVIEW" ] || {
+              echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$AFTER_REVIEW")" >&2
+              exit 2; } ;;
+    esac
+fi
 waited=0
 last=""
 while :; do

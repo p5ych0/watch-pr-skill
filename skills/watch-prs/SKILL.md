@@ -1159,9 +1159,15 @@ way — the signoff is on the PR, so a later session reads it back with
 # AND ITS STATUS IS NOT HELD, because a round boundary is not a refusal.
 # WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"; then
-    WHO="$COPILOT_BOT"
-    [[ $WHO = "$COPILOT_BOT" ]] \
-        || { echo "ABORT: WHO could not be set to the Copilot reviewer; the phase IS open."; exit 1; }
+    # THE REVIEWER SWITCH IS A CONDITION, because its refusal has somewhere to fall.
+    # WHY:
+    if WHO="$COPILOT_BOT"; [[ $WHO = "$COPILOT_BOT" ]]; then
+        [[ -n x ]]
+    else
+        echo "ABORT: WHO is readonly or value-transforming in this shell, so the rounds below would poll the wrong reviewer. The phase IS open and Copilot HAS been requested; do not re-open it."
+        exit 1
+        [[ -n "" ]]
+    fi
 else
     case $? in
         3) echo "The phase stopped at a round boundary. This is not permission to skip the pass: decide with the operator."

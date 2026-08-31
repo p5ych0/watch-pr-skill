@@ -25,7 +25,12 @@ COPILOTBOT='copilot-pull-request-reviewer[bot]'
 
 # ── the harness ────────────────────────────────────────────────────────────
 DIR="$TMP/s"; mkdir -p "$DIR" "$TMP/bin"
-cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" "$DIR/" \
+# `testlib.sh` IS STAGED TOO, because it is a RUNTIME dependency of this helper and
+# not only the fixture watchdog: `open` bounds its baseline writes with `run_limited`,
+# since opening a FIFO for writing blocks for a reader that never arrives. Same
+# reason `pr-ci-state.sh` loads it. #243.
+cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" \
+   "$SELF_DIR/testlib.sh" "$DIR/" \
     || { die "the subject could not be staged"; echo "RESULT: FAIL"; exit 1; }
 # `pr-review-state.sh` ANSWERS TWO DIFFERENT QUESTIONS HERE — `verdict` and
 # `review-id` — and they fail independently, so the stub keys on the subcommand
@@ -1021,6 +1026,30 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 { [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
     && pass "…and a refusal before the write leaves no stale baseline" \
     || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
+
+# A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks
+# waiting for a reader, and the top-of-file clearing skips a FIFO because it tests
+# `-f` — so the unconditional open below it was the one that waited, and the second
+# write is after the revocation has been posted, which is a hang with the phase half
+# advanced. A type check before the open is not the answer either: the open is what
+# blocks, and a check it precedes can be raced by whoever put the FIFO there. Both
+# writes run under the runtime watchdog now. Bounded by the harness as well, so a
+# regression hangs the case rather than the suite.
+if command -v mkfifo >/dev/null 2>&1; then
+    world; rm -f "$TMP/fifo.txt"
+    mkfifo "$TMP/fifo.txt" 2>/dev/null && {
+        got="$(run open 7 "$HEAD40" "$TMP/fifo.txt")"
+        [ "${got%%|*}" = 1 ] \
+            && pass "a FIFO baseline path stops the phase instead of hanging it" \
+            || die "a FIFO baseline path gave '${got}'"
+        grep -q -- '--add-reviewer' "$TMP/calls" \
+            && die "Copilot was requested despite the blocked baseline write" \
+            || pass "…with Copilot not requested"
+    }
+    rm -f "$TMP/fifo.txt"
+else
+    pass "no mkfifo on this platform, so the FIFO state is skipped by name"
+fi
 
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —
 # Copilot requested, the revocation posted — with no baseline anywhere, and the

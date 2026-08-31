@@ -2150,6 +2150,83 @@ for _rec_st in 0 3 1; do
         *) die "the record fence on 1 gave rc=$_rec_rc '$_rec_out'" ;;
     esac
 done
+
+# ── THE PHASE-OPEN FENCE, AND ITS REVIEWER SWITCH UNDER A RETURNING `exit` ─
+#
+# `WHO` selects the reviewer every round below is addressed to, and it is the one
+# assignment that fence still makes. Both ways it can fail are silent: a readonly
+# `WHO` keeps the value it had, which is Codex, so the Copilot rounds would poll a
+# reviewer that is already clean; a transforming attribute such as `declare -u`
+# stores a login that is nobody's, and `pr-review-state.sh` compares logins exactly,
+# so Copilot's verdict is never recognised and the phase re-arms forever.
+#
+# Written as an assignment and then a guard, the refusal did not hold: `exit` is a
+# builtin a startup file can replace with one that RETURNS, and `{ echo …; exit 1; }`
+# whose last command returns 0 SUCCEEDS — so the `||` was satisfied and execution
+# carried on with Copilot already requested. Run here, against a returning `exit`,
+# because that is the state no `grep` distinguishes from the correct shape.
+_opn_dir="$TMP_CL/opn"; mkdir -p "$_opn_dir" || die "the phase-open scratch directory could not be made"
+awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-copilot-phase.sh open N/, /^fi$/' "$SKILL" \
+    | sed '1s|^if .*|if "$RB_OPN_STUB"; then|' > "$_opn_dir/opn.sh"
+{ [ -s "$_opn_dir/opn.sh" ] && grep -q 'WHO="$COPILOT_BOT"' "$_opn_dir/opn.sh"; } \
+    && pass "the phase-open fence lifts, so the cases below reach the code they name" \
+    || die "the phase-open fence did not lift; the cases prove nothing"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$_opn_dir/stub0"; chmod +x "$_opn_dir/stub0"
+
+# THE ORDINARY RUN FIRST, or an attack case passes against a fence that never worked.
+_opn_rc=0
+_opn_out="$(RB_OPN_STUB="$_opn_dir/stub0" bash -c '
+    COPILOT_BOT="copilot-pull-request-reviewer[bot]"
+    trap '"'"'printf "WHO:[%s]" "${WHO-unset}"'"'"' EXIT
+    . "$1" 2>/dev/null' _ "$_opn_dir/opn.sh" 2>/dev/null)" || _opn_rc=$?
+case "$_opn_rc|$_opn_out" in
+    '0|WHO:[copilot-pull-request-reviewer[bot]]')
+        pass "…an opened phase switches WHO to Copilot and continues" ;;
+    *) die "the phase-open fence on 0 gave rc=$_opn_rc '$_opn_out'" ;;
+esac
+
+# A TRANSFORMING `WHO` PLUS A RETURNING `exit`, which is the combination. Either alone
+# is survivable: the transform is caught by the comparison, and the returning `exit`
+# has nothing to walk into while the value is right.
+#
+# WHAT IS ASSERTED IS THE SOURCED UNIT'S STATUS, not a marker after it. Nothing follows
+# the refusal INSIDE the fence — that is what the shape is for — so a `printf` placed
+# after `.` in this harness runs whatever the fence did, and asserting on it proves
+# only that `exit` was shadowed. The fence's last word is `[[ -n "" ]]`, so a refusal
+# makes the sourced unit report NON-ZERO even when `exit` returns, and that status is
+# the one thing a driver reading on can still act on.
+_opn_attack() {   # _opn_attack <label> <setup-line>
+    local _o _r=0
+    _o="$(RB_OPN_STUB="$_opn_dir/stub0" bash -c '
+        COPILOT_BOT="copilot-pull-request-reviewer[bot]"
+        '"$2"'
+        exit() { return 0; }
+        . "$1" 2>/dev/null; _s=$?
+        printf "S:%s WHO:[%s]" "$_s" "${WHO-unset}"' _ "$_opn_dir/opn.sh" 2>/dev/null)" || _r=$?
+    # THE REFUSAL PRINTS ON STDOUT, so the marker is not at the START of the capture —
+    # the driver aborts with prose for the operator, not with a sentinel on stderr.
+    case "$_o" in
+        *S:*) ;;
+        *) die "$1 produced no status: [$_o]"; return 0 ;;
+    esac
+    case "${_o##*S:}" in
+        0*) die "$1 was accepted with a returning exit: [$_o]" ;;
+        *)  pass "$1" ;;
+    esac
+}
+_opn_attack "…a transforming WHO refuses even with exit shadowed" "declare -u WHO"
+_opn_attack "…and a readonly WHO does too, rather than polling Codex again" \
+    "readonly WHO=\"chatgpt-codex-connector[bot]\""
+# AND THE GOOD PATH STILL REPORTS ZERO, or the two cases above pass against a fence
+# that refuses everything.
+_opn_attack_ok="$(RB_OPN_STUB="$_opn_dir/stub0" bash -c '
+    COPILOT_BOT="copilot-pull-request-reviewer[bot]"
+    exit() { return 0; }
+    . "$1" 2>/dev/null; printf "S:%s" "$?"' _ "$_opn_dir/opn.sh" 2>/dev/null)"
+[ "${_opn_attack_ok##*S:}" = "0" ] \
+    && pass "…while an unhindered switch reports success, so the refusals are not blanket" \
+    || die "the phase-open fence refuses the ordinary case too: '$_opn_attack_ok'"
+
 # …AND THE DOCUMENT BRANCHES ON THE STAGE ITSELF. `PHASE_RC` is gone with #239: the
 # stage is the `if` condition, and the pause is a `3)` arm of a `case $?` in its
 # `else`, so no name holds the status and no trailing test can become the block's.

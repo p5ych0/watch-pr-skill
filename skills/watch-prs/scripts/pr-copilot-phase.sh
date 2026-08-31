@@ -146,6 +146,18 @@ rb_load() { return 127; }
 # this arm the only trace is a bare exit status — the ordinary-looking empty
 # answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
 # own refusals report their own reason and their own status.
+# `run_limited` — the portable watchdog, for the baseline WRITES below. Opening a
+# path for writing can BLOCK: a FIFO at that name waits for a reader that never
+# arrives, and the second write happens after the Copilot-signoff revocation has been
+# posted, so a hang there leaves the phase partially advanced with no way to say so.
+# A `[[ -f ]]` test before the open does not answer it — the open is what blocks, and
+# a check it precedes can be raced by the same-UID process that put the FIFO there.
+# `pr-ci-state.sh` loads the same helper for the same reason; stock macOS ships no
+# GNU `timeout`, which is why it is shared rather than a one-line wrapper.
+rb_load "$_RB_SELF_DIR" testlib run_limited "ABORT:" 2>&1 || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
+    exit 1; }
 rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
@@ -220,7 +232,11 @@ if [[ $STAGE = open ]]; then
     # bootstrap, and it declines a path that does not exist yet — so a caller naming
     # one gets its clearing here. Empty is a LEGAL baseline, meaning no prior review,
     # which is why the write below is status-checked rather than left to the reader.
-    > "$PRIOR_FILE" || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'."; exit 1; }
+    # BOUNDED, because the open can block rather than fail. `run_limited` returns 124
+    # when it does, which is a refusal like any other here — the phase has not
+    # advanced and nothing has been posted.
+    run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$PRIOR_FILE" \
+        || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'; it is unwritable, or opening it blocked."; exit 1; }
 
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
@@ -338,7 +354,9 @@ if [[ $STAGE = open ]]; then
     # with — the phase would be irreversibly half-opened, with Copilot asked and the
     # caller reading a truncated id as the baseline. Writing first costs nothing,
     # because the driver reads the file only when this stage succeeds.
-    printf '%s\n' "$PRIOR_REVIEW" > "$PRIOR_FILE" \
+    # BOUNDED FOR THE SAME REASON, and it matters more here: the revocation is already
+    # posted, so a hang leaves the phase half-advanced with nothing said about it.
+    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$PRIOR_FILE" "$PRIOR_REVIEW" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
     _rb_prior_back="$(<"$PRIOR_FILE")" \
         || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }

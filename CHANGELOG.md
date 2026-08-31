@@ -2,7 +2,7 @@
 
 ## [2.0.88] — 2026-08-31
 
-- **`SKILL.md` is 2,603 characters shorter, and the driving shell no longer names
+- **`SKILL.md` is 2,341 characters shorter, and the driving shell no longer names
   the review baseline at all.** The review id captured immediately before a request
   is what the next watch needs, and it used to come back into the operator's own
   shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
@@ -44,7 +44,18 @@
   watchdog every other probe in the watch uses, and an expiry is `state=error` like
   any other unreadable answer. And a NUL byte is not an empty baseline: `$(<file)`
   drops NUL, so a file holding one read back as the empty string, which is the
-  legitimate "there is no prior review to wait past". #243.
+  legitimate "there is no prior review to wait past". The read is bounded by the
+  watch's OWN remaining deadline rather than a fixed limit, so `--timeout` still means
+  what it says, and `pr-copilot-phase.sh open` bounds its two baseline WRITES the same
+  way — opening a path for writing blocks for a reader, and the second of those writes
+  is after the revocation has been posted, where a hang leaves the phase half advanced.
+
+  And the reviewer switch that follows a successful `open` is a condition rather than
+  an assignment and a guard. `exit` is a builtin a startup file can replace with one
+  that RETURNS, and the guard's `{ echo …; exit 1; }` then SUCCEEDED — so a readonly
+  `WHO` left the Copilot rounds polling Codex, and a transforming one left them polling
+  a login that is nobody's, which `pr-review-state.sh` never matches, so the phase
+  re-armed forever. #243.
 
 ## [2.0.87] — 2026-08-31
 
