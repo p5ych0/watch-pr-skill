@@ -1258,6 +1258,31 @@ refusal arm and prints it unless `echo` has been shadowed, `post` asks the conte
 question again and refuses, so no summary is posted and no pass requested, and the
 allocation the paths come from cannot produce the aliased case at all.
 
+
+## THE FILE IS READ ONCE, because two reads are two different values.
+
+The check proved the head in two steps: an outer `case` for the LENGTH, and an inner one,
+on a second `$(<…)` of the same path, for the ALPHABET. A value that is forty characters
+when the first read runs and something else when the second does satisfies both — and the
+path is published in argv, so a same-UID process is all it takes.
+
+What that gates is the THREAD RESOLVES. They are the irreversible part of the round and
+they happen before `post` gets to re-prove anything, so this is the only proof standing
+between a gate that did not write a head and a round that resolves threads claiming it
+did. A check-then-use is a poor thing to put there.
+
+One read and one `case` with three arms answers both questions at once: a non-hex value
+or an empty one is refused, exactly forty hex characters continues, and any other length
+is refused. No name holds the value, because a name in this shell is one an operator's
+startup file can have made readonly or aimed elsewhere — which is why the two reads were
+there in the first place, and why the answer is one read rather than one variable.
+
+The aliasing test that used to wrap all of this is gone with it. It re-refused a head file
+that is the summary file, which `gate` already refuses by `=` and by `-ef` before it
+empties anything — and this code runs only in the arm where `gate` exited 0, so the branch
+could not fire. `CLAUDE.md` records what a second copy of a rule costs; an unreachable one
+costs the same and proves less.
+
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
 Twenty-four lines of this block were the two invocations, the exit statuses and the

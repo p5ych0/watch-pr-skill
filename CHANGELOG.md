@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.89] — 2026-08-31
+
+- **The gated head is read once, and the check that cannot fire is gone.** Between the
+  gate and the thread replies, `SKILL.md` proved the head file `pr-close-round.sh gate`
+  had just written — in two steps, an outer `case` for the LENGTH and an inner one, on a
+  SECOND read of the same path, for the alphabet. A value that is forty characters when
+  the first read runs and something else when the second does satisfied both, and the
+  path is published in argv.
+
+  What that gates is the thread RESOLVES: they are the irreversible part of the round and
+  they happen before `post` can re-prove anything, so this is the only proof standing
+  between a gate that did not write a head and a round that resolves threads claiming it
+  did. One read and one `case` with three arms answers both questions at once.
+
+  The aliasing test that wrapped it is removed. It re-refused a head file that is the
+  summary file, which `gate` already refuses by `=` and by `-ef`, in the arm reached only
+  when `gate` exited 0 — a branch that could not fire. The contract check that anchored on
+  it moved to the read itself, and now requires exactly ONE occurrence at any indent: the
+  old form required zero at column zero, which passed while the same read sat twice inside
+  the branch. #247.
+
 ## [2.0.88] — 2026-08-31
 
 - **`SKILL.md` is 1,156 characters shorter, and the driving shell no longer names
