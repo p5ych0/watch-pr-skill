@@ -69,6 +69,42 @@ grep -q 'SUMMARY_FILE' <<<"$out" \
     && pass "…and the finding names it" \
     || die "the finding does not name the variable: $out"
 
+# ── AND A `{ VAR= }` ASSIGNMENT IS AN ASSIGNMENT ──────────────────────────
+# A guarded assignment written as the second term of a condition —
+# `… && { VAR=x; [[ $VAR = x ]]; }` — is where SKILL.md proves a name it is about to
+# mutate. The scan looked for a line start or a `;` before the name, so it saw none of
+# those and reported the variable as never assigned, on a document that assigns it twice.
+# Respelling the source to suit the scan was the other option and it is the wrong way
+# round: `{ VAR=` is valid Bash and means what it says.
+R="$(mkroot '# skill
+```bash
+OWNER=acme
+if [ -n "$OWNER" ] && { WHO="reviewer"; [ "$WHO" = reviewer ]; }
+then
+    echo "$WHO"
+fi
+```
+')"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+grep -q 'undefined_variable' <<<"$out" \
+    && die "a { VAR= } assignment was not counted as one (rc=$rc out='$out')" \
+    || pass "a variable assigned inside a braced guard is not reported as undefined"
+# AND THE CHECK STILL CATCHES ITS OWN CASE in the same document, or the arm above
+# passes because the scan stopped looking rather than because it understood the brace.
+R="$(mkroot '# skill
+```bash
+OWNER=acme
+if [ -n "$OWNER" ] && { WHO="reviewer"; [ "$WHO" = reviewer ]; }
+then
+    echo "$MISSING_NAME"
+fi
+```
+')"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'MISSING_NAME' <<<"$out"; } \
+    && pass "…while an unassigned name beside it is still a finding" \
+    || die "the brace case blinded the scan (rc=$rc out='$out')"
+
 # …AND A VARIABLE THE SHELL ITSELF SUPPLIES IS NOT ONE. `TMPDIR` and `RANDOM` are
 # read by the setup block and assigned by nobody, which is correct — and until the
 # list said so, the gate reported a finding on every session for a name `SKILL.md`

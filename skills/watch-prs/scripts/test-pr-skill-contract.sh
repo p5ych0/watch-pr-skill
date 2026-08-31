@@ -2159,6 +2159,85 @@ for _rec_st in 0 3 1; do
     esac
 done
 
+# ── THE STEP-2 REVIEWER ASSIGNMENT, LIFTED AND RUN ────────────────────────
+#
+# `WHO` is set twice: here, and switched in step 7. Both carry the same subshell probe,
+# and until now only the step-7 one was EXECUTED — this site was covered by a `grep` for
+# setup's probe, so removing the probe from this fence left the suite green while the
+# opening request ran against an aliased name.
+#
+# The state is a nameref introduced AFTER setup, which is the one setup cannot see: the
+# assignment writes the reviewer login into whatever `WHO` points at, and the
+# postcondition beside it agrees because it reads back through the same alias. Aimed at
+# `PRIOR_FILE` it replaces the baseline path, and the watch that follows the opening
+# request is then handed a reviewer login as its file.
+_w2_dir="$TMP_CL/w2"; mkdir -p "$_w2_dir" || die "the step-2 scratch directory could not be made"
+# ANCHORED ON `AUTO_REVIEW=`, WHICH IS NOT PART OF THE DEFENCE. Anchored on the probe
+# instead, removing the probe broke the LIFT — so the cases below failed because there
+# was nothing to run rather than because the guard was gone, which is a proof that a
+# renamed variable would satisfy just as well. The range starts at the line above the
+# fence and that line is harmless to source.
+awk '/^AUTO_REVIEW=/, /^fi$/' "$SKILL" > "$_w2_dir/w2.sh"
+{ [ -s "$_w2_dir/w2.sh" ] && grep -q 'WHO="$CODEX_BOT"' "$_w2_dir/w2.sh"; } \
+    && pass "the step-2 reviewer assignment lifts, so the cases below reach the code they name" \
+    || die "the step-2 reviewer assignment did not lift; the cases prove nothing"
+
+# THE ORDINARY RUN FIRST, or the attacks below pass against a fence that never worked.
+_w2_ok="$(bash -c '
+    CODEX_BOT="chatgpt-codex-connector[bot]"
+    . "$1" 2>/dev/null; printf "S:%s WHO:[%s]" "$?" "${WHO-unset}"' _ "$_w2_dir/w2.sh" 2>/dev/null)"
+case "$_w2_ok" in
+    'S:0 WHO:[chatgpt-codex-connector[bot]]')
+        pass "…an unhindered step 2 sets WHO to Codex and continues" ;;
+    *) die "the step-2 assignment on a clean shell gave '$_w2_ok'" ;;
+esac
+
+# A NAMEREF INTRODUCED AFTER SETUP, aimed at the baseline path. The target must be
+# untouched, and the fence must not continue — the opening request is the NEXT fence and
+# is reached only if this one does not stop the shell.
+if [ "$_rb_has_n" = yes ]; then
+    _w2_nr_rc=0
+    _w2_nr="$(bash -c '
+        CODEX_BOT="chatgpt-codex-connector[bot]"
+        PRIOR_FILE="/the/baseline/path"
+        declare -n WHO=PRIOR_FILE
+        . "$1" 2>/dev/null
+        printf "P:[%s]" "$PRIOR_FILE"' _ "$_w2_dir/w2.sh" 2>/dev/null)" || _w2_nr_rc=$?
+    case "$_w2_nr" in
+        *'P:[chatgpt-codex-connector[bot]]'*)
+            die "an aliased WHO overwrote the baseline path before the opening request: $_w2_nr" ;;
+        *'P:[/the/baseline/path]'*)
+            die "an aliased WHO was accepted at step 2; the request would run against it: $_w2_nr" ;;
+        *)  [ "$_w2_nr_rc" -ne 0 ] \
+                && pass "…and a nameref introduced after setup stops step 2 before the request" \
+                || die "an aliased WHO neither refused nor reported its target: $_w2_nr" ;;
+    esac
+else
+    pass "this shell has no declare -n, so the step-2 alias state is skipped by name"
+fi
+
+# AND THE ATTRIBUTES TOO, with `exit` shadowed — the same combination step 7 is run
+# against, because this fence has the same shape and the same last word.
+_w2_attack() {   # _w2_attack <label> <setup-line>
+    local _o _r=0
+    _o="$(bash -c '
+        CODEX_BOT="chatgpt-codex-connector[bot]"
+        '"$2"'
+        exit() { return 0; }
+        . "$1" 2>/dev/null; printf "S:%s" "$?"' _ "$_w2_dir/w2.sh" 2>/dev/null)" || _r=$?
+    case "$_o" in
+        *S:*) ;;
+        *) die "$1 produced no status: [$_o]"; return 0 ;;
+    esac
+    case "${_o##*S:}" in
+        0*) die "$1 was accepted with a returning exit: [$_o]" ;;
+        *)  pass "$1" ;;
+    esac
+}
+_w2_attack "…a transforming WHO refuses at step 2 even with exit shadowed" "declare -u WHO"
+_w2_attack "…and a readonly WHO does too, before anything is posted" \
+    "readonly WHO=\"copilot-pull-request-reviewer[bot]\""
+
 # ── THE PHASE-OPEN FENCE, AND ITS REVIEWER SWITCH UNDER A RETURNING `exit` ─
 #
 # `WHO` selects the reviewer every round below is addressed to, and it is the one

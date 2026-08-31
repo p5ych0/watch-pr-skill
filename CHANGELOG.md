@@ -2,7 +2,7 @@
 
 ## [2.0.88] — 2026-08-31
 
-- **`SKILL.md` is 1,434 characters shorter, and the driving shell no longer names
+- **`SKILL.md` is 1,248 characters shorter, and the driving shell no longer names
   the review baseline at all.** The review id captured immediately before a request
   is what the next watch needs, and it used to come back into the operator's own
   shell: the opening request read it into `PRIOR_REVIEW`, the round close read it
@@ -66,7 +66,16 @@
   floor rather than the answer, because the driving shell is long-lived and a `declare
   -n` executed afterwards is invisible to a probe that already passed — so the same
   probe runs at each site that assigns the name, in a subshell, so that the write it
-  makes to prove the point cannot land on the target. #243.
+  makes to prove the point cannot land on the target. The wait step's third assignment
+  is REMOVED rather than given a third probe: it only restated a value already set, and
+  an assignment is where a nameref does its damage. #243.
+
+- **`pr-selfcheck.sh` counts `{ VAR= }` as an assignment.** A guarded assignment written
+  as the second term of a condition is where `SKILL.md` proves a name before mutating it,
+  and the scan looked for a line start or a `;` before the name — so it reported a
+  variable as never assigned in a document that assigns it twice. Respelling the source
+  to suit the scan was the other option and it is the wrong way round: `{ VAR=` is valid
+  Bash and means what it says.
 
 ## [2.0.87] — 2026-08-31
 

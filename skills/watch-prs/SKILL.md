@@ -467,8 +467,10 @@ Do not sit in a polling loop by hand. `pr-watch.sh` blocks until there is
 something to act on and prints one line when the state changes:
 
 ```bash
-WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun — set and PROVEN
-                        # in step 2 and step 7; this line only names which one
+# $WHO is the reviewer this round is addressed to. It is set and PROVEN in step 2 and
+# switched, proven again, in step 7 — so it is not re-assigned here: an assignment is
+# where a nameref does its damage, and one that only restates a value already set would
+# be a third site to guard for nothing. Codex in the Codex phase, Copilot after step 7.
 # $PRIOR_FILE holds the authoritative review id captured BEFORE the request that
 # this watch is waiting on — written by step 2, step 5 and step 7. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than

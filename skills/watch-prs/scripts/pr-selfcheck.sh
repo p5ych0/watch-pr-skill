@@ -366,9 +366,15 @@ if [ -f "$SKILL" ]; then
     # cannot catch the bug it was written for is the failure this repository has
     # already deleted one checker over, so this is verified by a fixture that
     # removes the real assignment and requires the finding.
+    # `{` COUNTS AS AN ASSIGNMENT POSITION, alongside line start and `;`. A guarded
+    # assignment written as the second term of a condition — `… && { VAR=x; [[ $VAR = x ]]; }`
+    # — is an ordinary assignment that this list did not see, so the name read back on the
+    # next line was reported as never assigned. The alternative was respelling the source to
+    # suit the scanner, which is the tail wagging the dog: `{ VAR=` is valid Bash and means
+    # what it says.
     assigned="$(printf '%s\n' "$code" \
-        | nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
+        | nomatch grep -oE '(^|;|\{)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
+        | sed -E 's/^[;{[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
     # …plus the variables a SOURCED library assigns. SKILL.md loads
     # `identitylib.sh` and calls `rb_identity`, which SETS `HOST`, `OWNER` and
     # `REPO` rather than printing them — so those names are assigned, just not in

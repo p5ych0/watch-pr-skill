@@ -447,7 +447,13 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
         # Reporting `state=error` there stops the round over a clock the caller set.
         # With budget left it is the read that is stuck, which is a different answer
         # and a different status.
-        124) remaining_s; [ $? -eq 2 ] && timed_out
+        # AND THE THIRD CLOCK READ HAS ITS OWN ANSWER. `remaining_s` reports 2 for a
+        # passed deadline and 1 for a clock it cannot read, and only the first is a
+        # timeout — falling through on a 1 blamed a baseline path that may be fine and
+        # sent the operator to the wrong recovery.
+        124) remaining_s; _bl_r3=$?
+             [ "$_bl_r3" -eq 2 ] && timed_out
+             [ "$_bl_r3" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
              echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_blocked detail=$(q "$AFTER_REVIEW_FILE")" >&2
              exit 2 ;;
         *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_unreadable detail=$(q "$AFTER_REVIEW_FILE")" >&2
