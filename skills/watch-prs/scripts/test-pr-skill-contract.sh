@@ -4176,9 +4176,23 @@ grep -q 'cd "\$REPO_DIR" && /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-merge-gate.sh
 # written to stop reporting on prose reported on prose in the other direction. Prose is
 # where this document explains what the helpers do; it must be able to name a GraphQL
 # field without being accused of calling one. What is a fetch is what a shell would run.
-_tp_scan() {   # _tp_scan <markdown-file> ; prints the number of fenced thread fetches
-    awk '/^[[:space:]]*```bash[[:space:]]*$/{f=1;next} /^[[:space:]]*```[[:space:]]*$/{f=0;next} f' \
-        "$1" 2>/dev/null | grep -cE 'reviewThreads|pullRequest\(number' || true
+# COMMENT LINES ARE NOT CODE EITHER. These fences deliberately keep a CLAIM beside each
+# line, so a comment naming `reviewThreads` is routine — and counting one made the third
+# version of this check fail on explanation, exactly as the first two did on prose outside
+# the fences. What a shell would run is what is scanned: fenced, and not a comment.
+#
+# AND THE EXTRACTION'S STATUS IS TAKEN. Written as a pipeline ending in `|| true`, an
+# `awk` that could not read its input produced nothing, `grep -c` printed `0`, and the
+# absence assertion passed WITHOUT HAVING PARSED ANYTHING — the ordinary-looking empty
+# answer this repository forbids. `grep`'s own no-match is status 1 and is not a failure;
+# anything above that, or a failed extraction, is.
+_tp_scan() {   # _tp_scan <markdown-file> ; prints the count, non-zero if it could not parse
+    local _code _n _rc
+    _code="$(awk '/^[[:space:]]*```bash[[:space:]]*$/{f=1;next} /^[[:space:]]*```[[:space:]]*$/{f=0;next} f && $0 !~ /^[[:space:]]*#/' "$1" 2>/dev/null)" \
+        || return 1
+    _n="$(grep -cE 'reviewThreads|pullRequest\(number' <<<"$_code")"; _rc=$?
+    [ "$_rc" -le 1 ] || return 1
+    printf '%s' "$_n"
 }
 _tp_code="$TMP_CL/tp-code.sh"
 awk '/^[[:space:]]*```bash[[:space:]]*$/{f=1;next} /^[[:space:]]*```[[:space:]]*$/{f=0;next} f' \
@@ -4186,9 +4200,11 @@ awk '/^[[:space:]]*```bash[[:space:]]*$/{f=1;next} /^[[:space:]]*```[[:space:]]*
 [ -s "$_tp_code" ] \
     && pass "the document's fenced code extracts, so the scan below reads something" \
     || die "no fenced code extracted from SKILL.md; the thread-fetch scan would pass vacuously"
-[ "$(_tp_scan "$SKILL")" -eq 0 ] \
+_tp_n="$(_tp_scan "$SKILL")" \
+    || die "the document's fenced code could not be scanned; the absence below would be an unparsed zero"
+[ "$_tp_n" -eq 0 ] \
     && pass "the document fetches no review threads itself; the paginated walk is the helpers'" \
-    || die "SKILL.md fetches review threads in $(_tp_scan "$SKILL") fenced place(s); that walk belongs in a helper where its pagination is executed"
+    || die "SKILL.md fetches review threads in $_tp_n fenced place(s); that walk belongs in a helper where its pagination is executed"
 # AND THE SCAN IS SHOWN TO TELL THE TWO APART, on staged documents rather than by
 # reading it. The first version failed on a SENTENCE naming the field, which is how this
 # check earned its second round; without these a later widening back to the whole file
@@ -4197,10 +4213,20 @@ printf 'Prose about how `pr-findings.sh` walks `reviewThreads` with a cursor,\na
 [ "$(_tp_scan "$TMP_CL/tp-prose.md")" -eq 0 ] \
     && pass "…and prose naming the GraphQL field is not a fetch" \
     || die "a sentence naming reviewThreads was counted as a fetch"
+printf 'text\n\n```bash\n# A claim about how the helper walks `reviewThreads` with a cursor.\n# WHY:\necho ok\n```\n' > "$TMP_CL/tp-comment.md"
+[ "$(_tp_scan "$TMP_CL/tp-comment.md")" -eq 0 ] \
+    && pass "…and a fenced COMMENT naming it is not a fetch either" \
+    || die "a comment inside a fence was counted as a fetch"
 printf 'text\n\n```bash\ngh api graphql -f query=%s{ pullRequest(number: 1) { reviewThreads { nodes { id } } } }%s\n```\n' "'" "'" > "$TMP_CL/tp-code.md"
 [ "$(_tp_scan "$TMP_CL/tp-code.md")" -eq 1 ] \
     && pass "…while a fenced query is" \
     || die "a fenced reviewThreads query was not counted as a fetch"
+# AND AN INPUT IT CANNOT READ IS A FAILURE, not a zero. The absence assertion is the
+# fail-open direction: a scan that parsed nothing and reported none looks exactly like a
+# document with no fetch in it.
+_tp_scan "$TMP_CL/tp-does-not-exist.md" >/dev/null 2>&1 \
+    && die "the scan reported a count for an input it could not read" \
+    || pass "…and an unreadable input fails the scan rather than counting zero"
 
 # ── the instruction files carry the scope + issue policy ───────────────────
 # These are what reach the reviewers; the loop depends on them, so a missing
