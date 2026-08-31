@@ -11,16 +11,19 @@
   `printf | grep` gate's over-reporting and the `pipefail` race behind it, which the
   driver never applies.
 
-- **A contract check that could not fail now can.** `test-pr-skill-contract.sh` required
-  `hasNextPage` to appear at least once in `SKILL.md` and reported it as "the thread fetch
-  that remains in the document is paginated". No thread fetch remains — the only match was
-  the word inside a sentence *describing* the helper — so the check passed on prose and
-  would have gone on passing after a real unpaginated fetch was added. It asserts the
-  absence now, which is what is true: the document fetches no review threads itself,
-  because the paginated walk lives where its pagination is executed — and it reads the
-  FENCES rather than the file, so a sentence naming a GraphQL field is not accused of
-  calling one. Prose is where this document explains what the helpers do; what counts as
-  a fetch is what a shell would run. #253.
+- **A contract check that could not fail is removed rather than fixed.** It required
+  `hasNextPage` to appear at least once in `SKILL.md` and reported that as "the thread
+  fetch that remains in the document is paginated". No thread fetch remains — the only
+  match was the word inside a sentence *describing* the helper — so it passed on prose,
+  and its one possible failure was somebody deleting that sentence, which is what
+  happened.
+
+  Rewriting it as a search for `reviewThreads` produced one variation per review round: it
+  failed on prose outside the fences, then on a comment inside one, then on a trailing
+  comment after real code, and the next remedy would have been a shell lexer. Every
+  denylist is one spelling behind. The whitelist beside it already closes the case —
+  every executable line in the findings section must be a `pr-findings.sh` invocation, so
+  a walk pasted where one would plausibly go fails however it is spelt. #253.
 
 ## [2.0.91] — 2026-08-31
 
