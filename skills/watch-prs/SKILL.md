@@ -548,14 +548,6 @@ non-blocking channel and does not gate the merge — with one exception, below.
   summarise: a truncated or malformed page is indistinguishable from a shorter
   review, and everything downstream would be based on it.
 
-The script paginates, validates each page's shape before formatting anything, and
-refuses to guess when `hasNextPage` is missing or a thread has no readable
-comment. That is deliberately not inline here: this logic spent three review
-rounds as a snippet in this file, where no test ran it, and each round found
-another way for it to fail open. The repository has been here before — the
-merge-range check lived inline "where nothing executed it" and became a script for
-the same reason.
-
 **When a reviewer's state is `blocked`, read its review body too.** A
 `CHANGES_REQUESTED` review can carry its whole argument in the body with no
 inline comment — the merge gate then refuses to pass while `list` shows nothing to
@@ -731,21 +723,16 @@ wait, so a finding caught here is worth several caught there.
 
 It checks what can be checked without judgement: every variable used in this
 file is assigned in it, every script parses, every helper this file drives is
-shipped, every script has a test, no fixture pipes a `printf` into `grep` — the
-gate reports that shape whatever the reader, while the race itself needs an
-early-exiting one such as `grep -q`, which under `pipefail` reports a present line
-as missing; a producer the check does not name is left to review — and the suite
-passes. That set is not
-arbitrary — each one is a mistake that actually shipped from this repository.
+shipped, every script has a test, no fixture pipes a `printf` into `grep`, and
+the suite passes. That set is not arbitrary — each one is a mistake that actually
+shipped from this repository.
 
 **Then read your own diff against the list below.** These are the classes that
 produced the rounds, and none of them is mechanical:
 
 - **Did I fix the instance or the class, within this diff?** A finding names one
   place. Before fixing it, search for the same shape **everywhere else this PR
-  already changes** and fix those together — the same fix arrived in three
-  consecutive rounds (head validation, then non-zero statuses, then record
-  identity) because each round closed one site. A copy in a file this PR does not
+  already changes** and fix those together. A copy in a file this PR does not
   touch is recorded and left to the operator, exactly as the scope rules above
   require; this check asks whether the class was closed inside the diff, never
   whether the diff was widened to reach it.
@@ -759,8 +746,7 @@ produced the rounds, and none of them is mechanical:
 - **Can each new assertion actually fail?** Revert the fix and watch the test
   fail *for the reason it names*. An assertion matching prose that wrapped across
   a line, or a token that also appears elsewhere in the file, passes against the
-  unfixed code — which is worse than no test, because it converts an unverified
-  assumption into a green tick.
+  unfixed code.
 - **Did I answer the finding, or just silence it?** Resolving a thread without
   fixing or arguing is the one move that guarantees it comes back.
 

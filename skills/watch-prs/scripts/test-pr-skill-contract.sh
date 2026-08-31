@@ -4158,14 +4158,31 @@ grep -q 'cd "\$REPO_DIR" && /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-merge-gate.sh
     && pass "…and the gate is invoked from the captured repository root" \
     || die "a cd between setup and the merge would repoint every gate"
 
-# ── thread pagination ──────────────────────────────────────────────────────
-# A truncated thread list reads exactly like a shorter review. `SKILL.md` fetches
-# threads in ONE place now — step 4, where findings are read — because the merge
-# gate's own walk went into `pr-merge-gate.sh`, where a cursor cycle, a malformed
-# `hasNextPage` and a partial response are each an executed case.
-[ "$(grep -c 'hasNextPage' "$SKILL")" -ge 1 ] \
-    && pass "the thread fetch that remains in the document is paginated" \
-    || die "a thread fetch is not paginated"
+# ── the thread walk is not here, and this is NOT scanned for ──────────────
+# A truncated thread list reads exactly like a shorter review, so the walk lives in
+# `pr-findings.sh` and `pr-merge-gate.sh`, where a cursor cycle, a malformed
+# `hasNextPage` and a partial response are each an EXECUTED case.
+#
+# THERE WAS A SCAN HERE AND IT IS GONE, because it was a denylist and every denylist is
+# one spelling behind. It began by requiring `hasNextPage` to appear at least once and
+# calling that "the thread fetch that remains in the document is paginated" — but no
+# thread fetch remains, so the only match was the word inside a SENTENCE DESCRIBING the
+# helper. That check reported PASS on prose and could never have failed on a fetch: its
+# one failure mode was somebody deleting the sentence, which is what happened.
+#
+# Replacing it with a search for `reviewThreads` produced one variation per review round.
+# It failed on prose outside the fences; restricted to fences, it failed on a COMMENT
+# inside one; restricted to non-comment lines, it failed on a trailing `# reviewThreads`
+# after real code — and the next remedy on offer was to strip comments by shell quoting
+# rules, which is a LEXER. This repository has built and deleted two of those, and
+# `CLAUDE.md` says not to build a third.
+#
+# WHAT COVERS IT INSTEAD is the whitelist in § the findings section runs only the helper:
+# every executable line there must be a `pr-findings.sh` invocation, so a thread walk
+# pasted into the one section where it would plausibly go fails however it is spelt.
+# That check's own comment makes this argument about `gh api` denylists — the scan
+# standing next to it was the shape it warns against. Any other section is review's job,
+# which is where it was before: the scan never guarded a fetch, only a sentence.
 
 # ── the instruction files carry the scope + issue policy ───────────────────
 # These are what reach the reviewers; the loop depends on them, so a missing
