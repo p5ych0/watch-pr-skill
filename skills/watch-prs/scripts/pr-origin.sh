@@ -901,8 +901,16 @@ fi
 # SCP-LIKE REMOTES ARE LEFT ALONE — the `user@host:path` form has no `://`, and its user
 # part is a login with no secret in it, so there is nothing to redact and rewriting it
 # would only make the message harder to match against the operator's config.
-rb_redact() {   # prints its argument with any URL userinfo replaced
+rb_redact() {   # prints its argument with any URL userinfo, query and fragment replaced
     local _u="$1" _scheme _rest _auth _path
+    # THE QUERY AND FRAGMENT GO FIRST, AND FROM EVERY FORM. A credential does not have to
+    # be in the userinfo: `https://host/org/repo.git?access_token=…` is a remote git
+    # accepts, and the token is in the query. What identifies a remote for this message is
+    # the scheme, host and path, so nothing diagnostic is lost by dropping what follows
+    # them — and this runs before the scheme test so an SCP-like value is covered too.
+    case "$_u" in
+        *[?#]*) _u="${_u%%[?#]*}?***" ;;
+    esac
     case "$_u" in
         *://*) _scheme="${_u%%://*}"; _rest="${_u#*://}" ;;
         *) printf '%s' "$_u"; return 0 ;;

@@ -370,6 +370,25 @@ case "${got#*|}" in
     *) die "the refusal redacted more than the userinfo: ${got#*|}" ;;
 esac
 
+# AND A CREDENTIAL OUTSIDE THE USERINFO IS REDACTED TOO. A token does not have to be
+# between `//` and the `@`: `https://host/org/repo.git?access_token=…` is a remote git
+# accepts, and the secret is in the query. Redacting only the userinfo would have printed
+# it in full.
+_credq='https://example.com/acme/widget.git?access_token=s3cr3t-query-token'
+got="$(run pin REVIEW_BUS_REMOTE="$_credq")"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a query-credential pin that is not this origin is still refused" \
+    || die "a query-credential planted pin gave '${got}'"
+case "${got#*|}" in
+    *s3cr3t-query-token*) die "the refusal printed the query token: ${got#*|}" ;;
+    *access_token*)       die "the refusal printed the query parameter: ${got#*|}" ;;
+    *)                    pass "…without printing the query or its token" ;;
+esac
+case "${got#*|}" in
+    *example.com/acme/widget.git*) pass "…while still naming the host and path" ;;
+    *) die "the query redaction took the host or path with it: ${got#*|}" ;;
+esac
+
 # AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
 # the directory has been created and before anything is written, so the cleanup must be
 # the one that removes only the directory. With the phase already `post` it removed the
