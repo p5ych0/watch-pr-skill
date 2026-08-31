@@ -317,6 +317,40 @@ pin_out="$(<"$TMP/pin.value/pin")"
     && pass "…and an unset pin is an empty answer, not an error" \
     || die "an unset pin gave rc=$pin_rc out='$pin_out'"
 
+# ── …AND A PIN THAT IS NOT THIS CHECKOUT'S IS REFUSED ─────────────────────
+#
+# The hole #230 named. The origin crosses from `pr-setup.sh` to the driver as a NAMED
+# FILE, and a same-UID process that replaces it between the write and the driver's open
+# is what the driver parses, exports and pins. `pin` used to report the inherited value
+# and stop, so a planted-but-VALID remote came back equal to itself and every later post,
+# signoff and merge was addressed to the wrong repository.
+#
+# The planted value here is well-formed and parses — that is the point. What makes it
+# wrong is that it is not what `fetch` and `push` would use in this checkout.
+got="$(run pin REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git')"
+{ [ "${got%%|*}" != 0 ] && grep -qF 'is not this checkout' <<<"${got#*|}"; } \
+    && pass "a pin that is not this checkout's origin is refused" \
+    || die "a planted pin gave '${got}'"
+case "${got#*|}" in
+    *not-this-one*) pass "…naming the value it was given" ;;
+    *)              die "the refusal does not name the planted value: ${got#*|}" ;;
+esac
+# AND IT WRITES NO PIN. A refusal that still left the planted value in the leaf would be
+# read back by the driver and pinned anyway.
+rm -rf "$TMP/plant"
+run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
+    HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" pin "$TMP/plant" >/dev/null 2>&1; plant_rc=$?
+{ [ "$plant_rc" != 0 ] && [ ! -e "$TMP/plant/pin" ]; } \
+    && pass "…and leaves no pin for the caller to read" \
+    || die "a refused pin left rc=$plant_rc and pin=[$(cat "$TMP/plant/pin" 2>/dev/null)]"
+# AND THE MATCHING PIN IS STILL ACCEPTED, or the two cases above pass by refusing
+# everything — which would stop every session rather than the planted ones.
+got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
+{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+    && pass "…while the checkout's own origin still pins" \
+    || die "the genuine pin was refused: '${got}'"
+
 # ── MODES ARE NAMED, AND AN UNKNOWN ONE IS REFUSED ─────────────────────────
 got="$(run '')"
 { [ "${got%%|*}" = 1 ] && grep -qF 'a mode is required' <<<"${got#*|}"; } \

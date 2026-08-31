@@ -700,26 +700,6 @@ _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 RB_PHASE=post
 
 
-if [[ $MODE = pin ]]; then
-    # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
-    # is a real answer it needs — the one that says the export did not take. An
-    # empty line and status 0 says exactly that; refusing would make the two
-    # failures indistinguishable from this side.
-    # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
-    # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
-    # a failed write leaves exactly what a legitimately unset pin leaves: an empty
-    # file and success. The caller could not tell them apart, so this one says.
-    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
-        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
-    # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
-    # EXIT handler would remove the leaf this run just wrote, so it has to go. The
-    # SIGNAL handlers stay armed through the final command: resetting them too left
-    # a window in which a `TERM` terminated the helper by default, with no cleanup
-    # — and the caller, seeing a non-zero status, removes nothing, so a completed
-    # directory leaked.
-    trap - EXIT
-    exit 0
-fi
 
 # THE STATUS IS TAKEN, NOT JUST THE OUTPUT. `git remote get-url origin` can print
 # a plausible URL and then exit non-zero — a partially configured remote, a
@@ -835,6 +815,7 @@ done
 # is strictly the stronger of the two, so closing the weaker one bought no
 # guarantee and cost agreement with git in every case above. That boundary is
 # recorded at the bottom of this file, where it already was.
+rb_read_origin() {   # sets $_rb_origin from the checkout, or refuses
 _rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" \
     git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     rb_refuse "ABORT: could not read origin in $(command pwd 2>/dev/null)"; }
@@ -861,6 +842,62 @@ if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
     rb_refuse "ABORT: origin contains a newline; it cannot be a single value"
 fi
+}
+
+# ── pin: what a child inherits, AND whether it is this checkout's ─────────
+#
+# `pin` used to write the inherited value and stop. That answered "does the export
+# reach a child" and nothing else — so a value the driver had been fed instead of the
+# one setup wrote was exported, inherited, reported back, and compared equal to
+# ITSELF. The origin crosses from `pr-setup.sh` to the driver as a NAMED FILE, and a
+# same-UID process that replaces it between the write and the driver's open is what
+# the driver then parses and pins. Every later post, signoff and merge is addressed by
+# that value, so the failure is a WRONG REPOSITORY rather than a stall.
+#
+# Nothing downstream caught it. The pin proves inheritance, not provenance;
+# `rb_identity` asks whether a string is a usable identity, not whether it is THIS
+# checkout's. Both agree with a planted-but-valid remote.
+#
+# So this asks the checkout. It is the question actually at stake — "is what you
+# exported what `fetch` and `push` would use here" — and this process is where it can
+# be asked: privileged, in the checkout, with `git` not a name anything can shadow.
+# #230.
+if [[ $MODE = pin ]]; then
+    # AN EMPTY PIN IS STILL A REAL ANSWER, and it is answered before anything is
+    # verified. The caller is asking what a child inherits, and "nothing" is the reply
+    # that says the export did not take; refusing here would make that indistinguishable
+    # from a checkout this helper could not read. There is also nothing to verify: an
+    # empty value cannot be the wrong repository.
+    if [[ -n ${REVIEW_BUS_REMOTE-} ]]; then
+        # THE COMPARISON IS AGAINST THE CHECKOUT, NOT AGAINST THE FILE. Comparing with
+        # what `pr-setup.sh` wrote would compare the planted value with the planted
+        # file. `rb_read_origin` refuses on its own if origin cannot be read — which in
+        # this flow means something moved since setup read it, and is not a state to
+        # write a pin for.
+        rb_read_origin
+        [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
+            || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$REVIEW_BUS_REMOTE', origin '$_rb_origin'); the value the driver exported did not come from this repository"
+    fi
+    # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
+    # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
+    # a failed write leaves exactly what a legitimately unset pin leaves: an empty
+    # file and success. The caller could not tell them apart, so this one says.
+    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
+        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
+    # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
+    # EXIT handler would remove the leaf this run just wrote, so it has to go. The
+    # SIGNAL handlers stay armed through the final command: resetting them too left
+    # a window in which a `TERM` terminated the helper by default, with no cleanup
+    # — and the caller, seeing a non-zero status, removes nothing, so a completed
+    # directory leaked.
+    trap - EXIT
+    exit 0
+fi
+
+# THE READ IS A FUNCTION SO `pin` CAN ASK THE SAME QUESTION, and a second copy of it
+# would be the duplication `CLAUDE.md` records paying for. `read` calls it and writes what
+# it got; `pin` calls it to CHECK what it inherited. Neither derives the origin twice.
+rb_read_origin
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to

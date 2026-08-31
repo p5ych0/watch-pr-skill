@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.93] — 2026-08-31
+
+- **`pr-origin.sh pin` refuses a pin that is not this checkout's origin.** The origin
+  crosses from `pr-setup.sh` to the driver as a NAMED FILE, and the driver opens that name
+  after the helper has exited. A same-UID process that replaces the file in that window is
+  what the driver parses, exports and pins — and every later post, signoff and merge is
+  addressed by that value, so the failure is a **wrong repository** rather than a stall.
+
+  Nothing downstream caught it. `rb_identity` asks whether a string is a usable identity,
+  not whether it is this checkout's; `pin` reported `REVIEW_BUS_REMOTE` as a child sees it
+  and nothing more. Both are computed from the planted value, so both agreed with it.
+
+  `pin` now re-reads the checkout with the same hardened read `read` uses — one call,
+  hoisted into a function rather than copied — and refuses when the inherited value
+  disagrees, naming both. An empty pin is still an answer, because "the export did not
+  take" is what the caller needs to distinguish and an empty value cannot be the wrong
+  repository. A swap still gets a value past the driver's read; it no longer gets a
+  session addressed to it. #230.
+
 ## [2.0.92] — 2026-08-31
 
 - **`SKILL.md` is 968 characters shorter, finishing the sweep #249 and #251 began.** The
