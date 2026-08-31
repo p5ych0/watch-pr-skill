@@ -240,6 +240,28 @@ got="$(run record notanumber "$TMP/body.md")"
 { [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
     && pass "…and so does one that refuses before the arguments are even checked" \
     || die "an early refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
+# …AND EVEN WHEN THE BOOTSTRAP ITSELF REFUSES, which is the case the other two cannot
+# see: both of those reach argument handling with the libraries already loaded, so they
+# pass just as well with the truncation back below the bootstrap. This one empties a
+# library in a copy of the tree, so `rb_load` refuses at the top of the file — before any
+# argument is looked at and before the later truncation is reachable at all.
+world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
+rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
+: > "$TMP/broken/recordlib.sh"
+_bs_rc=0
+_bs_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$TMP/broken/pr-copilot-phase.sh" record 7 "$TMP/body.md" "$TMP/sha.txt" 2>&1)" || _bs_rc=$?
+{ [ "$_bs_rc" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
+    && pass "…and a record that cannot bootstrap leaves no stale sha either" \
+    || die "a bootstrap refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (rc=$_bs_rc out='$_bs_out')"
+# AND IT REFUSED FOR THE REASON THIS CASE IS ABOUT, not for an argument it never reached.
+case "$_bs_out" in
+    *reason=recordlib_empty*|*reason=loadlib_*)
+        pass "…having refused in the bootstrap, before any argument was looked at" ;;
+    *)  die "the bootstrap case refused for another reason: '$_bs_out'" ;;
+esac
+
 # …AND THE BODY FILE IS NEVER TRUNCATED BY EITHER CLEARING, which is what the guards
 # exclude. Staged as the alias: the account must survive to be refused properly.
 world; printf 'the account\n' > "$TMP/body.md"
