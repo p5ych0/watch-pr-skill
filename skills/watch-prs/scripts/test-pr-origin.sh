@@ -1756,13 +1756,17 @@ _mkd_real="$(command -v mkdir 2>/dev/null)" || _mkd_real=""
 _mkd_bin="$TMP/mkdbin"; mkdir -p "$_mkd_bin"
 _mkd_mark="$TMP/mkd.created"
 rm -f "$_mkd_mark"
-printf '#!/usr/bin/env bash\n%s "$@" || exit 1\n: > "$RB_MKD_MARK"\nsleep 3\n' "$_mkd_real" > "$_mkd_bin/mkdir"
+# THE RESOLVED PATH CROSSES IN THE ENVIRONMENT AND IS INVOKED QUOTED. Interpolated into
+# the generated script unquoted, a path containing a space parses as two words: the
+# delegated call fails, the helper cannot create its reservation, and the case dies saying
+# the slow `mkdir` never reported — a staging failure that reads as a broken test. #267.
+printf '#!/usr/bin/env bash\n"$RB_MKD_REAL" "$@" || exit 1\n: > "$RB_MKD_MARK"\nsleep 3\n' > "$_mkd_bin/mkdir"
 chmod +x "$_mkd_bin/mkdir"
 _mkd_dir="$TMP/mkdt.$$"
 rm -rf "$_mkd_dir"
 if [ -n "$_mkd_real" ] && [ -x "$_mkd_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    RB_MKD_MARK="$_mkd_mark" PATH="$_mkd_bin:$PATH" \
+    RB_MKD_MARK="$_mkd_mark" RB_MKD_REAL="$_mkd_real" PATH="$_mkd_bin:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$_mkd_dir" ) >/dev/null 2>&1 &
 _mkd_pid=$!
 _mkd_n=0
@@ -1824,7 +1828,8 @@ _sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
 # directory from the FIRST signal and passes without ever delivering a second one.
 # The stub writes a marker, this waits for it, and the second `kill` is required to
 # succeed.
-printf '#!/usr/bin/env bash\n: > "$RB_SIG_MARK"\nsleep 2\nexec %s "$@"\n' "$_sig_real" > "$_sig_bin/rmdir"
+# THE RESOLVED PATH CROSSES IN THE ENVIRONMENT HERE TOO, for the reason above. #267.
+printf '#!/usr/bin/env bash\n: > "$RB_SIG_MARK"\nsleep 2\nexec "$RB_SIG_REAL" "$@"\n' > "$_sig_bin/rmdir"
 printf '#!/usr/bin/env bash\nsleep 3\n' > "$_sig_bin/git"
 chmod +x "$_sig_bin/rmdir" "$_sig_bin/git"
 _sig_dir="$TMP/sigt.$$"
@@ -1833,7 +1838,7 @@ _sig_mark="$TMP/sig.cleanup-started"
 rm -f "$_sig_mark"
 if [ -n "$_sig_real" ] && [ -x "$_sig_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    RB_SIG_MARK="$_sig_mark" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
+    RB_SIG_MARK="$_sig_mark" RB_SIG_REAL="$_sig_real" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
 _sig_pid=$!
 _sig_n=0
 while [ ! -d "$_sig_dir" ] && [ "$_sig_n" -lt 100 ]; do _sig_n=$(( _sig_n + 1 )); sleep 0.1; done
