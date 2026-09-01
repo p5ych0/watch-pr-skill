@@ -1025,11 +1025,17 @@ plugin docs and open an issue.
   leaves.
 
   **What that litter can contain, since 2.0.98.** A refused attempt may leave its
-  temporary directory with a nested transport directory inside it, holding an `origin`
-  or `pin` file that is **empty or partially written** — that is what a storage refusal
-  looks like when the file was opened before the write failed, and nothing removes it.
-  It is not a usable result: a value in those files means something only when the helper
-  exited 0. Leave them; they are a stale temporary directory under **the parent setup
+  temporary directory with a nested transport directory inside it, holding an `origin` or
+  `pin` file. That file may be **empty, partially written, or complete**: empty or partial
+  is what a storage refusal looks like when the file was opened before the write failed,
+  and a complete one is left whenever the read succeeded and a *later* step refused — while
+  the work files were being allocated, say — or an interruption arrived after the write.
+  Nothing removes any of them.
+
+  **Completeness is not usability, and this is the case to be careful with.** A
+  well-formed `origin` left by a refused run is indistinguishable by inspection from one a
+  successful run produced. What makes a value usable is the enclosing setup sequence
+  reporting success — `PR_SETUP status=ready` — and never the file looking finished. Leave them; they are a stale temporary directory under **the parent setup
   selected** — `TMPDIR` where that is usable, `$HOME` where it is not, and the second of
   those two where the first attempt was retried — so look under the one the abort names
   rather than under `TMPDIR` by assumption. Removing them by hand is the one thing the

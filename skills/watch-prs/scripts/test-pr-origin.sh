@@ -1737,7 +1737,7 @@ fi
 rm -rf "$_pin_dir" "$_pin_bin"
 # ── A SIGNAL DURING THE RESERVATION ITSELF LEAVES NOTHING BEHIND ───────────
 #
-# NOTHING OF THIS RUN'''S, and nothing at all in what this case stages: the signal lands
+# NOTHING OF THIS RUN'S, and nothing at all in what this case stages: the signal lands
 # while the reservation is still empty, so the `rmdir` succeeds. A same-UID process that
 # has filled it by then makes the same `rmdir` fail, which is the accepted residue the
 # populated-reservation case below measures — not this one.
@@ -2187,8 +2187,8 @@ _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR=
   && case "$_lit_out" in *"is not this checkout's origin"*) true ;; *) false ;; esac; } \
     && pass "…and a pin mismatch refuses after the reservation, before anything is written" \
     || die "the litter case did not reach the mismatch refusal (rc=$_lit_rc): '$_lit_out'"
-# AND EVERY PLANTED OBJECT SURVIVES, which is the bound the record accepts: the cleanup in
-# the cleanup is `rmdir` alone, so it removes an empty directory and NOTHING else. What must
+# AND EVERY PLANTED OBJECT SURVIVES, which is the bound the record accepts: the cleanup is
+# `rmdir` alone, so it removes an empty directory and NOTHING else. What must
 # not have happened is the other half — a removal reaching an object this run did not write.
 { [ -d "$_lit_dir" ] && [ -f "$_lit_dir/pin" ] && [ -f "$_lit_dir/sibling" ] \
   && [ -f "$_lit_dir/sub/deep/file" ]; } \
