@@ -1765,18 +1765,29 @@ _mkd_real=""
 _sp_out=""
 _sp_real() {   # _sp_real <command> ; sets $_sp_out to a path containing a space, or empty
     _sp_out=""
+    # AN ABSENT DELEGATE IS THE ONLY THING THAT MAY SKIP, and it is why `_sp_out` can come
+    # back empty at all: the callers below already skip by name where their command is not
+    # on this platform. EVERY OTHER FAILURE IS A TEST FAILURE — a `mkdir`, a write or a
+    # `chmod` that does not work leaves the staging incomplete, and returning quietly would
+    # hand the callers the same empty value, so both would print their success-looking skip
+    # and the suite would finish without exercising the regression at all. That is the
+    # shape this repository records as worse than no check.
     _sp_r="$(command -v "$1" 2>/dev/null)" || return 0
     [ -n "$_sp_r" ] || return 0
     _sp_d="$TMP/spaced bin"
-    mkdir -p "$_sp_d" || return 0
+    mkdir -p "$_sp_d" || die "could not create the spaced delegate directory for $1"
     # THE TARGET IS READ FROM A FILE, NOT EMBEDDED. Interpolating it into the wrapper is
     # the very defect this coverage exists for, and quoting it there would need `%q`, which
     # `/bin/sh` has not got. The wrapper reads the path and execs it quoted.
-    printf '%s\n' "$_sp_r" > "$_sp_d/$1.target" || return 0
+    printf '%s\n' "$_sp_r" > "$_sp_d/$1.target" || die "could not write the spaced delegate target for $1"
     { printf '#!/bin/sh\n'
       printf 'IFS= read -r _t < "$0.target" || exit 1\n'
-      printf 'exec "$_t" "$@"\n'; } > "$_sp_d/$1" || return 0
-    chmod +x "$_sp_d/$1" || return 0
+      printf 'exec "$_t" "$@"\n'; } > "$_sp_d/$1" || die "could not write the spaced delegate wrapper for $1"
+    chmod +x "$_sp_d/$1" || die "could not make the spaced delegate wrapper for $1 executable"
+    # AND IT IS PROVED USABLE BEFORE IT IS HANDED BACK, so a wrapper that was written but
+    # cannot run is a failure here rather than a skip two lines later.
+    "$_sp_d/$1" --version >/dev/null 2>&1 || "$_sp_d/$1" >/dev/null 2>&1 \
+        || die "the spaced delegate wrapper for $1 does not run"
     _sp_out="$_sp_d/$1"
     return 0
 }
