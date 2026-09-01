@@ -1702,7 +1702,7 @@ fi
 rm -rf "$_int_dir" "$_int_bin"
 # …AND `pin` MODE TOO, which reaches no `git` at all. Its only external command
 # before the write is the ancestry walk's `find`, so that is what the signal lands
-# during — the pre-write phase, where the handler is `rmdir` alone.
+# during — before any write, where the `rmdir` still empties the reservation.
 _pin_bin="$TMP/pinbin"; mkdir -p "$_pin_bin"
 printf '#!/usr/bin/env bash\nsleep 3\n' > "$_pin_bin/find"
 chmod +x "$_pin_bin/find"
@@ -2111,7 +2111,7 @@ else
 fi
 rm -rf "$_rz"
 
-# ── THE PRE-PHASE CLEANUP'S LITTER, MEASURED — `docs/decisions/2026-09-01-origin-cleanup-races.md` ─
+# ── A POPULATED RESERVATION IS LEFT WHOLE, MEASURED — `docs/decisions/2026-09-01-origin-cleanup-races.md` ─
 #
 # The residue is ACCEPTED and this case is what the acceptance rests on: if the bound
 # changes, it fails. It is not a proof that the helper is correct here; it is the
@@ -2172,7 +2172,7 @@ _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR=
 # would be a directory this run never made — the vacuous pass this assertion excludes.
 { [ "$_lit_rc" = 1 ] \
   && case "$_lit_out" in *"is not this checkout's origin"*) true ;; *) false ;; esac; } \
-    && pass "…and a pin mismatch refuses after the reservation, with the phase still pre-write" \
+    && pass "…and a pin mismatch refuses after the reservation, before anything is written" \
     || die "the litter case did not reach the mismatch refusal (rc=$_lit_rc): '$_lit_out'"
 # AND EVERY PLANTED OBJECT SURVIVES, which is the bound the record accepts: the cleanup in
 # this phase is `rmdir` alone, so it removes an empty directory and NOTHING else. What must
@@ -2180,7 +2180,7 @@ _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR=
 { [ -d "$_lit_dir" ] && [ -f "$_lit_dir/pin" ] && [ -f "$_lit_dir/sibling" ] \
   && [ -f "$_lit_dir/sub/deep/file" ]; } \
     && pass "…and leaves the whole reservation behind, taking nothing the racer put there" \
-    || die "the pre-phase refusal removed something: dir=$([ -d "$_lit_dir" ] && echo yes || echo no) pin=$([ -e "$_lit_dir/pin" ] && echo yes || echo no) sibling=$([ -e "$_lit_dir/sibling" ] && echo yes || echo no) nested=$([ -e "$_lit_dir/sub/deep/file" ] && echo yes || echo no)"
+    || die "the refusal removed something from the reservation: dir=$([ -d "$_lit_dir" ] && echo yes || echo no) pin=$([ -e "$_lit_dir/pin" ] && echo yes || echo no) sibling=$([ -e "$_lit_dir/sibling" ] && echo yes || echo no) nested=$([ -e "$_lit_dir/sub/deep/file" ] && echo yes || echo no)"
 rm -rf "$_lit_dir" "$_lit_bin"
 
 # ── A REPLACED RESERVATION TAKES NOTHING FROM ITS TARGET — #266 ────────────

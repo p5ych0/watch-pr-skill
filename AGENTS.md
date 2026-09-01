@@ -588,7 +588,7 @@ name — the record tabulates every placement that was tried for the one #266 re
 each was worse than the last.
 
 **That record accepts ONE race, and the other was a defect that is now FIXED.** #257 named
-a second — the post-phase `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow
+a second — the leaf removal `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow
 symlinks, so a same-UID process that replaces the reservation with a symlink to another
 directory has that directory's file removed. Measured during #265, that reaches OUTSIDE the
 reservation entirely, so it was filed as #266 rather than accepted. #266 removed it: the

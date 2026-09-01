@@ -1,4 +1,4 @@
-# Decision: the pre-phase cleanup's litter is accepted
+# Decision: a refusal leaves the reservation, and that litter is accepted
 
 **Date:** 2026-09-01
 **Status:** accepted
@@ -20,7 +20,7 @@ pointed at when the accepted one is raised again.
 case on `pr-origin.sh`'s behalf. It was right to decline: measured, that case is worse than
 it looked, and it is not accepted here either.
 
-## Accepted — a pre-phase refusal leaves the reservation
+## Accepted — a refusal leaves the reservation behind
 
 The cleanup is `rmdir` alone, and `rmdir` necessarily fails on a directory that is not
 empty. So any refusal that fires while a same-UID process has put something in the
@@ -46,9 +46,9 @@ nothing collects it, and that is the whole of the cost.
 directory the moment it exists, drives the pin mismatch refusal — asserting it reached the
 MISMATCH and not the exclusion, which would be a directory this run never made and a
 vacuous pass — and asserts the directory and every planted object are still there. If a
-pre-phase refusal ever starts removing something, the case fails.
+refusal ever starts removing something from the reservation, the case fails.
 
-## NOT accepted — the post-phase removal, which reaches outside the reservation
+## NOT accepted — the leaf removal, which reached outside the reservation
 
 #257's second gap is a defect rather than a limit, and measuring it is what settled that.
 

@@ -540,8 +540,8 @@ rb_cleanup() {   # give back what this run created, for the phase it is in
     #
     # THE RESIDUE IS THE LITTER ALREADY ACCEPTED. A refusal after a write now leaves the
     # directory and its leaf, because `rmdir` fails on a non-empty directory — which is the
-    # cost `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts for the pre-phase
-    # case, and the same KIND: nothing destroyed.
+    # cost `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts, and the same KIND:
+    # nothing destroyed.
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
@@ -563,8 +563,11 @@ rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap
 # `rmdir` alone, which fails on a directory holding the leaf this run just wrote, so a
 # signal landing between the write and `trap - EXIT` leaves the reservation AND the leaf.
 # That residue is the accepted cost in
-# `docs/decisions/2026-09-01-origin-cleanup-races.md`; what bought it is that no removal
-# here resolves a name, so an interrupted run cannot take something it did not write.
+# `docs/decisions/2026-09-01-origin-cleanup-races.md`. What bought it is narrower than "no
+# removal resolves a name" — `rmdir` resolves `$RB_DIR`, and against a replaced name it can
+# take somebody else's EMPTY directory, which the re-entrancy note below covers. What it
+# cannot do is follow a symlink, or reach a leaf beneath the reservation: those are the two
+# ways the old removal took a file this run never wrote.
 #
 # THE HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal REPLACES its
 # default terminating action: handled and returned from, bash resumes the
