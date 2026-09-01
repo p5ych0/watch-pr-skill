@@ -454,8 +454,9 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # Running once is still the fix, and it is cheaper to keep than to re-derive.
 #
 # SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap gives the reservation back for
-# them and for any other abnormal end — where it still can, which since #266 means
-# before the write — and there is nothing left to do twice.
+# them and for any other abnormal end — where it still can, which since #266 means while
+# the reservation is EMPTY: ordinarily a refusal before the write, and not one a same-UID
+# process has populated — and there is nothing left to do twice.
 #
 # A SIGNAL DOES NOT COME THROUGH `EXIT`, and that is deliberate: its handler
 # disables `EXIT`, calls the cleanup DIRECTLY, and re-raises. Routing it through

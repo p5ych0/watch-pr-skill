@@ -176,8 +176,10 @@ command, since resetting those too left a window where a `TERM` terminated the h
 with no cleanup at all. The contract is a directory this helper created, so a refusal or
 a signal that left it behind would be a leak nothing else would collect: the caller
 performs no cleanup after a non-zero status, deliberately, because it cannot know who
-created the path. Since #266 that promise holds only BEFORE the write — past it the
-reservation and its leaf are left, `rmdir` failing on a non-empty directory, and
+created the path. Since #266 that promise holds only where the reservation is EMPTY when
+the cleanup runs — which a refusal before the write ordinarily is, and is not once a
+same-UID process has put something there; past the write the reservation and its leaf are
+left, `rmdir` failing on a non-empty directory, and
 `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts that residue rather than
 treating it as a leak. #157.
 

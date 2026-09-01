@@ -62,10 +62,11 @@ it.
 `test-pr-setup.sh` stages these against the real helper — `TERM`, `INT` and `HUP` all
 delivered mid-run — and asserts that the file contains NO removal of any kind and that no
 handler it arms removes anything, so a shape that resolves a name for removal cannot come
-back, behind a signal or otherwise, without a case failing. What it does NOT stage is the
-exception in the last row: that removal is `pr-origin.sh`'s, governed by its own contract
-and its own fixture, and this record neither owns it nor accepts it on that helper's
-behalf.
+back, behind a signal or otherwise, without a case failing. It does not stage what the last
+row used to except, and no longer needs to: that removal was `pr-origin.sh`'s, this record
+declined to accept it on that helper's behalf, and #266 removed it. What is left there is
+that helper's own `rmdir` of its own transport, governed by its own contract and its own
+fixture.
 
 ## What it costs
 
