@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.95] — 2026-09-01
+
+- **A read-back that could not tell EOF from a failed read now compares in the child.**
+  `read` reports ordinary end-of-file and a read that failed part-way with the **same**
+  status, and bash exposes no way to ask a descriptor whether it ended cleanly. That did
+  not matter for `record`'s forty-character sha, which a truncated read can never equal.
+  It mattered for `open`'s baseline: an empty baseline is legitimate — no earlier Copilot
+  review is the ordinary first pass — so a read failing at the first byte returned the
+  empty string and compared equal to the empty value that had just been written, and the
+  phase opened against a file nothing could read.
+
+  The fix does not answer the question it could not answer. The expected bytes are passed
+  **into** the child, which compares them against what it read including the trailing
+  newline and before any stripping — so a read that lost even one byte differs, whatever
+  its status said. Nothing crosses back, so there is no second comparison to get wrong.
+  `record` uses the same shape, which also gives it the bounded open and the read status it
+  had been missing. #246.
+
 ## [2.0.94] — 2026-09-01
 
 - **The suite's placeholder identity no longer appears in prose.** The repo-agnostic rule
