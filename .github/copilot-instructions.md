@@ -589,10 +589,11 @@ and staged behaviourally on both sides. Raise a cost you think was underweighted
 non-blocking note.
 
 **A fourth is accepted since 2026-09-01**, in
-`docs/decisions/2026-09-01-origin-cleanup-races.md`: `pr-origin.sh` flips `RB_PHASE` inside
-each write's own redirection, so the leaf is OPEN before the assignment that marks it as
-this run's, and a refusal or signal while the phase is still `pre` therefore runs `rmdir`
-alone — which fails on a directory that is not empty, leaving the reservation behind. The
+`docs/decisions/2026-09-01-origin-cleanup-races.md`: `pr-origin.sh`'s cleanup is `rmdir`
+alone, which fails on a directory that is not empty — so a refusal leaves the reservation
+behind whenever anything is in it, including the leaf this run wrote. (Until #266 there was
+a phase flag selecting a leaf-removing shape as well; both are gone, and the record's table
+of where that flag could flip is history.) The
 contents are RACER-CONTROLLED and there is no upper bound on them: any same-UID process can
 create files and subdirectories in the mode-700 directory once it exists. What makes it
 acceptable is the KIND and not the size — nothing is destroyed, since that phase's cleanup

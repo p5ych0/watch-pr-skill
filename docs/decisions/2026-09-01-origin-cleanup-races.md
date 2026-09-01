@@ -7,8 +7,8 @@
 cannot waive a finding in the pull request that introduces the behaviour — #256 tried and
 was closed for it.
 
-`pr-origin.sh` flips `RB_PHASE` inside each write's own redirection, so the leaf is OPEN
-before the assignment that marks it as this run's. #257 named two consequences of that
+`pr-origin.sh` used to flip `RB_PHASE` inside each write's own redirection, so the leaf was
+OPEN before the assignment that marked it as this run's. #257 named two consequences of that
 shape and asked for both to be measured. **They were, and the measurement separated them:
 one is accepted here and the other is a defect.** This record is what a reviewer should be
 pointed at when the accepted one is raised again.
@@ -22,11 +22,12 @@ it looked, and it is not accepted here either.
 
 ## Accepted — a pre-phase refusal leaves the reservation
 
-A `TERM`, `HUP` or `INT` delivered between the redirection opening the leaf and
-`RB_PHASE=post` executing runs the cleanup while the phase is still `pre`, which is
-`rmdir` alone — and `rmdir` necessarily fails on a directory that is not empty. The same
-residue is reached by any refusal that fires while a same-UID process has put something in
-the directory: the mismatch refusal, the origin read's, the walks'.
+The cleanup is `rmdir` alone, and `rmdir` necessarily fails on a directory that is not
+empty. So any refusal that fires while a same-UID process has put something in the
+directory leaves it: the mismatch refusal, the origin read's, the walks'. When this was
+written the cleanup had a second, leaf-removing shape and this race was the window before
+the flag selecting it flipped; #266 removed that shape, which widens the residue to every
+refusal and narrows what a refusal can touch to nothing.
 
 **Cost: the reservation directory and whatever it contains, left behind under a parent the
 caller named.** The contents are RACER-CONTROLLED and there is no upper bound on them:

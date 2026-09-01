@@ -444,10 +444,10 @@ case "${got#*|}" in
 esac
 
 # AND A REFUSED PIN TAKES NOTHING OF A REPLACEMENT'S. The mismatch refusal happens after
-# the directory has been created and before anything is written, so the cleanup must be
-# the one that removes only the directory. With the phase already `post` it removed the
-# LEAF by name — and where a same-UID process has swapped the directory in the meantime,
-# that name is the replacement's file.
+# the directory has been created and before anything is written, and the cleanup removes
+# only the directory — which since #266 is true of every refusal, not just this one. It
+# used to remove the LEAF by name once a write had happened, and where a same-UID process
+# had swapped the directory that name was the replacement's file.
 #
 # WHAT THIS STAGES, EXACTLY. The window the finding names — this run creates the
 # directory, a same-UID process swaps it, and the MISMATCH refusal then fires — needs a
@@ -1571,7 +1571,11 @@ _res_rmf="$(grep -c '^[[:space:]]*[^#]*rm -f "\$OUT"' "$SCRIPT")" || _res_rmf=0
 [ "$_res_rmf" -eq 0 ] \
     && pass "the cleanup removes no leaf by name, so no placement rule is needed for one" \
     || die "a leaf removal is back in the helper ($_res_rmf occurrence(s)); #266 removed it because -d and -O follow symlinks"
-_res_ph="$(grep -c '^[[:space:]]*RB_PHASE=' "$SCRIPT")" || _res_ph=0
+# EVERY EXECUTABLE POSITION, not just the start of a line. The form this change removed was
+# `{ RB_PHASE=post; printf …; } > "$OUT"`, where the assignment follows a brace — a pattern
+# requiring it to be the first token cannot catch the very spelling it forbids. `^[^#]*`
+# still keeps the file's own prose about the removed flag out of the count.
+_res_ph="$(grep -c '^[^#]*RB_PHASE=' "$SCRIPT")" || _res_ph=0
 [ "$_res_ph" -eq 0 ] \
     && pass "…and the phase flag it selected is gone with it" \
     || die "RB_PHASE is assigned $_res_ph time(s) but nothing reads it"
@@ -1872,8 +1876,10 @@ rm -rf "$_sig_bin"; rm -f "$_sig_mark"
 # exercise that path, not the refusal one.
 #
 # WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
-# before the disarm is the phase where the handler must remove the leaf as well.
-# It is asserted structurally by the `RB_PHASE` ordering cases above and not run, because the interval cannot be
+# before the disarm used to be the phase where the handler removed the leaf as well; since
+# #266 the handler has one shape and that distinction is gone, so what is left there is
+# `rmdir` failing on the non-empty directory and the reservation surviving. Not run,
+# because the interval cannot be
 # reached: bash defers a signal until the foreign command it is waiting on
 # returns, so a TERM sent during `git` is handled BEFORE the write, and the only
 # thing between the write and the disarm is a builtin. Racing a builtin is not a
@@ -2226,9 +2232,19 @@ else
     # THE SWAP ACTUALLY HAPPENED. Without this the survival assertion below passes against a
     # run that never reached a removal at all, or one where `mv` was refused — which is the
     # vacuous pass #265's review found in this fixture's ancestor.
+    # THE WRITE WAS REACHED AND FAILED, which is what makes this the POST-write cleanup. A
+    # refusal anywhere between the reservation and the open — a regressed origin read, a
+    # pin comparison — still reaches the EXIT cleanup, which still calls the `rmdir` shim,
+    # which still swaps and still writes the marker; and the target's file survives such a
+    # run for a reason that has nothing to do with #266. Status 2 is the storage refusing
+    # the bytes, which only happens once the leaf has been opened.
+    { [ "$_esc_rc" = 2 ] \
+      && case "$_esc_out" in *"exclusively and write"*) true ;; *) false ;; esac; } \
+        && pass "the escape case reached the write and the storage refused it" \
+        || die "the case did not reach the post-write cleanup (rc=$_esc_rc): '$_esc_out'"
     [ -e "$_esc_mark" ] \
-        && pass "a same-UID process can replace the reservation with a symlink before the cleanup" \
-        || die "the reservation was never swapped (rc=$_esc_rc), so the case below would prove nothing: '$_esc_out'"
+        && pass "…and a same-UID process replaced the reservation with a symlink before the cleanup" \
+        || die "the reservation was never swapped, so the case below would prove nothing: '$_esc_out'"
     # AND THE TARGET'S FILE SURVIVES, which is the whole of #266. `rmdir` refuses a symlink
     # outright, so the cleanup cannot follow the replacement; before the fix the leaf removal
     # resolved through it and unlinked this file.

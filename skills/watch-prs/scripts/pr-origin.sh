@@ -81,12 +81,14 @@
 #      pre-existing case: where `<dir>` was already there and already held an
 #      `origin` or a `pin`, the `mkdir` refuses before anything is written and that
 #      leaf — the caller's, or somebody else's — is still there afterwards. Absence
-#      is guaranteed only for a refusal AFTER this script WROTE, where the EXIT cleanup,
-#      in its post-write phase, removes the leaf and the directory together. Between the
-#      `mkdir` and the write the shape is `rmdir` alone, so an ordinary refusal there
-#      still leaves nothing — but a directory a same-UID process has replaced with a
-#      non-empty one is not removed, and that residue is deliberate: the alternative is
-#      unlinking a leaf by a name this run did not write.
+#      is NOT guaranteed for a refusal after this script WROTE either, and since #266 that
+#      is the ordinary case: the cleanup is `rmdir` alone in every phase, so a refusal past
+#      the write leaves the directory AND the leaf, `rmdir` failing on a non-empty
+#      directory. It used to remove the leaf first, and that removal could reach a file
+#      outside this reservation entirely. What a refusal BEFORE the write leaves is nothing,
+#      unless a same-UID process has put something in the directory — that residue is
+#      deliberate too, and is the same one: the alternative is unlinking by a name this run
+#      did not write.
 #
 #      WHAT IS AT THE ARGUMENT ON A NON-ZERO STATUS DEPENDS ON WHICH SIDE OF THE
 #      `mkdir` the refusal happened, and the two are opposite. That is a different
@@ -106,12 +108,13 @@
 #          directory, so it gives the directory back before stopping, and there is
 #          nothing for the caller to collect.
 #
-#          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal before a write
-#          gets `rmdir` alone, which cannot remove a directory holding a file. So a
-#          directory a same-UID process has replaced with a NON-EMPTY one survives
-#          the refusal. That residue is the point rather than a gap: the only way to
-#          empty it is to unlink a leaf by a name this run did not write, which is
-#          what the phase exists to prevent.
+#          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal gets `rmdir` alone
+#          since #266, and `rmdir` cannot remove a directory that holds a file. So a
+#          refusal past the write leaves the leaf it wrote, and a directory a same-UID
+#          process has filled survives any refusal at all. That residue is the point
+#          rather than a gap: the only way to empty it is to unlink by a name this run
+#          did not write, and that removal is what #266 took out for reaching a file
+#          outside this reservation.
 #
 #          THE CLEANUP HAS ONE BODY AND THREE WAYS IN, and they are not the same
 #          thing. An ordinary refusal and any other abnormal end reach it through
@@ -730,14 +733,13 @@ _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
     || rb_refuse "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
 [[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse
-# THE NAME IS TRUSTED FROM HERE, and the walks are all above this line. The PHASE does
-# not flip here, though: it selects the cleanup SHAPE, and the leaf-removing shape is only
-# correct once this run has written a leaf. Between here and the write there are refusals
-# — the origin read, and the pin's comparison against it — and a refusal there with the
-# phase already `post` runs `rm -f "$OUT"` on a leaf this run never created. Where a
-# same-UID process has replaced the directory in the meantime, that deletes ITS file. So
-# the flip sits immediately before each write instead, and `rmdir` alone is what a refusal
-# gets until then.
+# THE NAME IS TRUSTED FROM HERE, and the walks are all above this line. Nothing about the
+# CLEANUP changes here, and since #266 nothing about it changes anywhere: it is `rmdir`
+# alone from the reservation to the end. There used to be a phase flag selecting a
+# leaf-removing shape, and the question at this line was whether to flip it here — the
+# answer was no, because the refusals between here and the write would then run `rm -f
+# "$OUT"` on a leaf this run never created, and against a replaced directory that deletes
+# ITS file. The removal is gone, so the question is too.
 
 
 
@@ -984,13 +986,12 @@ if [[ $MODE = pin ]]; then
         [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
             || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$(rb_redact "$REVIEW_BUS_REMOTE")', origin '$(rb_redact "$_rb_origin")'); the value the driver exported did not come from this repository"
     fi
-    # THE PHASE FLIPS INSIDE THE REDIRECTION, so the leaf is OPEN before it flips. As a
-    # separate command before the write it left a window of its own: a `TERM` delivered
-    # after the flip and before `printf` opened `$OUT` ran the leaf-removing cleanup with
-    # no leaf written, and against a replaced directory that unlinks the replacement's
-    # file. A redirection on a group is applied BEFORE the group runs, so by the time the
-    # assignment executes the object exists and is this run's — and if the open fails the
-    # group never runs, the phase never flips, and `rmdir` alone is what the refusal gets.
+    # NO PHASE FLIPS HERE, and none anywhere: since #266 the cleanup is `rmdir` alone
+    # whatever has been written. This write used to be wrapped in a group that flipped a
+    # flag first — `{ RB_PHASE=post; printf …; } > "$OUT"` — so that the leaf was open
+    # before the flag said it might be, because a flag set even slightly early let a
+    # refusal run the leaf-removing cleanup against a directory somebody had replaced.
+    # With no removal to select, the wrapping has nothing to arm and the write is a write.
     #
     # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
     # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
