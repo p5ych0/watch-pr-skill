@@ -451,10 +451,15 @@ Then:
      and so is a substituted value that happens to be digits. Every well-formed id is
      accepted, including the *previous* round's after a bootstrap refusal and this
      round's after a failed request: if the current terminal review has a different id,
-     the watch reports a verdict for a pass nobody requested. Those are known residues of
-     the fallback rather than things the watch can catch, which is why the rule is the one
-     above — the contents are authoritative only where `open` returned 0, and the driver
-     must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
+     the watch reports it as this round's answer. Where nothing was asked for, that
+     verdict is simply not this round's. **The failed request is the exception**, and the
+     one not to lump in with the rest: `--add-reviewer` has already run and the remote may
+     have accepted it before the client reported the error, so a pass may genuinely be
+     pending and what the watch reports is a *stale* verdict rather than an imaginary one
+     — do not read a refusal there as "no Copilot pass is coming". All of these are known
+     residues of the fallback rather than things the watch can catch, which is why the rule
+     is the one above: the contents are authoritative only where `open` returned 0, and the
+     driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

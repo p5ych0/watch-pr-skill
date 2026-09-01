@@ -458,10 +458,14 @@ something to act on and prints one line when the state changes:
 # is accepted. So the sentinel is refused while it survives — the capture overwrites it
 # — but a readiness write that failed after truncating leaves an empty file that is
 # accepted, and a substituted value that happens to be digits is accepted too. Both
-# ids are, so a terminal review with a different id is reported as this round's answer
-# though nothing was requested. The watch cannot tell a stale id from a fresh one,
-# which is why the success rule above is the one to rely on and why the value is not
-# re-derived or defaulted here. A re-request on
+# ids are, so a terminal review with a different id is reported as this round's
+# answer. Where the refusal came before the request, nothing was asked for and that
+# verdict is not this round's; where `--add-reviewer` itself failed, the request has
+# run and the remote may have taken it, so a pass may be pending and the verdict is a
+# STALE one rather than an imaginary one — do not read that refusal as "no pass is
+# coming". The watch cannot tell a stale id from a fresh one either way, which is why
+# the success rule above is the one to rely on and why the value is not re-derived or
+# defaulted here. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives
