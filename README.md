@@ -430,11 +430,13 @@ Then:
      file's contents: depending on where the run stopped it may hold the previous
      round's value, a refusal sentinel, or the id this run captured. Once past the
      bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
-     whatever is there — that write is also how it checks the path can be written
-     before it revokes anything, so an unusable path stops the stage before the PR is
-     touched. It proves only that write at that moment, not the whole handoff:
-     `/dev/null` and a write-only file accept it and fail the later regular-file and
-     read-back checks. Where the sentinel survives, a refusal cannot hand the watch a
+     whatever is there — that write is also how it checks the path, so a path that
+     **cannot take that write** (a directory, a FIFO, an unwritable or append-only
+     file) stops the stage before the PR is touched. That is the only guarantee it
+     gives: it proves that write at that moment and not the whole handoff, so
+     `/dev/null` and a write-only file accept it, pass the revocation, and are refused
+     only by the later regular-file and read-back checks. Do not read a path-related
+     refusal as meaning the PR was left unmodified. Where the sentinel survives, a refusal cannot hand the watch a
      value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
      and stops.
 
