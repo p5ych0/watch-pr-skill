@@ -1274,9 +1274,12 @@ fi
 #
 # The reader after this refusal IS real, unlike `record`'s: with the driver's `exit` shadowed
 # to return, execution falls past the fence into the wait step. What that reader gets is the
-# previous round's id rather than an empty file, and per `test-pr-watch.sh` that is the safer
-# of the two — an empty baseline suppresses nothing, while a stale one at least suppresses
-# the review it names.
+# previous round's id, and that is a FAIL-OPEN RESIDUE rather than protection — it is a
+# well-formed baseline, so where the current terminal review has a different id the watch
+# accepts it and reports a verdict for a pass nobody requested. It suppresses only the one
+# review it names, which is not the case that matters. `SKILL.md` and `README.md` state the
+# boundary; #264 carries the fix. What this case proves is narrower and is all it claims:
+# a bootstrap refusal leaves the file untouched.
 world; printf '%s\n' '99' > "$TMP/prior.txt"
 rm -rf "$TMP/brokeno"; cp -R "$DIR" "$TMP/brokeno" || die "could not copy the scripts for the open bootstrap case"
 : > "$TMP/brokeno/recordlib.sh"

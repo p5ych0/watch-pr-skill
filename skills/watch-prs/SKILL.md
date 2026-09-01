@@ -449,15 +449,15 @@ something to act on and prints one line when the state changes:
 # where a nameref does its damage, and one that only restates a value already set would
 # be a third site to guard for nothing. Codex in the Codex phase, Copilot after step 7.
 # $PRIOR_FILE holds the review id captured BEFORE the request that this watch is
-# waiting on — written by step 2, step 5 and step 7 — and it is AUTHORITATIVE ONLY
-# WHERE THE STAGE THAT WROTE IT RETURNED 0. Those steps abort on anything else, but
+# waiting on — written by step 2, step 5 and step 7 — and it is authoritative only
+# where the stage that wrote it returned 0. Those steps abort on anything else, but
 # an `exit` that returns carries a refusal into this line, and the file then holds
 # the previous round's id, this round's captured id, a refusal sentinel, or nothing.
-# ONLY THE SENTINEL IS REFUSED — it is `state=error` at the watch. The two ids are
+# Only the sentinel is refused; it is `state=error` at the watch. The two ids are
 # well-formed baselines and are accepted, so a terminal review with a different id
 # is reported as this round's answer though nothing was requested. The watch cannot
-# tell them apart, which is why the rule above is the one to rely on and why the
-# value is not re-derived or defaulted here. A re-request on
+# tell them apart, which is why the success rule above is the one to rely on and why
+# the value is not re-derived or defaulted here. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives
