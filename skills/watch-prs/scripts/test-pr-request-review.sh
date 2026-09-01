@@ -75,6 +75,19 @@ run() {   # run [args…] ; prints "<rc>", with stdout in $OUT and stderr in $ER
         /usr/bin/env bash -p "$DIR/pr-request-review.sh" "$@" <"$BODY_IN" >"$OUT" 2>"$ERR") || rc=$?
     printf '%s' "$rc"
 }
+# THE TERMINATING NEWLINE IS ASSERTED ON RAW BYTES, because nothing else in this file can
+# see it. `$(…)` and `cat` in a substitution both strip trailing newlines, so every
+# assertion phrased on the captured value passes whether or not the writer emitted the
+# delimiter — and `pr-watch.sh` refuses a baseline without it as
+# `unterminated_after_review_file`. A writer changed to emit a bare token would leave this
+# suite green and break the real handoff, which is the shape of the defect this whole
+# change is about.
+raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
+    printf '%s' "$2" > "$TMP/raw.expected" || die "could not stage the raw expectation for $3"
+    cmp -s "$1" "$TMP/raw.expected" \
+        && pass "…and $3 lands as raw bytes with its terminating newline" \
+        || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
+}
 stdout()  { cat "$OUT"; }
 stderr()  { cat "$ERR"; }
 posted()  { grep -q '^gh ' "$TMP/calls"; }
@@ -134,6 +147,8 @@ world; : > "$W/prior.out"; rc="$(run 7 no)"
 { [ "$rc" = 0 ] && [ "$(stdout)" = none ] && posted; } \
     && pass "…and no prior review on the manual path reports the none token, not an empty value" \
     || die "a first request with no prior review gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
+raw_is "$OUT" 'none
+' "the manual path's none baseline"
 
 # AND A COMMENT-BACKED BASELINE COMES THROUGH AS IT IS. A reviewer's newest
 # verdict arrives either as a submitted review, whose id is digits, or as a clean
@@ -181,6 +196,8 @@ world; rc="$(run 7 yes)"
 { [ "$rc" = 0 ] && [ "$(stdout)" = none ]; } \
     && pass "the automatic path posts and reports the none token as its baseline" \
     || die "the automatic path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
+raw_is "$OUT" 'none
+' "the automatic path's none baseline"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \
     || pass "…and never looks one up"

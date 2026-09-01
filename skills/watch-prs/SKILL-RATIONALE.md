@@ -1513,12 +1513,18 @@ No shell redirection expresses the write's own mode, so the operation that prove
 the truncation.
 
 IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is not a detail. Emptying looked free
-because an empty baseline is LEGAL — it means "no prior review to wait past", which this
-stage can legitimately produce when Copilot has never reviewed. Which is exactly why it
-was dangerous: a refusal between that write and the real one left a value the watch
-ACCEPTS, and with the driver's `exit` shadowed to return, the watch skipped its equality
-check and announced `PR_REVIEW_READY` for a review no request was made for. The readiness
-proof was buying its ordering guarantee with a fail-OPEN.
+because an empty baseline was LEGAL when this was written — it meant "no prior review to
+wait past", which this stage can legitimately produce when Copilot has never reviewed.
+Which is exactly why it was dangerous: a refusal between that write and the real one left a
+value the watch ACCEPTED, and with the driver's `exit` shadowed to return, the watch
+skipped its equality check and announced `PR_REVIEW_READY` for a review no request was made
+for. The readiness proof was buying its ordering guarantee with a fail-OPEN.
+
+SINCE #264 AN EMPTY BASELINE IS NO LONGER LEGAL, and "no prior review" is spelled `none` —
+so the emptying this section argues against is refused by the watch on its own account now,
+and the sentinel is belt as well as braces rather than the only thing standing there. The
+argument for writing a sentinel is unchanged and so is the code: a value written on purpose
+is what a reader can trust, and this section is why.
 
 The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
 status 2, at the call and before any network read — and the driver stops rather than

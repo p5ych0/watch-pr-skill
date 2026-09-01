@@ -141,6 +141,17 @@ exit 0
 GITSH
 chmod +x "$TMP/bin/gh" "$TMP/bin/git"
 
+# THE TERMINATING NEWLINE IS ASSERTED ON RAW BYTES, because nothing else here can see it.
+# `$(…)` and `cat` in a substitution both strip trailing newlines, so an assertion phrased
+# on the captured value passes whether or not the writer emitted the delimiter — while
+# `pr-watch.sh` refuses a baseline without it as `unterminated_after_review_file`. A writer
+# changed to emit a bare token would leave this suite green and break the real handoff.
+raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
+    printf '%s' "$2" > "$TMP/raw.expected" || die "could not stage the raw expectation for $3"
+    cmp -s "$1" "$TMP/raw.expected" \
+        && pass "…and $3 lands as raw bytes with its terminating newline" \
+        || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
+}
 world() {   # world ; the state in which a round closes cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/local.out"
@@ -1040,6 +1051,8 @@ got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 # tidier — an emptied baseline reaching the watch is a refusal instead of a no-floor, so a
 # `post` that fails after `gate` stops the round rather than arming a watch against
 # nothing.
+raw_is "$TMP/prior.txt" 'none
+' "post's none baseline"
 { [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
     && pass "…and the prior file reads back as the none token rather than empty or a previous round's value" \
     || die "an empty baseline left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"

@@ -145,6 +145,17 @@ exit 0
 GHSH
 chmod +x "$TMP/bin/gh"
 
+# THE TERMINATING NEWLINE IS ASSERTED ON RAW BYTES, because nothing else here can see it.
+# `$(…)` and `cat` in a substitution both strip trailing newlines, so an assertion phrased
+# on the captured value passes whether or not the writer emitted the delimiter — while
+# `pr-watch.sh` refuses a baseline without it as `unterminated_after_review_file`. A writer
+# changed to emit a bare token would leave this suite green and break the real handoff.
+raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
+    printf '%s' "$2" > "$TMP/raw.expected" || die "could not stage the raw expectation for $3"
+    cmp -s "$1" "$TMP/raw.expected" \
+        && pass "…and $3 lands as raw bytes with its terminating newline" \
+        || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
+}
 world() {   # world ; the state in which the phase advances cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/head.out"
@@ -1084,6 +1095,8 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 { [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
     && pass "…and the none token is written over a stale baseline, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
+raw_is "$TMP/prior.txt" 'none
+' "open's none baseline"
 
 # A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing
 # #245 did NOT remove. It is below the bootstrap, `run_limited` bounds it, and it is the

@@ -285,13 +285,18 @@ if [[ $STAGE = open ]]; then
     # write's own mode — O_WRONLY without truncate or append — so the operation that proves
     # it IS the truncation.
     #
-    # IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is what stops the readiness proof
-    # from being a fail-open. Emptying looked free because an empty baseline is LEGAL — it
-    # means "no prior review to wait past", which is a real answer this stage can produce
-    # when Copilot has never reviewed. That is exactly why it was dangerous: a refusal
-    # between here and the write left a value the watch ACCEPTS. Falling through the
-    # driver's shadowed `exit`, the watch skips its equality check and announces
-    # `PR_REVIEW_READY` for a review no request was made for.
+    # IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is what stopped the readiness
+    # proof from being a fail-open. Emptying looked free because an empty baseline WAS legal
+    # when this was written — it meant "no prior review to wait past", which is a real
+    # answer this stage can produce when Copilot has never reviewed. That is exactly why it
+    # was dangerous: a refusal between here and the write left a value the watch ACCEPTED,
+    # and falling through the driver's shadowed `exit` the watch skipped its equality check
+    # and announced `PR_REVIEW_READY` for a review no request was made for.
+    #
+    # SINCE #264 AN EMPTY BASELINE IS REFUSED and "no prior review" is spelled `none`, so
+    # that emptying would now be caught by the watch on its own account. The sentinel stays:
+    # a value written on purpose is what a reader can trust, and it names the reason rather
+    # than leaving the watch to infer one.
     #
     # A SENTINEL IS NOT A REVIEW ID, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
     # status 2 — and the driver stops instead of accepting a pass that never happened. The
@@ -448,9 +453,12 @@ if [[ $STAGE = open ]]; then
     # AND THE READ'S OWN STATUS IS TAKEN, INSIDE THE CHILD. `printf "%s" "$(<"$1")"`
     # exits 0 whatever the substitution did, so a path removed or made unreadable
     # after the write came back as SUCCESS with empty output — and where there is
-    # legitimately no earlier Copilot review the baseline IS empty, so the comparison
-    # below passed and Copilot was requested against a file nothing can read. The
-    # watch then refuses, after the revocation and the request have gone out.
+    # legitimately no earlier Copilot review the baseline WAS empty when this was written,
+    # so the comparison below passed and Copilot was requested against a file nothing can
+    # read. The watch then refuses, after the revocation and the request have gone out.
+    # Since #264 that value is the `none` token rather than empty, which narrows the
+    # coincidence without removing the reason for taking the status: a read that fails must
+    # not be able to look like any legitimate value.
     #
     # AND THE DESCRIPTOR IS PROVED REGULAR. A writable non-regular path — `/dev/null`
     # is the reachable one — takes both writes, reads back empty, and passes that same
@@ -462,8 +470,11 @@ if [[ $STAGE = open ]]; then
     # ask a descriptor whether it ended cleanly — so a child that hands its bytes back and
     # leaves the comparison here cannot tell the two apart. That did not matter for a
     # forty-character sha, which a truncated read can never equal, and it mattered exactly
-    # here: an EMPTY baseline is legitimate, so a read that failed at the first byte
-    # returned the empty string and compared equal to the empty value that was written.
+    # here: an EMPTY baseline was legitimate when this was written, so a read that failed at
+    # the first byte returned the empty string and compared equal to the empty value that
+    # was written. Since #264 the legitimate value is `none\n`, which a read failing at the
+    # first byte cannot equal — but a read failing at the FIFTH still returns `none`, and
+    # the comparison here is on the raw bytes INCLUDING the terminator, so it does not.
     #
     # PASSING THE EXPECTED BYTES IN CLOSES IT WITHOUT ANSWERING THE QUESTION. The child
     # compares what it read against what was written, INCLUDING the trailing newline and
