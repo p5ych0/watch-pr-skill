@@ -55,7 +55,7 @@ it.
 | --- | --- |
 | the `mkdir` never succeeded | there is no directory of this run's, and none is left |
 | a refusal after the reservation | the directory is **left**, with whatever had been written in it |
-| a refusal from `pr-origin.sh read` itself | the directory is left and is **empty** — that helper creates its own transport and gives it back on its own refusal path (#157), which is the one removal this contract does not cover and does not own |
+| a refusal from `pr-origin.sh read` itself | the directory is left, and whether its `o` transport is still inside depends on where that helper stopped — it creates its own transport and gives it back where it can (#157), which since #266 means before its write; a write that opens and then fails leaves the transport and its leaf. That is the one removal this contract does not cover and does not own |
 | a signal at any point | **whatever had been written by then is left** — `TERM` and `HUP` terminate by bash's own default with no handler at all, `INT` is re-raised by the one handler there is, and neither path removes anything, so a signal after the reader wrote `o/origin` leaves the reservation AND that transport |
 | anything a same-UID process placed at or inside that name | **untouched by this helper.** It had one exception it did not own, and that exception is gone: `pr-origin.sh`'s cleanup used to resolve `<dir>/o/origin` for removal (`rm -f "$OUT"`), so a replacement planted there went with it — #266 removed that, and its cleanup is now `rmdir` alone |
 

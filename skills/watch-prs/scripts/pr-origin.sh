@@ -73,9 +73,11 @@
 #      another parent: what is wrong is not the storage, and an operator has to see
 #      it named.
 #
-#      The reason is on STDERR, and this script does NOT create a value
-#      file. The leaf is written by the single redirection that creates it, so
-#      nothing here ever leaves a half-written or empty one.
+#      The reason is on STDERR, and on a refusal BEFORE the write this script
+#      creates no value file at all. The leaf is written by the single redirection
+#      that creates it, so nothing here leaves a HALF-WRITTEN one — but a write that
+#      opens and then fails leaves an empty leaf behind with the reservation, which
+#      is why a caller must branch on the status rather than on the file.
 #
 #      THAT IS NOT THE SAME AS "THE LEAF IS ABSENT", and the difference is the
 #      pre-existing case: where `<dir>` was already there and already held an
@@ -104,9 +106,12 @@
 #          refusal that tidied it up would be this script deleting what it just
 #          refused to trust.
 #        - AFTER it — an UNSAFE ANCESTOR, the git read, an empty origin, a newline
-#          in it, the pin's mismatch, a failed write — this script created the
-#          directory, so it gives the directory back before stopping, and there is
-#          nothing for the caller to collect.
+#          in it, the pin's mismatch — this script created the directory, so it
+#          gives the directory back before stopping and there is nothing to collect.
+#          A FAILED WRITE IS THE EXCEPTION, since #266: the leaf is open by then,
+#          `rmdir` alone cannot remove a directory holding it, and the reservation
+#          is left. That residue is accepted in
+#          `docs/decisions/2026-09-01-origin-cleanup-races.md`.
 #
 #          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal gets `rmdir` alone
 #          since #266, and `rmdir` cannot remove a directory that holds a file. So a
@@ -301,11 +306,14 @@ esac
 # the operator owns. The value is written by the single redirection that creates
 # the object, below, so there is no interval and no second lookup.
 #
-# NOTHING IS LEFT BEHIND ON A REFUSAL EITHER, which is what the truncation was
-# for: a run that refuses before its write creates no file at all, and a refusal
-# AFTER the directory exists is given back by the EXIT cleanup, which removes the
-# file and the directory before the process ends. The caller opens the result once to check and
+# A REFUSAL BEFORE THE WRITE LEAVES NOTHING, which is what the exclusive create is
+# for: such a run creates no file at all, and the EXIT cleanup `rmdir`s the empty
+# directory before the process ends. The caller opens the result once to check and
 # read it, and sees the open fail rather than an empty file.
+#
+# A REFUSAL PAST THE WRITE LEAVES BOTH, and that is #266's residue rather than an
+# oversight: the cleanup is `rmdir` alone, which fails on a directory holding the
+# leaf. The caller still sees a non-zero status and still must not read the file.
 umask 077
 set -C
 # AND THE DIRECTORY IT SITS IN MUST BE ONE NOBODY ELSE CAN WRITE. Everything
@@ -437,8 +445,9 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # symlink — so what a recreated name costs is an empty directory of somebody else's.
 # Running once is still the fix, and it is cheaper to keep than to re-derive.
 #
-# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap gives the reservation back
-# for them and for any other abnormal end, and there is nothing left to do twice.
+# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap gives the reservation back for
+# them and for any other abnormal end — where it still can, which since #266 means
+# before the write — and there is nothing left to do twice.
 #
 # A SIGNAL DOES NOT COME THROUGH `EXIT`, and that is deliberate: its handler
 # disables `EXIT`, calls the cleanup DIRECTLY, and re-raises. Routing it through
@@ -647,8 +656,9 @@ rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and 
 # WALKING AFTERWARDS IS NOT WEAKER. The walk asks who may rename the components on
 # the way; creating a private child first does not change any of their answers, and
 # NOTHING IS WRITTEN into the child until the walk has passed. A refusal from the
-# walk removes the directory again — the EXIT cleanup does it, in its pre-write
-# phase — so the reservation is given back rather than left behind.
+# walk removes the directory again — the EXIT cleanup `rmdir`s it, which succeeds
+# precisely because nothing has been written yet — so the reservation is given back
+# rather than left behind.
 #
 # HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
 # this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
@@ -715,12 +725,14 @@ trap 'rb_on_signal TERM' TERM
          # so every existing `if helper …; then` treats it as the refusal it is.
          echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
          exit 2; }
-# AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES. Every refusal from here on
-# happens AFTER the directory exists — the two ancestry walks, the git read, an
-# empty origin, a newline in it, a write that opens and then fails — and each used
-# to leave nothing behind because the CALLER owned the directory and cleaned up in
-# its own arms. It does not own it any more, so the obligation moved with the
-# creation.
+# AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES — WHILE IT IS STILL EMPTY. Every
+# refusal from here on happens AFTER the directory exists — the two ancestry walks, the
+# git read, an empty origin, a newline in it, a write that opens and then fails — and
+# each used to leave nothing behind because the CALLER owned the directory and cleaned
+# up in its own arms. It does not own it any more, so the obligation moved with the
+# creation. What moved with it is bounded by the removal's shape: `rmdir` gives back an
+# empty reservation, and a refusal past the write leaves one that is not empty, which
+# `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts.
 #
 # `rmdir`, NOT `rm -rf`. This removes only what it made and only while empty: a
 # path this script created cannot legitimately hold anything else, and a recursive

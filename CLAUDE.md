@@ -160,8 +160,9 @@ to terminate: it stops re-entry and makes the cleanup interruptible instead, so 
 signal during the `rmdir` kills the shell and the caller removes nothing.
 Ignoring stops both. Doing it after the cleanup rather than before leaves it RE-ENTRANT:
 a signal arriving while it runs invokes it again, and after the first pass has freed the
-candidate an account watching a shared parent can put a symlink there before the second
-`rm -f` resolves it. A signal is the third way out: each handler disarms all four traps,
+candidate an account watching a shared parent can recreate it before a second pass resolves
+the name — which was `rm -f` following a symlink until #266 and is `rmdir` now, so the cost
+is somebody else's empty directory rather than their file. A signal is the third way out: each handler disarms all four traps,
 cleans up, and RE-RAISES, because a trap REPLACES a signal's terminating action and one
 that merely returned left bash resuming the work it was killed during — and, between a
 successful write and the disarm, returning status 0 for a run somebody killed. The
@@ -170,7 +171,10 @@ command, since resetting those too left a window where a `TERM` terminated the h
 with no cleanup at all. The contract is a directory this helper created, so a refusal or
 a signal that left it behind would be a leak nothing else would collect: the caller
 performs no cleanup after a non-zero status, deliberately, because it cannot know who
-created the path. #157.
+created the path. Since #266 that promise holds only BEFORE the write — past it the
+reservation and its leaf are left, `rmdir` failing on a non-empty directory, and
+`docs/decisions/2026-09-01-origin-cleanup-races.md` accepts that residue rather than
+treating it as a leak. #157.
 
 ### The DRIVER's retry over `pr-setup.sh` is a separate contract
 

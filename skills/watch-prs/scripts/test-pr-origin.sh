@@ -1928,8 +1928,10 @@ esac
 # ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
 #
 # Since #157 this script creates the transport directory, so every refusal PAST
-# that `mkdir` — the git read, an empty origin, a newline in it, a failed write —
-# owns something nothing else will collect. `rb_refuse` is what removes it, and
+# that `mkdir` — the git read, an empty origin, a newline in it — owns something
+# nothing else will collect. (A failed WRITE is the exception since #266: the leaf
+# is open, `rmdir` cannot remove the directory, and the reservation is left by
+# design.) `rb_refuse` is what removes the rest, and
 # nothing observed the directory after such a failure: the cases above assert
 # status and output, and each `run` now takes a fresh name, so removing the
 # `rmdir` from `rb_refuse` left every one of them green while each refused read
