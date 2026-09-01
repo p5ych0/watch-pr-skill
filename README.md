@@ -1029,9 +1029,12 @@ plugin docs and open an issue.
   or `pin` file that is **empty or partially written** — that is what a storage refusal
   looks like when the file was opened before the write failed, and nothing removes it.
   It is not a usable result: a value in those files means something only when the helper
-  exited 0. Leave them; they are a stale temporary directory under your `TMPDIR`, and
-  removing them by hand is the one thing the loop itself refuses to do, because the path
-  was published in `argv` and may no longer be the directory that run created.
+  exited 0. Leave them; they are a stale temporary directory under **the parent setup
+  selected** — `TMPDIR` where that is usable, `$HOME` where it is not, and the second of
+  those two where the first attempt was retried — so look under the one the abort names
+  rather than under `TMPDIR` by assumption. Removing them by hand is the one thing the
+  loop itself refuses to do, because the path was published in `argv` and may no longer be
+  the directory that run created.
 
   The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds
