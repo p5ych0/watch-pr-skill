@@ -136,23 +136,28 @@ rather than a handoff, and #162 carries the protocol change that removes them. T
 refusals only say why and stop — cleaning up in them as well meant a refusal cleaned and
 then `exit` fired the trap and cleaned again, and the second pass is the dangerous one,
 because an account watching the published path can recreate it as a symlink between the
-two and a second `rm -f` follows the replacement. `RB_PHASE` picks the shape: `rmdir`
-ALONE while no leaf can exist — it refuses a symlink outright, which is what makes it
-safe on a name the ancestry walks have not approved — and leaf-then-directory once a
-write has happened, since `rmdir` necessarily fails on a directory holding its leaf. The
-phase flips INSIDE each write's own redirection — `{ RB_PHASE=post; printf …; } > "$OUT"`
-— which is after the walks, so the leaf-removing shape never runs on an unapproved path,
-and has no interval before the write for a signal to arrive in. It flipped at the walks
-until #230, and then as a command just before the write; both left a window in which a
-refusal or a signal ran the leaf-removing shape with nothing written, which against a
-replaced directory unlinks the replacement's file. The cost of the shape that has no
-window is a residue: a refusal before a write gets `rmdir` alone, so a directory somebody
-replaced with a NON-EMPTY one survives it, and that is deliberate — the alternative is
-unlinking a leaf by a name this run did not write. Every trap is
+two and a second `rm -f` follows the replacement. **THE CLEANUP IS `rmdir` ALONE, IN EVERY
+PHASE, AND THERE IS NO PHASE.** It had two shapes chosen by `RB_PHASE` — `rmdir` while no
+leaf could exist, and leaf-then-directory once a write had happened, since `rmdir`
+necessarily fails on a directory holding its leaf — and #266 removed the second. The leaf
+removal resolved a NAME, and the `-d` and `-O` tests in front of it FOLLOW SYMLINKS, so a
+same-UID process that renamed the reservation and left a symlink to another directory
+passed both and had a file removed in the TARGET: measured, a file in an unrelated
+directory was unlinked. A `[[ -L ]]` in front of it is a check-then-use, which is the shape
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the whole class on and which
+`pr-setup.sh` answered by removing nothing at all. `rmdir` needs no such confinement: it
+refuses a symlink outright and refuses a non-empty directory. **`RB_PHASE` went with it,
+and that is the point rather than a tidy-up** — three review rounds went into WHERE to flip
+it, because every placement traded one window for another, and a value nothing reads cannot
+be placed wrongly; what carries the guarantee now is the shape of the removal. The cost is
+a residue and it is the one already accepted: a refusal after a write leaves the directory
+AND its leaf, because `rmdir` fails on a non-empty directory —
+`docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for the pre-write
+case, and this is the same kind, nothing destroyed. Every trap is
 IGNORED — `trap ''`, not `trap -` — before the first removal, in one statement, on both
 exit paths. `trap -` restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is
 to terminate: it stops re-entry and makes the cleanup interruptible instead, so a second
-signal between the `rm` and the `rmdir` kills the shell and the caller removes nothing.
+signal during the `rmdir` kills the shell and the caller removes nothing.
 Ignoring stops both. Doing it after the cleanup rather than before leaves it RE-ENTRANT:
 a signal arriving while it runs invokes it again, and after the first pass has freed the
 candidate an account watching a shared parent can put a symlink there before the second

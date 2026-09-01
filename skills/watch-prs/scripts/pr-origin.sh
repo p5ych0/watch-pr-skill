@@ -124,14 +124,14 @@
 #          halves of the mistake — removing the direct signal cleanup, and cleaning
 #          up a successful result.
 #
-#          THE BODY HAS TWO SHAPES, chosen by `RB_PHASE` — by whether a leaf can
-#          exist yet. BEFORE either write, which is the two ancestry walks and the
-#          unresolvable-path refusal, it is `rmdir` ALONE: there is no leaf to
-#          remove, and removing one by NAME would resolve a path the walk has just
-#          decided not to trust, which is a symlink an attacker can substitute
-#          while it runs. AFTER the writes it removes the leaf and then the
-#          directory. The refusals themselves clean up nothing — they say why and
-#          stop — so the removal happens at most once, whichever way the run ends.
+#          THE BODY HAS ONE SHAPE AND IT IS `rmdir` ALONE. It had two, chosen by a
+#          phase flag, and the second removed the leaf by NAME before the directory
+#          — which resolves a path a same-UID process may have substituted, and
+#          #266 measured it removing a file in an unrelated directory through a
+#          replaced reservation. `rmdir` refuses a symlink and refuses a non-empty
+#          directory, so it can only take an empty directory at this name. The
+#          refusals themselves clean up nothing — they say why and stop — so the
+#          removal happens at most once, whichever way the run ends.
 #
 #      THE ANCESTRY IS ON THE SECOND LIST, and it moved there with the `mkdir`.
 #      The walks used to run first, so an unsafe component was refused before
@@ -445,23 +445,24 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # up on every path out" is the sentence that invites removing the direct signal
 # cleanup, or cleaning up a successful result.
 #
-# THE PHASE IS WHAT PICKS THE SHAPE, and it replaces the two refusal functions
-# exactly: `rmdir` alone while no leaf can exist, and leaf-then-directory once a
-# write has happened. `rmdir` refuses a symlink outright, which is what makes the
-# pre-write shape safe on a name the ancestry walks have not approved yet; and
-# `rmdir` NECESSARILY fails on a directory holding its leaf, which is why the
-# post-write shape has to remove the leaf first.
+# THERE IS ONE SHAPE AND IT IS `rmdir` ALONE, in every phase. There were two, chosen by
+# `RB_PHASE`: `rmdir` while no leaf could exist, and leaf-then-directory once a write had
+# happened, because `rmdir` necessarily fails on a directory holding its leaf. #266 removed
+# the second — the leaf removal resolved a NAME, and the `-d` and `-O` tests in front of it
+# follow symlinks, so a replaced reservation had a file removed in the directory the
+# symlink pointed at. `rmdir` needs no such confinement: it refuses a symlink outright and
+# refuses a non-empty directory.
 #
-# THE PHASE FLIPS INSIDE EACH WRITE'S OWN REDIRECTION, which is after both walks and so
-# never on an unapproved path — but NOT at the walks, and not as a command before the
-# write either. The name becomes trusted at the walks; a leaf starts existing when the
-# redirection OPENS, and between those sit refusals: the origin read's, and the pin's
-# comparison against it. With the flip at the walks each of those ran the leaf-removing
-# shape for a leaf the run had never created; as a separate command before the write, a
-# signal delivered between the two did the same on a smaller interval. A redirection on a
-# group is applied before the group runs, so `{ RB_PHASE=post; printf …; } > "$OUT"` has
-# the object open before the assignment executes and no interval at all.
-RB_PHASE=pre
+# `RB_PHASE` WENT WITH IT, and that is the point rather than a tidy-up. It existed only to
+# select the removing shape, so with that gone the flag has no consumer — and this file
+# spent three review rounds on WHERE to flip it, because every placement traded one window
+# for another. A value nothing reads cannot have a wrong placement. What replaces the
+# guarantee it was carrying is the shape of the removal itself.
+#
+# THE COST IS LITTER, and it is the cost already accepted for the other phase: a refusal
+# after a write leaves the directory and its leaf, because `rmdir` fails on a non-empty
+# directory. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for
+# the pre-write case, and this is the same kind — nothing destroyed.
 # WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
 # neither is signal-safe alone.
 #
@@ -505,7 +506,27 @@ rb_cleanup() {   # give back what this run created, for the phase it is in
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
         || return 0
     [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
-    [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
+    # `rmdir` ALONE, IN EVERY PHASE, AND THAT IS #266. This removed the leaf by name first
+    # where a write had happened, and the two tests above do not confine it: `-d` and `-O`
+    # both FOLLOW SYMLINKS, so a same-UID process that renames this reservation and leaves
+    # a symlink to another directory passes both — the target is a directory and is owned
+    # by the same user — and `rm -f "$OUT"` then unlinked a file in THAT directory.
+    # Measured: with the write failing under a zero file-size limit and the swap performed
+    # between the write and the cleanup, a file in an unrelated directory was removed.
+    #
+    # A FURTHER CHECK IS NOT THE ANSWER, and that is why this is a removal. `[[ -L ]]` here
+    # is a check-then-use: the `rm` resolves the name again afterwards, which is the shape
+    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the whole removal class on
+    # — and that record already declined to accept this case on this helper's behalf.
+    # `pr-setup.sh` answered the same question by removing nothing at all.
+    #
+    # `rmdir` NEEDS NO SUCH CONFINEMENT because it refuses a symlink outright and refuses a
+    # non-empty directory, so it can only ever take an empty directory at this name.
+    #
+    # THE RESIDUE IS THE LITTER ALREADY ACCEPTED. A refusal after a write now leaves the
+    # directory and its leaf, because `rmdir` fails on a non-empty directory — which is the
+    # cost `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts for the pre-phase
+    # case, and the same KIND: nothing destroyed.
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
@@ -975,10 +996,10 @@ if [[ $MODE = pin ]]; then
     # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
-    { RB_PHASE=post; printf '%s\n' "${REVIEW_BUS_REMOTE-}"; } > "$OUT" \
+    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
-    # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
-    # EXIT handler would remove the leaf this run just wrote, so it has to go. The
+    # ONLY `EXIT` IS RESET. The EXIT handler would try to give this reservation back,
+    # and a successful run leaves it for the caller — that is the point of the call. The
     # SIGNAL handlers stay armed through the final command: resetting them too left
     # a window in which a `TERM` terminated the helper by default, with no cleanup
     # — and the caller, seeing a non-zero status, removes nothing, so a completed
@@ -994,9 +1015,9 @@ rb_read_origin
 # THE PHASE FLIPS INSIDE THIS REDIRECTION TOO, for the same reason and against a defect
 # that predates the pin's: `rb_read_origin` refuses on a checkout with no origin, on a
 # `git` that fails, and on a value it cannot accept — all after the walks and all before
-# any write. With the flip at the walks each of those removed a leaf this run had not
-# made; as a separate command before the write, a signal between the two did the same.
-{ RB_PHASE=post; printf '%s\n' "$_rb_origin"; } > "$OUT" \
+# any write. Each of those used to run the leaf-removing cleanup shape for a leaf the run
+# had not made; there is no such shape now.
+printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
 # stay armed through the final command.

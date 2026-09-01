@@ -1397,10 +1397,21 @@ esac
 # unset pin leaves — and `read` leaves an empty file the caller reads back as an
 # origin.
 #
-# AND THE DIRECTORY IS ASSERTED GONE, which is the half only the cleanup provides:
-# the write happens after `RB_PHASE=post`, so the leaf is removed with it.
+# AND THE RESERVATION IS ASSERTED LEFT BEHIND, which is what #266 changed. The write has
+# opened the leaf by the time it fails, so the directory is not empty — and the cleanup is
+# `rmdir` alone now, which fails on a non-empty directory. The leaf removal that used to
+# make this case end with the directory gone is what #266 took out: `-d` and `-O` both
+# follow symlinks, so a replaced reservation had a file removed in the directory the
+# symlink pointed at.
+#
+# THE RESIDUE IS THE LITTER ALREADY ACCEPTED by
+# `docs/decisions/2026-09-01-origin-cleanup-races.md` for the pre-write case, and of the
+# same kind: nothing destroyed. Asserting it here is what stops the removal coming back
+# quietly — a change that restored it would make this case green again.
 _wf_bin="$TMP/wfbin"; mkdir -p "$_wf_bin"
 for _wf_mode in read pin; do
+    # THE LEAF NAME IS THE MODE'S OWN: `read` writes `origin`, `pin` writes `pin`.
+    case "$_wf_mode" in read) _wf_leaf=origin ;; *) _wf_leaf=pin ;; esac
     _wf_dir="$TMP/wf.$_wf_mode.$$"
     rm -rf "$_wf_dir"
     _wf_rc=0
@@ -1440,9 +1451,14 @@ for _wf_mode in read pin; do
       && case "$_wf_out" in *"storage refused the write"*) true ;; *) false ;; esac; } \
         && pass "a write that opens and then fails reports 2 and names storage ($_wf_mode)" \
         || die "the $_wf_mode write-failure case gave rc=$_wf_rc '$_wf_out'"
-    [ ! -e "$_wf_dir" ] \
-        && pass "…and the directory it had reserved is given back ($_wf_mode)" \
-        || die "a failed $_wf_mode write left '$_wf_dir' behind"
+    # THE LEAF IS STILL THERE TOO, and asserting it is what makes this a measurement of the
+    # residue rather than a weaker "the directory survives". A cleanup that removed the leaf
+    # and then failed to `rmdir` for some other reason would satisfy the directory check
+    # alone, and that is the state #266 exists to keep out.
+    { [ -d "$_wf_dir" ] && [ -e "$_wf_dir/$_wf_leaf" ]; } \
+        && pass "…and the reservation is left behind, leaf and all, rather than removed by name ($_wf_mode)" \
+        || die "a failed $_wf_mode write did not leave its reservation: dir=$([ -d "$_wf_dir" ] && echo yes || echo no) leaf=$([ -e "$_wf_dir/$_wf_leaf" ] && echo yes || echo no)"
+    rm -rf "$_wf_dir"
 done
 rm -rf "$_wf_bin"
 
@@ -1537,63 +1553,28 @@ _res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
 [ -z "$_res_gap" ] \
     && pass "…with nothing running between the arming and the reservation" \
     || die "statements run between the arming and the reservation: '$_res_gap'"
-# …AND THE PHASE FLIPS AFTER THE WALKS AND BEFORE ANY WRITE. `RB_PHASE` is what
-# decides whether the cleanup removes a leaf, and the leaf is removed BY NAME — so
-# moving `RB_PHASE=post` above either ancestry walk would let a signal during an
-# UNTRUSTED walk resolve `$OUT` through a path an attacker can have replaced. The
-# interruption cases cannot see that: they stage neither a replacement nor a victim
-# leaf, so they stay green.
+# …AND THE CLEANUP HAS NO REMOVAL TO PLACE, WHICH IS WHY THE PHASE MACHINERY IS GONE.
+# There used to be an `RB_PHASE` flag selecting a leaf-then-directory cleanup once a write
+# had happened, and a block of structural checks here pinning WHERE it could flip — after
+# the walks, inside the redirection that arms it, never as a command of its own. Every one
+# of those existed because the leaf was removed BY NAME, and a name resolved at the wrong
+# moment reaches something the run did not write.
 #
-# THESE ASSERTIONS WENT MISSING when this block was rewritten, and their absence is
-# why the paragraph that claimed structural cover was false for two rounds. All
-# three line numbers must be positive before they are ordered — a pattern that
-# stops matching leaves zero, and zero precedes everything.
-#
-# THERE IS ONE FLIP PER WRITE, AND THIS COUNTS THEM. A single flip after the walks was
-# the old shape, and it was too early: between the walks and a write there are refusals
-# — the origin read, and the pin's comparison against it — and a refusal with the phase
-# already `post` runs `rm -f "$OUT"` on a leaf this run never created, deleting a
-# replacement's file where a same-UID process has swapped the directory. So each write
-# is preceded by its own flip, and what has to hold is pairwise: as many flips as writes,
-# every flip after the walks, and each flip before the write it arms.
-_res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
-#
-# THE FLIP IS INSIDE THE REDIRECTED GROUP, which is what makes the leaf exist before it.
-# So the pattern matches it there rather than on a line of its own — and a flip written as
-# a separate command before the write no longer matches at all, which is the state this
-# check has to reject: it leaves a window in which a signal runs the leaf-removing cleanup
-# with nothing written.
-# ANCHORED AT LINE START, so a COMMENT quoting the construct is not counted as one. The
-# file explains this shape in prose, and an unanchored pattern found the explanation and
-# reported three flips for two writes — the same prose-for-code confusion #253 spent three
-# rounds on, arriving here by a different door.
-_res_phs="$(grep -n '^[[:space:]]*{ RB_PHASE=post; printf ' "$SCRIPT" `# racy-pipeline-ok: the printf is inside the grep PATTERN, and the pipe is grep-to-cut` | cut -d: -f1)" || _res_phs=""
-_res_bare="$(grep -c '^[[:space:]]*RB_PHASE=post$' "$SCRIPT")" || _res_bare=0
-[ "$_res_bare" -eq 0 ] \
-    && pass "the phase never flips as a command of its own, so no window precedes a write" \
-    || die "RB_PHASE=post appears $_res_bare time(s) outside a redirected write group; a signal between it and the write removes a leaf that was never created"
-_res_wrs="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | cut -d: -f1)" || _res_wrs=""
-_res_np="$(grep -c '[0-9]' <<<"$_res_phs")" || _res_np=0
-_res_nw="$(grep -c '[0-9]' <<<"$_res_wrs")" || _res_nw=0
-{ [ "$_res_w2" -gt 0 ] && [ "$_res_np" -gt 0 ] && [ "$_res_np" -eq "$_res_nw" ]; } \
-    && pass "…and every write to \$OUT is armed by a phase flip of its own ($_res_np)" \
-    || die "phase flips and \$OUT writes do not correspond (walk=$_res_w2 flips=$_res_np writes=$_res_nw)"
-_res_bad=""
-_res_i=1
-while [ "$_res_i" -le "$_res_np" ]; do
-    _res_p="$(sed -n "${_res_i}p" <<<"$_res_phs")"
-    _res_w="$(sed -n "${_res_i}p" <<<"$_res_wrs")"
-    # THE SAME LINE, because the flip lives INSIDE the redirected group — that is what
-    # makes the leaf open before it. "Before the write" was the old invariant and it is
-    # the one that left the window; what has to hold now is that the two are one command,
-    # and that it is after the walks.
-    { [ "$_res_p" -gt "$_res_w2" ] && [ "$_res_p" -eq "$_res_w" ]; } \
-        || _res_bad="$_res_bad pair$_res_i(walk=$_res_w2 phase=$_res_p write=$_res_w)"
-    _res_i=$((_res_i + 1))
-done
-[ -z "$_res_bad" ] \
-    && pass "…each after the walks and inside the redirection it arms" \
-    || die "RB_PHASE=post is misplaced:$_res_bad"
+# #266 removed the leaf removal instead, and the flag with it. `rmdir` refuses a symlink
+# and refuses a non-empty directory, so there is no placement question left to get wrong:
+# a value nothing reads cannot be flipped too early. What replaced three rounds of
+# placement rules is the SHAPE of the removal, asserted below.
+# ANCHORED AT LINE START, for the reason the removed block already recorded: this file
+# EXPLAINS the shape it forbids, and an unanchored pattern finds the explanation. It found
+# four, all of them prose.
+_res_rmf="$(grep -c '^[[:space:]]*[^#]*rm -f "\$OUT"' "$SCRIPT")" || _res_rmf=0
+[ "$_res_rmf" -eq 0 ] \
+    && pass "the cleanup removes no leaf by name, so no placement rule is needed for one" \
+    || die "a leaf removal is back in the helper ($_res_rmf occurrence(s)); #266 removed it because -d and -O follow symlinks"
+_res_ph="$(grep -c '^[[:space:]]*RB_PHASE=' "$SCRIPT")" || _res_ph=0
+[ "$_res_ph" -eq 0 ] \
+    && pass "…and the phase flag it selected is gone with it" \
+    || die "RB_PHASE is assigned $_res_ph time(s) but nothing reads it"
 # …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
 # means the cleanup can run at a moment when the `mkdir` had already failed because
 # the name was taken, and a directory there that belongs to somebody else is
@@ -2190,6 +2171,72 @@ _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR=
     && pass "…and leaves the whole reservation behind, taking nothing the racer put there" \
     || die "the pre-phase refusal removed something: dir=$([ -d "$_lit_dir" ] && echo yes || echo no) pin=$([ -e "$_lit_dir/pin" ] && echo yes || echo no) sibling=$([ -e "$_lit_dir/sibling" ] && echo yes || echo no) nested=$([ -e "$_lit_dir/sub/deep/file" ] && echo yes || echo no)"
 rm -rf "$_lit_dir" "$_lit_bin"
+
+# ── A REPLACED RESERVATION TAKES NOTHING FROM ITS TARGET — #266 ────────────
+#
+# THIS IS THE CASE THE CHANGE EXISTS FOR. The cleanup used to remove the leaf by NAME
+# before the directory, guarded by `[[ -d $RB_DIR ]]` and `[[ -O $RB_DIR ]]` — and both of
+# those FOLLOW SYMLINKS. So a same-UID process that renamed the reservation and left a
+# symlink to another directory passed both tests, because the target is a directory owned
+# by the same user, and the removal then resolved `$RB_DIR/pin` through the link and
+# unlinked a file that had nothing to do with this run.
+#
+# STAGED THROUGH BOTH REMOVAL COMMANDS, because either could be the one that runs: the
+# swap is performed by shims for `rm` AND `rmdir`, so whichever the cleanup reaches does it.
+# Before the fix the `rm` shim was enough; asserting through both is what keeps the case
+# honest if the cleanup's shape changes again.
+#
+# THE WRITE MUST FAIL AFTER OPENING, or the cleanup is never reached at all: a successful
+# run resets `EXIT` and leaves the reservation for the caller. `ulimit -f 0` gives that —
+# the redirection creates the leaf and the `printf` into it fails — and `SIGXFSZ` is
+# ignored so the shell survives to refuse. No watchdog, for the reason the write-failure
+# case above gives: `run_limited` captures into regular files, which the limit forbids.
+_esc_bin="$TMP/escbin"; rm -rf "$_esc_bin"; mkdir -p "$_esc_bin"
+_esc_real_rm="$(command -v rm)"; _esc_real_rmdir="$(command -v rmdir)"
+_esc_real_mv="$(command -v mv)"; _esc_real_ln="$(command -v ln)"
+# EVERY RESOLVED PATH CROSSES IN THE ENVIRONMENT AND IS INVOKED QUOTED, which is #267's
+# lesson applied here rather than repeated: a path containing a space, embedded unquoted,
+# would parse as two words and the shim would fail in a way that reads as a staging problem.
+for _esc_cmd in rm rmdir; do
+    { printf '#!/bin/sh\n'
+      printf 'if [ -d "$RB_ESC_DIR" ] && [ ! -L "$RB_ESC_DIR" ]; then\n'
+      printf '  "$RB_ESC_MV" "$RB_ESC_DIR" "$RB_ESC_DIR.moved" || exit 1\n'
+      printf '  "$RB_ESC_LN" -s "$RB_ESC_TARGET" "$RB_ESC_DIR" || exit 1\n'
+      printf '  : > "$RB_ESC_MARK" || exit 1\n'
+      printf 'fi\n'
+      printf 'exec "$RB_ESC_REAL_%s" "$@"\n' "$(printf '%s' "$_esc_cmd" | tr 'a-z' 'A-Z')"; } > "$_esc_bin/$_esc_cmd"
+    chmod +x "$_esc_bin/$_esc_cmd"
+done
+_esc_dir="$TMP/esc.$$"; rm -rf "$_esc_dir" "$_esc_dir.moved"
+_esc_tgt="$TMP/esc-elsewhere.$$"; rm -rf "$_esc_tgt"; mkdir -p "$_esc_tgt"
+printf 'belongs to somebody else\n' > "$_esc_tgt/pin"
+_esc_mark="$TMP/esc-swapped.$$"; rm -f "$_esc_mark"
+_esc_rc=0
+_esc_out="$(cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" PATH="$_esc_bin:$PATH" \
+    RB_ESC_DIR="$_esc_dir" RB_ESC_TARGET="$_esc_tgt" RB_ESC_MARK="$_esc_mark" \
+    RB_ESC_MV="$_esc_real_mv" RB_ESC_LN="$_esc_real_ln" \
+    RB_ESC_REAL_RM="$_esc_real_rm" RB_ESC_REAL_RMDIR="$_esc_real_rmdir" \
+    bash -c 'ulimit -f 0 2>/dev/null || exit 97
+             trap "" XFSZ
+             exec /usr/bin/env bash -p "$1" pin "$2"' _ "$SCRIPT" "$_esc_dir" 2>&1)" || _esc_rc=$?
+if [ "$_esc_rc" = 97 ]; then
+    echo "ok   - (this shell cannot set a zero file-size limit; the replaced-reservation case did not run)"
+else
+    # THE SWAP ACTUALLY HAPPENED. Without this the survival assertion below passes against a
+    # run that never reached a removal at all, or one where `mv` was refused — which is the
+    # vacuous pass #265's review found in this fixture's ancestor.
+    [ -e "$_esc_mark" ] \
+        && pass "a same-UID process can replace the reservation with a symlink before the cleanup" \
+        || die "the reservation was never swapped (rc=$_esc_rc), so the case below would prove nothing: '$_esc_out'"
+    # AND THE TARGET'S FILE SURVIVES, which is the whole of #266. `rmdir` refuses a symlink
+    # outright, so the cleanup cannot follow the replacement; before the fix the leaf removal
+    # resolved through it and unlinked this file.
+    [ -e "$_esc_tgt/pin" ] \
+        && pass "…and the cleanup takes nothing from the directory it points at" \
+        || die "the cleanup removed a file outside its own reservation; the leaf removal is back"
+fi
+rm -rf "$_esc_dir" "$_esc_dir.moved" "$_esc_tgt" "$_esc_bin"; rm -f "$_esc_mark"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

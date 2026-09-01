@@ -585,13 +585,15 @@ sibling and a nested subtree, so a bound that changes fails a case. Do not raise
 leftover directory as a leak, and do not "fix" the flip by moving it out of the redirection;
 every alternative placement is tabulated in the record and each is worse.
 
-**That record accepts ONE race, and explicitly not the other.** #257 named a second — the
-post-phase `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow symlinks, so a
-same-UID process that replaces the reservation with a symlink to another directory has that
-directory's file removed. Measured during #265, that reaches OUTSIDE the reservation
-entirely, which is not the narrow cost an earlier draft claimed and is not accepted: it is
-filed as a defect (#266), and the fix is a removal rather than a guard, since a further symlink
-check before the `rm` is a check-then-use. Do not treat the accepted litter as covering it.
+**That record accepts ONE race, and the other was a defect that is now FIXED.** #257 named
+a second — the post-phase `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow
+symlinks, so a same-UID process that replaces the reservation with a symlink to another
+directory has that directory's file removed. Measured during #265, that reaches OUTSIDE the
+reservation entirely, so it was filed as #266 rather than accepted. #266 removed it: the
+cleanup is `rmdir` alone in every phase, which refuses a symlink outright, and the phase
+flag that selected the removing shape went with it. Do not reintroduce a name-based removal
+here, and do not "fix" the leftover reservation by adding one — a `[[ -L ]]` in front of it
+is a check-then-use, which is the shape `2026-08-29-setup-leaf-cleanup.md` convicts.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses

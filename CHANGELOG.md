@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.98] — 2026-09-01
+
+- **`pr-origin.sh`'s cleanup no longer removes a leaf by name, so it can no longer take a
+  file outside its own reservation.** It had two shapes chosen by `RB_PHASE`: `rmdir` alone
+  while no leaf could exist, and leaf-then-directory once a write had happened. The second
+  is gone, and the flag with it.
+
+  **The failure it caused.** The leaf removal resolved a NAME, and the two tests guarding it
+  — `[[ -d $RB_DIR ]]` and `[[ -O $RB_DIR ]]` — both follow symlinks. So a same-UID process
+  that renamed the reservation and left a symlink to another directory in its place passed
+  both, because the target is a directory owned by the same user, and `rm -f "$OUT"` then
+  unlinked a file in *that* directory. Measured with the write failing under a zero
+  file-size limit and the swap performed between the write and the cleanup: a file in an
+  unrelated directory was removed. That is not the transport this helper created, and it is
+  not anything the caller offered.
+
+  **Why a check was not the fix.** A `[[ -L ]]` in front of the removal is a check-then-use:
+  the `rm` resolves the name again afterwards. That is the shape
+  `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the whole removal class on, and
+  which `pr-setup.sh` answered by removing nothing at all. `rmdir` needs no such guard — it
+  refuses a symlink outright and refuses a non-empty directory, so it can only ever take an
+  empty directory at that name.
+
+  **`RB_PHASE` went with it, and that is the point rather than tidying up.** The flag existed
+  only to select the removing shape, and three review rounds had gone into *where* it could
+  flip, because every placement traded one window for another. A value nothing reads cannot
+  be placed wrongly. The structural checks that pinned those placements are replaced by two
+  that assert the shape instead: no leaf removal in the helper, and no phase assignment.
+
+  **The cost is a residue, and it is one already accepted.** A refusal after a write now
+  leaves the reservation directory *and* its leaf, because `rmdir` fails on a non-empty
+  directory. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for the
+  pre-write case, and this is the same kind — nothing destroyed, litter under a path the
+  caller named. The write-failure fixtures assert it rather than asserting the directory is
+  gone, so a change that restored the removal would turn them red.
+
 ## [2.0.97] — 2026-09-01
 
 - **`open`'s UNBOUNDED baseline clearing is removed; the bounded one stays.**

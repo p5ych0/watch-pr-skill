@@ -66,11 +66,15 @@ at all. The consistent answer is the same one, and it is a REMOVAL rather than a
 further symlink check before the `rm` is a check-then-use, since the removal resolves the
 name again afterwards.
 
-It is not fixed in this change because it is a behaviour change to a helper, which this
-repository lands as its own pull request. It is **#266**, filed with the measurement and
-with the residue the fix would leave — a post-write refusal would leak the directory and
-its leaf, which is the litter this record already accepts, and of the same kind: nothing
-destroyed.
+It was not fixed in this change because it is a behaviour change to a helper, which this
+repository lands as its own pull request. **It is #266, and it is now fixed**: the leaf
+removal is gone and the cleanup is `rmdir` alone in every phase, which refuses a symlink
+outright. The residue that fix leaves is a post-write refusal keeping the directory and its
+leaf — the litter this record accepts, and of the same kind, nothing destroyed.
+
+**This record still accepts only the litter.** What #266 removed was a defect; what remains
+is that a refusal leaves the reservation behind, whatever phase it happens in, and that is
+the cost accepted above.
 
 ## Why the flip is not moved instead
 
@@ -88,9 +92,14 @@ tried, and each is worse — this is the comparison the reviewer files point at:
 | a descriptor-relative unlink in the handler | not available in shell |
 
 The current shape is the only one whose worst case is litter rather than loss, and it
-shrinks the interval to two adjacent operations. Note that the rows naming a leaf-removing
-shape describe a removal that is itself a defect (#266); once that is gone the comparison
-narrows further, but the flip stays where it is for the reason in the first row.
+shrinks the interval to two adjacent operations.
+
+**Since #266 this table is history rather than a live comparison.** Every row naming a
+leaf-removing shape describes a removal that no longer exists: the cleanup is `rmdir` alone
+in every phase, and the phase flag went with the removal it selected — so there is no
+placement left to choose. It is kept because it records what was tried and why each
+placement failed, which a later change proposing to reintroduce a name-based removal has to
+answer.
 
 ## What would change the accepted half
 
