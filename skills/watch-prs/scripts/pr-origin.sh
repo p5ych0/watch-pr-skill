@@ -431,8 +431,11 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # used to live in two refusal functions AND an EXIT trap, so a refusal cleaned up
 # and then `exit` fired the trap, which cleaned up again — and the second pass is
 # the dangerous one: on a shared sticky parent an account watching the published
-# path can recreate it as a symlink between the two, and the second `rm -f "$OUT"`
-# follows the replacement into a file this run never created.
+# path can recreate it between the two, and a second pass resolves that name again.
+# When this was written the second pass was `rm -f "$OUT"`, which followed a symlink
+# into a file this run never created; since #266 it is `rmdir`, which refuses a
+# symlink — so what a recreated name costs is an empty directory of somebody else's.
+# Running once is still the fix, and it is cheaper to keep than to re-derive.
 #
 # SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap gives the reservation back
 # for them and for any other abnormal end, and there is nothing left to do twice.
@@ -541,11 +544,18 @@ rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap
     [[ -n ${1-} ]] && echo "$1" >&2
     exit "${2:-1}"
 }
-# AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
+# AND A SIGNAL BETWEEN THE RESERVATION AND THE WRITE GIVES THE RESERVATION BACK. The
 # caller performs no cleanup after a non-zero status, deliberately — it cannot know
 # who created the path — so an interrupted run used to leak its `watch-pr.*`
 # directory for the life of the machine. The obligation moved here with the
 # creation, and a signal is a way out no refusal sees.
+#
+# NOT AFTER THE WRITE, AND SINCE #266 THAT IS THE HONEST STATEMENT. The cleanup is
+# `rmdir` alone, which fails on a directory holding the leaf this run just wrote, so a
+# signal landing between the write and `trap - EXIT` leaves the reservation AND the leaf.
+# That residue is the accepted cost in
+# `docs/decisions/2026-09-01-origin-cleanup-races.md`; what bought it is that no removal
+# here resolves a name, so an interrupted run cannot take something it did not write.
 #
 # THE HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal REPLACES its
 # default terminating action: handled and returned from, bash resumes the
@@ -563,18 +573,22 @@ rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap
 # restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is to terminate:
 # it stops the cleanup being re-entered and makes it INTERRUPTIBLE instead, so a
 # second signal during `rb_on_signal`, or one during the EXIT handler on an
-# ordinary refusal, kills the shell between the `rm` and the `rmdir` — and the
-# caller removes nothing after a non-zero status. `trap ''` ignores them, which
-# stops both. The original signal is restored to its default immediately before
+# ordinary refusal, kills the shell before the `rmdir` runs — and the caller removes
+# nothing after a non-zero status, so the reservation leaks. `trap ''` ignores them,
+# which stops both. This mattered more when the cleanup was two commands and a signal
+# could land BETWEEN them; since #266 it is one, and what remains is a shell killed
+# before it. The original signal is restored to its default immediately before
 # the re-raise, and only that one.
 #
 # AND EVERY TRAP IS DISARMED BEFORE THE CLEANUP RUNS, NOT AFTER IT. Disarming
 # afterwards leaves the cleanup RE-ENTRANT: a signal arriving while it runs — or a
 # second signal arriving while the first handler is between its two statements —
 # invokes it again, and the second pass is the dangerous one for the reason the
-# refusals gave up their own cleanup. After the first pass has freed the candidate,
-# an account watching that path on a shared parent can recreate it as a symlink
-# before the second `rm -f "$OUT"` resolves it.
+# refusals gave up their own cleanup. After the first pass has freed the candidate, an
+# account watching that path on a shared parent can recreate it — and a second pass then
+# resolves the name again. `rmdir` refuses a symlink, so what a recreated directory costs
+# now is an empty directory of somebody else's rather than a file of theirs; the
+# re-entrancy is still worth stopping, and the disarm is what stops it.
 #
 # ALL FOUR IN ONE STATEMENT, in both exit paths, and BEFORE the first removal.
 # Removing only the signal that fired leaves the other two armed; removing them
@@ -1013,11 +1027,11 @@ fi
 # would be the duplication `CLAUDE.md` records paying for. `read` calls it and writes what
 # it got; `pin` calls it to CHECK what it inherited. Neither derives the origin twice.
 rb_read_origin
-# THE PHASE FLIPS INSIDE THIS REDIRECTION TOO, for the same reason and against a defect
-# that predates the pin's: `rb_read_origin` refuses on a checkout with no origin, on a
-# `git` that fails, and on a value it cannot accept — all after the walks and all before
-# any write. Each of those used to run the leaf-removing cleanup shape for a leaf the run
-# had not made; there is no such shape now.
+# NO PHASE FLIPS HERE EITHER, and the refusals this note was about are why the flag was
+# hard to place: `rb_read_origin` refuses on a checkout with no origin, on a `git` that
+# fails, and on a value it cannot accept — all after the walks and all before any write,
+# so a flag set any earlier had each of them running the leaf-removing shape for a leaf
+# the run had not made. #266 removed the shape, so there is nothing left to place.
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to

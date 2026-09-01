@@ -1465,9 +1465,10 @@ rm -rf "$_wf_bin"
 # runtime cases above are the coverage: they execute both write paths and assert
 # the refusal, the status and the cleanup.
 #
-# WHAT THEY ARE NOT is a cleanup guarantee. `|| exit 1` in place of `|| rb_refuse`
-# would still give the directory back, because the EXIT trap does the cleanup and
-# is already armed — the `rb_refuse` spelling is uniformity, not a mechanism. And
+# WHAT THEY ARE NOT is a cleanup guarantee — and since #266 there is less of one to give:
+# the EXIT trap is armed either way, but `rmdir` alone cannot empty a directory holding the
+# leaf the write opened, so a failed write leaves the reservation whichever spelling
+# refuses. The `rb_refuse` spelling is uniformity, not a mechanism. And
 # deleting a guard entirely is caught by the runtime cases, by status and by
 # diagnostic. What is left is worth keeping and worth stating honestly: both writes
 # take their status, and both name the write in their message, so a future edit
@@ -1511,8 +1512,9 @@ _res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCR
 # …AND NO REFUSAL CLEANS UP ITSELF, which is what makes the cleanup run ONCE. It
 # used to live in the refusals AND in the EXIT trap, so a refusal cleaned up and
 # then `exit` fired the trap and cleaned again — and the second pass is the
-# dangerous one: an account watching the published path can recreate it as a
-# symlink between the two, and a second `rm -f "$OUT"` follows the replacement.
+# dangerous one: an account watching the published path can recreate it between the
+# two, and a second pass resolves that name again. That was `rm -f "$OUT"` following
+# a symlink when this was written; since #266 it is `rmdir`, which refuses one.
 _res_ref=""
 _res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
 { [ -n "$_res_ref" ] \
@@ -1601,11 +1603,12 @@ _res_bad="$(awk '/^ *exit 0$/ { if (prev ~ /trap - EXIT HUP INT TERM/) n++ } { p
 [ "$_res_bad" = 0 ] \
     && pass "…and neither disarms the signal handlers before the final command" \
     || die "a success path resets the signal traps early, leaving a window with no cleanup"
-# …AND THE CLEANUP IS NOT RE-ENTRANT. Every trap is removed BEFORE the first
-# removal, in one statement, on both exit paths: a signal arriving while the
-# cleanup runs would otherwise invoke it again, and after the first pass has freed
-# the candidate an account watching a shared parent can put a symlink there before
-# the second `rm -f "$OUT"` resolves it.
+# …AND THE CLEANUP IS NOT RE-ENTRANT. Every trap is removed BEFORE the removal, in one
+# statement, on both exit paths: a signal arriving while the cleanup runs would otherwise
+# invoke it again, and after the first pass has freed the candidate an account watching a
+# shared parent can recreate it before a second pass resolves the name. Since #266 that
+# second pass is `rmdir`, which refuses a symlink — so what re-entrancy costs is somebody
+# else's empty directory rather than their file, and it is still worth stopping.
 _res_sig=""
 _res_sig="$(awk '/^rb_on_signal\(\) \{/,/^\}/' "$SCRIPT")" || _res_sig=""
 _res_sig_ok=no
@@ -1789,9 +1792,10 @@ rm -rf "$_mkd_bin"; rm -f "$_mkd_mark"
 #
 # `trap -` restores a signal's DEFAULT action, which for these three is to
 # terminate: disarming that way stops the cleanup being RE-ENTERED and makes it
-# INTERRUPTIBLE instead, so a second signal between the `rm` and the `rmdir` kills
+# INTERRUPTIBLE instead, so a second signal arriving before the `rmdir` completes kills
 # the shell and the caller — which removes nothing after a non-zero status — is
-# left with the directory. `trap ''` ignores them, which stops both.
+# left with the directory. `trap ''` ignores them, which stops both. The interval was
+# wider when the cleanup was two commands; #266 left one, and this still aims at it.
 #
 # STAGED WITH A SLOW `rmdir`, so there is an interval to aim at. The cleanup
 # reaches it through `/usr/bin/env`, which resolves on `PATH`, so a stub is enough:
