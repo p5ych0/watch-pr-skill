@@ -354,12 +354,14 @@ case "$_bs_out" in
     *)  die "the bootstrap case refused for another reason: '$_bs_out'" ;;
 esac
 
-# …AND THE BODY FILE IS NEVER TRUNCATED BY EITHER CLEARING, which is what the guards
-# exclude. Staged as the alias: the account must survive to be refused properly.
+# …AND THE BODY FILE SURVIVES THE ALIAS REFUSAL. There is no clearing left to protect it
+# from; what can destroy it is the WRITE, which opens `$SHA_FILE` truncating, so the alias
+# has to be refused BEFORE anything is written. Staged as the alias: the account must
+# survive to be refused properly.
 world; printf 'the account\n' > "$TMP/body.md"
 got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && [ -s "$TMP/body.md" ]; } \
-    && pass "…and neither clearing truncates the body file it is aliased to" \
+    && pass "…and the alias is refused before the write, so the account is still there" \
     || die "the alias refusal emptied the account: '$(cat "$TMP/body.md" 2>/dev/null)'"
 # …AND THE FILE IS NOT THE BODY FILE, by path and under another name.
 world; got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
