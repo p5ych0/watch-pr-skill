@@ -2276,6 +2276,35 @@ for _rec_st in 0 3 1; do
         *) die "the record fence on 1 gave rc=$_rec_rc '$_rec_out'" ;;
     esac
 done
+# …AND "WITHOUT READING ANYTHING" IS ASSERTED, not inferred from the message. #245 removed
+# `record`'s pre-bootstrap clearing on exactly this ground: a refusal exits 1 into the `*)`
+# arm, which never opens `$HEAD_FILE`, so a stale sha left there by an earlier run cannot
+# reach the next stage. If that stops being true the removal is wrong, and this is where it
+# would show.
+#
+# THE SHA FILE HOLDS A WELL-FORMED VALUE for these, so a fence that DID read it would
+# assign one rather than fail — the failure mode being guarded against is a silent success.
+_rec_rc=0
+_rec_out="$(RB_REC_STUB="$_rec_dir/stub1" HEAD_FILE="$_rec_dir/sha" bash -c '
+    trap '"'"'printf "SHA:[%s]" "${CODEX_SHA-unset}"'"'"' EXIT
+    . "$1" 2>/dev/null' _ "$_rec_dir/rec.sh" 2>/dev/null)" || _rec_rc=$?
+case "$_rec_out" in
+    *'SHA:[unset]'*) pass "…leaving CODEX_SHA unassigned, which is what makes that removal safe" ;;
+    *) die "a refused record fence assigned CODEX_SHA from the file: '$_rec_out'" ;;
+esac
+# AND IT DOES NOT DISTURB A RETAINED ONE EITHER. `CODEX_SHA` is kept across the session for
+# step 8 and is never cleared, so after a completed Codex phase a refusal here falls through
+# holding the earlier value. What must not happen is this fence REPLACING it with whatever
+# the file holds.
+_rec_out="$(RB_REC_STUB="$_rec_dir/stub1" HEAD_FILE="$_rec_dir/sha" bash -c '
+    CODEX_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    trap '"'"'printf "SHA:[%s]" "${CODEX_SHA-unset}"'"'"' EXIT
+    . "$1" 2>/dev/null' _ "$_rec_dir/rec.sh" 2>/dev/null)" || true
+case "$_rec_out" in
+    *'SHA:[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]'*)
+        pass "…and a retained CODEX_SHA survives a refusal untouched" ;;
+    *) die "a refused record fence overwrote a retained CODEX_SHA: '$_rec_out'" ;;
+esac
 
 # ── THE STEP-2 REVIEWER ASSIGNMENT, LIFTED AND RUN ────────────────────────
 #

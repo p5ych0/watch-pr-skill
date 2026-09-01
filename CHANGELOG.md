@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.96] — 2026-09-01
+
+- **`record`'s pre-bootstrap clearing is removed, and the one that matters is bounded.**
+  `pr-copilot-phase.sh` cleared its caller-named file twice: once above the bootstrap, for
+  refusals that happen before the later clearing is reachable, and once after. The first was
+  an **unbounded truncating open on a caller-named path** — `>` follows a symlink and
+  truncates its target, and a FIFO there blocks — and it could not be bounded where it was,
+  because `run_limited` arrives with the bootstrap.
+
+  It did not need to be. The driver reads `$HEAD_FILE` in the success arm and in the `3`
+  arm; a refusal exits 1 into the `*)` arm, which reads nothing, and with `exit` shadowed
+  execution falls past that fence carrying whatever `CODEX_SHA` already held — the retained
+  value from step 7, not anything this file wrote. So the arm was destroying files to
+  protect a read that does not happen. The later clearing now goes through `run_limited`.
+
+  **`open` keeps its arm, and the asymmetry is measured.** A refused `open` *is* followed by
+  a reader: with `exit` shadowed, execution reaches the wait step, which hands
+  `$PRIOR_FILE` to `pr-watch.sh --after-review-file`, and a stale well-formed review id is
+  accepted there. That case was missing from the suite and is now present; removing the
+  clearing turns it red. #245.
+
 ## [2.0.95] — 2026-09-01
 
 - **A read-back that could not tell EOF from a failed read now compares in the child.**

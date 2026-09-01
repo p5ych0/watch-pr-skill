@@ -104,13 +104,20 @@ set -uo pipefail
 # `record` also refuses to truncate its BODY file, whose account this stage is about to
 # post and which the alias check below refuses properly. `open` needs no such pairing:
 # its `$3` is a sha, not a path.
-if [[ ${1:-} = record ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]] \
-   && [[ -n ${3:-} ]] && [[ ! ${4} -ef ${3} ]]; then
-    > "${4}" || {
-        echo "ABORT: the sha file '${4}' exists and cannot be emptied; a stale sha would be left for the caller to read."
-        exit 1
-    }
-fi
+# `record` HAS NO ARM HERE, AND THAT IS MEASURED RATHER THAN ASSUMED. It had one, for a
+# refusal above the later clearing — an unreadable library, a PR number that is not a
+# number — on the reasoning that such a refusal would leave the previous run's sha for the
+# caller to read as this one's. The driver does not read it there: `$HEAD_FILE` is read in
+# the success arm and in the `3` arm, and a bootstrap failure exits 1 into the `*)` arm,
+# which reads nothing. With `exit` shadowed to return, execution falls past that fence
+# carrying whatever `CODEX_SHA` already held — which after a completed Codex phase is the
+# retained sha from step 7, not anything this file wrote — so the stale FILE is not what
+# reaches the next stage.
+#
+# Removing it removes an unbounded truncating open on a caller-named path, which is worth
+# more than the depth it was giving: `>` follows a symlink and truncates its target, so an
+# arm that cannot be reached by a reader was still able to destroy a file. The clearing
+# that matters runs after the bootstrap, where `run_limited` exists to bound it. #245.
 if [[ ${1:-} = open ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]]; then
     > "${4}" || {
         echo "ABORT: the baseline file '${4}' exists and cannot be emptied; a stale review id would be left for the caller to read, and the watch would take a pass made before this request as the answer to it."
@@ -552,7 +559,13 @@ fi
 # a sha file that IS the body file must not be truncated, because the account this stage
 # is about to post is what would be destroyed. Both guards exclude it, and the alias check
 # above refuses it properly.
-> "$SHA_FILE" || { echo "ABORT: could not empty the sha file '$SHA_FILE'."; exit 1; }
+# BOUNDED, because opening a path can BLOCK. A same-UID process can put a FIFO at this
+# name and `>` waits for a reader that never arrives — and this is the clearing that
+# matters now that the pre-bootstrap arm is gone, so it is the one that has to be bounded.
+# `run_limited` has loaded by here, which is the whole reason the clearing belongs after
+# the bootstrap rather than above it. #245.
+run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$SHA_FILE" \
+    || { echo "ABORT: could not empty the sha file '$SHA_FILE'; it is unwritable, or opening it blocked."; exit 1; }
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest
 # summary the thing read before the diff — so a truncated one is worse than none:
