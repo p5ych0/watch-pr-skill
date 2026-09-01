@@ -453,11 +453,13 @@ something to act on and prints one line when the state changes:
 # where the stage that wrote it returned 0. Those steps abort on anything else, but
 # an `exit` that returns carries a refusal into this line, and the file then holds
 # the previous round's id, this round's captured id, a refusal sentinel, or nothing.
-# Only the sentinel is refused; it is `state=error` at the watch. The two ids are
-# well-formed baselines and are accepted, so a terminal review with a different id
-# is reported as this round's answer though nothing was requested. The watch cannot
-# tell them apart, which is why the success rule above is the one to rely on and why
-# the value is not re-derived or defaulted here. A re-request on
+# The watch decides on SHAPE, not on who wrote it: anything that is not a review id
+# is `state=error` there, and any id is accepted. So the sentinel is refused while it
+# survives — the capture overwrites it — and so are arbitrary bytes from a failed
+# read-back, while both ids are accepted and a terminal review with a different id is
+# reported as this round's answer though nothing was requested. The watch cannot tell
+# a stale id from a fresh one, which is why the success rule above is the one to rely
+# on and why the value is not re-derived or defaulted here. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives

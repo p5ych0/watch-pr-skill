@@ -443,15 +443,16 @@ Then:
      returns carries the refusal past the abort and into the wait step, which reads
      this path. That fallback is real and is tested.
 
-     **Only the sentinel is guaranteed to be refused.** Where the readiness write
-     happened, the fallback reads the sentinel and `pr-watch.sh` stops. Where it did
-     not — a refusal from the bootstrap — the file still holds the *previous* round's
-     id, and that is a well-formed baseline: if the current terminal review has a
-     different id the watch accepts it and reports a verdict for a pass nobody
-     requested. A failed request can likewise leave this round's captured id. Those are
-     known residues of the fallback, not things the watch can catch, which is why the
-     rule is the one above: the contents are authoritative only where `open` returned
-     0, and the driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
+     **What the watch refuses is decided by shape, not by which stage wrote the
+     value**: anything that is not a review id stops it, and any id is accepted. So the
+     sentinel is refused *while it survives* — the captured id overwrites it once the
+     capture succeeds — and so are arbitrary bytes left by a failed read-back. What is
+     accepted is any well-formed id, including the *previous* round's after a bootstrap
+     refusal and this round's after a failed request: if the current terminal review has
+     a different id, the watch reports a verdict for a pass nobody requested. Those are
+     known residues of the fallback rather than things the watch can catch, which is why
+     the rule is the one above — the contents are authoritative only where `open`
+     returned 0, and the driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

@@ -33,8 +33,10 @@
   **This narrows the fail-open; it does not eliminate it.** The readiness write truncates
   before it writes, so a failure between the two — ENOSPC, a quota — still leaves an empty
   file, and empty is still legal. A refusal from the bootstrap leaves the previous round's
-  id and a failed request leaves this round's, both well-formed baselines the watch accepts.
-  Only the sentinel is refused. What changed is that the span between the readiness write and
+  id and a failed request leaves this round's, both well-formed baselines the watch accepts —
+  the watch decides on shape, so it refuses the sentinel only while it survives, the capture
+  having overwritten it, and refuses arbitrary bytes from a failed read-back for the same
+  reason. What changed is that the span between the readiness write and
   the capture no longer fails open on *every* refusal, only on one where the write itself
   fails after truncating. Closing the rest needs the file to say which run wrote it, which is
   #264; `README.md` and `SKILL.md` state the boundary for anyone relying on it.
