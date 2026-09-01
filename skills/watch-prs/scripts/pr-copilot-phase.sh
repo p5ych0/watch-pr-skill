@@ -91,25 +91,23 @@ set -uo pipefail
 # from `record`, and it is why its clearings outlived `record`'s by one change.
 #
 # ONLY THE ONE ABOVE THE BOOTSTRAP IS GONE — the arm this comment used to introduce. The
-# bounded one below survives, because it is also the readiness proof for the write and
-# stands ahead of the revocation; its own argument is beside it. So a bootstrap refusal
-# leaves this file untouched and a later refusal leaves it empty, and both are deliberate.
+# bounded one below survives, and its argument is beside it rather than here: five review
+# rounds went into restating this in four files, and every round one of the copies had
+# drifted. `skills/watch-prs/SKILL-RATIONALE.md` carries the whole account under
+# **THE FILE WAS EMPTIED TWICE AND IS NOW EMPTIED ONCE**; what is stated here is only what
+# THIS arm did.
 #
-# BUT EMPTYING WAS NEVER THE PROTECTION, and that is what #245's second half turned out to
-# be. `pr-watch.sh` suppresses a terminal verdict on ONE condition — the id it finds equals
-# the baseline — and the whole comparison is guarded by `[ -n "$AFTER_REVIEW" ]`. So an
-# EMPTY baseline suppresses NOTHING. Against a stale id the two outcomes are the same
-# wherever they differ from the current review, and where they do not, emptying is the
-# WORSE of the two: `test-pr-watch.sh` stages exactly this pair — baseline `99` with the
-# current id `99` reports `awaiting_new_review`, and an EMPTY baseline with that same
-# current id reports `PR_REVIEW_READY`. Clearing converted a correct suppression into an
-# announcement of the very review it was supposed to hold back.
+# EMPTYING WAS NEVER THE PROTECTION. `pr-watch.sh` holds a terminal verdict back on ONE
+# condition — the id it finds equals the baseline — and the whole comparison is guarded by
+# `[ -n "$AFTER_REVIEW" ]`, so an EMPTY baseline holds nothing back. This arm therefore did
+# not prevent the harm its own comment named.
 #
-# So the clearing did not prevent the harm its own comment named — the watch taking a pass
-# that already finished — because empty and stale both fail to suppress it. What it did do
-# was open a caller-named path with `>` before the bootstrap, where `run_limited` does not
-# exist yet: a FIFO there blocks, and a symlink there truncates its target. That is the
-# whole of #245, and removing the arm removes it.
+# WHAT IT DID COST is a `>` on a caller-named path before the bootstrap, where `run_limited`
+# does not exist yet. Its `[[ -f ]]` guard makes the blocking case a CHECK-TO-OPEN RACE: a
+# FIFO already at the path was refused by the guard and never opened, and what could block
+# is a same-UID process replacing the path between the test and the open. The symlink case
+# needs no race, `[[ -f ]]` following one to a regular file the open then truncated. That is
+# the whole of #245, and removing the arm removes it.
 #
 # `record` HAS NO CLEARING, HERE OR ANYWHERE, and #245 is why: it had two and neither
 # protected a read that can happen. Its file is read only in the driver's success arm and
@@ -280,11 +278,18 @@ if [[ $STAGE = open ]]; then
     # write's own mode — O_WRONLY without truncate or append — so the operation that proves
     # it IS the truncation.
     #
-    # THE PRICE IS PAID KNOWINGLY: a refusal between here and the write leaves the file
-    # empty rather than holding the previous round's id, and empty is the weaker of the two.
-    # It buys a phase that never reports "did not open" after mutating the PR, which is the
-    # stronger property — the emptier baseline costs at most one waiting cycle, and the
-    # half-mutated phase costs a revoked signoff nobody asked for.
+    # THE PRICE IS PAID KNOWINGLY, AND IT IS NOT A WAITING CYCLE. A refusal between here and
+    # the write leaves this file EMPTY rather than holding the previous round's id — and if
+    # that refusal falls through the driver's shadowed `exit` into the wait step, an empty
+    # baseline makes `pr-watch.sh` skip its equality check, so a terminal review that the
+    # previous round's id would have held back as `awaiting_new_review` is announced as
+    # `PR_REVIEW_READY` instead. The cost is PREMATURE ACCEPTANCE of a review no new request
+    # was made for, in the narrow case where the stale id equals the current one.
+    #
+    # It is still the trade to take, because the alternative is unconditional: without this
+    # clearing EVERY unusable baseline path reaches the write only after the signoff has been
+    # revoked, and the phase reports "did not open" having mutated the PR. A narrow premature
+    # acceptance against a certain half-mutated phase.
     run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$PRIOR_FILE" \
         || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive

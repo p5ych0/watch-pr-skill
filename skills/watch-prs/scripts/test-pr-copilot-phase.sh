@@ -1369,10 +1369,25 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested while a stale signoff still described the head" \
     || pass "…with Copilot not requested"
 
-world; printf '1\n' > "$W/edit.rc"; got="$(run open 7 "$HEAD40")"
+world; printf '1\n' > "$W/edit.rc"
+printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
+got="$(run open 7 "$HEAD40" "$TMP/prior.txt")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'not permission to skip the pass' <<<"${got#*|}"; } \
     && pass "a failed request stops, and says so rather than reading as a slow reviewer" \
     || die "a failed --add-reviewer gave '${got}'"
+# AND THE FILE HOLDS THE CAPTURED ID, WHICH IS THE THIRD OUTCOME. A refusal has three
+# possible residues here and a reader must not be promised two: untouched where the
+# BOOTSTRAP refused, empty between the bounded clearing and the write, and — here — the id
+# the write already put there, because this refusal is PAST the write. Asserting the id
+# rather than merely "not stale" is what makes the case name the outcome instead of
+# excluding one.
+_ar="$(cat "$TMP/prior.txt" 2>/dev/null)"
+case "$_ar" in
+    stale-from-a-previous-round) die "the baseline write did not happen before the failed request" ;;
+    "") die "a refusal past the write left the baseline empty, not the captured id" ;;
+    *[!0-9]*) die "the baseline file holds something that is not a review id: '$_ar'" ;;
+    *) pass "…and a refusal past the write leaves the captured id, not an empty file" ;;
+esac
 
 world; got="$(run open 7)"
 { [ "${got%%|*}" = 1 ] && grep -qF "'open' needs the head" <<<"${got#*|}"; } \

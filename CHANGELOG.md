@@ -14,9 +14,11 @@
   filed. The symlink half needs no race — `[[ -f ]]` follows one, so a symlink to a regular
   file passes the guard and the open truncates its target.
 
-  So a refusal from the bootstrap leaves the baseline as it found it, and a refusal after
-  the surviving clearing leaves it empty. Which of the two a reader gets depends on where
-  the run stopped, and the reason the second one is kept is below.
+  Where a run stops decides what the file then holds, and there are three answers, not two:
+  a refusal from the bootstrap leaves it as it found it; a refusal between the surviving
+  clearing and the write leaves it empty; and a refusal *after* the write — a read-back
+  mismatch, or `gh pr edit --add-reviewer` failing — leaves the captured id, because the
+  write has already replaced the file. The reason the surviving clearing is kept is below.
 
   It survived that release because the reader it was written for is real, and still is:
   with the driver's `exit` shadowed to return, a refused `open` falls past its fence into

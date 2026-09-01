@@ -2452,18 +2452,23 @@ WHO="chatgpt-codex-connector[bot]" bash -c '
 # with. THAT is what this case proves, and it is why `open` is not `record`: the driver has
 # a reader after the refusal, so what the file holds is observable.
 #
-# THE STUB REFUSES WITHOUT RUNNING THE HELPER, so the value seen here is the one the caller
-# left — `99`, not empty. That is the bootstrap-refusal shape, which is the arm whose
-# clearing #245 removed. A refusal further in reaches the bounded clearing first and the
-# reader would see an empty file instead; both are deliberate, and which one a run gets
-# depends on where it stopped. Neither is asserted here, because neither is the document's
-# to decide — what the document decides is that a reader exists at all.
+# THE STUB REFUSES WITHOUT RUNNING THE HELPER AT ALL, and that bounds what this case can
+# say. Deleting the retained bounded clearing would not change it by one byte, so it proves
+# NOTHING about either clearing. What it proves is the premise both arguments rest on and
+# neither helper suite can reach: after a refusal, with `exit` returning, the driver still
+# arrives at the wait step and hands it whatever `$PRIOR_FILE` holds — here `99`, the value
+# the caller left, because no helper ran to change it.
+#
+# WHAT THE FILE HOLDS IN A REAL RUN IS THE HELPER'S QUESTION, and `test-pr-copilot-phase.sh`
+# is where it is asked: untouched after a bootstrap refusal, empty after one between the
+# bounded clearing and the write, and the captured id after one past the write. None of the
+# three is asserted here.
 if grep -q 'WATCHED:' "$_ow_dir/seen" 2>/dev/null; then
     grep -qF 'WATCHED:[99]' "$_ow_dir/seen" \
-        && pass "a refused open DOES reach the wait step, which is why its clearing is load-bearing" \
+        && pass "a refused open DOES reach the wait step, and arms it with whatever the file holds" \
         || die "the wait step was reached with something other than the staged baseline: $(cat "$_ow_dir/seen")"
 else
-    die "the lifted open fence did not reach the wait step; the reason for keeping its clearing is unproven"
+    die "the lifted open fence did not reach the wait step; the premise both clearing arguments rest on is unproven"
 fi
 
 # ── THE PHASE-OPEN FENCE, AND ITS REVIEWER SWITCH UNDER A RETURNING `exit` ─

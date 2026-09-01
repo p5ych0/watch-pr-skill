@@ -1501,9 +1501,25 @@ Nothing weaker proves it, and that was measured rather than assumed. `>>` opens 
 append, so an append-only file passes and the write fails; `<>` opens read-write, which
 rejects a write-only file the real write handles, and its only gain needs root to stage.
 No shell redirection expresses the write's own mode, so the operation that proves it is
-the truncation. The price is that a refusal between the clearing and the write leaves the
-baseline empty rather than stale — at most one waiting cycle, against a revoked signoff
-nobody asked for. #245.
+the truncation.
+
+THE PRICE IS PREMATURE ACCEPTANCE, NOT A WAITING CYCLE, and it is worth naming exactly. A
+refusal between the clearing and the write leaves this file EMPTY rather than stale; if
+that refusal falls through the driver's shadowed `exit` into the wait step, the empty
+baseline makes the watch skip its equality check, so a terminal review the previous
+round's id would have held back as `awaiting_new_review` is announced as
+`PR_REVIEW_READY` — a review no new request was made for, accepted as this round's answer.
+It needs the stale id to have equalled the current one, which is the narrow case.
+
+It is still the trade to take, because the alternative is unconditional: with no clearing
+here, EVERY unusable baseline path is discovered only at the write, which is after the
+signoff has been revoked, and the phase reports that it did not open having mutated the
+PR. A narrow premature acceptance against a certain half-mutated phase.
+
+WHAT THE FILE HOLDS AFTER A REFUSAL THEREFORE HAS THREE ANSWERS, and a reader should not
+be promised two: untouched where the bootstrap refused, empty between this clearing and
+the write, and the captured id after the write — a read-back mismatch or a failed
+`--add-reviewer` leaves what the write already put there. #245.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 
