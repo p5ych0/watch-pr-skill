@@ -30,16 +30,21 @@
   ordering guarantee is unchanged — still a truncating open, still bounded, still ahead of
   the revocation.
 
-  **This narrows the fail-open; it does not eliminate it.** The readiness write truncates
-  before it writes, so a failure between the two — ENOSPC, a quota — still leaves an empty
-  file, and empty is still legal. A refusal from the bootstrap leaves the previous round's
-  id and a failed request leaves this round's, both well-formed baselines the watch accepts —
-  the watch decides on shape, so it refuses the sentinel only while it survives, the capture
-  having overwritten it, and refuses arbitrary bytes from a failed read-back for the same
-  reason. What changed is that the span between the readiness write and
-  the capture no longer fails open on *every* refusal, only on one where the write itself
-  fails after truncating. Closing the rest needs the file to say which run wrote it, which is
-  #264; `README.md` and `SKILL.md` state the boundary for anyone relying on it.
+  **This narrows the fail-open; it does not eliminate it.** The watch refuses only a value
+  that is non-empty and not a review id, so what it stops is the sentinel *while it
+  survives* — the capture overwrites it — and a substituted value that is not id-shaped.
+  Everything else it accepts, and that is where the remaining fail-open lives: an empty file,
+  from a readiness write that failed after truncating; the previous round's id after a
+  bootstrap refusal; this round's after a failed request; and **a substituted value that
+  happens to be digits**, which a read-back mismatch leaves in place and which is as
+  well-formed as any real baseline. In each case a terminal review with a different id is
+  announced as this round's answer though nothing was requested.
+
+  What changed is narrower than "the fail-open is closed": the span between the readiness
+  write and the capture no longer fails open on *every* refusal, only where the write itself
+  fails after truncating or a substituted id survives the mismatch. Closing the rest needs
+  the file to say which run wrote it, which is #264; `README.md` and `SKILL.md` state the
+  boundary for anyone relying on it.
 
   **Truncation through a caller-named path is not what changed, and is not removable here.**
   The surviving clearing opens the baseline with `>`, so a symlink a same-UID process leaves
