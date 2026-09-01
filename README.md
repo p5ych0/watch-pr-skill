@@ -1024,6 +1024,15 @@ plugin docs and open an issue.
   had already been created is left where it is, which is the same litter a refusal
   leaves.
 
+  **What that litter can contain, since 2.0.98.** A refused attempt may leave its
+  temporary directory with a nested transport directory inside it, holding an `origin`
+  or `pin` file that is **empty or partially written** — that is what a storage refusal
+  looks like when the file was opened before the write failed, and nothing removes it.
+  It is not a usable result: a value in those files means something only when the helper
+  exited 0. Leave them; they are a stale temporary directory under your `TMPDIR`, and
+  removing them by hand is the one thing the loop itself refuses to do, because the path
+  was published in `argv` and may no longer be the directory that run created.
+
   The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds
   everything else itself, so nothing the helper wrote is ever executed. The three

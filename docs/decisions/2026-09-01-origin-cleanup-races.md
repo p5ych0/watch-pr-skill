@@ -115,7 +115,13 @@ answer.
 
 ## What would change the accepted half
 
-A shell with descriptor-relative removal, or a transport that is not a shell — either would
-let the reservation be given back even when it is not empty. Until then a refusal that finds
+**Not a descriptor-relative removal**, which an earlier draft of this record proposed and
+which does not reach it: unlinking THIS RUN's `origin` or `pin` through a held descriptor
+leaves the racer's sibling or nested subtree, so the reservation is still not empty, and
+removing those as well would destroy entries this record's own bound forbids touching.
+
+What would change it is a transport nothing else can populate — a protocol where an unowned
+entry cannot appear inside the reservation at all, rather than a better way to remove one.
+That is a different design, not a different primitive. Until then a refusal that finds
 it non-empty leaves what it found, and that is the accepted cost. An empty one is still
 removed, which is the ordinary case and not a limit.

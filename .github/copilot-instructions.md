@@ -583,8 +583,10 @@ survives `INT` and publishes a ready line for a run somebody stopped. Do not rai
 leftover directory as a leak, and do not reintroduce a removal of any kind — a fixture
 asserts the file contains none and that no handler removes anything. One object is
 outside that promise and is not this helper's: `pr-origin.sh read` creates its own
-transport directory and gives it back on its own refusal path, so a checkout with no
-readable origin ends with the reservation present and empty. That is stated in the file
+transport directory and gives it back on its own refusal path — a single `rmdir`, so it
+succeeds only while that transport is EMPTY, and a same-UID process that has put anything
+in it defeats it. A checkout with no readable origin ordinarily ends with the reservation
+present and empty. That is stated in the file
 and staged behaviourally on both sides. Raise a cost you think was underweighted as a
 non-blocking note.
 
