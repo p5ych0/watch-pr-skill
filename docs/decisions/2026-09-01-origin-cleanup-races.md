@@ -52,7 +52,7 @@ pre-phase refusal ever starts removing something, the case fails.
 
 #257's second gap is a defect rather than a limit, and measuring it is what settled that.
 
-Once the phase is `post`, `rb_cleanup` runs `rm -f "$OUT"`. It removes by NAME, and every
+Once the phase was `post`, `rb_cleanup` ran `rm -f "$OUT"`. It removed by NAME, and every
 check above it — `[[ -d $RB_DIR ]]`, `[[ -O $RB_DIR ]]` — FOLLOWS SYMLINKS. So a same-UID
 process that renames the reservation and leaves a symlink to another directory in its place
 has that directory's `pin` or `origin` removed instead. Measured: with the write failing
@@ -79,12 +79,13 @@ the cost accepted above.
 
 ## Why the flip is not moved instead
 
-The window exists because the flip is inside the redirection. Every other placement was
-tried, and each is worse — this is the comparison the reviewer files point at:
+The window existed because the flip was inside the redirection. Every other placement was
+tried, and each was worse — this is the comparison the reviewer files point at, kept as the
+record of what a name-based removal cost to place:
 
 | placement | residue |
 | --- | --- |
-| inside the redirection (today) | a signal in a two-instruction window leaves the reservation as it found it — litter |
+| inside the redirection (what shipped) | a signal in a two-instruction window leaves the reservation as it found it — litter |
 | before the redirection | a signal in the window runs the leaf-removing shape with nothing written: **loss**, not litter |
 | at the walks | every refusal between the walks and the write runs the leaf-removing shape for a leaf the run never created |
 | after the write | every refusal between the open and the write leaks, over a longer interval |
@@ -92,8 +93,8 @@ tried, and each is worse — this is the comparison the reviewer files point at:
 | ignore signals across the write | trades a bounded litter for a write that cannot be interrupted — worse on a blocking target |
 | a descriptor-relative unlink in the handler | not available in shell |
 
-The current shape is the only one whose worst case is litter rather than loss, and it
-shrinks the interval to two adjacent operations.
+The shape that shipped was the only one whose worst case was litter rather than loss, and
+it shrank the interval to two adjacent operations.
 
 **Since #266 this table is history rather than a live comparison.** Every row naming a
 leaf-removing shape describes a removal that no longer exists: the cleanup is `rmdir` alone
@@ -104,5 +105,6 @@ answer.
 
 ## What would change the accepted half
 
-A shell with descriptor-relative removal, or a transport that is not a shell. Until then a
-refusal before the phase flips leaves what it found, and that is the accepted cost.
+A shell with descriptor-relative removal, or a transport that is not a shell — either would
+let the reservation be given back on a refusal instead of left. Until then a refusal leaves
+what it found, and that is the accepted cost.

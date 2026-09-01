@@ -583,8 +583,9 @@ create files and subdirectories in the mode-700 directory once it exists. What m
 acceptable is the KIND and not the size — nothing is destroyed, since that phase's cleanup
 removes only an empty directory — and it is STAGED in `test-pr-origin.sh` with a leaf, a
 sibling and a nested subtree, so a bound that changes fails a case. Do not raise the
-leftover directory as a leak, and do not "fix" the flip by moving it out of the redirection;
-every alternative placement is tabulated in the record and each is worse.
+leftover directory as a leak, and do not "fix" it by reintroducing a removal that resolves a
+name — the record tabulates every placement that was tried for the one #266 removed, and
+each was worse than the last.
 
 **That record accepts ONE race, and the other was a defect that is now FIXED.** #257 named
 a second — the post-phase `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow

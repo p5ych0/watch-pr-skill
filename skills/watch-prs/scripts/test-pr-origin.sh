@@ -453,15 +453,14 @@ esac
 # directory, a same-UID process swaps it, and the MISMATCH refusal then fires — needs a
 # racer inside a span of a few milliseconds, and a fixture that tries to hit it would pass
 # on scheduling rather than on the code. So the window itself is covered STRUCTURALLY, by
-# the pairwise phase-flip assertion in the reservation section: one flip per write, each
-# after the walks and before the write it arms, so no refusal can reach the leaf-removing
-# shape.
+# the assertions in the reservation section that there is no leaf removal and no phase flag
+# at all, so no refusal can reach a leaf-removing shape because there is not one.
 #
 # WHAT THIS CASE PROVES is the consequence, on the refusal that CAN be staged
 # deterministically: a foreign leaf is present, the helper refuses before writing
 # anything, and the file is still there afterwards. It reaches that refusal by the
-# exclusion rather than by the mismatch — the phase is pre-write at both — so it is
-# evidence about the cleanup shape, not about the mismatch's timing.
+# exclusion rather than by the mismatch — neither writes anything — so it is evidence about
+# the cleanup shape, not about the mismatch's timing.
 rm -rf "$TMP/swap"; mkdir -p "$TMP/swap"
 printf 'someone-elses-pin\n' > "$TMP/swap/pin"
 if true; then
@@ -1884,8 +1883,8 @@ rm -rf "$_sig_bin"; rm -f "$_sig_mark"
 # returns, so a TERM sent during `git` is handled BEFORE the write, and the only
 # thing between the write and the disarm is a builtin. Racing a builtin is not a
 # case, it is a coin. The structural assertions cover which shape the handler
-# takes and where the phase flips; the runs above cover that the handler fires,
-# cleans up and re-raises, in both modes.
+# takes — one, since #266 — and the runs above cover that it fires, cleans up and
+# re-raises, in both modes.
 
 # ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
 #
@@ -2112,12 +2111,12 @@ rm -rf "$_rz"
 # changes, it fails. It is not a proof that the helper is correct here; it is the
 # measurement of exactly how much a refusal can leave.
 #
-# `RB_PHASE` flips inside each write's own redirection, so a signal delivered between the
-# open and the assignment runs the cleanup as `rmdir` alone — which fails on a directory
-# that is not empty. That window is two instructions and a fixture aiming at it would pass
-# on scheduling, so what is staged is the SAME residue by a refusal that can be driven: a
-# same-UID racer populates the directory the moment it exists, and the pin mismatch then
-# refuses with the phase still `pre`.
+# The cleanup is `rmdir` alone, which fails on a directory that is not empty, so ANY refusal
+# with something in the reservation leaves it. That was once a window of two instructions —
+# between the leaf opening and a flag saying so — and a fixture aiming at a window would
+# pass on scheduling; #266 removed the flag and the removal it selected, so the residue is
+# no longer a race at all. What is staged is a refusal that can be driven: a same-UID racer
+# populates the directory the moment it exists, and the pin mismatch then refuses.
 #
 # THE CONTENTS ARE RACER-CONTROLLED AND SO IS THE BOUND. An earlier version planted one
 # leaf, which measured an example rather than a maximum: once the mode-700 directory
