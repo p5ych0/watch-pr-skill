@@ -2276,6 +2276,41 @@ for _rec_st in 0 3 1; do
         *) die "the record fence on 1 gave rc=$_rec_rc '$_rec_out'" ;;
     esac
 done
+# …AND "WITHOUT READING ANYTHING" IS ASSERTED, not inferred from the message. #245 removed
+# `record`'s pre-bootstrap clearing on exactly this ground: a refusal exits 1 into the `*)`
+# arm, which never opens `$HEAD_FILE`, so a stale sha left there by an earlier run cannot
+# reach the next stage. If that stops being true the removal is wrong, and this is where it
+# would show.
+#
+# THE SHA FILE HOLDS A WELL-FORMED VALUE for these, so a fence that DID read it would
+# assign one rather than fail — the failure mode being guarded against is a silent success.
+_rec_rc=0
+# `CODEX_SHA` IS CLEARED IN THE CHILD, because the case is about what the FENCE assigns and
+# the suite runs with the operator's environment: an exported `CODEX_SHA` is a name setup
+# accepts and the self-check preserves, so without this the child would report the
+# inherited value and fail a clean checkout for a reason that has nothing to do with the
+# fence.
+_rec_out="$(RB_REC_STUB="$_rec_dir/stub1" HEAD_FILE="$_rec_dir/sha" bash -c '
+    unset CODEX_SHA
+    trap '"'"'printf "SHA:[%s]" "${CODEX_SHA-unset}"'"'"' EXIT
+    . "$1" 2>/dev/null' _ "$_rec_dir/rec.sh" 2>/dev/null)" || _rec_rc=$?
+case "$_rec_out" in
+    *'SHA:[unset]'*) pass "…leaving CODEX_SHA unassigned, which is what makes that removal safe" ;;
+    *) die "a refused record fence assigned CODEX_SHA from the file: '$_rec_out'" ;;
+esac
+# AND IT DOES NOT DISTURB A RETAINED ONE EITHER. `CODEX_SHA` is kept across the session for
+# step 8 and is never cleared, so after a completed Codex phase a refusal here falls through
+# holding the earlier value. What must not happen is this fence REPLACING it with whatever
+# the file holds.
+_rec_out="$(RB_REC_STUB="$_rec_dir/stub1" HEAD_FILE="$_rec_dir/sha" bash -c '
+    CODEX_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    trap '"'"'printf "SHA:[%s]" "${CODEX_SHA-unset}"'"'"' EXIT
+    . "$1" 2>/dev/null' _ "$_rec_dir/rec.sh" 2>/dev/null)" || true
+case "$_rec_out" in
+    *'SHA:[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]'*)
+        pass "…and a retained CODEX_SHA survives a refusal untouched" ;;
+    *) die "a refused record fence overwrote a retained CODEX_SHA: '$_rec_out'" ;;
+esac
 
 # ── THE STEP-2 REVIEWER ASSIGNMENT, LIFTED AND RUN ────────────────────────
 #
@@ -2380,6 +2415,49 @@ _w2_attack() {   # _w2_attack <label> <setup-line>
 _w2_attack "…a transforming WHO refuses at step 2 even with exit shadowed" "declare -u WHO"
 _w2_attack "…and a readonly WHO does too, before anything is posted" \
     "readonly WHO=\"copilot-pull-request-reviewer[bot]\""
+
+# ── WHY `open` KEEPS A CLEARING AND `record` DOES NOT ─────────────────────
+#
+# #245 removed both of `record`'s clearings and kept both of `open`'s, and the difference is
+# entirely about what the DRIVER does after a refusal. Asserting it in the helper's own
+# suite would prove the helper empties a file; what has to be true is that a stale value
+# reaches a reader, and only the document can show that.
+#
+# The fence and the wait step are lifted TOGETHER, with `exit` shadowed to return — which is
+# the state in which a refused `open` continues at all — and the watch replaced by a stub
+# that records the baseline it was given.
+_ow_dir="$TMP_CL/ow"; mkdir -p "$_ow_dir" || die "the open-window scratch directory could not be made"
+# THE TWO FENCES ARE NOT ADJACENT and are lifted separately, then concatenated in the order
+# execution takes them: past step 7's fence, the driver returns to steps 3-6 with `$WHO`
+# switched, and the wait step is the first thing there that opens `$PRIOR_FILE`.
+awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-copilot-phase.sh open N/, /^fi$/' "$SKILL" \
+    | sed '1s|^if .*|if "$RB_OW_STUB"; then|' > "$_ow_dir/ow.sh"
+grep '^/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-watch.sh N "\$WHO" --after-review-file' "$SKILL" \
+    `# racy-pipeline-ok: the printf is inside the sed REPLACEMENT, and sed reads to EOF` \
+    | sed 's|^.*$|printf "WATCHED:[%s]" "$(cat "$PRIOR_FILE")" >> "$RB_OW_SEEN"|' >> "$_ow_dir/ow.sh"
+{ grep -q 'if "$RB_OW_STUB"; then' "$_ow_dir/ow.sh" && grep -q 'WATCHED:' "$_ow_dir/ow.sh"; } \
+    && pass "the phase-open fence and the wait step lift together, so the case below reaches both" \
+    || die "the open-window lift did not produce both halves; the case would prove nothing"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$_ow_dir/stub1"; chmod +x "$_ow_dir/stub1"
+printf '99\n' > "$_ow_dir/prior"
+: > "$_ow_dir/seen"
+RB_OW_STUB="$_ow_dir/stub1" RB_OW_SEEN="$_ow_dir/seen" \
+PRIOR_FILE="$_ow_dir/prior" COPILOT_BOT="copilot-pull-request-reviewer[bot]" \
+WHO="chatgpt-codex-connector[bot]" bash -c '
+    exit() { return 0; }
+    . "$1" 2>/dev/null' _ "$_ow_dir/ow.sh" >/dev/null 2>&1 || true
+# THE CONSEQUENCE, NOT THE MECHANISM. A refused `open` with `exit` returning reaches the
+# wait step, and whatever `$PRIOR_FILE` holds at that moment is what the watch is armed
+# with. The helper's clearing is what makes that value empty rather than a previous round's
+# review id — which the watch accepts, and then waits past a review already given. That is
+# the whole reason `open` keeps a clearing that `record` does not.
+if grep -q 'WATCHED:' "$_ow_dir/seen" 2>/dev/null; then
+    grep -qF 'WATCHED:[99]' "$_ow_dir/seen" \
+        && pass "a refused open DOES reach the wait step, which is why its clearing is load-bearing" \
+        || die "the wait step was reached with something other than the staged baseline: $(cat "$_ow_dir/seen")"
+else
+    die "the lifted open fence did not reach the wait step; the reason for keeping its clearing is unproven"
+fi
 
 # ── THE PHASE-OPEN FENCE, AND ITS REVIEWER SWITCH UNDER A RETURNING `exit` ─
 #

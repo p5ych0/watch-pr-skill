@@ -291,26 +291,28 @@ _open_args="$(grep -c 'PRIOR_FILE="${3:-}"' "$DIR/pr-copilot-phase.sh")"
 [ "$(cat "$TMP/sha.txt" 2>/dev/null)" = "$HEAD40" ] \
     && pass "…and writes the signed-off sha into the file the caller named" \
     || die "the sha file holds '$(cat "$TMP/sha.txt" 2>/dev/null)', not $HEAD40"
-# …AND IT IS EMPTIED BEFORE ANY REFUSAL, including one that happens before the argument
-# checks. Two cases: a body file that is missing, which refuses after the bootstrap, and a
-# PR number that is not a number, which refuses during argument validation — the clearing
-# for that one has to be at the top of the file, above the bootstrap, or the previous run's
-# sha survives and the caller reads it as this one's.
+# …AND NO REFUSAL CLEARS IT, WHICH IS #245. There were two clearings and neither protected
+# a read that can happen: the driver reads `$HEAD_FILE` in the success arm and in the `3`
+# arm, every refusal exits 1 into the `*)` arm which reads nothing, and on success or pause
+# the WRITE has already replaced the file. Both were unbounded truncating opens on a
+# caller-named path — `>` follows a symlink and truncates its target — so they could destroy
+# an operator's file to protect nothing.
+#
+# What is pinned here is that the previous value is LEFT, on a refusal after the bootstrap
+# and on one before it, so a later change restoring either clearing has to say why. The
+# consequence they used to stand for is asserted where it lives, in
+# `test-pr-skill-contract.sh`: a refused record fence assigns no `CODEX_SHA` and disturbs no
+# retained one.
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 got="$(run record 7 "$TMP/nope.md")"
-{ [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
-    && pass "…and a refusal leaves no stale sha behind it" \
-    || die "a refused record left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
+{ [ "${got%%|*}" != 0 ] && [ "$(cat "$TMP/sha.txt")" = 'STALE-SHA' ]; } \
+    && pass "…and a refusal after the bootstrap leaves the sha file alone" \
+    || die "a refused record did something other than leave the sha file alone (got '$got', sha=[$(cat "$TMP/sha.txt" 2>/dev/null)])"
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 got="$(run record notanumber "$TMP/body.md")"
-{ [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
-    && pass "…and so does one that refuses before the arguments are even checked" \
-    || die "an early refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
-# …AND EVEN WHEN THE BOOTSTRAP ITSELF REFUSES, which is the case the other two cannot
-# see: both of those reach argument handling with the libraries already loaded, so they
-# pass just as well with the truncation back below the bootstrap. This one empties a
-# library in a copy of the tree, so `rb_load` refuses at the top of the file — before any
-# argument is looked at and before the later truncation is reachable at all.
+{ [ "${got%%|*}" != 0 ] && [ "$(cat "$TMP/sha.txt")" = 'STALE-SHA' ]; } \
+    && pass "…and so does one refusing before the arguments are checked" \
+    || die "an argument refusal did something other than leave the sha file alone (got '$got', sha=[$(cat "$TMP/sha.txt" 2>/dev/null)])"
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
 : > "$TMP/broken/recordlib.sh"
@@ -318,9 +320,33 @@ _bs_rc=0
 _bs_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     "$TMP/broken/pr-copilot-phase.sh" record 7 "$TMP/body.md" "$TMP/sha.txt" 2>&1)" || _bs_rc=$?
-{ [ "$_bs_rc" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
-    && pass "…and a record that cannot bootstrap leaves no stale sha either" \
-    || die "a bootstrap refusal left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (rc=$_bs_rc out='$_bs_out')"
+{ [ "$_bs_rc" != 0 ] && [ "$(cat "$TMP/sha.txt")" = 'STALE-SHA' ]; } \
+    && pass "…and so does one that cannot bootstrap at all" \
+    || die "a bootstrap refusal did something other than leave the sha file alone (rc=$_bs_rc out='$_bs_out')"
+
+# AND A FIFO AT THE SHA PATH STOPS THE STAGE RATHER THAN HANGING IT. With the clearings
+# gone the WRITE is the only open on that path, and it is bounded — so this now proves the
+# bound on the write, with nothing posted, since the write precedes the signoff.
+if command -v mkfifo >/dev/null 2>&1; then
+    world; rm -f "$TMP/shafifo"
+    mkfifo "$TMP/shafifo" 2>/dev/null && {
+        _sf_got="$(run record 7 "$TMP/body.md" "$TMP/shafifo")"
+        # THE HELPER'S OWN REFUSAL, NOT THE HARNESS WATCHDOG'S. `run` wraps every call in
+        # `run_limited 25`, so an UNBOUNDED write would block on the FIFO until that fired
+        # and come back 124 — which "not zero" accepts, and the case would report the write
+        # as bounded precisely when it is not. Status 1 is the helper refusing; 124 and 125
+        # are the harness saying it never did.
+        case "${_sf_got%%|*}" in
+            1) pass "…and a FIFO at the sha path stops record instead of hanging it" ;;
+            124|125) die "record hung on the FIFO and the harness watchdog stopped it: '${_sf_got}'" ;;
+            *) die "a FIFO sha path gave '${_sf_got}'" ;;
+        esac
+        nothing_posted "the sha path was a FIFO"
+    }
+    rm -f "$TMP/shafifo"
+else
+    pass "no mkfifo on this platform, so the FIFO sha path is skipped by name"
+fi
 # AND IT REFUSED FOR THE REASON THIS CASE IS ABOUT, not for an argument it never reached.
 case "$_bs_out" in
     *reason=recordlib_empty*|*reason=loadlib_*)
@@ -328,12 +354,14 @@ case "$_bs_out" in
     *)  die "the bootstrap case refused for another reason: '$_bs_out'" ;;
 esac
 
-# …AND THE BODY FILE IS NEVER TRUNCATED BY EITHER CLEARING, which is what the guards
-# exclude. Staged as the alias: the account must survive to be refused properly.
+# …AND THE BODY FILE SURVIVES THE ALIAS REFUSAL. There is no clearing left to protect it
+# from; what can destroy it is the WRITE, which opens `$SHA_FILE` truncating, so the alias
+# has to be refused BEFORE anything is written. Staged as the alias: the account must
+# survive to be refused properly.
 world; printf 'the account\n' > "$TMP/body.md"
 got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && [ -s "$TMP/body.md" ]; } \
-    && pass "…and neither clearing truncates the body file it is aliased to" \
+    && pass "…and the alias is refused before the write, so the account is still there" \
     || die "the alias refusal emptied the account: '$(cat "$TMP/body.md" 2>/dev/null)'"
 # …AND THE FILE IS NOT THE BODY FILE, by path and under another name.
 world; got="$(run record 7 "$TMP/body.md" "$TMP/body.md")"
@@ -1201,6 +1229,28 @@ RLZ
 else
     pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
 fi
+
+# AND AN `open` THAT CANNOT BOOTSTRAP LEAVES NO STALE BASELINE. This is the case #245's
+# review found missing, and it is the one that decides whether `open`'s pre-bootstrap
+# clearing may move the way `record`'s did. It may not: unlike `record`, a refused `open`
+# IS followed by a reader — with the driver's `exit` shadowed to return, execution falls
+# past the fence into the wait step, which hands `$PRIOR_FILE` to
+# `pr-watch.sh --after-review-file`, and a stale well-formed review id is accepted there.
+#
+# So this asserts the clearing that is still above the bootstrap, on the refusal only it
+# can cover: a library emptied in a copy of the tree, which `rb_load` refuses before any
+# argument is looked at.
+world; printf '%s\n' '99' > "$TMP/prior.txt"
+rm -rf "$TMP/brokeno"; cp -R "$DIR" "$TMP/brokeno" || die "could not copy the scripts for the open bootstrap case"
+: > "$TMP/brokeno/recordlib.sh"
+_bo_rc=0
+_bo_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$TMP/brokeno/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" 2>&1)" || _bo_rc=$?
+{ [ "$_bo_rc" != 0 ] && [ ! -s "$TMP/prior.txt" ]; } \
+    && pass "an open that cannot bootstrap leaves no stale baseline for the watch to read" \
+    || die "an open bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the baseline file (rc=$_bo_rc out='$_bo_out')"
+rm -rf "$TMP/brokeno"
 
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —
 # Copilot requested, the revocation posted — with no baseline anywhere, and the

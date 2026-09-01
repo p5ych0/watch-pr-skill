@@ -84,14 +84,21 @@ fi
 
 set -uo pipefail
 
-# ── THE SHA FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE ─────────────────────
-# A refusal above the truncation further down — an unreadable library, a PR number that
-# is not a number — leaves the PREVIOUS run's sha in the file, and the caller reads it as
-# this one's: a signoff that was never posted, on a commit from another round. So the
-# clearing happens here, before the bootstrap and before any argument is looked at, which
-# is the same place and the same reason `pr-close-round.sh` clears its head file.
+# ── `open`'S BASELINE FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE ───────────
+# A refusal above the clearing further down — an unreadable library, a PR number that is
+# not a number — leaves the PREVIOUS run's review id in the file, and something reads it as
+# this one's. For `open` that reader is real: with the driver's `exit` shadowed to return, a
+# refusal falls past its fence into the wait step, which hands `$PRIOR_FILE` to
+# `pr-watch.sh --after-review-file`, and a stale well-formed id is accepted there — so the
+# watch waits past a review that has already happened. That is why this clearing is here,
+# before the bootstrap and before any argument is looked at.
 #
-# GUARDED, AND PER STAGE. `close` takes a sha as an argument and writes no file, so
+# `record` HAS NO CLEARING, HERE OR ANYWHERE, and #245 is why: it had two and neither
+# protected a read that can happen. Its file is read only in the driver's success arm and
+# `3` arm, both of which the WRITE has already reached, and every refusal exits 1 into an
+# arm that reads nothing. Two unbounded truncating opens were destroying to protect that.
+#
+# GUARDED, AND ONE STAGE ONLY. `close` takes a sha as an argument and writes no file, so
 # truncating a third argument there would destroy whatever the caller named. The path
 # must exist, be a regular file and contain a `/` — a bare name is not the driver's
 # handoff.
@@ -104,13 +111,22 @@ set -uo pipefail
 # `record` also refuses to truncate its BODY file, whose account this stage is about to
 # post and which the alias check below refuses properly. `open` needs no such pairing:
 # its `$3` is a sha, not a path.
-if [[ ${1:-} = record ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]] \
-   && [[ -n ${3:-} ]] && [[ ! ${4} -ef ${3} ]]; then
-    > "${4}" || {
-        echo "ABORT: the sha file '${4}' exists and cannot be emptied; a stale sha would be left for the caller to read."
-        exit 1
-    }
-fi
+# `record` HAS NO ARM HERE, AND THAT IS MEASURED RATHER THAN ASSUMED. It had one, for a
+# refusal above the later clearing — an unreadable library, a PR number that is not a
+# number — on the reasoning that such a refusal would leave the previous run's sha for the
+# caller to read as this one's. The driver does not read it there: `$HEAD_FILE` is read in
+# the success arm and in the `3` arm, and a bootstrap failure exits 1 into the `*)` arm,
+# which reads nothing. With `exit` shadowed to return, execution falls past that fence
+# carrying whatever `CODEX_SHA` already held — which after a completed Codex phase is the
+# retained sha from step 7, not anything this file wrote — so the stale FILE is not what
+# reaches the next stage.
+#
+# Removing it removes an unbounded truncating open on a caller-named path, which is worth
+# more than the depth it was giving: `>` follows a symlink and truncates its target, so an
+# arm that cannot be reached by a reader was still able to destroy a file. `record` has NO
+# clearing now, here or after the bootstrap — the second one protected nothing either, for
+# the same reason — and what makes a stale value impossible is the WRITE: bounded, its
+# status taken, and compared in the child. #245.
 if [[ ${1:-} = open ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]]; then
     > "${4}" || {
         echo "ABORT: the baseline file '${4}' exists and cannot be emptied; a stale review id would be left for the caller to read, and the watch would take a pass made before this request as the answer to it."
@@ -228,9 +244,11 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # EMPTIED AGAIN HERE. The first clearing is at the top of the file, before the
-    # bootstrap, and it declines a path that does not exist yet — so a caller naming
-    # one gets its clearing here. Empty is a LEGAL baseline, meaning no prior review,
+    # EMPTIED AGAIN HERE, and both clearings are load-bearing for THIS stage — unlike
+    # `record`, whose two were removed in #245 because nothing reads its file after a
+    # refusal. The one above the bootstrap covers a refusal from the bootstrap itself and
+    # declines a path that does not exist yet; this one covers every refusal after it, and
+    # takes the path the other declines. Empty is a LEGAL baseline, meaning no prior review,
     # which is why the write below is status-checked rather than left to the reader.
     # BOUNDED, because the open can block rather than fail. `run_limited` returns 124
     # when it does, which is a refusal like any other here — the phase has not
@@ -541,18 +559,22 @@ if [[ $SHA_FILE = "$BODY_FILE" ]] || [[ $SHA_FILE -ef $BODY_FILE ]] 2>/dev/null;
     echo "ABORT: the sha file and the body file are the same file ('$SHA_FILE'); the sha would overwrite the account."
     exit 1
 fi
-# EMPTIED AGAIN HERE, and the first clearing is at the top of the file — before the
-# bootstrap, where a refusal would otherwise leave the previous run's sha behind. This one
-# covers the path the guard up there declines to take: it requires the file to EXIST
-# already, so a caller naming a path that is not there yet gets its clearing here instead.
-# Empty is not a valid sha, so an emptied file is refused by the reader rather than
-# mistaken for an answer.
+# THE SHA FILE IS NOT CLEARED AT ALL, and that is #245. There were two clearings — one
+# above the bootstrap, one here — and NEITHER protected a read that can happen. The driver
+# reads `$HEAD_FILE` in the success arm and in the `3` arm; every refusal exits 1 into the
+# `*)` arm, which reads nothing, and with `exit` shadowed to return execution falls past
+# that fence carrying whatever `CODEX_SHA` already held — the value retained for step 8,
+# not anything this file wrote. On success and on the pause alike, the WRITE below has
+# already replaced the file before either read.
 #
-# NEITHER CLEARING TOUCHES THE BODY FILE, and that is deliberate rather than an oversight:
-# a sha file that IS the body file must not be truncated, because the account this stage
-# is about to post is what would be destroyed. Both guards exclude it, and the alias check
-# above refuses it properly.
-> "$SHA_FILE" || { echo "ABORT: could not empty the sha file '$SHA_FILE'."; exit 1; }
+# So the clearings were destroying to protect nothing. `>` follows a symlink and truncates
+# its target, and a FIFO at the name blocks; an arm no reader depends on could still take
+# an operator's file. What replaces them is the write itself, which is bounded, takes its
+# status, and is compared in the child — a stale value cannot survive it, and a refusal
+# before it leaves a file the driver never opens.
+#
+# THE BODY FILE IS STILL REFUSED, above, and that guard is unaffected: it is about the sha
+# and the account naming one file, which is wrong however the file is opened.
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest
 # summary the thing read before the diff — so a truncated one is worse than none:
