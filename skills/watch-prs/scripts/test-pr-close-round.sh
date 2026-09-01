@@ -1031,7 +1031,7 @@ _hf_file="$(cat "$HEADF")" || _hf_rc=1
     && pass "…and the head the gate reports is exactly the head it wrote to the file" \
     || die "the gate's record and its head file disagree: record='$_hf_rec' file='$_hf_file' rc='${got%%|*}/$_hf_rc'"
 
-# ── A HEAD WITH NO REVIEW YET REPORTS AN EMPTY BASELINE, AND THAT IS AN ANSWER ─
+# ── A HEAD WITH NO REVIEW YET REPORTS THE `none` BASELINE, AND THAT IS AN ANSWER ─
 # `pr-review-state.sh review-id` returns nothing when the current head has no
 # review — every round that pushes a new commit, and every Copilot round, since a
 # push never triggers one. The record must still carry the field, so the driver
@@ -1041,7 +1041,7 @@ world; : > "$W/pr-review-state.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=none$' <<<"${got#*|}"; } \
     && pass "a head with no review yet closes, reporting the none baseline" \
-    || die "an empty baseline gave '${got}'"
+    || die "a head with no review yet gave '${got}'"
 # …AND IT REACHES THE FILE AS THE `none` TOKEN — #264. It used to reach it as an EMPTY
 # file, which meant "no floor" and was therefore indistinguishable from a truncation whose
 # write then failed. The token has to be written on purpose, so the watch can tell the
@@ -1055,14 +1055,14 @@ raw_is "$TMP/prior.txt" 'none
 ' "post's none baseline"
 { [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
     && pass "…and the prior file reads back as the none token rather than empty or a previous round's value" \
-    || die "an empty baseline left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
+    || die "a head with no review yet left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
 
 # AND THE FIELD IS STILL THERE, which is the whole difference between an answer
 # and a malformed record. Asserted on the record itself rather than on the value,
 # because a record that simply dropped the field also has an "empty" value.
 grep -qF ' prior-review=' <<<"${got#*|}" \
     && pass "…with the field present, so an absent record stays distinguishable" \
-    || die "the empty-baseline record dropped the field entirely: '${got#*|}'"
+    || die "the none-baseline record dropped the field entirely: '${got#*|}'"
 
 # THE SAME ON THE PATH WHERE THE BASELINE IS ALSO HANDED TO THE WATCH. A first
 # auto-review round has no prior review to wait past, and the gate must not refuse

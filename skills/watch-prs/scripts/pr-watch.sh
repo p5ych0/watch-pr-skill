@@ -418,15 +418,20 @@ fi
 # runs under the same watchdog every other probe here uses, and an expiry is
 # `state=error` like any unreadable answer.
 #
-# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
-# holding one read back as the empty string — which is the LEGITIMATE "there is no
-# prior review to wait past" — and the watch would announce the terminal review this
-# round just handled as the next one. Measured: bash warned about the ignored null
+# AND A NUL BYTE IS NOT A BASELINE. `$(<file)` DROPS NUL bytes, so a file holding one
+# read back as the empty string — which was the LEGITIMATE "there is no prior review to
+# wait past" when this was written — and the watch would announce the terminal review
+# this round just handled as the next one. Measured: bash warned about the ignored null
 # byte and the run reported an ordinary timeout. The child reads with `read -d ""`
 # instead, whose delimiter IS the NUL: finding one is a successful read and that is
 # what makes it a refusal, while an ordinary file ends at EOF with status 1 and the
-# whole content assigned. The trailing newline every writer leaves is stripped by the
-# capture, as before.
+# whole content assigned.
+#
+# SINCE #264 EMPTY IS NOT LEGITIMATE EITHER, so that particular coincidence is gone —
+# and the reason for reading this way is unchanged, because a NUL dropped in silence is
+# a file the reader cannot claim to have understood whatever the remains look like. The
+# trailing newline every writer leaves is NOT stripped by the capture any more: it is
+# the completion delimiter, preserved through a sentinel and required below.
 if [ -n "$AFTER_REVIEW_FILE" ]; then
     # The child's statuses, and they are distinct because each names a different
     # thing to tell an operator: 4 the open failed, 5 a NUL byte, 6 not a regular

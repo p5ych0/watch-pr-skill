@@ -836,9 +836,10 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 # stage writes a readiness value into this same file before it revokes anything, and a
 # refusal between that write and the real one leaves the sentinel behind. It must NOT read
 # as a baseline: with the driver's `exit` shadowed to return, a refused `open` reaches this
-# watch, and an EMPTY file there would be taken as "no prior review" and let a terminal
-# verdict through as this round's answer — a pass that was never requested. The sentinel is
-# not a review id, so it is refused at the call, before any network read.
+# watch, and an EMPTY file there WOULD have been taken as "no prior review" and let a
+# terminal verdict through as this round's answer — a pass that was never requested. Since
+# #264 an empty file is refused here on its own account; the sentinel is refused as well,
+# for not being a review id, and it says WHY rather than leaving the watch to infer it.
 #
 # THE TWO HALVES ARE PINNED TOGETHER: the phase fixture asserts the exact string the stage
 # leaves, and this asserts the same string is refused here. Change one and the other fails.
@@ -917,11 +918,12 @@ for _un_v in none 4321; do
         || pass "…with no verdict announced for it"
 done
 
-# AND A FILE THAT CANNOT BE READ IS state=error, NOT AN EMPTY BASELINE. Degrading to
-# empty would make a failed read say exactly what the case above says, and the watch
-# would then accept the previous terminal review as this round's — the whole failure
-# the baseline exists to prevent, arriving through the read instead of through the
-# absence of a flag.
+# AND A FILE THAT CANNOT BE READ IS state=error, NOT A BASELINE. Degrading to empty made
+# a failed read say exactly what the no-floor case above said, and the watch would then
+# accept the previous terminal review as this round's — the whole failure the baseline
+# exists to prevent, arriving through the read instead of through the absence of a flag.
+# Since #264 empty is itself refused, so the two collide no longer; the reason for a
+# distinct status is unchanged, because an operator has to be told which recovery applies.
 rm -f "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
@@ -993,9 +995,12 @@ else
 fi
 
 # AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
-# holding one read back as the empty string — which is the legitimate "no prior review
-# to wait past" — and the watch announced the terminal review this round just handled
-# as the next one. Asserted on the CONSEQUENCE as well as the reason: no READY line.
+# holding one read back as the empty string — which was the legitimate "no prior review
+# to wait past" when this was written — and the watch announced the terminal review this
+# round just handled as the next one. Since #264 empty is refused too, so this would now
+# be caught either way; the case stays because it pins the READ rather than the shape, and
+# a NUL dropped in silence is a file the reader cannot claim to have understood. Asserted
+# on the CONSEQUENCE as well as the reason: no READY line.
 printf '\000' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?

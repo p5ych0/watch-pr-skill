@@ -268,9 +268,12 @@ rc="$(run 7 yes)"
     && pass "…and the mention is matched case-insensitively, as the trigger is" \
     || die "a mixed-case mention on the automatic path gave rc=$rc, posted=$(cat "$TMP/calls")"
 
-# ── A BASELINE THAT CANNOT BE READ IS NOT AN EMPTY BASELINE ────────────────
-# Read as empty it becomes the automatic path's answer on the manual path, and
-# the watch then accepts the PREVIOUS review as this round's.
+# ── A BASELINE THAT CANNOT BE READ IS NOT A BASELINE ───────────────────────
+# Read as empty it became the automatic path's answer on the manual path, and the
+# watch then accepted the PREVIOUS review as this round's. Since #264 the automatic
+# path's answer is the `none` token and an empty value is refused by the watch, so
+# that particular collision is gone — and the reason to refuse here is unchanged: a
+# read that failed must not be able to produce ANY value a caller would act on.
 world; printf '2\n' > "$W/prior.rc"
 rc="$(run 7 no)"
 _cap stderr

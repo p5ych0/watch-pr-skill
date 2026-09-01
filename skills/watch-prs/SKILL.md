@@ -454,7 +454,8 @@ something to act on and prints one line when the state changes:
 # waiting on — written by step 2, step 5 and step 7 — and it is authoritative only
 # where the stage that wrote it returned 0. Those steps abort on anything else, but
 # an `exit` that returns carries a refusal into this line, and the file then holds
-# the previous round's id, this round's captured id, a refusal sentinel, or nothing.
+# the previous round's id, this round's captured id, the `none` token where there was
+# no prior review to capture, a refusal sentinel, or nothing.
 # The watch decides on SHAPE, not on who wrote it: since #264 it refuses an EMPTY file
 # and one whose last byte is not the writer's newline, accepts `none` as "no baseline",
 # accepts any id, and refuses anything else. So the sentinel is refused, and so is a

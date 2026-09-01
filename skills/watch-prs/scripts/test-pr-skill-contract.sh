@@ -3786,7 +3786,7 @@ fi
 # waited for — and the watch would reject the only terminal review as stale.
 #
 # THE RULE MOVED INTO `pr-request-review.sh` (#144, under #26), where
-# `test-pr-request-review.sh` asserts the concrete outcome — an empty baseline
+# `test-pr-request-review.sh` asserts the concrete outcome — the `none` baseline
 # AND no lookup at all — instead of matching an assignment. What is asserted here
 # is that the driver did not keep a second copy: a `PRIOR_REVIEW=` of its own
 # beside the capture would decide the question in the one place nothing executes,
