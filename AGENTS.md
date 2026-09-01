@@ -567,31 +567,38 @@ survives `INT` and publishes a ready line for a run somebody stopped. Do not rai
 leftover directory as a leak, and do not reintroduce a removal of any kind — a fixture
 asserts the file contains none and that no handler removes anything. One object is
 outside that promise and is not this helper's: `pr-origin.sh read` creates its own
-transport directory and gives it back on its own refusal path, so a checkout with no
-readable origin ends with the reservation present and empty. That is stated in the file
+transport directory and gives it back on its own refusal path — a single `rmdir`, so it
+succeeds only while that transport is EMPTY, and a same-UID process that has put anything
+in it defeats it. A checkout with no readable origin ordinarily ends with the reservation
+present and empty. That is stated in the file
 and staged behaviourally on both sides. Raise a cost you think was underweighted as a
 non-blocking note.
 
 **A fourth is accepted since 2026-09-01**, in
-`docs/decisions/2026-09-01-origin-cleanup-races.md`: `pr-origin.sh` flips `RB_PHASE` inside
-each write's own redirection, so the leaf is OPEN before the assignment that marks it as
-this run's, and a refusal or signal while the phase is still `pre` therefore runs `rmdir`
-alone — which fails on a directory that is not empty, leaving the reservation behind. The
+`docs/decisions/2026-09-01-origin-cleanup-races.md`: `pr-origin.sh`'s cleanup is `rmdir`
+alone, which fails on a directory that is not empty — so a refusal leaves the reservation
+behind whenever anything is in it, including the leaf this run wrote. (Until #266 there was
+a phase flag selecting a leaf-removing shape as well; both are gone, and the record's table
+of where that flag could flip is history.) The
 contents are RACER-CONTROLLED and there is no upper bound on them: any same-UID process can
 create files and subdirectories in the mode-700 directory once it exists. What makes it
-acceptable is the KIND and not the size — nothing is destroyed, since that phase's cleanup
+acceptable is the KIND and not the size — no leaf and nothing beneath the reservation is
+destroyed, since the cleanup
 removes only an empty directory — and it is STAGED in `test-pr-origin.sh` with a leaf, a
 sibling and a nested subtree, so a bound that changes fails a case. Do not raise the
-leftover directory as a leak, and do not "fix" the flip by moving it out of the redirection;
-every alternative placement is tabulated in the record and each is worse.
+leftover directory as a leak, and do not "fix" it by reintroducing a removal that resolves a
+name — the record tabulates every placement that was tried for the one #266 removed, and
+each was worse than the last.
 
-**That record accepts ONE race, and explicitly not the other.** #257 named a second — the
-post-phase `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow symlinks, so a
-same-UID process that replaces the reservation with a symlink to another directory has that
-directory's file removed. Measured during #265, that reaches OUTSIDE the reservation
-entirely, which is not the narrow cost an earlier draft claimed and is not accepted: it is
-filed as a defect (#266), and the fix is a removal rather than a guard, since a further symlink
-check before the `rm` is a check-then-use. Do not treat the accepted litter as covering it.
+**That record accepts ONE race, and the other was a defect that is now FIXED.** #257 named
+a second — the leaf removal `rm -f "$OUT"`, where the `-d` and `-O` checks above it follow
+symlinks, so a same-UID process that replaces the reservation with a symlink to another
+directory has that directory's file removed. Measured during #265, that reaches OUTSIDE the
+reservation entirely, so it was filed as #266 rather than accepted. #266 removed it: the
+cleanup is `rmdir` alone throughout the run, which refuses a symlink outright, and the phase
+flag that selected the removing shape went with it. Do not reintroduce a name-based removal
+here, and do not "fix" the leftover reservation by adding one — a `[[ -L ]]` in front of it
+is a check-then-use, which is the shape `2026-08-29-setup-leaf-cleanup.md` convicts.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses

@@ -55,17 +55,18 @@ it.
 | --- | --- |
 | the `mkdir` never succeeded | there is no directory of this run's, and none is left |
 | a refusal after the reservation | the directory is **left**, with whatever had been written in it |
-| a refusal from `pr-origin.sh read` itself | the directory is left and is **empty** — that helper creates its own transport and gives it back on its own refusal path (#157), which is the one removal this contract does not cover and does not own |
-| a signal at any point | **whatever had been written by then is left** — `TERM` and `HUP` terminate by bash's own default with no handler at all, `INT` is re-raised by the one handler there is, and neither path removes anything, so a signal after the reader wrote `o/origin` leaves the reservation AND that transport |
-| anything a same-UID process placed at or inside that name | **untouched by this helper** — with one exception it does not own: an object at `<dir>/o/origin` is removed by `pr-origin.sh`'s own cleanup, which resolves that name (`rm -f "$OUT"`), so a replacement planted there between its write and its refusal goes with it |
+| a refusal from `pr-origin.sh read` itself | the directory is left, and whether its `o` transport is still inside depends on where that helper stopped — it creates its own transport and gives it back where it can (#157), which since #266 means whenever that transport is EMPTY as its cleanup runs — not a matter of write timing: a racer that populates it defeats the `rmdir` before the write, and one that empties it lets the `rmdir` through after. That is the one removal this contract does not cover and does not own |
+| a signal at any point | **whatever had been written by then is left** — `TERM` and `HUP` terminate by bash's own default with no handler at all, `INT` is re-raised by the one handler there is, and neither path removes anything, so a signal after the reader wrote `o/origin` leaves the reservation AND that transport — `pr-origin.sh`'s own cleanup can still `rmdir` its transport where a same-UID process has emptied it first, which is that helper's race and not this contract's |
+| anything a same-UID process placed at or inside that name | **untouched by this helper.** It had one exception it did not own, and that exception is gone: `pr-origin.sh`'s cleanup used to resolve `<dir>/o/origin` for removal (`rm -f "$OUT"`), so a replacement planted there went with it — #266 removed that, and its cleanup is now `rmdir` alone |
 
 `test-pr-setup.sh` stages these against the real helper — `TERM`, `INT` and `HUP` all
 delivered mid-run — and asserts that the file contains NO removal of any kind and that no
 handler it arms removes anything, so a shape that resolves a name for removal cannot come
-back, behind a signal or otherwise, without a case failing. What it does NOT stage is the
-exception in the last row: that removal is `pr-origin.sh`'s, governed by its own contract
-and its own fixture, and this record neither owns it nor accepts it on that helper's
-behalf.
+back, behind a signal or otherwise, without a case failing. It does not stage what the last
+row used to except, and no longer needs to: that removal was `pr-origin.sh`'s, this record
+declined to accept it on that helper's behalf, and #266 removed it. What is left there is
+that helper's own `rmdir` of its own transport, governed by its own contract and its own
+fixture.
 
 ## What it costs
 

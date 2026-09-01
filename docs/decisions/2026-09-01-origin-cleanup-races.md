@@ -1,4 +1,4 @@
-# Decision: the pre-phase cleanup's litter is accepted
+# Decision: a refusal may leave the reservation, and that litter is accepted
 
 **Date:** 2026-09-01
 **Status:** accepted
@@ -7,8 +7,8 @@
 cannot waive a finding in the pull request that introduces the behaviour — #256 tried and
 was closed for it.
 
-`pr-origin.sh` flips `RB_PHASE` inside each write's own redirection, so the leaf is OPEN
-before the assignment that marks it as this run's. #257 named two consequences of that
+`pr-origin.sh` used to flip `RB_PHASE` inside each write's own redirection, so the leaf was
+OPEN before the assignment that marked it as this run's. #257 named two consequences of that
 shape and asked for both to be measured. **They were, and the measurement separated them:
 one is accepted here and the other is a defect.** This record is what a reviewer should be
 pointed at when the accepted one is raised again.
@@ -20,13 +20,19 @@ pointed at when the accepted one is raised again.
 case on `pr-origin.sh`'s behalf. It was right to decline: measured, that case is worse than
 it looked, and it is not accepted here either.
 
-## Accepted — a pre-phase refusal leaves the reservation
+## Accepted — a refusal leaves a reservation that is not empty
 
-A `TERM`, `HUP` or `INT` delivered between the redirection opening the leaf and
-`RB_PHASE=post` executing runs the cleanup while the phase is still `pre`, which is
-`rmdir` alone — and `rmdir` necessarily fails on a directory that is not empty. The same
-residue is reached by any refusal that fires while a same-UID process has put something in
-the directory: the mismatch refusal, the origin read's, the walks'.
+The cleanup is `rmdir` alone, and `rmdir` necessarily fails on a directory that is not
+empty. So any refusal that fires while a same-UID process has put something in the
+directory leaves it: the mismatch refusal, the origin read's, the walks'. When this was
+written the cleanup had a second, leaf-removing shape and this race was the window before
+the flag selecting it flipped; #266 removed that shape, which widens the residue to every
+refusal whose reservation is not empty when the cleanup runs — a refusal that finds it
+empty still gives it back — and narrows what a refusal can touch: `rmdir` reaches no leaf and nothing beneath
+the reservation, which is what the old removal reached. It is not nothing — `rmdir` still
+resolves `$RB_DIR` by name, so a same-UID process that substitutes its own EMPTY directory
+after the ownership checks has that directory removed. That race is the one this record
+already bounds, and it stays open.
 
 **Cost: the reservation directory and whatever it contains, left behind under a parent the
 caller named.** The contents are RACER-CONTROLLED and there is no upper bound on them:
@@ -35,9 +41,12 @@ subdirectories in it, and the `rmdir` leaves all of them. An earlier draft of th
 said "one directory and one leaf" and that was an example rather than a bound; the fixture
 now plants a leaf, a sibling and a nested subtree, and asserts every one survives.
 
-**What makes it acceptable is not the size, it is the KIND.** Nothing is destroyed. The
-cleanup in this phase removes only an empty directory, so a refusal leaves litter under a
-path the caller named and takes nothing of anybody else's. The caller performs no cleanup
+**What makes it acceptable is not the size, it is the KIND.** No leaf is destroyed, and
+nothing beneath the reservation. The
+cleanup removes only an empty directory, so a refusal leaves litter under a
+path the caller named. It is not "nothing of anybody else's": `rmdir` resolves `$RB_DIR`,
+so a substituted EMPTY directory still goes, which is the race bounded above. The caller
+performs no cleanup
 after a non-zero status, deliberately, because it cannot know who created the path — so
 nothing collects it, and that is the whole of the cost.
 
@@ -45,13 +54,13 @@ nothing collects it, and that is the whole of the cost.
 directory the moment it exists, drives the pin mismatch refusal — asserting it reached the
 MISMATCH and not the exclusion, which would be a directory this run never made and a
 vacuous pass — and asserts the directory and every planted object are still there. If a
-pre-phase refusal ever starts removing something, the case fails.
+refusal ever starts removing something from the reservation, the case fails.
 
-## NOT accepted — the post-phase removal, which reaches outside the reservation
+## NOT accepted — the leaf removal, which reached outside the reservation
 
 #257's second gap is a defect rather than a limit, and measuring it is what settled that.
 
-Once the phase is `post`, `rb_cleanup` runs `rm -f "$OUT"`. It removes by NAME, and every
+Once the phase was `post`, `rb_cleanup` ran `rm -f "$OUT"`. It removed by NAME, and every
 check above it — `[[ -d $RB_DIR ]]`, `[[ -O $RB_DIR ]]` — FOLLOWS SYMLINKS. So a same-UID
 process that renames the reservation and leaves a symlink to another directory in its place
 has that directory's `pin` or `origin` removed instead. Measured: with the write failing
@@ -66,20 +75,28 @@ at all. The consistent answer is the same one, and it is a REMOVAL rather than a
 further symlink check before the `rm` is a check-then-use, since the removal resolves the
 name again afterwards.
 
-It is not fixed in this change because it is a behaviour change to a helper, which this
-repository lands as its own pull request. It is **#266**, filed with the measurement and
-with the residue the fix would leave — a post-write refusal would leak the directory and
-its leaf, which is the litter this record already accepts, and of the same kind: nothing
-destroyed.
+It was not fixed in this change because it is a behaviour change to a helper, which this
+repository lands as its own pull request. **It is #266, and it is now fixed**: the leaf
+removal is gone and the cleanup is `rmdir` alone throughout the run, which refuses a symlink
+outright. The residue that fix leaves is a post-write refusal keeping the directory and its
+leaf — the litter this record accepts, and of the same kind: no leaf destroyed and nothing
+beneath the reservation.
+
+**This record still accepts only the litter.** What #266 removed was a defect; what remains
+is that a refusal leaves the reservation behind whenever it is not empty — which since
+#266 includes a failed write, the leaf being open by then, unless a same-UID process has
+unlinked that leaf or substituted an empty directory before the cleanup runs — and that is
+the cost accepted above.
 
 ## Why the flip is not moved instead
 
-The window exists because the flip is inside the redirection. Every other placement was
-tried, and each is worse — this is the comparison the reviewer files point at:
+The window existed because the flip was inside the redirection. Every other placement was
+tried, and each was worse — this is the comparison the reviewer files point at, kept as the
+record of what a name-based removal cost to place:
 
 | placement | residue |
 | --- | --- |
-| inside the redirection (today) | a signal in a two-instruction window leaves the reservation as it found it — litter |
+| inside the redirection (what shipped) | a signal in a two-instruction window leaves the reservation as it found it — litter |
 | before the redirection | a signal in the window runs the leaf-removing shape with nothing written: **loss**, not litter |
 | at the walks | every refusal between the walks and the write runs the leaf-removing shape for a leaf the run never created |
 | after the write | every refusal between the open and the write leaks, over a longer interval |
@@ -87,12 +104,25 @@ tried, and each is worse — this is the comparison the reviewer files point at:
 | ignore signals across the write | trades a bounded litter for a write that cannot be interrupted — worse on a blocking target |
 | a descriptor-relative unlink in the handler | not available in shell |
 
-The current shape is the only one whose worst case is litter rather than loss, and it
-shrinks the interval to two adjacent operations. Note that the rows naming a leaf-removing
-shape describe a removal that is itself a defect (#266); once that is gone the comparison
-narrows further, but the flip stays where it is for the reason in the first row.
+The shape that shipped was the only one whose worst case was litter rather than loss, and
+it shrank the interval to two adjacent operations.
+
+**Since #266 this table is history rather than a live comparison.** Every row naming a
+leaf-removing shape describes a removal that no longer exists: the cleanup is `rmdir` alone
+throughout the run, and the flag that selected the removing shape went with it — so there is no
+placement left to choose. It is kept because it records what was tried and why each
+placement failed, which a later change proposing to reintroduce a name-based removal has to
+answer.
 
 ## What would change the accepted half
 
-A shell with descriptor-relative removal, or a transport that is not a shell. Until then a
-refusal before the phase flips leaves what it found, and that is the accepted cost.
+**Not a descriptor-relative removal**, which an earlier draft of this record proposed and
+which does not reach it: unlinking THIS RUN's `origin` or `pin` through a held descriptor
+leaves the racer's sibling or nested subtree, so the reservation is still not empty, and
+removing those as well would destroy entries this record's own bound forbids touching.
+
+What would change it is a transport nothing else can populate — a protocol where an unowned
+entry cannot appear inside the reservation at all, rather than a better way to remove one.
+That is a different design, not a different primitive. Until then a refusal that finds
+it non-empty leaves what it found, and that is the accepted cost. An empty one is still
+removed, which is the ordinary case and not a limit.

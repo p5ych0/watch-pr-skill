@@ -135,28 +135,39 @@ this run made; and `-O` refuses a name another ACCOUNT holds. Both flags are inf
 rather than a handoff, and #162 carries the protocol change that removes them. The
 refusals only say why and stop — cleaning up in them as well meant a refusal cleaned and
 then `exit` fired the trap and cleaned again, and the second pass is the dangerous one,
-because an account watching the published path can recreate it as a symlink between the
-two and a second `rm -f` follows the replacement. `RB_PHASE` picks the shape: `rmdir`
-ALONE while no leaf can exist — it refuses a symlink outright, which is what makes it
-safe on a name the ancestry walks have not approved — and leaf-then-directory once a
-write has happened, since `rmdir` necessarily fails on a directory holding its leaf. The
-phase flips INSIDE each write's own redirection — `{ RB_PHASE=post; printf …; } > "$OUT"`
-— which is after the walks, so the leaf-removing shape never runs on an unapproved path,
-and has no interval before the write for a signal to arrive in. It flipped at the walks
-until #230, and then as a command just before the write; both left a window in which a
-refusal or a signal ran the leaf-removing shape with nothing written, which against a
-replaced directory unlinks the replacement's file. The cost of the shape that has no
-window is a residue: a refusal before a write gets `rmdir` alone, so a directory somebody
-replaced with a NON-EMPTY one survives it, and that is deliberate — the alternative is
-unlinking a leaf by a name this run did not write. Every trap is
+because an account watching the published path can recreate it between the two and a
+second pass resolves the name again — `rm -f` following a symlink until #266, `rmdir`
+refusing one since. **THE CLEANUP IS `rmdir` ALONE, ON EVERY
+PATH OUT, AND THERE IS NO PHASE FLAG.** It had two shapes chosen by `RB_PHASE` — `rmdir` while no
+leaf could exist, and leaf-then-directory once a write had happened, since `rmdir`
+necessarily fails on a directory holding its leaf — and #266 removed the second. The leaf
+removal resolved a NAME, and the `-d` and `-O` tests in front of it FOLLOW SYMLINKS, so a
+same-UID process that renamed the reservation and left a symlink to another directory
+passed both and had a file removed in the TARGET: measured, a file in an unrelated
+directory was unlinked. A `[[ -L ]]` in front of it is a check-then-use, which is the shape
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the whole class on and which
+`pr-setup.sh` answered by removing nothing at all. `rmdir` needs no such confinement: it
+refuses a symlink outright and refuses a non-empty directory. **`RB_PHASE` went with it,
+and that is the point rather than a tidy-up** — three review rounds went into WHERE to flip
+it, because every placement traded one window for another, and a value nothing reads cannot
+be placed wrongly; what carries the guarantee now is the shape of the removal. The cost is
+a residue and it is the one already accepted: while the reservation stays non-empty — a
+same-UID process may unlink the leaf and let the `rmdir` through — a refusal after a write
+leaves the directory
+AND its leaf, because `rmdir` fails on a non-empty directory —
+`docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for the pre-write
+case, and this is the same kind — no leaf destroyed, and nothing beneath the reservation,
+though `rmdir` still resolves `$RB_DIR` and a substituted EMPTY directory goes with it.
+Every trap is
 IGNORED — `trap ''`, not `trap -` — before the first removal, in one statement, on both
 exit paths. `trap -` restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is
 to terminate: it stops re-entry and makes the cleanup interruptible instead, so a second
-signal between the `rm` and the `rmdir` kills the shell and the caller removes nothing.
+signal during the `rmdir` kills the shell and the caller removes nothing.
 Ignoring stops both. Doing it after the cleanup rather than before leaves it RE-ENTRANT:
 a signal arriving while it runs invokes it again, and after the first pass has freed the
-candidate an account watching a shared parent can put a symlink there before the second
-`rm -f` resolves it. A signal is the third way out: each handler disarms all four traps,
+candidate an account watching a shared parent can recreate it before a second pass resolves
+the name — which was `rm -f` following a symlink until #266 and is `rmdir` now, so the cost
+is somebody else's empty directory rather than their file. A signal is the third way out: each handler disarms all four traps,
 cleans up, and RE-RAISES, because a trap REPLACES a signal's terminating action and one
 that merely returned left bash resuming the work it was killed during — and, between a
 successful write and the disarm, returning status 0 for a run somebody killed. The
@@ -165,7 +176,12 @@ command, since resetting those too left a window where a `TERM` terminated the h
 with no cleanup at all. The contract is a directory this helper created, so a refusal or
 a signal that left it behind would be a leak nothing else would collect: the caller
 performs no cleanup after a non-zero status, deliberately, because it cannot know who
-created the path. #157.
+created the path. Since #266 that promise holds only where the reservation is EMPTY when
+the cleanup runs — which a refusal before the write ordinarily is, and is not once a
+same-UID process has put something there; past the write the reservation and its leaf are
+left, `rmdir` failing on a non-empty directory, and
+`docs/decisions/2026-09-01-origin-cleanup-races.md` accepts that residue rather than
+treating it as a leak. #157.
 
 ### The DRIVER's retry over `pr-setup.sh` is a separate contract
 
@@ -976,7 +992,7 @@ author side of that contract matters:
   `test-pr-skill-contract.sh` stages against the real helper; the reservation
   races cost one empty directory, lost or left behind, which `test-pr-origin.sh`
   stages with `mkdir` on `PATH` as the racer; and the helper takes nothing of anybody
-  else's because it removes nothing at all — the one object that can still vanish is `pr-origin.sh`'s own transport, which that helper creates and gives back on its own refusal, so a checkout with no readable origin ends with the reservation empty — which `test-pr-setup.sh` stages against the
+  else's because it removes nothing at all — the one object that can still vanish is `pr-origin.sh`'s own transport, which that helper creates and gives back on its own refusal by a single `rmdir`, so a checkout with no readable origin ends with the reservation empty while nothing else has been put in that transport — which `test-pr-setup.sh` stages against the
   real helper — `TERM` and `INT` both delivered mid-run — and pins with a scan requiring no removal of any kind and no removing handler. Those cases are what the records
   rest on: **if a bound changes they fail**, which is what stops an accepted limit
   drifting into an unexamined one.

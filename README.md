@@ -1024,6 +1024,34 @@ plugin docs and open an issue.
   had already been created is left where it is, which is the same litter a refusal
   leaves.
 
+  **What that litter can contain, since 2.0.98.** A refused attempt may leave its
+  temporary directory with a nested transport directory inside it, holding an `origin` or
+  `pin` file. That file may be **empty, partially written, or complete**: empty or partial
+  is what a storage refusal looks like when the file was opened before the write failed,
+  and a complete one is left whenever the read succeeded and a *later* step refused — while
+  the work files were being allocated, say — or an interruption arrived after the write.
+  Nothing removes any of them.
+
+  **Completeness is not usability, and this is the case to be careful with.** A
+  well-formed `origin` or `pin` left by a refused run is indistinguishable by inspection
+  from one a successful run produced, so the file never tells you.
+
+  What does depends on which file it is. An `origin` is covered by
+  `PR_SETUP status=ready`, which is emitted after that read has been made and verified. A
+  `pin` is **not**: it is written later, by the driver's own `pr-origin.sh pin` call, and
+  setup has already reported `ready` by then — an interruption after that write leaves a
+  complete `pin` beside a `status=ready` line and the driver still aborts, because it never
+  gets to compare the pin against the remote it read. The only thing covering a `pin` is the
+  driver reaching the end of setup, past that comparison, without aborting.
+
+  So: **neither file is a result on its own, and `status=ready` is not the answer for
+  both.** If the run did not finish, discard what it left. Leave them; they are a stale temporary directory under **the parent setup
+  selected** — `TMPDIR` where that is usable, `$HOME` where it is not, and the second of
+  those two where the first attempt was retried — so look under the one the abort names
+  rather than under `TMPDIR` by assumption. Removing them by hand is the one thing the
+  loop itself refuses to do, because the path was published in `argv` and may no longer be
+  the directory that run created.
+
   The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
   value from the helper — the repository's remote — and derives, holds or builds
   everything else itself, so nothing the helper wrote is ever executed. The three
