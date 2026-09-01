@@ -1405,7 +1405,8 @@ esac
 #
 # THE RESIDUE IS THE LITTER ALREADY ACCEPTED by
 # `docs/decisions/2026-09-01-origin-cleanup-races.md` for the pre-write case, and of the
-# same kind: nothing destroyed. Asserting it here is what stops the removal coming back
+# same kind: no leaf destroyed, and nothing beneath the reservation. Asserting it here is
+# what stops the removal coming back
 # quietly — a change that restored it would make this case green again.
 _wf_bin="$TMP/wfbin"; mkdir -p "$_wf_bin"
 for _wf_mode in read pin; do

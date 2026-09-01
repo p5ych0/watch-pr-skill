@@ -40,9 +40,12 @@ subdirectories in it, and the `rmdir` leaves all of them. An earlier draft of th
 said "one directory and one leaf" and that was an example rather than a bound; the fixture
 now plants a leaf, a sibling and a nested subtree, and asserts every one survives.
 
-**What makes it acceptable is not the size, it is the KIND.** Nothing is destroyed. The
+**What makes it acceptable is not the size, it is the KIND.** No leaf is destroyed, and
+nothing beneath the reservation. The
 cleanup removes only an empty directory, so a refusal leaves litter under a
-path the caller named and takes nothing of anybody else's. The caller performs no cleanup
+path the caller named. It is not "nothing of anybody else's": `rmdir` resolves `$RB_DIR`,
+so a substituted EMPTY directory still goes, which is the race bounded above. The caller
+performs no cleanup
 after a non-zero status, deliberately, because it cannot know who created the path — so
 nothing collects it, and that is the whole of the cost.
 
@@ -75,10 +78,12 @@ It was not fixed in this change because it is a behaviour change to a helper, wh
 repository lands as its own pull request. **It is #266, and it is now fixed**: the leaf
 removal is gone and the cleanup is `rmdir` alone throughout the run, which refuses a symlink
 outright. The residue that fix leaves is a post-write refusal keeping the directory and its
-leaf — the litter this record accepts, and of the same kind, nothing destroyed.
+leaf — the litter this record accepts, and of the same kind: no leaf destroyed and nothing
+beneath the reservation.
 
 **This record still accepts only the litter.** What #266 removed was a defect; what remains
-is that a refusal leaves the reservation behind wherever it happens, and that is
+is that a refusal leaves the reservation behind whenever it is not empty — which since
+#266 includes every failed write, the leaf being open by then — and that is
 the cost accepted above.
 
 ## Why the flip is not moved instead

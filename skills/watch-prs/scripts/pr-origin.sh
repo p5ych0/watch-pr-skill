@@ -481,7 +481,8 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # THE COST IS LITTER, and it is the cost already accepted for a refusal that finds the
 # reservation populated: a refusal after a write leaves the directory and its leaf, because `rmdir` fails on a non-empty
 # directory. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for
-# the pre-write case, and this is the same kind — nothing destroyed.
+# the pre-write case, and this is the same kind — no leaf destroyed, and nothing beneath
+# the reservation.
 # WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
 # neither is signal-safe alone.
 #
@@ -545,7 +546,7 @@ rb_cleanup() {   # give back what this run created, while it is still empty
     # THE RESIDUE IS THE LITTER ALREADY ACCEPTED. A refusal after a write now leaves the
     # directory and its leaf, because `rmdir` fails on a non-empty directory — which is the
     # cost `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts, and the same KIND:
-    # nothing destroyed.
+    # no leaf destroyed, and nothing beneath the reservation.
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }

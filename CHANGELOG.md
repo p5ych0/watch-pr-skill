@@ -32,7 +32,8 @@
   **The cost is a residue, and it is one already accepted.** A refusal after a write now
   leaves the reservation directory *and* its leaf, because `rmdir` fails on a non-empty
   directory. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for the
-  pre-write case, and this is the same kind — nothing destroyed, litter under a path the
+  pre-write case, and this is the same kind — no leaf destroyed and nothing beneath the
+  reservation, litter under a path the
   caller named. The write-failure fixtures assert it rather than asserting the directory is
   gone, so a change that restored the removal would turn them red.
 

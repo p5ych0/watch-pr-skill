@@ -596,7 +596,8 @@ a phase flag selecting a leaf-removing shape as well; both are gone, and the rec
 of where that flag could flip is history.) The
 contents are RACER-CONTROLLED and there is no upper bound on them: any same-UID process can
 create files and subdirectories in the mode-700 directory once it exists. What makes it
-acceptable is the KIND and not the size — nothing is destroyed, since the cleanup
+acceptable is the KIND and not the size — no leaf and nothing beneath the reservation is
+destroyed, since the cleanup
 removes only an empty directory — and it is STAGED in `test-pr-origin.sh` with a leaf, a
 sibling and a nested subtree, so a bound that changes fails a case. Do not raise the
 leftover directory as a leak, and do not "fix" it by reintroducing a removal that resolves a

@@ -154,7 +154,9 @@ be placed wrongly; what carries the guarantee now is the shape of the removal. T
 a residue and it is the one already accepted: a refusal after a write leaves the directory
 AND its leaf, because `rmdir` fails on a non-empty directory —
 `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for the pre-write
-case, and this is the same kind, nothing destroyed. Every trap is
+case, and this is the same kind — no leaf destroyed, and nothing beneath the reservation,
+though `rmdir` still resolves `$RB_DIR` and a substituted EMPTY directory goes with it.
+Every trap is
 IGNORED — `trap ''`, not `trap -` — before the first removal, in one statement, on both
 exit paths. `trap -` restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is
 to terminate: it stops re-entry and makes the cleanup interruptible instead, so a second
