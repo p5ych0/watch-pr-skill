@@ -88,7 +88,8 @@
 #      is NOT guaranteed for a refusal after this script WROTE either, and since #266 that
 #      is the ordinary case: the cleanup is `rmdir` alone throughout, so a refusal past
 #      the write leaves the directory AND the leaf, `rmdir` failing on a non-empty
-#      directory. It used to remove the leaf first, and that removal could reach a file
+#      directory — for as long as it stays non-empty, since a same-UID process is free to
+#      unlink that leaf and let the `rmdir` through. It used to remove the leaf first, and that removal could reach a file
 #      outside this reservation entirely. What a refusal BEFORE the write leaves is nothing,
 #      unless a same-UID process has put something in the directory — that residue is
 #      deliberate too, and is the same one: the alternative is unlinking by a name this run
@@ -117,8 +118,9 @@
 #
 #          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal gets `rmdir` alone
 #          since #266, and `rmdir` cannot remove a directory that holds a file. So a
-#          refusal past the write leaves the leaf it wrote, and a directory a same-UID
-#          process has filled survives any refusal at all. That residue is the point
+#          refusal past the write leaves the leaf it wrote — unless a same-UID process
+#          unlinks it first, after which `rmdir` succeeds — and a directory such a process
+#          has filled survives any refusal at all. That residue is the point
 #          rather than a gap: the only way to empty it is to unlink by a name this run
 #          did not write, and that removal is what #266 took out for reaching a file
 #          outside this reservation.
@@ -479,8 +481,9 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # guarantee it was carrying is the shape of the removal itself.
 #
 # THE COST IS LITTER, and it is the cost already accepted for a refusal that finds the
-# reservation populated: a refusal after a write leaves the directory and its leaf, because `rmdir` fails on a non-empty
-# directory. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for
+# reservation populated: a refusal after a write leaves the directory and its leaf, because
+# `rmdir` fails on a non-empty directory — for as long as it IS non-empty, a same-UID
+# process being free to unlink the leaf and let the `rmdir` through. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for
 # the pre-write case, and this is the same kind — no leaf destroyed, and nothing beneath
 # the reservation.
 # WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
@@ -739,7 +742,8 @@ trap 'rb_on_signal TERM' TERM
 # each used to leave nothing behind because the CALLER owned the directory and cleaned
 # up in its own arms. It does not own it any more, so the obligation moved with the
 # creation. What moved with it is bounded by the removal's shape: `rmdir` gives back an
-# empty reservation, and a refusal past the write leaves one that is not empty, which
+# empty reservation, and a refusal past the write leaves one that is not empty — while it
+# stays that way, since a same-UID process may unlink the leaf — which
 # `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts.
 #
 # `rmdir`, NOT `rm -rf`. This removes only what it made and only while empty: a

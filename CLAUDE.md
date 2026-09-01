@@ -151,7 +151,9 @@ refuses a symlink outright and refuses a non-empty directory. **`RB_PHASE` went 
 and that is the point rather than a tidy-up** — three review rounds went into WHERE to flip
 it, because every placement traded one window for another, and a value nothing reads cannot
 be placed wrongly; what carries the guarantee now is the shape of the removal. The cost is
-a residue and it is the one already accepted: a refusal after a write leaves the directory
+a residue and it is the one already accepted: while the reservation stays non-empty — a
+same-UID process may unlink the leaf and let the `rmdir` through — a refusal after a write
+leaves the directory
 AND its leaf, because `rmdir` fails on a non-empty directory —
 `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for the pre-write
 case, and this is the same kind — no leaf destroyed, and nothing beneath the reservation,

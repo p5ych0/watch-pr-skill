@@ -83,7 +83,8 @@ beneath the reservation.
 
 **This record still accepts only the litter.** What #266 removed was a defect; what remains
 is that a refusal leaves the reservation behind whenever it is not empty — which since
-#266 includes every failed write, the leaf being open by then — and that is
+#266 includes a failed write, the leaf being open by then, unless a same-UID process has
+unlinked that leaf or substituted an empty directory before the cleanup runs — and that is
 the cost accepted above.
 
 ## Why the flip is not moved instead
