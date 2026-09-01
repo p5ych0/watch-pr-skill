@@ -382,9 +382,9 @@ rb_push_is_the_prs() {
     [ -n "$_want" ] || { echo "ABORT: the PR reports no head branch; refusing to push blind."; return 1; }
     # THE API SAYS WHETHER IT IS A FORK; THIS DOES NOT COMPARE NAMES. Comparing
     # `headRepositoryOwner/headRepository` with `$OWNER/$REPO` was the first
-    # version and it is wrong on casing: a pinned `git@github.com:Acme/widget.git`
-    # addresses the same repository the API returns as `acme/widget`, and a
-    # case-sensitive test called every such PR a fork and refused every push.
+    # version and it is wrong on casing: a pinned origin whose owner or repository
+    # differs in case from what the API returns addresses the same repository, and
+    # a case-sensitive test called every such PR a fork and refused every push.
     # Lower-casing needs a name — `tr`, or a bash 4 expansion this suite's 3.2 job
     # does not have — so the comparison is removed rather than fixed:
     # `isCrossRepository` is the same question asked of the thing that knows.
@@ -417,9 +417,9 @@ rb_push_is_the_prs() {
         || { echo "ABORT: could not read origin's push URLs; refusing to push blind."; return 1; }
     [ -n "$_pushurl" ] || { echo "ABORT: origin has no push URL; refusing to push blind."; return 1; }
     #
-    # COMPARED CASE-INSENSITIVELY, because casing is not a different repository:
-    # `git@github.com:Acme/Widget.git` and `acme/widget` address the same thing,
-    # and a fetch URL and a push URL written with different capitalisation are one
+    # COMPARED CASE-INSENSITIVELY, because casing is not a different repository: two
+    # spellings of one owner-and-repository pair differing only in case address the
+    # same thing, and a fetch URL and a push URL written with different capitalisation are one
     # operator's inconsistency rather than a redirection. Comparing them exactly
     # refused every push in that configuration — the same defect this round
     # removed from the fork check, one level over.

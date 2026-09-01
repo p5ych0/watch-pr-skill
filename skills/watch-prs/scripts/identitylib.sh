@@ -23,8 +23,8 @@
 # removes the mechanism rather than the instances. Issue #18.
 #
 # WHAT A DRIFTED COPY COSTS. An origin whose host cannot be derived, defaulted to
-# github.com while the path split still yields a plausible `acme/widget`, points
-# every `gh` call at the unrelated PUBLIC repository of that name — reading,
+# github.com while the path split still yields a plausible owner-and-repository
+# pair, points every `gh` call at the unrelated PUBLIC repository of that name — reading,
 # commenting on and merging there. The failure is not an error; it is silent
 # success against the wrong project.
 
@@ -69,8 +69,8 @@
 # `origin_host_unparseable` — so a refused origin left a half-derived identity
 # behind, which is the opposite of what a failing call is supposed to communicate.
 # A caller that exits on the non-zero never sees it; one that does not, or one
-# reading the values after a guard it got wrong, sees a plausible `acme/widget`
-# with an empty host. The locals make "the call failed" and "the identity is
+# reading the values after a guard it got wrong, sees a plausible owner and
+# repository with an empty host. The locals make "the call failed" and "the identity is
 # untouched" the same statement.
 rb_identity() {
     local remote p h _host _owner _repo
@@ -107,15 +107,15 @@ rb_identity() {
     # every pinned command would act on the wrong GitHub entirely.
     #
     # A remote with NO NETWORK AUTHORITY is not an identity, and must not be
-    # given one. A local-path origin such as `/srv/mirrors/acme/widget.git` or
-    # `../acme/widget.git` has no host, and defaulting it to github.com while the
-    # path split still yields `acme/widget` pointed every `gh` call at the
-    # unrelated PUBLIC repository of that name.
+    # given one. A local-path origin — an absolute or relative path ending in a
+    # `.git` directory — has no host, and defaulting it to github.com while the
+    # path split still yields the last two components pointed every `gh` call at
+    # the unrelated PUBLIC repository of that name.
     #
     # The TRANSPORT is checked, not only the authority.
-    # `file://github.com/srv/acme/widget.git` is a file-transport remote that
-    # carries an authority, so parsing it as a URL yielded HOST=github.com while
-    # the path split yielded `acme/widget` — the same wrong-public-repository
+    # A `file://` remote carrying a network-looking authority is a file-transport
+    # remote all the same, so parsing it as a URL yielded that authority as HOST
+    # while the path split yielded a pair — the same wrong-public-repository
     # outcome as a bare local path, reached through the arm that was supposed to
     # be the safe one. Only transports that actually reach a GitHub server are
     # accepted; anything else names no reviewable identity.

@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.94] — 2026-09-01
+
+- **The suite's placeholder identity no longer appears in prose.** The repo-agnostic rule
+  forbids naming a repository as an example, as evidence or as history, and the exemption
+  covers a **value a fixture case supplies** — not a sentence about one. `identitylib.sh`,
+  `pr-close-round.sh` and `pr-origin.sh` used the placeholder pair to illustrate what a
+  drifted parser costs, what a case-insensitive comparison is for, and what an unexpanded
+  `insteadOf` alias looks like; `SKILL-RATIONALE.md` did the same, and `CHANGELOG.md`
+  carried it through nine historical entries.
+
+  Each now describes the shape without the pair — "a plausible owner-and-repository pair",
+  "an origin whose owner differs only in case", "an origin that used such an alias" —
+  which costs the sentences nothing, and that is the tell: where removing the names loses
+  no meaning, they were never doing work. The fixtures are untouched. #231.
+
 ## [2.0.93] — 2026-08-31
 
 - **`pr-origin.sh pin` refuses a pin that is not this checkout's origin.** The origin
@@ -2674,9 +2689,9 @@
   one parser, in a subshell so its globals cannot leak back, and the answer is the
   subshell's status rather than three values serialised through one string.
 
-  That comparison is case-insensitive: `git@github.com:Acme/Widget.git` and
-  `acme/widget` address the same repository, and comparing them exactly refused
-  every push in that configuration. `shopt -s nocasematch` is safe in a helper for
+  That comparison is case-insensitive: an origin whose owner and repository differ
+  only in case from the recorded identity addresses the same repository, and
+  comparing them exactly refused every push in that configuration. `shopt -s nocasematch` is safe in a helper for
   a reason specific to these files — they start `bash -p`, which imports no
   functions, so no builtin in them can be shadowed, which is what #101 and #83
   settled — and it is set inside the subshell so the option does not outlive the
@@ -3464,9 +3479,9 @@
   **A global `insteadOf` rule is expanded again.** Emptying the environment to
   shut out `GIT_DIR` also removed `HOME`, and `git remote get-url` is documented
   to expand `url.<base>.insteadOf` — rules that live in the user's global config.
-  A checkout whose origin is `work:acme/widget.git` came back unexpanded with host
-  `work`, so setup refused a valid checkout or addressed the session at a host it
-  does not push to. `HOME` and `XDG_CONFIG_HOME` are carried through; everything
+  A checkout whose origin used such an alias came back unexpanded, with the alias
+  itself read as the host, so setup refused a valid checkout or addressed the
+  session at a host it does not push to. `HOME` and `XDG_CONFIG_HOME` are carried through; everything
   that redirects the repository still goes, and the list needs no maintaining
   because the environment is emptied rather than filtered.
 
@@ -4702,7 +4717,7 @@ rule can no longer hold in one copy and not another. Issue #18.
   carries the comment recording it: *a rule proven in one copy is unproven in the
   others*. What a drifted copy costs is not an error: an origin whose host cannot
   be derived, defaulted to `github.com` while the path split still yields a
-  plausible `acme/widget`, points every `gh` call at the unrelated **public**
+  plausible owner-and-repository pair, points every `gh` call at the unrelated **public**
   repository of that name — reading, commenting on and merging there.
 
 - **`rb_identity` sets `HOST`, `OWNER` and `REPO` rather than printing them.** The
@@ -4778,7 +4793,7 @@ rule can no longer hold in one copy and not another. Issue #18.
   `origin_host_unparseable` — so a refused origin left a half-derived identity
   behind, which is the opposite of what a failing call is supposed to
   communicate. A caller that exits on the non-zero never sees it; one reading the
-  values after a guard it got wrong sees a plausible `acme/widget` with an empty
+  values after a guard it got wrong sees a plausible owner-and-repository pair with an empty
   host. Everything parses into locals and the globals are written once, after all
   validation.
 
@@ -5066,7 +5081,7 @@ the plugin no longer runs a reviewer of its own.
   and `remaining_s` return through variables now, so the state survives the call.
 
 - **The identity guard checks a mixed line.** `$OWNER/$REPO` on a line caused the
-  whole line to be skipped, so `REPO_SLUG="acme/widget"; echo "$OWNER/$REPO"`
+  whole line to be skipped, so an assignment of the slug followed by `echo "$OWNER/$REPO"`
   scanned clean — the guard asserting the repo-agnostic invariant while a runtime
   script routed review traffic to a fixed repository.
 
@@ -5173,9 +5188,9 @@ the plugin no longer runs a reviewer of its own.
   as easily as by anyone who can comment on the PR.
 
 - **A remote whose transport reaches no GitHub server is refused too.**
-  `file://github.com/srv/acme/widget.git` carries an authority, so the URL arm
+  a `file://` URL carrying an authority reaches the URL arm
   accepted `github.com` as the host while the path split still yielded
-  `acme/widget` — the same wrong-public-repository outcome as a bare local path,
+  an owner-and-repository pair — the same wrong-public-repository outcome as a bare local path,
   reached through the arm meant to be the safe one. Only `ssh`, `git`, `https`,
   `http` and `git+ssh` are accepted.
 
@@ -5211,8 +5226,8 @@ the plugin no longer runs a reviewer of its own.
   command's own 0. Both now return a distinguished 125.
 
 - **An origin with no network authority is refused, not defaulted to GitHub.**
-  A local-path remote such as `/srv/mirrors/acme/widget.git` has no host, and
-  defaulting it to `github.com` while the path split still yielded `acme/widget`
+  A local-path remote — an absolute path ending in a `.git` directory — has no host, and
+  defaulting it to `github.com` while the path split still yielded a plausible pair
   pointed every `gh` call at the unrelated **public** repository of that name —
   reading, commenting on and merging the same-numbered PR there. Applied in all
   four identity parsers.

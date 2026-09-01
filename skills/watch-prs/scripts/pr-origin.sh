@@ -756,7 +756,7 @@ _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 # `HOME` SURVIVES `-i`, AND THAT IS NOT A WEAKENING. `git remote get-url` is
 # documented to expand `url.<base>.insteadOf`, and those rules live in the user's
 # GLOBAL config — so an emptied environment returned the UNEXPANDED alias, and a
-# checkout whose origin is `work:acme/widget.git` came back with host `work`.
+# checkout whose origin used such an alias came back with the alias read as the host.
 # `rb_identity` then refused a valid checkout, or addressed the session somewhere
 # that is not where it pushes. Measured both ways.
 #
