@@ -116,5 +116,6 @@ answer.
 ## What would change the accepted half
 
 A shell with descriptor-relative removal, or a transport that is not a shell — either would
-let the reservation be given back on a refusal instead of left. Until then a refusal leaves
-what it found, and that is the accepted cost.
+let the reservation be given back even when it is not empty. Until then a refusal that finds
+it non-empty leaves what it found, and that is the accepted cost. An empty one is still
+removed, which is the ordinary case and not a limit.
