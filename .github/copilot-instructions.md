@@ -588,6 +588,20 @@ readable origin ends with the reservation present and empty. That is stated in t
 and staged behaviourally on both sides. Raise a cost you think was underweighted as a
 non-blocking note.
 
+**A fourth is accepted since 2026-09-01**, in
+`docs/decisions/2026-09-01-prebootstrap-clearing-open.md`: `pr-copilot-phase.sh` clears its
+caller-named file above the bootstrap, guarded by `[[ -f ]]` and then opened with `>`, which
+is a check-then-use — a same-UID process can put a FIFO there between the two and block the
+stage. It cannot be bounded where it is: every bounded open goes through `run_limited`,
+which arrives WITH the bootstrap, and the clearing sits above it so that a bootstrap refusal
+cannot leave the previous run's value to be read as this one's. Moving it below was measured
+against the driver and refused: for `record` the file is never read after a refusal, but for
+`open` a shadowed `exit` falls into the wait step, which hands that file to
+`pr-watch.sh --after-review-file` — so a stale well-formed baseline would be accepted there.
+The residue is a stall before any mutation, with nothing posted and no phase half advanced.
+Do not raise the FIFO block as a defect, and do not propose moving either clearing below the
+bootstrap.
+
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection.

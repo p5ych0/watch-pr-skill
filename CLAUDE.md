@@ -961,10 +961,13 @@ author side of that contract matters:
   establish intent, never permission. Where a limitation is genuinely accepted,
   record it on the base ref as a dated file in `docs/decisions/`.
 
-  **Three are accepted there, one record each.** #160: the transport candidate name
+  **Four are accepted there, one record each.** #160: the transport candidate name
   is published in argv before the `mkdir` reserves it. #162: the reservation is an
-  inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. And
-  2026-08-29: `pr-setup.sh` removes NOTHING — not the files it wrote, not the transport,
+  inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. 2026-09-01: `pr-copilot-phase.sh` clears its caller-named file above the bootstrap with a
+  `[[ -f ]]` and a `>`, which a FIFO planted between them blocks — it cannot be bounded there
+  because `run_limited` arrives with the bootstrap, and moving it below was measured against
+  the driver and refused, since a shadowed `exit` reaches the wait step with a stale baseline
+  for `open`. And 2026-08-29: `pr-setup.sh` removes NOTHING — not the files it wrote, not the transport,
   not the reservation — so a refusal leaves whatever it had made. Every shape that removed
   something needed a name a same-UID process may have substituted, and each destroyed
   something; the last of them was one `rmdir` gated on a held descriptor and a recorded
