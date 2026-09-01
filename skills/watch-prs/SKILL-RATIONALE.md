@@ -1472,8 +1472,13 @@ review. #243.
 
 THE FILE WAS EMPTIED TWICE AND IS NOW EMPTIED ONCE. The clearing ABOVE the bootstrap is
 gone, and that is #245: an unbounded truncating open on a path the caller named, where
-`run_limited` does not exist yet — a symlink there truncates its target and a FIFO there
-blocks, with nothing to stop either. Do not restore it.
+`run_limited` does not exist yet.
+
+Its `[[ -f ]]` guard is what made it a CHECK-TO-OPEN RACE. A FIFO already at that path was
+refused by the guard and never opened; what could block was a same-UID process replacing
+the path between the test and the open, with nothing loaded yet to bound the wait. The
+symlink half needed no race at all — `[[ -f ]]` follows one, so a symlink to a regular file
+passed the guard and the open truncated its target. Do not restore it.
 
 The reason it survived `record`'s removal by a release is that its reader is real: with
 the driver's `exit` shadowed to return, a refused `open` falls past its fence into the

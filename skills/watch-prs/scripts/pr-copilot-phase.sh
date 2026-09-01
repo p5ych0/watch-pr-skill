@@ -256,8 +256,10 @@ if [[ $STAGE = open ]]; then
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
     # THIS CLEARING STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
-    # truncating open above the bootstrap, where `run_limited` does not exist yet — a
-    # symlink there truncates its target and a FIFO there blocks with nothing to stop it.
+    # truncating open above the bootstrap, where `run_limited` does not exist yet: its
+    # `[[ -f ]]` guard refused a FIFO already at the path, so what could block it was a
+    # same-UID process replacing the path between the test and the open — while the symlink
+    # half needed no race, `[[ -f ]]` following one to a regular file it then truncated.
     # This one is below the bootstrap and bounded, and it was removed for a round on the
     # argument that emptying buys nothing: the watch holds a verdict back only when the id
     # it reads equals the baseline, and skips the comparison entirely when the baseline is

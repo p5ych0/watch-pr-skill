@@ -6,8 +6,13 @@
   `pr-copilot-phase.sh open` cleared its caller-named baseline twice — once above the
   bootstrap, once after — and only the first is gone. It was the same **unbounded truncating
   open on a caller-named path** that came out of `record` in 2.0.96: `>` follows a symlink
-  and truncates its target, and a FIFO there blocks, with no `run_limited` yet loaded to
-  bound it.
+  and truncates its target, with no `run_limited` yet loaded to bound it.
+
+  Its `[[ -f ]]` guard makes that a **check-to-open race** rather than a plain bad input. A
+  FIFO already at the path is refused by the guard and never opened; what blocks is a
+  same-UID process replacing the path between the test and the open, which is the shape #245
+  filed. The symlink half needs no race — `[[ -f ]]` follows one, so a symlink to a regular
+  file passes the guard and the open truncates its target.
 
   So a refusal from the bootstrap leaves the baseline as it found it, and a refusal after
   the surviving clearing leaves it empty. Which of the two a reader gets depends on where

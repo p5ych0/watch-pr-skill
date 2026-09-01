@@ -2418,10 +2418,11 @@ _w2_attack "…and a readonly WHO does too, before anything is posted" \
 
 # ── WHY `open` KEEPS A CLEARING AND `record` DOES NOT ─────────────────────
 #
-# #245 removed both of `record`'s clearings and kept both of `open`'s, and the difference is
-# entirely about what the DRIVER does after a refusal. Asserting it in the helper's own
-# suite would prove the helper empties a file; what has to be true is that a stale value
-# reaches a reader, and only the document can show that.
+# #245 removed both of `record`'s clearings and, of `open`'s two, removed the one ABOVE the
+# bootstrap and kept the BOUNDED one below it. The difference is entirely about what the
+# DRIVER does after a refusal. Asserting it in the helper's own suite would prove the helper
+# does or does not empty a file; what has to be true is that whatever the file holds reaches
+# a reader, and only the document can show that.
 #
 # The fence and the wait step are lifted TOGETHER, with `exit` shadowed to return — which is
 # the state in which a refused `open` continues at all — and the watch replaced by a stub
@@ -2448,9 +2449,15 @@ WHO="chatgpt-codex-connector[bot]" bash -c '
     . "$1" 2>/dev/null' _ "$_ow_dir/ow.sh" >/dev/null 2>&1 || true
 # THE CONSEQUENCE, NOT THE MECHANISM. A refused `open` with `exit` returning reaches the
 # wait step, and whatever `$PRIOR_FILE` holds at that moment is what the watch is armed
-# with. The helper's clearing is what makes that value empty rather than a previous round's
-# review id — which the watch accepts, and then waits past a review already given. That is
-# the whole reason `open` keeps a clearing that `record` does not.
+# with. THAT is what this case proves, and it is why `open` is not `record`: the driver has
+# a reader after the refusal, so what the file holds is observable.
+#
+# THE STUB REFUSES WITHOUT RUNNING THE HELPER, so the value seen here is the one the caller
+# left — `99`, not empty. That is the bootstrap-refusal shape, which is the arm whose
+# clearing #245 removed. A refusal further in reaches the bounded clearing first and the
+# reader would see an empty file instead; both are deliberate, and which one a run gets
+# depends on where it stopped. Neither is asserted here, because neither is the document's
+# to decide — what the document decides is that a reader exists at all.
 if grep -q 'WATCHED:' "$_ow_dir/seen" 2>/dev/null; then
     grep -qF 'WATCHED:[99]' "$_ow_dir/seen" \
         && pass "a refused open DOES reach the wait step, which is why its clearing is load-bearing" \
