@@ -119,14 +119,15 @@
 #          `docs/decisions/2026-09-01-origin-cleanup-races.md`, and both mean the
 #          same thing to a caller — the status is the answer, never the directory.
 #
-#          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal gets `rmdir` alone
-#          since #266, and `rmdir` cannot remove a directory that holds a file. So a
-#          refusal past the write leaves the leaf it wrote — unless a same-UID process
-#          unlinks it first, after which `rmdir` succeeds — and a directory such a process
-#          has filled survives any refusal at all. That residue is the point
-#          rather than a gap: the only way to empty it is to unlink by a name this run
-#          did not write, and that removal is what #266 took out for reaching a file
-#          outside this reservation.
+#          AND LEAVING A NON-EMPTY ONE IS DELIBERATE. Every refusal gets `rmdir` alone
+#          since #266, and `rmdir` cannot remove a directory that holds a file — so a
+#          refusal past the write leaves the leaf it wrote, unless a same-UID process
+#          unlinks it first and the `rmdir` then succeeds, and a directory such a process
+#          has filled survives any refusal at all. Neither is an exception to the rule
+#          above; they are the two ways it is reached. The residue is the point rather
+#          than a gap: the only way to empty it is to unlink by a name this run did not
+#          write, and that removal is what #266 took out for reaching a file outside
+#          this reservation.
 #
 #          THE CLEANUP HAS ONE BODY AND THREE WAYS IN, and they are not the same
 #          thing. An ordinary refusal and any other abnormal end reach it through
