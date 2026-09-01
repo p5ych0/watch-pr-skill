@@ -475,13 +475,19 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
     #
     # A COMMAND SUBSTITUTION STRIPS TRAILING NEWLINES, so the child appends a sentinel the
     # parent removes — the same shape `pr-origin.sh` uses to keep `git`'s own terminator.
+    #
+    # THE TWO WRITES ARE CHAINED, and that is not style. Written as two statements, a data
+    # `printf` that wrote a PREFIX and then failed left the sentinel's own success as the
+    # child's status, so the parent saw 0 and took the prefix — which is the failure this
+    # whole read is about, reintroduced by the mechanism added to detect it. With `&&` the
+    # sentinel never runs on a failed data write, and the child exits non-zero.
     _bl_out="$(probe "$_bl_lim" /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9
           _s=$?
         } 9<"$1" || exit 4
         [ "$_s" -eq 0 ] && exit 5
-        printf %s "$_r"; printf x' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+        printf %s "$_r" && printf x' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
     [ "$_bl_rc" -eq 0 ] && _bl_out="${_bl_out%x}"
     case "$_bl_rc" in
         # AN EMPTY FILE IS A REFUSAL, AND "NO PRIOR REVIEW" IS SPELLED `none`. #264.
