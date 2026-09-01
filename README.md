@@ -436,7 +436,14 @@ Then:
      `/dev/null` and a write-only file accept it and fail the later regular-file and
      read-back checks. Where the sentinel survives, a refusal cannot hand the watch a
      value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
-     and stops. Do not read the file on a non-zero status. The order is revoke → prove → baseline → request: the
+     and stops.
+
+     The driver aborts on a non-zero `open`, so it should never read the file then.
+     The reason the sentinel matters anyway is that it can: a shell whose `exit`
+     returns carries the refusal past the abort and into the wait step, which reads
+     this path. That fallback is real and is tested. It may read a stale value or the
+     sentinel, and what makes it safe is the **watch**, not the driver — so the
+     contents are authoritative only where `open` returned 0. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

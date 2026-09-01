@@ -61,7 +61,11 @@
 
   Not "posts nothing", which would be false: `open` revokes any earlier Copilot signoff
   before it captures the baseline, so a refusal after that point has already written one
-  comment to the PR. What every refusal does guarantee is that Copilot was never requested.
+  comment to the PR. Nor "Copilot was never requested", which is false at the last refusal
+  of all — `gh pr edit --add-reviewer` failing is itself a refusal, and the remote may have
+  accepted the mutation before the client reported the error. What holds is scoped to where
+  the run stopped: a refusal **before the request command runs** leaves Copilot un-asked, and
+  that covers every refusal this change is about.
 
   **The clearing BELOW the bootstrap is kept**, and only the unbounded one is removed. It
   was tried both ways in review, and removing it is a regression: bounded by `run_limited`,

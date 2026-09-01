@@ -448,8 +448,13 @@ something to act on and prints one line when the state changes:
 # switched, proven again, in step 7 — so it is not re-assigned here: an assignment is
 # where a nameref does its damage, and one that only restates a value already set would
 # be a third site to guard for nothing. Codex in the Codex phase, Copilot after step 7.
-# $PRIOR_FILE holds the authoritative review id captured BEFORE the request that
-# this watch is waiting on — written by step 2, step 5 and step 7. A re-request on
+# $PRIOR_FILE holds the review id captured BEFORE the request that this watch is
+# waiting on — written by step 2, step 5 and step 7 — and it is AUTHORITATIVE ONLY
+# WHERE THE STAGE THAT WROTE IT RETURNED 0. Those steps abort on anything else, but
+# an `exit` that returns carries a refusal into this line, and the file then holds
+# the previous round's value, a refusal sentinel, or nothing. The watch is what
+# stops there: a sentinel is `state=error`, and this is why the value is not
+# re-derived or defaulted here. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives

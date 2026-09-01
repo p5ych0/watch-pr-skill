@@ -1102,11 +1102,14 @@ case "$_rb_res" in
     "") die "a refused open left an EMPTY baseline, which the watch accepts as 'no floor'" ;;
     *) die "a refused open left '$_rb_res' in the baseline file" ;;
 esac
-# AND IT REQUESTED NOTHING, which is what every refusal guarantees — unlike "posts nothing",
-# which is false once the revocation has been written. NOT "no watch is armed": the driver
-# reaches the wait step after a refusal whenever `exit` returns, which is what the open-window
-# case in `test-pr-skill-contract.sh` proves. What is true here is only that Copilot was never
-# asked, so nothing new is coming for that watch to find.
+# AND IT REQUESTED NOTHING — at THIS refusal, which is a staged head-read failure and so is
+# before the request command runs. Not "every refusal": `gh pr edit --add-reviewer` failing is
+# itself a refusal, with the request already invoked and possibly accepted by the remote before
+# the client reported the error, and the case further down stages exactly that.
+#
+# NOT "no watch is armed" either: the driver reaches the wait step after a refusal whenever
+# `exit` returns, which the open-window case in `test-pr-skill-contract.sh` proves. What is
+# true here is that Copilot was not asked, so nothing new is coming for that watch to find.
 grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested by a refused open" \
     || pass "…with Copilot not requested, so nothing new is coming for the watch to find"
