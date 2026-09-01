@@ -123,8 +123,10 @@ set -uo pipefail
 #
 # Removing it removes an unbounded truncating open on a caller-named path, which is worth
 # more than the depth it was giving: `>` follows a symlink and truncates its target, so an
-# arm that cannot be reached by a reader was still able to destroy a file. The clearing
-# that matters runs after the bootstrap, where `run_limited` exists to bound it. #245.
+# arm that cannot be reached by a reader was still able to destroy a file. `record` has NO
+# clearing now, here or after the bootstrap — the second one protected nothing either, for
+# the same reason — and what makes a stale value impossible is the WRITE: bounded, its
+# status taken, and compared in the child. #245.
 if [[ ${1:-} = open ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]]; then
     > "${4}" || {
         echo "ABORT: the baseline file '${4}' exists and cannot be emptied; a stale review id would be left for the caller to read, and the watch would take a pass made before this request as the answer to it."

@@ -13,7 +13,11 @@
   arm; a refusal exits 1 into the `*)` arm, which reads nothing, and with `exit` shadowed
   execution falls past that fence carrying whatever `CODEX_SHA` already held — the retained
   value from step 7, not anything this file wrote. So the arm was destroying files to
-  protect a read that does not happen. The later clearing now goes through `run_limited`.
+  protect a read that does not happen. The later clearing is gone too, on the same
+  reasoning: on success and on the pause alike the WRITE has already replaced the file, and
+  every refusal between exits into the arm that reads nothing. `record` clears its sha file
+  nowhere, and the bounded, status-taken, child-compared write is what makes a stale value
+  impossible.
 
   **`open` keeps its arm, and the asymmetry is measured.** A refused `open` *is* followed by
   a reader: with `exit` shadowed, execution reaches the wait step, which hands

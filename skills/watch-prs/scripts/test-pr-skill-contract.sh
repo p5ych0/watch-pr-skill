@@ -2285,7 +2285,13 @@ done
 # THE SHA FILE HOLDS A WELL-FORMED VALUE for these, so a fence that DID read it would
 # assign one rather than fail — the failure mode being guarded against is a silent success.
 _rec_rc=0
+# `CODEX_SHA` IS CLEARED IN THE CHILD, because the case is about what the FENCE assigns and
+# the suite runs with the operator's environment: an exported `CODEX_SHA` is a name setup
+# accepts and the self-check preserves, so without this the child would report the
+# inherited value and fail a clean checkout for a reason that has nothing to do with the
+# fence.
 _rec_out="$(RB_REC_STUB="$_rec_dir/stub1" HEAD_FILE="$_rec_dir/sha" bash -c '
+    unset CODEX_SHA
     trap '"'"'printf "SHA:[%s]" "${CODEX_SHA-unset}"'"'"' EXIT
     . "$1" 2>/dev/null' _ "$_rec_dir/rec.sh" 2>/dev/null)" || _rec_rc=$?
 case "$_rec_out" in

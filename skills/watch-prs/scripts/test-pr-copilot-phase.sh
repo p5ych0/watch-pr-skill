@@ -331,9 +331,16 @@ if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/shafifo"
     mkfifo "$TMP/shafifo" 2>/dev/null && {
         _sf_got="$(run record 7 "$TMP/body.md" "$TMP/shafifo")"
-        [ "${_sf_got%%|*}" != 0 ] \
-            && pass "…and a FIFO at the sha path stops record instead of hanging it" \
-            || die "a FIFO sha path gave '${_sf_got}'"
+        # THE HELPER'S OWN REFUSAL, NOT THE HARNESS WATCHDOG'S. `run` wraps every call in
+        # `run_limited 25`, so an UNBOUNDED write would block on the FIFO until that fired
+        # and come back 124 — which "not zero" accepts, and the case would report the write
+        # as bounded precisely when it is not. Status 1 is the helper refusing; 124 and 125
+        # are the harness saying it never did.
+        case "${_sf_got%%|*}" in
+            1) pass "…and a FIFO at the sha path stops record instead of hanging it" ;;
+            124|125) die "record hung on the FIFO and the harness watchdog stopped it: '${_sf_got}'" ;;
+            *) die "a FIFO sha path gave '${_sf_got}'" ;;
+        esac
         nothing_posted "the sha path was a FIFO"
     }
     rm -f "$TMP/shafifo"
