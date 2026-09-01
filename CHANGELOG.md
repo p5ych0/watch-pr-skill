@@ -26,7 +26,14 @@
   newlines. An **id** has the same defect, and it is the worse one: `123` truncated from
   `1234` is well-formed and no shape test can reject it. So the reader preserves that byte
   and requires it, refusing an unterminated file with
-  `reason=unterminated_after_review_file`. All three writers emit it —
+  `reason=unterminated_after_review_file`.
+
+  **And empty after stripping is empty.** A file holding only the delimiter passes the
+  empty-file check — it has a byte in it — and strips to nothing, which the shape test would
+  then accept as "no floor". That is not hypothetical: `printf '%s\n' ""` is exactly what
+  the writers emitted before this change, so a baseline left by an older version of this
+  plugin, or by a caller written against the old contract, has precisely that shape. The
+  value is re-checked after the delimiter comes off. All three writers emit it —
   `pr-request-review.sh` on both paths, `pr-close-round.sh post`, and
   `pr-copilot-phase.sh open`, where it is the ordinary case because Copilot has usually not
   reviewed the head when the phase opens.

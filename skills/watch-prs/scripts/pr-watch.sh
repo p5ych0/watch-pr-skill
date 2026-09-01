@@ -519,6 +519,18 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
                *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=unterminated_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
                   exit 2 ;;
            esac
+           # AND EMPTY AFTER STRIPPING IS EMPTY. A file holding only the delimiter passes
+           # the check above — it is not an empty FILE — and strips to nothing, which the
+           # shape test below then accepts as "no floor". That is the fail-open this change
+           # exists to close, reached one step later.
+           #
+           # IT IS NOT HYPOTHETICAL: `printf '%s\n' ""` is exactly what the writers emitted
+           # before #264, so a baseline file left by an older version of this plugin, or by
+           # a caller written against the old contract, has precisely this shape.
+           case "$_bl_out" in
+               "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                   exit 2 ;;
+           esac
            case "$_bl_out" in
                none) AFTER_REVIEW="" ;;
                *) AFTER_REVIEW="$_bl_out" ;;

@@ -890,6 +890,21 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
 # finished write. Staged for BOTH shapes, because an id has the same defect and is the one
 # an earlier reading of this change missed — `123` truncated from `1234` is a well-formed
 # id that no shape test can reject.
+# AND A FILE HOLDING ONLY THE DELIMITER IS EMPTY TOO. It passes the empty-FILE check,
+# since it has a byte in it, and strips to nothing — so without a second look the shape
+# test accepts it as "no floor" and the fail-open returns one step later. This is the exact
+# shape `printf '%s\n' ""` produces, which is what every writer emitted before this change,
+# so a file left by an older plugin or by a caller written against the old contract has it.
+printf '\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=empty_after_review_file' <<<"$out"; } \
+    && pass "…and a file holding only the delimiter is refused as empty" \
+    || die "a newline-only baseline file was not refused (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a verdict was announced against a newline-only baseline: $out" \
+    || pass "…with no verdict announced for it"
+
 for _un_v in none 4321; do
     printf '%s' "$_un_v" > "$_bl"
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
