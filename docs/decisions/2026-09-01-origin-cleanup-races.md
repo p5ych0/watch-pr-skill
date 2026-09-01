@@ -37,7 +37,7 @@ said "one directory and one leaf" and that was an example rather than a bound; t
 now plants a leaf, a sibling and a nested subtree, and asserts every one survives.
 
 **What makes it acceptable is not the size, it is the KIND.** Nothing is destroyed. The
-cleanup in this phase removes only an empty directory, so a refusal leaves litter under a
+cleanup removes only an empty directory, so a refusal leaves litter under a
 path the caller named and takes nothing of anybody else's. The caller performs no cleanup
 after a non-zero status, deliberately, because it cannot know who created the path — so
 nothing collects it, and that is the whole of the cost.
@@ -74,7 +74,7 @@ outright. The residue that fix leaves is a post-write refusal keeping the direct
 leaf — the litter this record accepts, and of the same kind, nothing destroyed.
 
 **This record still accepts only the litter.** What #266 removed was a defect; what remains
-is that a refusal leaves the reservation behind, whatever phase it happens in, and that is
+is that a refusal leaves the reservation behind wherever it happens, and that is
 the cost accepted above.
 
 ## Why the flip is not moved instead

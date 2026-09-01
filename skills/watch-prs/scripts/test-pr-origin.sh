@@ -2175,7 +2175,7 @@ _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR=
     && pass "…and a pin mismatch refuses after the reservation, before anything is written" \
     || die "the litter case did not reach the mismatch refusal (rc=$_lit_rc): '$_lit_out'"
 # AND EVERY PLANTED OBJECT SURVIVES, which is the bound the record accepts: the cleanup in
-# this phase is `rmdir` alone, so it removes an empty directory and NOTHING else. What must
+# the cleanup is `rmdir` alone, so it removes an empty directory and NOTHING else. What must
 # not have happened is the other half — a removal reaching an object this run did not write.
 { [ -d "$_lit_dir" ] && [ -f "$_lit_dir/pin" ] && [ -f "$_lit_dir/sibling" ] \
   && [ -f "$_lit_dir/sub/deep/file" ]; } \

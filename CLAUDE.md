@@ -135,9 +135,10 @@ this run made; and `-O` refuses a name another ACCOUNT holds. Both flags are inf
 rather than a handoff, and #162 carries the protocol change that removes them. The
 refusals only say why and stop — cleaning up in them as well meant a refusal cleaned and
 then `exit` fired the trap and cleaned again, and the second pass is the dangerous one,
-because an account watching the published path can recreate it as a symlink between the
-two and a second `rm -f` follows the replacement. **THE CLEANUP IS `rmdir` ALONE, IN EVERY
-PHASE, AND THERE IS NO PHASE.** It had two shapes chosen by `RB_PHASE` — `rmdir` while no
+because an account watching the published path can recreate it between the two and a
+second pass resolves the name again — `rm -f` following a symlink until #266, `rmdir`
+refusing one since. **THE CLEANUP IS `rmdir` ALONE, ON EVERY
+PATH OUT, AND THERE IS NO PHASE FLAG.** It had two shapes chosen by `RB_PHASE` — `rmdir` while no
 leaf could exist, and leaf-then-directory once a write had happened, since `rmdir`
 necessarily fails on a directory holding its leaf — and #266 removed the second. The leaf
 removal resolved a NAME, and the `-d` and `-O` tests in front of it FOLLOW SYMLINKS, so a

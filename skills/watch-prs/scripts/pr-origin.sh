@@ -525,7 +525,7 @@ rb_cleanup() {   # give back what this run created, while it is still empty
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
         || return 0
     [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
-    # `rmdir` ALONE, IN EVERY PHASE, AND THAT IS #266. This removed the leaf by name first
+    # `rmdir` ALONE, ON EVERY PATH OUT, AND THAT IS #266. This removed the leaf by name first
     # where a write had happened, and the two tests above do not confine it: `-d` and `-O`
     # both FOLLOW SYMLINKS, so a same-UID process that renames this reservation and leaves
     # a symlink to another directory passes both — the target is a directory and is owned
