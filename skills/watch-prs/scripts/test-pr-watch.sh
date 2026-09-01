@@ -879,6 +879,29 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a verdict was announced against an empty baseline file: $out" \
     || pass "…with no verdict announced for it"
 
+# AND A WRITE THAT STOPPED BEFORE ITS NEWLINE IS REFUSED, WHICH IS WHAT MAKES THE TOKEN
+# WORTH ANYTHING. Every writer ends with `printf '%s\n'`, so the trailing newline is the
+# completion delimiter: a write that failed part-way — a full filesystem, a quota reached
+# mid-flush — leaves the value without it.
+#
+# WITHOUT THAT CHECK THE TOKEN IS FAKEABLE BY THE VERY FAILURE IT EXISTS FOR: a `none`
+# whose newline never landed reads as the deliberate no-floor value, since a command
+# substitution discards trailing newlines and the bare prefix is indistinguishable from a
+# finished write. Staged for BOTH shapes, because an id has the same defect and is the one
+# an earlier reading of this change missed — `123` truncated from `1234` is a well-formed
+# id that no shape test can reject.
+for _un_v in none 4321; do
+    printf '%s' "$_un_v" > "$_bl"
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && grep -q 'reason=unterminated_after_review_file' <<<"$out"; } \
+        && pass "…and a '$_un_v' written without its terminating newline is refused" \
+        || die "an unterminated '$_un_v' baseline was not refused (rc=$rc out='$out')"
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
+        && die "a verdict was announced against an unterminated baseline: $out" \
+        || pass "…with no verdict announced for it"
+done
+
 # AND A FILE THAT CANNOT BE READ IS state=error, NOT AN EMPTY BASELINE. Degrading to
 # empty would make a failed read say exactly what the case above says, and the watch
 # would then accept the previous terminal review as this round's — the whole failure

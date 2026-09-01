@@ -17,7 +17,16 @@
 
   **The fix is presence instead of absence.** `pr-watch.sh` refuses an empty file with
   `reason=empty_after_review_file`, and accepts `none` as the no-floor value. A token has to
-  be written on purpose; a truncation cannot fake it. All three writers emit it —
+  be written on purpose.
+
+  **And the write has to have finished, which is what the trailing newline says.** A token
+  is not enough on its own: every writer ends with `printf '%s\n'`, so a write that failed
+  part-way leaves the value without its newline — and a `none` whose newline never landed
+  reads as the deliberate no-floor value, because a command substitution discards trailing
+  newlines. An **id** has the same defect, and it is the worse one: `123` truncated from
+  `1234` is well-formed and no shape test can reject it. So the reader preserves that byte
+  and requires it, refusing an unterminated file with
+  `reason=unterminated_after_review_file`. All three writers emit it —
   `pr-request-review.sh` on both paths, `pr-close-round.sh post`, and
   `pr-copilot-phase.sh open`, where it is the ordinary case because Copilot has usually not
   reviewed the head when the phase opens.

@@ -310,10 +310,11 @@ Then:
    runs as the session's Monitor, so the verdict surfaces into the chat by
    itself. It is armed and re-armed as part of each round without asking you —
    see **Watching without prompts**. An unreadable state is a stop, never
-   "no findings" — and so is an unreadable baseline file, because an empty
-   baseline legitimately means "there is no earlier review to wait past", and a
-   failed read that quietly became one would let the watch report the review the
-   round just answered as the next one.
+   "no findings" — and so is an unreadable baseline file. "There is no earlier
+   review to wait past" is a real answer and is spelled `none`; an EMPTY file is a
+   refusal, because every writer truncates before it writes and so a failed write
+   produces one. A failed read that quietly became either would let the watch
+   report the review the round just answered as the next one.
 
    Every comment on the review counts as a finding, replies included. A reviewer
    sometimes delivers a clean verdict as a reply, and that is *not* exempted:
@@ -446,11 +447,13 @@ Then:
      this path. That fallback is real and is tested.
 
      **What the watch refuses is decided by shape, not by which stage wrote the
-     value**, and it refuses only a value that is *non-empty and not a review id*. An
-     empty file is accepted as "no baseline", and so is any id. So the sentinel stops it
-     *while it survives* — the captured id overwrites it once the capture succeeds — but
-     an empty file left by a readiness write that failed after truncating is accepted,
-     and so is a substituted value that happens to be digits. Every well-formed id is
+     value.** Since 2.0.99 it refuses an empty file, and one whose last byte is not the
+     newline every writer ends with; it accepts `none` as "no baseline", and any
+     complete id. So the sentinel stops it *while it survives* — the captured id
+     overwrites it once the capture succeeds — and so does an empty file left by a
+     readiness write that failed after truncating, which used to pass. What is still
+     accepted is a substituted value that happens to be a complete id. Every well-formed
+     id is
      accepted, including the *previous* round's after a bootstrap refusal and this
      round's after a failed request: if the current terminal review has a different id,
      the watch reports it as this round's answer. Where nothing was asked for, that

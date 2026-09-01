@@ -4,9 +4,11 @@
 #   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
 #   stdin   the account of what to look at; prose, one paragraph
-#   stdout  the review-id baseline, ALONE — empty on the automatic path, and
+#   stdout  the review-id baseline, ALONE — the `none` token where there is no prior
+#           review to wait past, which is always the case on the automatic path, and
 #           `comment:<id>` where the reviewer's newest verdict came through the
-#           comment channel rather than as a submitted review
+#           comment channel rather than as a submitted review. NEVER empty: the
+#           watch refuses an empty baseline, because a failed write produces one
 #   stderr  every reason
 #
 #   0  posted — the baseline is on stdout

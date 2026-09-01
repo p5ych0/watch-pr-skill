@@ -461,13 +461,23 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
     _bl_lim=10
     [ "$_bl_rem" -lt "$_bl_lim" ] && _bl_lim="$_bl_rem"
     [ "$_bl_lim" -lt 1 ] && _bl_lim=1
+    # THE TRAILING NEWLINE IS PRESERVED THROUGH THE READ, and it is the COMPLETION
+    # DELIMITER. Every writer ends with `printf '%s\n'`, so a write that failed part-way —
+    # a full filesystem, a quota reached mid-flush — leaves the value without it. Without
+    # that byte the reader cannot tell a finished write from a truncated one: a `none` whose
+    # newline never landed is the accepted no-floor token, and a `123` truncated from `1234`
+    # is a well-formed id. Both are fail-opens of exactly the kind this change is closing.
+    #
+    # A COMMAND SUBSTITUTION STRIPS TRAILING NEWLINES, so the child appends a sentinel the
+    # parent removes — the same shape `pr-origin.sh` uses to keep `git`'s own terminator.
     _bl_out="$(probe "$_bl_lim" /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9
           _s=$?
         } 9<"$1" || exit 4
         [ "$_s" -eq 0 ] && exit 5
-        printf %s "$_r"' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+        printf %s "$_r"; printf x' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+    [ "$_bl_rc" -eq 0 ] && _bl_out="${_bl_out%x}"
     case "$_bl_rc" in
         # AN EMPTY FILE IS A REFUSAL, AND "NO PRIOR REVIEW" IS SPELLED `none`. #264.
         #
@@ -489,6 +499,27 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
         0) case "$_bl_out" in
                "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
                    exit 2 ;;
+               # THE WRITE MUST HAVE FINISHED, which is what the terminator says. Checked
+               # BEFORE the value is looked at, so no shape test ever runs on a prefix.
+               #
+               # AT LEAST ONE, THEN ALL OF THEM STRIPPED. What the terminator proves is that
+               # the LAST byte written was the newline the writer ends with, which a
+               # truncated write cannot have; how many precede it is not part of the value,
+               # and a reader that took only one would refuse a file a writer never produces
+               # for a reason that has nothing to do with completion.
+               *"
+")  while :; do
+                       case "$_bl_out" in
+                           *"
+")  _bl_out="${_bl_out%
+}" ;;
+                           *) break ;;
+                       esac
+                   done ;;
+               *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=unterminated_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                  exit 2 ;;
+           esac
+           case "$_bl_out" in
                none) AFTER_REVIEW="" ;;
                *) AFTER_REVIEW="$_bl_out" ;;
            esac ;;
