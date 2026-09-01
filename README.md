@@ -441,9 +441,17 @@ Then:
      The driver aborts on a non-zero `open`, so it should never read the file then.
      The reason the sentinel matters anyway is that it can: a shell whose `exit`
      returns carries the refusal past the abort and into the wait step, which reads
-     this path. That fallback is real and is tested. It may read a stale value or the
-     sentinel, and what makes it safe is the **watch**, not the driver — so the
-     contents are authoritative only where `open` returned 0. The order is revoke → prove → baseline → request: the
+     this path. That fallback is real and is tested.
+
+     **Only the sentinel is guaranteed to be refused.** Where the readiness write
+     happened, the fallback reads the sentinel and `pr-watch.sh` stops. Where it did
+     not — a refusal from the bootstrap — the file still holds the *previous* round's
+     id, and that is a well-formed baseline: if the current terminal review has a
+     different id the watch accepts it and reports a verdict for a pass nobody
+     requested. A failed request can likewise leave this round's captured id. Those are
+     known residues of the fallback, not things the watch can catch, which is why the
+     rule is the one above: the contents are authoritative only where `open` returned
+     0, and the driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

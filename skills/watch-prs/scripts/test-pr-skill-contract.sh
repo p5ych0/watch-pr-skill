@@ -2418,11 +2418,14 @@ _w2_attack "…and a readonly WHO does too, before anything is posted" \
 
 # ── WHY `open` KEEPS A CLEARING AND `record` DOES NOT ─────────────────────
 #
-# #245 removed both of `record`'s clearings and, of `open`'s two, removed the one ABOVE the
-# bootstrap and kept the BOUNDED one below it. The difference is entirely about what the
-# DRIVER does after a refusal. Asserting it in the helper's own suite would prove the helper
-# does or does not empty a file; what has to be true is that whatever the file holds reaches
-# a reader, and only the document can show that.
+# WHAT THIS SECTION IS ABOUT IS THE READER, and not either clearing. #245 removed both of
+# `record`'s clearings and, of `open`'s two, the one ABOVE the bootstrap; the bounded write
+# below it stays as a readiness proof ahead of the revocation, which is a helper-side
+# ordering concern its own suite covers. NEITHER is what this fixture verifies.
+#
+# What it verifies is the premise every one of those arguments rests on and no helper suite
+# can reach: that after a refusal there IS a reader, so whatever the file holds is consumed.
+# Only the document can show that, because the reader is the driver.
 #
 # The fence and the wait step are lifted TOGETHER, with `exit` shadowed to return — which is
 # the state in which a refused `open` continues at all — and the watch replaced by a stub
