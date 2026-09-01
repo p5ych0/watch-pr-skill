@@ -314,8 +314,15 @@ fi
 # EMPTIED BY THE GATE, ALONGSIDE THE HEAD. A `post` that fails after a previous
 # round wrote a baseline would otherwise leave the OLD value readable, and the
 # driver's watch would take it — accepting a review that predates this round as the
-# answer to the request this round did not make. Empty is a legitimate baseline, so
-# an emptied file is not a refusal; it is the absence of a claim.
+# answer to the request this round did not make.
+#
+# AND SINCE #264 AN EMPTIED FILE IS A REFUSAL, WHICH IS STRONGER THAN WHAT THIS WAS FOR.
+# Empty used to be a legitimate baseline, so emptying here removed the stale claim and
+# left "no floor" in its place — better than the stale value and still a value the watch
+# accepts. The watch refuses an empty file now, so a `post` that fails after this gate
+# stops the round with `empty_after_review_file` instead of arming a watch against
+# nothing. Do not "fix" this by writing the `none` token here: the token means there was
+# no prior review, which this gate has not established and must not claim.
 if [ "$STAGE" = gate ]; then
     > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
     > "$PRIOR_FILE" || { echo "ABORT: could not empty the prior file '$PRIOR_FILE'."; exit 1; }

@@ -201,11 +201,17 @@ fi
 
 # THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN. `printf` can
 # FAIL — a full filesystem under the caller's transport file — and an `exit 0`
-# after it masks that, so the driver would read an empty or truncated value as
-# the baseline and `pr-watch.sh` would accept the PREVIOUS review as the answer
-# to a request just posted. Taking the status only works if there is something
-# left to refuse WITH: after the post there is not, because the request is
-# already in flight.
+# after it masks that. When this was written that meant the driver read an empty or
+# truncated value as the baseline and `pr-watch.sh` accepted the PREVIOUS review as
+# the answer to a request just posted.
+#
+# SINCE #264 THE WATCH REFUSES BOTH of those — an empty file, and one whose last byte is
+# not this `printf`'s newline — so the consequence has moved rather than gone. What taking
+# the status prevents now is posting a request whose baseline was never produced: the
+# request would be in flight, and the driver's watch would stop with
+# `empty_after_review_file` or `unterminated_after_review_file` on a round that cannot be
+# re-armed without re-requesting. Taking the status only works if there is something left
+# to refuse WITH, and after the post there is not.
 #
 # WRITING IT FIRST COSTS NOTHING, because the driver runs this as a condition and
 # only reads the file on success — a post that then fails takes the failure arm,
