@@ -1752,7 +1752,35 @@ rm -rf "$_pin_dir" "$_pin_bin"
 # handler would have been installed. The stub announces itself so the signal lands
 # inside that interval rather than at a guessed moment.
 _mkd_real=""
-_mkd_real="$(command -v mkdir 2>/dev/null)" || _mkd_real=""
+# THE DELEGATE LIVES BEHIND A SPACE, DELIBERATELY, WHICH IS #267's COVERAGE. The shim
+# below used to interpolate this path into its own text unquoted, so a `PATH` entry with a
+# space in it broke the delegated call and the case reported that the slow `mkdir` never
+# ran — a staging failure that reads as a broken test. Ordinary CI resolves its tools from
+# a space-free `PATH`, so the regression would not show there; routing the delegate through
+# a directory whose name contains a space is what makes this case exercise the fix on every
+# run, rather than only on an affected contributor's machine.
+# IT SETS A GLOBAL RATHER THAN PRINTING. Called in a command substitution it would run in
+# a SUBSHELL, and the wrapper's target has to reach the wrapper — written into a file
+# beside it here, so nothing depends on an export crossing back out.
+_sp_out=""
+_sp_real() {   # _sp_real <command> ; sets $_sp_out to a path containing a space, or empty
+    _sp_out=""
+    _sp_r="$(command -v "$1" 2>/dev/null)" || return 0
+    [ -n "$_sp_r" ] || return 0
+    _sp_d="$TMP/spaced bin"
+    mkdir -p "$_sp_d" || return 0
+    # THE TARGET IS READ FROM A FILE, NOT EMBEDDED. Interpolating it into the wrapper is
+    # the very defect this coverage exists for, and quoting it there would need `%q`, which
+    # `/bin/sh` has not got. The wrapper reads the path and execs it quoted.
+    printf '%s\n' "$_sp_r" > "$_sp_d/$1.target" || return 0
+    { printf '#!/bin/sh\n'
+      printf 'IFS= read -r _t < "$0.target" || exit 1\n'
+      printf 'exec "$_t" "$@"\n'; } > "$_sp_d/$1" || return 0
+    chmod +x "$_sp_d/$1" || return 0
+    _sp_out="$_sp_d/$1"
+    return 0
+}
+_sp_real mkdir; _mkd_real="$_sp_out"
 _mkd_bin="$TMP/mkdbin"; mkdir -p "$_mkd_bin"
 _mkd_mark="$TMP/mkd.created"
 rm -f "$_mkd_mark"
@@ -1819,7 +1847,8 @@ rm -rf "$_mkd_bin"; rm -f "$_mkd_mark"
 # cover — and the mac-shaped CI job cannot see that, because it runs on an Ubuntu
 # filesystem.
 _sig_real=""
-_sig_real="$(command -v rmdir 2>/dev/null)" || _sig_real=""
+# BEHIND A SPACE TOO, for the reason the `mkdir` case above gives. #267.
+_sp_real rmdir; _sig_real="$_sp_out"
 _sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
 # AND THE STUB ANNOUNCES ITSELF. The interval to aim at is the one where the
 # cleanup is inside `rmdir`, and a fixed sleep is a guess at when that starts: too
