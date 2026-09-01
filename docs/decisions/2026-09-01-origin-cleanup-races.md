@@ -1,4 +1,4 @@
-# Decision: a refusal leaves the reservation, and that litter is accepted
+# Decision: a refusal may leave the reservation, and that litter is accepted
 
 **Date:** 2026-09-01
 **Status:** accepted
@@ -20,7 +20,7 @@ pointed at when the accepted one is raised again.
 case on `pr-origin.sh`'s behalf. It was right to decline: measured, that case is worse than
 it looked, and it is not accepted here either.
 
-## Accepted — a refusal leaves the reservation behind
+## Accepted — a refusal leaves a reservation that is not empty
 
 The cleanup is `rmdir` alone, and `rmdir` necessarily fails on a directory that is not
 empty. So any refusal that fires while a same-UID process has put something in the
@@ -69,7 +69,7 @@ name again afterwards.
 
 It was not fixed in this change because it is a behaviour change to a helper, which this
 repository lands as its own pull request. **It is #266, and it is now fixed**: the leaf
-removal is gone and the cleanup is `rmdir` alone in every phase, which refuses a symlink
+removal is gone and the cleanup is `rmdir` alone throughout the run, which refuses a symlink
 outright. The residue that fix leaves is a post-write refusal keeping the directory and its
 leaf — the litter this record accepts, and of the same kind, nothing destroyed.
 
@@ -98,7 +98,7 @@ it shrank the interval to two adjacent operations.
 
 **Since #266 this table is history rather than a live comparison.** Every row naming a
 leaf-removing shape describes a removal that no longer exists: the cleanup is `rmdir` alone
-in every phase, and the phase flag went with the removal it selected — so there is no
+throughout the run, and the flag that selected the removing shape went with it — so there is no
 placement left to choose. It is kept because it records what was tried and why each
 placement failed, which a later change proposing to reintroduce a name-based removal has to
 answer.

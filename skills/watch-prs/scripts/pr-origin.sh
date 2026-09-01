@@ -74,17 +74,19 @@
 #      it named.
 #
 #      The reason is on STDERR, and on a refusal BEFORE the write this script
-#      creates no value file at all. The leaf is written by the single redirection
-#      that creates it, so nothing here leaves a HALF-WRITTEN one — but a write that
-#      opens and then fails leaves an empty leaf behind with the reservation, which
-#      is why a caller must branch on the status rather than on the file.
+#      creates no value file at all. A write that opens and then fails DOES leave a
+#      leaf, and it may be EMPTY or PARTIAL: the storage can take a prefix and then
+#      refuse — an origin longer than an `RLIMIT_FSIZE` allowance is the measurable
+#      case — and `printf` returns non-zero having written it. Since #266 nothing
+#      removes it. So a caller must branch on the STATUS and never on the file's
+#      presence or its contents.
 #
 #      THAT IS NOT THE SAME AS "THE LEAF IS ABSENT", and the difference is the
 #      pre-existing case: where `<dir>` was already there and already held an
 #      `origin` or a `pin`, the `mkdir` refuses before anything is written and that
 #      leaf — the caller's, or somebody else's — is still there afterwards. Absence
 #      is NOT guaranteed for a refusal after this script WROTE either, and since #266 that
-#      is the ordinary case: the cleanup is `rmdir` alone in every phase, so a refusal past
+#      is the ordinary case: the cleanup is `rmdir` alone throughout, so a refusal past
 #      the write leaves the directory AND the leaf, `rmdir` failing on a non-empty
 #      directory. It used to remove the leaf first, and that removal could reach a file
 #      outside this reservation entirely. What a refusal BEFORE the write leaves is nothing,
@@ -313,7 +315,9 @@ esac
 #
 # A REFUSAL PAST THE WRITE LEAVES BOTH, and that is #266's residue rather than an
 # oversight: the cleanup is `rmdir` alone, which fails on a directory holding the
-# leaf. The caller still sees a non-zero status and still must not read the file.
+# leaf. The leaf may hold NOTHING or a PREFIX of the value — the storage can accept
+# part of it and then refuse — so the caller sees a non-zero status and must not read
+# the file, whatever is in it.
 umask 077
 set -C
 # AND THE DIRECTORY IT SITS IN MUST BE ONE NOBODY ELSE CAN WRITE. Everything
@@ -460,7 +464,7 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # up on every path out" is the sentence that invites removing the direct signal
 # cleanup, or cleaning up a successful result.
 #
-# THERE IS ONE SHAPE AND IT IS `rmdir` ALONE, in every phase. There were two, chosen by
+# THERE IS ONE SHAPE AND IT IS `rmdir` ALONE, on every path out. There were two, chosen by
 # `RB_PHASE`: `rmdir` while no leaf could exist, and leaf-then-directory once a write had
 # happened, because `rmdir` necessarily fails on a directory holding its leaf. #266 removed
 # the second — the leaf removal resolved a NAME, and the `-d` and `-O` tests in front of it
@@ -474,8 +478,8 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # for another. A value nothing reads cannot have a wrong placement. What replaces the
 # guarantee it was carrying is the shape of the removal itself.
 #
-# THE COST IS LITTER, and it is the cost already accepted for the other phase: a refusal
-# after a write leaves the directory and its leaf, because `rmdir` fails on a non-empty
+# THE COST IS LITTER, and it is the cost already accepted for a refusal that finds the
+# reservation populated: a refusal after a write leaves the directory and its leaf, because `rmdir` fails on a non-empty
 # directory. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for
 # the pre-write case, and this is the same kind — nothing destroyed.
 # WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
@@ -512,7 +516,7 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 RB_OWNED=no
 RB_PREEXISTED=no
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
-rb_cleanup() {   # give back what this run created, for the phase it is in
+rb_cleanup() {   # give back what this run created, while it is still empty
     # THIS RUN'S, OR IT IS NOT OURS TO REMOVE. The traps are armed before the
     # `mkdir`, so this can run at a moment when the `mkdir` had already failed
     # because the name was taken. `-O` is kept as well as the two facts above: it

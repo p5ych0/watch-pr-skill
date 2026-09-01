@@ -2132,7 +2132,7 @@ rm -rf "$_rz"
 #
 # THE DIRECTORY MUST BE ONE THE HELPER CREATED, or the case is vacuous: `RB_PREEXISTED`
 # makes the cleanup decline a name that already stood, so a pre-made directory would
-# survive for a reason that has nothing to do with the phase. The racer is a `mkdir` on
+# survive for a reason that has nothing to do with the cleanup. The racer is a `mkdir` on
 # `PATH` — the same shape the reservation cases use — which creates the directory the
 # helper asked for and then populates it.
 _lit_bin="$TMP/litbin"; rm -rf "$_lit_bin"; mkdir -p "$_lit_bin"
@@ -2258,6 +2258,65 @@ else
         || die "the cleanup removed a file outside its own reservation; the leaf removal is back"
 fi
 rm -rf "$_esc_dir" "$_esc_dir.moved" "$_esc_tgt" "$_esc_bin"; rm -f "$_esc_mark"
+
+# ── A WRITE THAT TAKES A PREFIX AND THEN REFUSES — #266's residue, measured ─
+#
+# THE ZERO-BYTE CASE IS NOT THE ONLY ONE. The write-failure cases above use `ulimit -f 0`,
+# where the leaf is created and no byte reaches it, so they measure an EMPTY residue. A
+# non-zero limit is the other shape: the storage takes a PREFIX of the value and then
+# refuses, `printf` returns non-zero having written it, and since #266 nothing removes it.
+# The contract says a caller must branch on the STATUS and never on the file, and this is
+# the case that makes that instruction load-bearing rather than cautious — the leaf left
+# behind is a well-formed-looking prefix of a real origin.
+#
+# STAGED WITH A LONG ORIGIN AND A ONE-BLOCK LIMIT, in a throwaway checkout: `ulimit -f 1`
+# allows one block, and an origin longer than that cannot be written whole. The exact block
+# size is not assumed — the case asserts the leaf is non-empty AND shorter than the value,
+# which is what "a prefix" means on any allowance.
+if command -v git >/dev/null 2>&1; then
+    _pw_repo="$TMP/pw.$$"; rm -rf "$_pw_repo"; mkdir -p "$_pw_repo"
+    ( cd "$_pw_repo" && git init -q . ) >/dev/null 2>&1
+    # A LONG BUT ORDINARY-LOOKING ORIGIN. The padding is in the PATH, so the value still
+    # parses as a URL and reaches the write rather than being refused for its shape.
+    _pw_pad="$(awk 'BEGIN{s="";while(length(s)<3000)s=s "a";print s}')"
+    _pw_url="https://example.invalid/$_pw_pad/repo.git"
+    ( cd "$_pw_repo" && git remote add origin "$_pw_url" ) >/dev/null 2>&1
+    _pw_dir="$TMP/pwd.$$"; rm -rf "$_pw_dir"
+    _pw_rc=0
+    # NO WATCHDOG, for the reason the write-failure cases give: `run_limited` captures into
+    # regular files, which a file-size limit forbids.
+    _pw_out="$(cd "$_pw_repo" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 \
+        bash -c 'ulimit -f 1 2>/dev/null || exit 97
+                 trap "" XFSZ
+                 exec /usr/bin/env bash -p "$1" read "$2"' _ "$SCRIPT" "$_pw_dir" 2>&1)" || _pw_rc=$?
+    if [ "$_pw_rc" = 97 ]; then
+        echo "ok   - (this shell cannot set a one-block file-size limit; the partial-write case did not run)"
+    else
+        # THE WRITE WAS REACHED AND REFUSED. Status 2 is the storage refusing, which is the
+        # same distinction the zero-byte cases assert; without it a run refused earlier — for
+        # a shape the parser declined, say — would leave no leaf and pass the checks below by
+        # absence.
+        { [ "$_pw_rc" = 2 ] \
+          && case "$_pw_out" in *"exclusively and write"*) true ;; *) false ;; esac; } \
+            && pass "a write the storage takes only part of reports 2 and names storage" \
+            || die "the partial-write case did not reach the write (rc=$_pw_rc): '$_pw_out'"
+        _pw_have=0
+        [ -f "$_pw_dir/origin" ] && _pw_have="$(awk 'BEGIN{c=0} {c+=length($0)+1} END{print c+0}' "$_pw_dir/origin")"
+        # A PREFIX, WHICH IS NEITHER EMPTY NOR WHOLE. Asserting only "non-empty" would pass
+        # against a complete write, and only "shorter" would pass against the zero-byte case
+        # the other fixtures already cover — the residue this one is about is between them.
+        { [ "$_pw_have" -gt 0 ] && [ "$_pw_have" -lt "${#_pw_url}" ]; } \
+            && pass "…and leaves a PARTIAL leaf, so a caller must branch on the status and never the file" \
+            || die "the leaf is not a prefix: $_pw_have byte(s) against a ${#_pw_url}-byte origin"
+        [ -d "$_pw_dir" ] \
+            && pass "…with the reservation left behind, which is #266's accepted residue" \
+            || die "the reservation was removed although its leaf holds a partial value"
+    fi
+    rm -rf "$_pw_repo" "$_pw_dir"
+else
+    echo "ok   - (no git on this platform; the partial-write case did not run)"
+fi
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -592,7 +592,7 @@ a second — the leaf removal `rm -f "$OUT"`, where the `-d` and `-O` checks abo
 symlinks, so a same-UID process that replaces the reservation with a symlink to another
 directory has that directory's file removed. Measured during #265, that reaches OUTSIDE the
 reservation entirely, so it was filed as #266 rather than accepted. #266 removed it: the
-cleanup is `rmdir` alone in every phase, which refuses a symlink outright, and the phase
+cleanup is `rmdir` alone throughout the run, which refuses a symlink outright, and the phase
 flag that selected the removing shape went with it. Do not reintroduce a name-based removal
 here, and do not "fix" the leftover reservation by adding one — a `[[ -L ]]` in front of it
 is a check-then-use, which is the shape `2026-08-29-setup-leaf-cleanup.md` convicts.
