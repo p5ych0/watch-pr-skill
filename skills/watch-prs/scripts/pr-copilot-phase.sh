@@ -375,16 +375,28 @@ if [[ $STAGE = open ]]; then
     # comparison; `pr-watch.sh` rejects the identical path as `not_regular`, but only
     # once the phase is half open. The `-f` question is asked HERE, on the bound
     # descriptor rather than on the name, so it is the file that was read.
-    _rb_prior_back="$(run_limited 10 /usr/bin/env bash -p -c '
+    # AND THE COMPARISON HAPPENS IN THE CHILD, ON THE RAW BYTES. `read` reports ordinary
+    # EOF and a read that failed part-way with the SAME status — bash exposes no way to
+    # ask a descriptor whether it ended cleanly — so a child that hands its bytes back and
+    # leaves the comparison here cannot tell the two apart. That did not matter for a
+    # forty-character sha, which a truncated read can never equal, and it mattered exactly
+    # here: an EMPTY baseline is legitimate, so a read that failed at the first byte
+    # returned the empty string and compared equal to the empty value that was written.
+    #
+    # PASSING THE EXPECTED BYTES IN CLOSES IT WITHOUT ANSWERING THE QUESTION. The child
+    # compares what it read against what was written, INCLUDING the trailing newline and
+    # before any stripping — so a read that lost even one byte differs, whatever its
+    # status said. Nothing crosses back, which is also why there is no value here to
+    # compare a second time. #246.
+    run_limited 10 /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9
           _s=$?
         } 9<"$1" || exit 4
         [ "$_s" -eq 0 ] && exit 5
-        printf "%s" "$_r"' _ "$PRIOR_FILE")" \
-        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE' — it is unreadable, not a regular file, or holds a NUL byte; Copilot has NOT been requested."; exit 1; }
-    [[ $_rb_prior_back = "$PRIOR_REVIEW" ]] \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
+        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$PRIOR_REVIEW
+" \
+        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written; Copilot has NOT been requested."; exit 1; }
 
     # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
     # for, so entering the phase would poll for a review nobody asked for and then
@@ -834,10 +846,22 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # signoff is on the PR and this stage cannot be un-run.
 printf '%s\n' "$CODEX_SHA" > "$SHA_FILE" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
-_rb_sha_back="$(<"$SHA_FILE")" \
-    || { echo "ABORT: could not read back the signed-off sha from '$SHA_FILE'; nothing has been posted."; exit 1; }
-[[ $_rb_sha_back = "$CODEX_SHA" ]] \
-    || { echo "ABORT: the signed-off sha did not survive being written to '$SHA_FILE'; nothing has been posted."; exit 1; }
+# READ BACK THE SAME WAY `open` DOES, and for the reasons it states: bounded, because
+# opening a path can block; with its own status, because `$(<…)` reports the substitution's
+# and not the read's; and COMPARED IN THE CHILD on the raw bytes, because `read` cannot
+# tell ordinary EOF from a read that failed part-way. A truncated read can never equal a
+# forty-character sha, so this one was not exposed the way the baseline was — but two
+# read-backs proving the same kind of thing in two different shapes is how one of them
+# ends up weaker, which is what happened here. #246.
+run_limited 10 /usr/bin/env bash -p -c '
+    { [ -f /dev/fd/9 ] || exit 6
+      IFS= read -r -d "" _r <&9
+      _s=$?
+    } 9<"$1" || exit 4
+    [ "$_s" -eq 0 ] && exit 5
+    [ "$_r" = "$2" ] || exit 7' _ "$SHA_FILE" "$CODEX_SHA
+" \
+    || { echo "ABORT: the signed-off sha did not survive being written to '$SHA_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written; nothing has been posted."; exit 1; }
 
 gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
     || { echo "ABORT: could not post the phase summary — the signoff is not recorded; do not request Copilot."; exit 1; }
