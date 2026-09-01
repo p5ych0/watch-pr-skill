@@ -1080,25 +1080,53 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
     && pass "…and an empty baseline is written over a stale one, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
 
-# A REFUSAL LEAVES NO STALE BASELINE EITHER. The clearing happens at the top of the
-# file, before the bootstrap and before any argument is looked at, so an abort above
-# the write cannot leave the previous round's id for the caller to read as this
-# round's — which would arm the watch against a pass that already finished.
+# A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing
+# #245 did NOT remove. It is below the bootstrap, `run_limited` bounds it, and it is the
+# readiness proof for the exact operation the write performs — standing before
+# EITHER PR MUTATION — the revocation comment and the reviewer request — so a path that
+# CANNOT TAKE THAT WRITE is found before the signoff is revoked rather than after.
+# Not every unusable path: `/dev/null` and a write-only file accept it and are caught by the
+# read-back, which is after the revocation.
+#
+# AND IT LEAVES A SENTINEL, NOT AN EMPTY FILE, which is what makes this refusal fail
+# CLOSED. Emptying looked free because an empty baseline is LEGAL — it means "no prior
+# review to wait past" — so a refusal that emptied left a value the watch ACCEPTS, and with
+# the driver's `exit` returning the watch then announced `PR_REVIEW_READY` for a review no
+# request was made for. The sentinel is not a review id, so `pr-watch.sh` refuses it with
+# `reason=malformed_review_id` and the driver stops. `test-pr-watch.sh` holds that half.
 world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and a refusal before the write leaves no stale baseline" \
-    || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
+_rb_res="$(cat "$TMP/prior.txt" 2>/dev/null)"
+case "$_rb_res" in
+    refused-no-baseline) pass "…and a refusal after the readiness write leaves a sentinel the watch refuses" ;;
+    stale-from-a-previous-round) die "the readiness write did not happen before the refusal" ;;
+    "") die "a refused open left an EMPTY baseline, which the watch accepts as 'no floor'" ;;
+    *) die "a refused open left '$_rb_res' in the baseline file" ;;
+esac
+# AND IT REQUESTED NOTHING — at THIS refusal, which is a staged head-read failure and so is
+# before the request command runs. Not "every refusal": `gh pr edit --add-reviewer` failing is
+# itself a refusal, with the request already invoked and possibly accepted by the remote before
+# the client reported the error, and the case further down stages exactly that.
+#
+# NOT "no watch is armed" either: the driver reaches the wait step after a refusal whenever
+# `exit` returns, which the open-window case in `test-pr-skill-contract.sh` proves. What is
+# true here is that Copilot was not asked, so nothing new is coming for that watch to find.
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested by a refused open" \
+    || pass "…with Copilot not requested, so nothing new is coming for the watch to find"
 
-# A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks
-# waiting for a reader, and the top-of-file clearing skips a FIFO because it tests
-# `-f` — so the unconditional open below it was the one that waited, and the second
-# write is after the revocation has been posted, which is a hang with the phase half
-# advanced. A type check before the open is not the answer either: the open is what
-# blocks, and a check it precedes can be raced by whoever put the FIFO there. Both
-# writes run under the runtime watchdog now. Bounded by the harness as well, so a
-# regression hangs the case rather than the suite.
+# A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks waiting
+# for a reader, and what meets this FIFO is the BOUNDED CLEARING, before the revocation —
+# the top-of-file arm that used to run first is gone, and it would have skipped a FIFO
+# anyway, testing `-f`. So this case exercises the clearing and the refusal it produces,
+# which is why it can assert that nothing was posted.
+#
+# REACHING THE WRITE WITH A FIFO NEEDS A REPLACEMENT RACE, not a FIFO standing at the path,
+# and that is the separate case below. A type check before an open is not the answer to
+# either: the open is what blocks, and a check it precedes can be raced by whoever put the
+# FIFO there. Every open here runs under the runtime watchdog. Bounded by the harness as
+# well, so a regression hangs the case rather than the suite.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/fifo.txt"
     mkfifo "$TMP/fifo.txt" 2>/dev/null && {
@@ -1109,6 +1137,17 @@ if command -v mkfifo >/dev/null 2>&1; then
         grep -q -- '--add-reviewer' "$TMP/calls" \
             && die "Copilot was requested despite the blocked baseline write" \
             || pass "…with Copilot not requested"
+        # AND THE SIGNOFF WAS NOT REVOKED, which is the half that made removing the
+        # bounded clearing a regression rather than a subtraction. That clearing is
+        # also the READINESS proof on this path, and it stands BEFORE the revocation:
+        # without one, a FIFO here is not discovered until the write far below, by
+        # which time `gh pr comment` has already revoked the previous Copilot signoff
+        # — so the stage reports that the phase did not open while having mutated the
+        # PR. Asserting only `--add-reviewer` could not see that: the request comes
+        # after the write either way.
+        grep -q 'gh pr comment' "$TMP/calls" \
+            && die "the previous Copilot signoff was revoked before the unusable baseline path was found" \
+            || pass "…and with the previous signoff not revoked, so the PR is untouched"
     }
     rm -f "$TMP/fifo.txt"
 else
@@ -1230,16 +1269,19 @@ else
     pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
 fi
 
-# AND AN `open` THAT CANNOT BOOTSTRAP LEAVES NO STALE BASELINE. This is the case #245's
-# review found missing, and it is the one that decides whether `open`'s pre-bootstrap
-# clearing may move the way `record`'s did. It may not: unlike `record`, a refused `open`
-# IS followed by a reader — with the driver's `exit` shadowed to return, execution falls
-# past the fence into the wait step, which hands `$PRIOR_FILE` to
-# `pr-watch.sh --after-review-file`, and a stale well-formed review id is accepted there.
+# AND AN `open` THAT CANNOT BOOTSTRAP LEAVES THE FILE ALONE TOO. This is the refusal only
+# the pre-bootstrap clearing could ever have covered — a library emptied in a copy of the
+# tree, which `rb_load` refuses before any argument is looked at — so it is the case that
+# would go red if the clearing came back.
 #
-# So this asserts the clearing that is still above the bootstrap, on the refusal only it
-# can cover: a library emptied in a copy of the tree, which `rb_load` refuses before any
-# argument is looked at.
+# The reader after this refusal IS real, unlike `record`'s: with the driver's `exit` shadowed
+# to return, execution falls past the fence into the wait step. What that reader gets is the
+# previous round's id, and that is a FAIL-OPEN RESIDUE rather than protection — it is a
+# well-formed baseline, so where the current terminal review has a different id the watch
+# accepts it and reports a verdict for a pass nobody requested. It suppresses only the one
+# review it names, which is not the case that matters. `SKILL.md` and `README.md` state the
+# boundary; #264 carries the fix. What this case proves is narrower and is all it claims:
+# a bootstrap refusal leaves the file untouched.
 world; printf '%s\n' '99' > "$TMP/prior.txt"
 rm -rf "$TMP/brokeno"; cp -R "$DIR" "$TMP/brokeno" || die "could not copy the scripts for the open bootstrap case"
 : > "$TMP/brokeno/recordlib.sh"
@@ -1247,9 +1289,9 @@ _bo_rc=0
 _bo_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     "$TMP/brokeno/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" 2>&1)" || _bo_rc=$?
-{ [ "$_bo_rc" != 0 ] && [ ! -s "$TMP/prior.txt" ]; } \
-    && pass "an open that cannot bootstrap leaves no stale baseline for the watch to read" \
-    || die "an open bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the baseline file (rc=$_bo_rc out='$_bo_out')"
+{ [ "$_bo_rc" != 0 ] && [ "$(cat "$TMP/prior.txt" 2>/dev/null)" = 99 ]; } \
+    && pass "an open that cannot bootstrap leaves the caller's baseline file untouched" \
+    || die "an open bootstrap refusal altered the baseline file to '$(cat "$TMP/prior.txt" 2>/dev/null)' (rc=$_bo_rc out='$_bo_out')"
 rm -rf "$TMP/brokeno"
 
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —
@@ -1346,10 +1388,25 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested while a stale signoff still described the head" \
     || pass "…with Copilot not requested"
 
-world; printf '1\n' > "$W/edit.rc"; got="$(run open 7 "$HEAD40")"
+world; printf '1\n' > "$W/edit.rc"
+printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
+got="$(run open 7 "$HEAD40" "$TMP/prior.txt")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'not permission to skip the pass' <<<"${got#*|}"; } \
     && pass "a failed request stops, and says so rather than reading as a slow reviewer" \
     || die "a failed --add-reviewer gave '${got}'"
+# AND THE FILE HOLDS THE CAPTURED ID — the residue of a refusal PAST the write, because the
+# write has already replaced the file. It is compared against `42`, the id the stub captured,
+# and not merely tested for being numeric: a regression writing some OTHER number in the
+# failure arm passes a shape test, and the driver would then reach the watch with a baseline
+# naming a review nobody captured — accepting an old verdict or waiting past the wrong one,
+# while this case reported the outcome asserted.
+_ar="$(cat "$TMP/prior.txt" 2>/dev/null)"
+case "$_ar" in
+    42) pass "…and a refusal past the write leaves the captured id, not an empty file" ;;
+    stale-from-a-previous-round) die "the baseline write did not happen before the failed request" ;;
+    "") die "a refusal past the write left the baseline empty, not the captured id" ;;
+    *) die "the baseline file holds '$_ar', which is not the captured id 42" ;;
+esac
 
 world; got="$(run open 7)"
 { [ "${got%%|*}" = 1 ] && grep -qF "'open' needs the head" <<<"${got#*|}"; } \

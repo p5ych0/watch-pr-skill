@@ -1468,9 +1468,79 @@ It writes `$PRIOR_FILE` before the request, with the write's status taken and th
 read back — the arrangement `gate` uses for the head and `record` for the signed-off
 sha. After `--add-reviewer` there is nothing left to refuse with: the pass is in
 flight, and a caller reading a truncated id would arm the watch against the wrong
-review. The file is emptied at the top of the script, before the bootstrap, so a
-refusal above the write cannot leave the previous round's id to be read as this
-round's. #243.
+review. #243.
+
+THE FILE WAS EMPTIED TWICE AND IS NOW WRITTEN ONCE BEFORE THE CAPTURE. What survives is a
+bounded READINESS WRITE that leaves `refused-no-baseline`, not an emptying; the argument
+below is why it exists and the sentinel section after it is why it is not a truncation to
+nothing. The clearing ABOVE the bootstrap is
+gone, and that is #245: an unbounded truncating open on a path the caller named, where
+`run_limited` does not exist yet.
+
+Its `[[ -f ]]` guard is what made it a CHECK-TO-OPEN RACE. A FIFO already at that path was
+refused by the guard and never opened; what could block was a same-UID process replacing
+the path between the test and the open, with nothing loaded yet to bound the wait. The
+symlink half needed no race at all — `[[ -f ]]` follows one, so a symlink to a regular file
+passed the guard and the open truncated its target. Do not restore it.
+
+The reason it survived `record`'s removal by a release is that its reader is real: with
+the driver's `exit` shadowed to return, a refused `open` falls past its fence into the
+wait step, which hands this file to `pr-watch.sh --after-review-file`. What made it
+removable anyway is that emptying does not protect that reader. The watch holds a
+terminal verdict back on ONE condition — the id it reads equals the baseline — and skips
+the comparison entirely when the baseline is empty, so an empty baseline holds nothing
+back. Where a stale id would have matched the current review, emptying is the WORSE of
+the two, turning a correct `awaiting_new_review` into a `PR_REVIEW_READY` for the very
+review it meant to hold back. `test-pr-watch.sh` stages that pair.
+
+THE CLEARING BELOW THE BOOTSTRAP STAYS, and removing it was a regression found in two
+consecutive rounds. It is bounded, so it was never #245's defect — and it is also the
+READINESS PROOF for the exact operation the write performs, standing before ANY mutation
+this stage makes — it has two, the revocation comment and the reviewer request. Without it
+a baseline path that cannot take that write is not found until the write itself, which is
+AFTER the previous Copilot signoff has been revoked: the stage then reports that the phase
+did not open while having mutated the PR.
+
+Nothing weaker proves it, and that was measured rather than assumed. `>>` opens for
+append, so an append-only file passes and the write fails; `<>` opens read-write, which
+rejects a write-only file the real write handles, and its only gain needs root to stage.
+No shell redirection expresses the write's own mode, so the operation that proves it is
+the truncation.
+
+IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is not a detail. Emptying looked free
+because an empty baseline is LEGAL — it means "no prior review to wait past", which this
+stage can legitimately produce when Copilot has never reviewed. Which is exactly why it
+was dangerous: a refusal between that write and the real one left a value the watch
+ACCEPTS, and with the driver's `exit` shadowed to return, the watch skipped its equality
+check and announced `PR_REVIEW_READY` for a review no request was made for. The readiness
+proof was buying its ordering guarantee with a fail-OPEN.
+
+The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
+status 2, at the call and before any network read — and the driver stops rather than
+accepting a pass that never happened. The proof is unchanged: still a truncating open on
+the path, still bounded, still ahead of the revocation, so an unusable baseline is found
+before anything is posted — meaning a path that CANNOT TAKE THAT WRITE. `/dev/null` and a
+write-only file accept it and are caught by the read-back instead, which is after the
+revocation, so they are outside what this ordering buys. The refusal that used to fail open
+now fails closed, and there is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
+the phase fixture asserts the exact string left behind, so the two halves cannot drift.
+
+THE HELPER MAKES NO PROMISE ABOUT THIS FILE'S CONTENTS AFTER A REFUSAL, and that
+replaces the list of residues this document carried for three rounds. Enumerating them
+kept producing a list that was wrong by one — a refusal past the write leaves the captured
+id, a CONTENT mismatch leaves what another process substituted, an unreadable-but-written
+file leaves the captured id again — and each correction invited the next. The invariant is
+the same in every case and does not have to be enumerated: after a refusal the file holds
+whatever the last successful operation left there, which may be the previous round's value,
+nothing, this round's captured id, or another process's bytes. NONE of it is this round's
+baseline, and the only thing that makes a value one is `open` returning 0.
+
+THE SYMLINK IS NOT CLOSED BY #245 AND WAS NEVER GOING TO BE. The surviving clearing opens
+`$PRIOR_FILE` with `>`, so a symlink a same-UID process leaves at that name has its target
+truncated — and removing the clearing would not change that, because the WRITE beside it is
+`printf … > "$1"` on the same name. Truncating through a caller-named path is what this
+handoff IS, here and in `gate`'s head file and `record`'s sha file. What #245 removed is
+narrower and real: an open that was UNBOUNDED and stood where nothing could bound it. #245.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 

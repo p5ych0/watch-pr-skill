@@ -2418,10 +2418,14 @@ _w2_attack "…and a readonly WHO does too, before anything is posted" \
 
 # ── WHY `open` KEEPS A CLEARING AND `record` DOES NOT ─────────────────────
 #
-# #245 removed both of `record`'s clearings and kept both of `open`'s, and the difference is
-# entirely about what the DRIVER does after a refusal. Asserting it in the helper's own
-# suite would prove the helper empties a file; what has to be true is that a stale value
-# reaches a reader, and only the document can show that.
+# WHAT THIS SECTION IS ABOUT IS THE READER, and not either clearing. #245 removed both of
+# `record`'s clearings and, of `open`'s two, the one ABOVE the bootstrap; the bounded write
+# below it stays as a readiness proof ahead of the revocation, which is a helper-side
+# ordering concern its own suite covers. NEITHER is what this fixture verifies.
+#
+# What it verifies is the premise every one of those arguments rests on and no helper suite
+# can reach: that after a refusal there IS a reader, so whatever the file holds is consumed.
+# Only the document can show that, because the reader is the driver.
 #
 # The fence and the wait step are lifted TOGETHER, with `exit` shadowed to return — which is
 # the state in which a refused `open` continues at all — and the watch replaced by a stub
@@ -2448,15 +2452,26 @@ WHO="chatgpt-codex-connector[bot]" bash -c '
     . "$1" 2>/dev/null' _ "$_ow_dir/ow.sh" >/dev/null 2>&1 || true
 # THE CONSEQUENCE, NOT THE MECHANISM. A refused `open` with `exit` returning reaches the
 # wait step, and whatever `$PRIOR_FILE` holds at that moment is what the watch is armed
-# with. The helper's clearing is what makes that value empty rather than a previous round's
-# review id — which the watch accepts, and then waits past a review already given. That is
-# the whole reason `open` keeps a clearing that `record` does not.
+# with. THAT is what this case proves, and it is why `open` is not `record`: the driver has
+# a reader after the refusal, so what the file holds is observable.
+#
+# THE STUB REFUSES WITHOUT RUNNING THE HELPER AT ALL, and that bounds what this case can
+# say. Deleting the retained bounded clearing would not change it by one byte, so it proves
+# NOTHING about either clearing. What it proves is the premise both arguments rest on and
+# neither helper suite can reach: after a refusal, with `exit` returning, the driver still
+# arrives at the wait step and hands it whatever `$PRIOR_FILE` holds — here `99`, the value
+# the caller left, because no helper ran to change it.
+#
+# WHAT THE FILE HOLDS IN A REAL RUN IS THE HELPER'S QUESTION and none of it is asserted
+# here. `test-pr-copilot-phase.sh` stages the individual states; the rule they all obey is
+# that after a refusal the file holds whatever the last successful operation left, which is
+# never this round's baseline — only `open` returning 0 makes a value that.
 if grep -q 'WATCHED:' "$_ow_dir/seen" 2>/dev/null; then
     grep -qF 'WATCHED:[99]' "$_ow_dir/seen" \
-        && pass "a refused open DOES reach the wait step, which is why its clearing is load-bearing" \
+        && pass "a refused open DOES reach the wait step, and arms it with whatever the file holds" \
         || die "the wait step was reached with something other than the staged baseline: $(cat "$_ow_dir/seen")"
 else
-    die "the lifted open fence did not reach the wait step; the reason for keeping its clearing is unproven"
+    die "the lifted open fence did not reach the wait step; the premise both clearing arguments rest on is unproven"
 fi
 
 # ── THE PHASE-OPEN FENCE, AND ITS REVIEWER SWITCH UNDER A RETURNING `exit` ─

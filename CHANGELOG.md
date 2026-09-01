@@ -1,5 +1,114 @@
 # Changelog
 
+## [2.0.97] — 2026-09-01
+
+- **`open`'s UNBOUNDED baseline clearing is removed; the bounded one stays.**
+  `pr-copilot-phase.sh open` cleared its caller-named baseline twice — once above the
+  bootstrap, once after — and only the first is gone. It was the same **unbounded truncating
+  open on a caller-named path** that came out of `record` in 2.0.96: `>` follows a symlink
+  and truncates its target, with no `run_limited` yet loaded to bound it.
+
+  Its `[[ -f ]]` guard makes that a **check-to-open race** rather than a plain bad input. A
+  FIFO already at the path is refused by the guard and never opened; what blocks is a
+  same-UID process replacing the path between the test and the open, which is the shape #245
+  filed. The symlink half needs no race — `[[ -f ]]` follows one, so a symlink to a regular
+  file passes the guard and the open truncates its target.
+
+  **After a refusal the helper promises nothing about that file's contents.** Where a run
+  stops decides what is left — the previous round's value, a refusal sentinel, this round's
+  captured id, or another process's bytes — and none of it is this round's baseline. The
+  only thing that makes a value one is `open` returning 0. Three review rounds went into
+  enumerating those states and the list was wrong by one each time, so the invariant is
+  stated instead.
+
+  **The readiness write leaves a sentinel rather than an empty file**, and that closes a
+  fail-open the earlier emptying had. An empty baseline is *legal* — it means "no prior
+  review to wait past" — so a refusal that emptied left a value `pr-watch.sh` accepts, and
+  with the driver's `exit` shadowed to return the watch announced `PR_REVIEW_READY` for a
+  review no request was made for. The sentinel is not a review id, so the watch refuses it
+  with `reason=malformed_review_id` before any network read and the driver stops. The
+  ordering guarantee is unchanged — still a truncating open, still bounded, still ahead of
+  the revocation.
+
+  **This narrows the fail-open; it does not eliminate it.** The watch refuses only a value
+  that is non-empty and not a review id, so what it stops is the sentinel *while it
+  survives* — the capture overwrites it — and a substituted value that is not id-shaped.
+  Everything else it accepts, and that is where the remaining fail-open lives: an empty file,
+  from a readiness write that failed after truncating; the previous round's id after a
+  bootstrap refusal; this round's after a failed request; and **a substituted value that
+  happens to be digits**, which a read-back mismatch leaves in place and which is as
+  well-formed as any real baseline. In each case a terminal review with a different id is
+  announced as this round's answer.
+
+  For every one of those except the failed request, nothing was asked for and the verdict
+  is simply not this round's. The failed request is different and is the one not to
+  generalise over: `gh pr edit --add-reviewer` has already run, and the remote may have
+  accepted it before the client reported the error — so a pass may genuinely be pending,
+  and the announced verdict is a *stale* one rather than an imaginary one. An operator
+  reading "nothing was requested" there would assume no Copilot pass is coming.
+
+  What changed is narrower than "the fail-open is closed": the span between the readiness
+  write and the capture no longer fails open on *every* refusal, only where the write itself
+  fails after truncating or a substituted id survives the mismatch. Closing the rest needs
+  the file to say which run wrote it, which is #264; `README.md` and `SKILL.md` state the
+  boundary for anyone relying on it.
+
+  **Truncation through a caller-named path is not what changed, and is not removable here.**
+  The surviving clearing opens the baseline with `>`, so a symlink a same-UID process leaves
+  at that name has its target truncated — and removing the clearing would not change that,
+  because the write beside it opens the same name the same way. That is what this handoff is,
+  here and in `gate`'s head file and `record`'s sha file. What is removed is narrower: an
+  open that was **unbounded** and stood where nothing could bound it. The reason the
+  surviving clearing is kept is below.
+
+  It survived that release because the reader it was written for is real, and still is:
+  with the driver's `exit` shadowed to return, a refused `open` falls past its fence into
+  the wait step, which hands the file to `pr-watch.sh --after-review-file`. `record` has no
+  such reader, so its clearings went first.
+
+  What was wrong is the assumption that emptying the file protects that reader. It does
+  not. The watch suppresses a terminal verdict on one condition — the id it reads equals the
+  baseline — and skips the comparison entirely when the baseline is empty. So an empty
+  baseline suppresses **nothing**. Against a stale id the two behave identically wherever
+  the stale id differs from the current review, and where it does not, emptying is the worse
+  of the two: `test-pr-watch.sh` stages the pair, and baseline `99` against current id `99`
+  reports `awaiting_new_review` while an *empty* baseline against that same id reports
+  `PR_REVIEW_READY` — an announcement of the very review the clearing existed to hold back.
+
+  The failure this prevents is therefore not a stale baseline; it is the destruction a
+  caller never asked for. A `>` on a path the operator named could truncate whatever a
+  symlink pointed at, or hang on a FIFO planted there — above the bootstrap, where nothing
+  could bound either — in order to produce a value weaker than the one it overwrote. A
+  refusal from the bootstrap itself now leaves that file exactly as it found it, and **no
+  review request is left waiting for a baseline to bound it**.
+
+  Not "posts nothing", which would be false: `open` revokes any earlier Copilot signoff
+  before it captures the baseline, so a refusal after that point has already written one
+  comment to the PR. Nor "Copilot was never requested", which is false at the last refusal
+  of all — `gh pr edit --add-reviewer` failing is itself a refusal, and the remote may have
+  accepted the mutation before the client reported the error. What holds is scoped to where
+  the run stopped: a refusal **before the request command runs** leaves Copilot un-asked, and
+  that covers every refusal this change is about.
+
+  **The clearing BELOW the bootstrap is kept**, and only the unbounded one is removed. It
+  was tried both ways in review, and removing it is a regression: bounded by `run_limited`,
+  it is also the readiness proof for the exact operation the write performs, and it stands
+  before any mutation the stage makes — it has two, the revocation comment and the reviewer
+  request — and it catches the paths that cannot take that write. `/dev/null` and a
+  write-only file accept it and are caught later by the read-back, which is after the
+  revocation. Without it a baseline that cannot take the write — a directory,
+  a FIFO, an unwritable or append-only file — is not found until the write, by which time
+  the signoff has been revoked, and the stage reports that the phase did not open while
+  having mutated the PR. Nothing weaker proves it: `>>` lets an append-only file through to
+  fail at the write, and `<>` rejects a write-only file the write handles. No shell
+  redirection expresses the write's own mode, so the operation that proves it is the
+  truncation.
+
+  `skills/watch-prs/SKILL-RATIONALE.md` is updated with it. It carried the old argument —
+  that the file is emptied above the bootstrap so a refusal cannot leave the previous
+  round's id — and `SKILL.md` sends a reader there, so leaving it would have handed the
+  superseded safety case to whoever went looking for the reasoning.
+
 ## [2.0.96] — 2026-09-01
 
 - **`record`'s pre-bootstrap clearing is removed, and the one that matters is bounded.**

@@ -425,7 +425,43 @@ Then:
      current Copilot review id into, before requesting the pass; hand that same path
      to `pr-watch.sh --after-review-file` for the rounds that follow, or the first
      poll accepts a review made before the request. The loop uses one of the working
-     files set up at the start. The order is revoke → prove → baseline → request: the
+     files set up at the start. **A value in that file is this round's baseline only
+     when `open` returns 0.** After a refusal the stage promises nothing about the
+     file's contents: depending on where the run stopped it may hold the previous
+     round's value, a refusal sentinel, or the id this run captured. Once past the
+     bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
+     whatever is there — that write is also how it checks the path, so a path that
+     **cannot take that write** (a directory, a FIFO, an unwritable or append-only
+     file) stops the stage before the PR is touched. That is the only guarantee it
+     gives: it proves that write at that moment and not the whole handoff, so
+     `/dev/null` and a write-only file accept it, pass the revocation, and are refused
+     only by the later regular-file and read-back checks. Do not read a path-related
+     refusal as meaning the PR was left unmodified. Where the sentinel survives, a refusal cannot hand the watch a
+     value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
+     and stops.
+
+     The driver aborts on a non-zero `open`, so it should never read the file then.
+     The reason the sentinel matters anyway is that it can: a shell whose `exit`
+     returns carries the refusal past the abort and into the wait step, which reads
+     this path. That fallback is real and is tested.
+
+     **What the watch refuses is decided by shape, not by which stage wrote the
+     value**, and it refuses only a value that is *non-empty and not a review id*. An
+     empty file is accepted as "no baseline", and so is any id. So the sentinel stops it
+     *while it survives* — the captured id overwrites it once the capture succeeds — but
+     an empty file left by a readiness write that failed after truncating is accepted,
+     and so is a substituted value that happens to be digits. Every well-formed id is
+     accepted, including the *previous* round's after a bootstrap refusal and this
+     round's after a failed request: if the current terminal review has a different id,
+     the watch reports it as this round's answer. Where nothing was asked for, that
+     verdict is simply not this round's. **The failed request is the exception**, and the
+     one not to lump in with the rest: `--add-reviewer` has already run and the remote may
+     have accepted it before the client reported the error, so a pass may genuinely be
+     pending and what the watch reports is a *stale* verdict rather than an imaginary one
+     — do not read a refusal there as "no Copilot pass is coming". All of these are known
+     residues of the fallback rather than things the watch can catch, which is why the rule
+     is the one above: the contents are authoritative only where `open` returned 0, and the
+     driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

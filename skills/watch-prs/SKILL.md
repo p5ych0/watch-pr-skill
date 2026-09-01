@@ -448,8 +448,24 @@ something to act on and prints one line when the state changes:
 # switched, proven again, in step 7 — so it is not re-assigned here: an assignment is
 # where a nameref does its damage, and one that only restates a value already set would
 # be a third site to guard for nothing. Codex in the Codex phase, Copilot after step 7.
-# $PRIOR_FILE holds the authoritative review id captured BEFORE the request that
-# this watch is waiting on — written by step 2, step 5 and step 7. A re-request on
+# $PRIOR_FILE holds the review id captured BEFORE the request that this watch is
+# waiting on — written by step 2, step 5 and step 7 — and it is authoritative only
+# where the stage that wrote it returned 0. Those steps abort on anything else, but
+# an `exit` that returns carries a refusal into this line, and the file then holds
+# the previous round's id, this round's captured id, a refusal sentinel, or nothing.
+# The watch decides on SHAPE, not on who wrote it, and it refuses ONLY a value that is
+# non-empty and not a review id. An EMPTY file is accepted as "no baseline", and any id
+# is accepted. So the sentinel is refused while it survives — the capture overwrites it
+# — but a readiness write that failed after truncating leaves an empty file that is
+# accepted, and a substituted value that happens to be digits is accepted too. Both
+# ids are, so a terminal review with a different id is reported as this round's
+# answer. Where the refusal came before the request, nothing was asked for and that
+# verdict is not this round's; where `--add-reviewer` itself failed, the request has
+# run and the remote may have taken it, so a pass may be pending and the verdict is a
+# STALE one rather than an imaginary one — do not read that refusal as "no pass is
+# coming". The watch cannot tell a stale id from a fresh one either way, which is why
+# the success rule above is the one to rely on and why the value is not re-derived or
+# defaulted here. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives

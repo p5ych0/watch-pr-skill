@@ -84,14 +84,36 @@ fi
 
 set -uo pipefail
 
-# ── `open`'S BASELINE FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE ───────────
-# A refusal above the clearing further down — an unreadable library, a PR number that is
-# not a number — leaves the PREVIOUS run's review id in the file, and something reads it as
-# this one's. For `open` that reader is real: with the driver's `exit` shadowed to return, a
-# refusal falls past its fence into the wait step, which hands `$PRIOR_FILE` to
-# `pr-watch.sh --after-review-file`, and a stale well-formed id is accepted there — so the
-# watch waits past a review that has already happened. That is why this clearing is here,
-# before the bootstrap and before any argument is looked at.
+# ── `record` CLEARS NOTHING; `open` KEEPS THE BOUNDED CLEARING AND NOT THIS ONE ─
+# `open` had two clearings, and the reader they were written for IS real: with the driver's
+# `exit` shadowed to return, a refusal falls past its fence into the wait step, which hands
+# `$PRIOR_FILE` to `pr-watch.sh --after-review-file`. That is what makes `open` different
+# from `record`, and it is why its clearings outlived `record`'s by one change.
+#
+# ONLY THE ONE ABOVE THE BOOTSTRAP IS GONE — the arm this comment used to introduce. The
+# bounded one below survives, and its argument is beside it rather than here: five review
+# rounds went into restating this in four files, and every round one of the copies had
+# drifted. `skills/watch-prs/SKILL-RATIONALE.md` carries the whole account under
+# **THE FILE WAS EMPTIED TWICE AND IS NOW WRITTEN ONCE BEFORE THE CAPTURE**; what is here is
+# THIS arm did.
+#
+# AND NOT THE SYMLINK. The surviving clearing opens this path with `>`, so a symlink a
+# same-UID process leaves at that name still has its target truncated — removing the
+# clearing would not change that, since the WRITE beside it opens the same name the same
+# way. Truncating through a path the caller named is what this handoff IS. What comes out
+# here is narrower: an open that was UNBOUNDED and stood where nothing could bound it.
+#
+# EMPTYING WAS NEVER THE PROTECTION. `pr-watch.sh` holds a terminal verdict back on ONE
+# condition — the id it finds equals the baseline — and the whole comparison is guarded by
+# `[ -n "$AFTER_REVIEW" ]`, so an EMPTY baseline holds nothing back. This arm therefore did
+# not prevent the harm its own comment named.
+#
+# WHAT IT DID COST is a `>` on a caller-named path before the bootstrap, where `run_limited`
+# does not exist yet. Its `[[ -f ]]` guard makes the blocking case a CHECK-TO-OPEN RACE: a
+# FIFO already at the path was refused by the guard and never opened, and what could block
+# is a same-UID process replacing the path between the test and the open. The symlink case
+# needs no race, `[[ -f ]]` following one to a regular file the open then truncated. That is
+# the whole of #245, and removing the arm removes it.
 #
 # `record` HAS NO CLEARING, HERE OR ANYWHERE, and #245 is why: it had two and neither
 # protected a read that can happen. Its file is read only in the driver's success arm and
@@ -127,13 +149,6 @@ set -uo pipefail
 # clearing now, here or after the bootstrap — the second one protected nothing either, for
 # the same reason — and what makes a stale value impossible is the WRITE: bounded, its
 # status taken, and compared in the child. #245.
-if [[ ${1:-} = open ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]]; then
-    > "${4}" || {
-        echo "ABORT: the baseline file '${4}' exists and cannot be emptied; a stale review id would be left for the caller to read, and the watch would take a pass made before this request as the answer to it."
-        exit 1
-    }
-fi
-
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
@@ -244,18 +259,62 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # EMPTIED AGAIN HERE, and both clearings are load-bearing for THIS stage — unlike
-    # `record`, whose two were removed in #245 because nothing reads its file after a
-    # refusal. The one above the bootstrap covers a refusal from the bootstrap itself and
-    # declines a path that does not exist yet; this one covers every refusal after it, and
-    # takes the path the other declines. Empty is a LEGAL baseline, meaning no prior review,
-    # which is why the write below is status-checked rather than left to the reader.
-    # BOUNDED, because the open can block rather than fail. `run_limited` returns 124
-    # when it does, which is a refusal like any other here — the phase has not
-    # advanced and nothing has been posted.
-    run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$PRIOR_FILE" \
-        || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'; it is unwritable, or opening it blocked."; exit 1; }
-
+    # THIS CLEARING STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
+    # truncating open above the bootstrap, where `run_limited` does not exist yet: its
+    # `[[ -f ]]` guard refused a FIFO already at the path, so what could block it was a
+    # same-UID process replacing the path between the test and the open — while the symlink
+    # half needed no race, `[[ -f ]]` following one to a regular file it then truncated.
+    # This one is below the bootstrap and bounded, and it was removed for a round on the
+    # argument that emptying buys nothing: the watch holds a verdict back only when the id
+    # it reads equals the baseline, and skips the comparison entirely when the baseline is
+    # empty, so an empty baseline holds nothing back.
+    #
+    # THAT ARGUMENT IS TRUE AND IT IS NOT THE WHOLE TRADE. Removing this was a regression,
+    # found twice in two rounds, because the clearing is also the READINESS PROOF for the
+    # exact operation the write performs, and it stands before ANY mutation this stage makes
+    # — it has two, the revocation comment and the reviewer request. Without it a baseline
+    # path that cannot take this write — a directory, a FIFO, an unwritable or append-only
+    # file — is not found until the write far below, which is AFTER `gh pr comment` has
+    # revoked the previous Copilot signoff: the stage then reports that the phase did not
+    # open while having mutated the PR.
+    #
+    # AND NOTHING WEAKER PROVES IT. Measured: `>>` opens for append, so an append-only file
+    # passes the probe and fails the write; `<>` opens read-write, which REJECTS a
+    # write-only (mode 222) file the real write handles, and its only gain needs `chattr +a`
+    # and therefore root, so it would ship untestable. No shell redirection expresses the
+    # write's own mode — O_WRONLY without truncate or append — so the operation that proves
+    # it IS the truncation.
+    #
+    # IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is what stops the readiness proof
+    # from being a fail-open. Emptying looked free because an empty baseline is LEGAL — it
+    # means "no prior review to wait past", which is a real answer this stage can produce
+    # when Copilot has never reviewed. That is exactly why it was dangerous: a refusal
+    # between here and the write left a value the watch ACCEPTS. Falling through the
+    # driver's shadowed `exit`, the watch skips its equality check and announces
+    # `PR_REVIEW_READY` for a review no request was made for.
+    #
+    # A SENTINEL IS NOT A REVIEW ID, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
+    # status 2 — and the driver stops instead of accepting a pass that never happened. The
+    # same refusal that used to fail open now fails closed, and the readiness proof is
+    # unchanged: this is still a truncating open on the path, still bounded, still ahead of
+    # the revocation, so a path that CANNOT TAKE THIS WRITE is found before anything is
+    # posted. Not every unusable path: `/dev/null` and a write-only file accept it and are
+    # caught by the read-back further down, which is after the revocation. Those are the
+    # cases this ordering does not cover, and the read-back is what covers them.
+    #
+    # IT MUST NOT BE EMPTY AND MUST NOT PARSE AS AN ID. Empty is the legal "no floor" value
+    # above; digits, or `comment:` and digits, are the two shapes the watch accepts. Anything
+    # else is refused, and this is spelled so a reader of the file sees why it is there.
+    #
+    # AND IT NARROWS THE WINDOW RATHER THAN CLOSING IT. This write truncates before it
+    # writes, so a failure between the two — ENOSPC, a quota — still leaves the file empty,
+    # which the watch still accepts as "no floor". No shell redirection truncates and writes
+    # atomically, so no writer can close that alone: the fix is that an EMPTY file stops
+    # being legal and "no prior review" gets an explicit token, which is a change to
+    # `pr-watch.sh`'s contract with three writers and is #264. Until then this is strictly
+    # narrower than emptying, which failed open on EVERY refusal in this span.
+    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" refused-no-baseline > "$1"' _ "$PRIOR_FILE" \
+        || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase
