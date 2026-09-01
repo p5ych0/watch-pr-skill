@@ -79,7 +79,10 @@
   **The clearing BELOW the bootstrap is kept**, and only the unbounded one is removed. It
   was tried both ways in review, and removing it is a regression: bounded by `run_limited`,
   it is also the readiness proof for the exact operation the write performs, and it stands
-  before the only mutation the stage makes. Without it an unusable baseline — a directory,
+  before any mutation the stage makes — it has two, the revocation comment and the reviewer
+  request — and it catches the paths that cannot take that write. `/dev/null` and a
+  write-only file accept it and are caught later by the read-back, which is after the
+  revocation. Without it a baseline that cannot take the write — a directory,
   a FIFO, an unwritable or append-only file — is not found until the write, by which time
   the signoff has been revoked, and the stage reports that the phase did not open while
   having mutated the PR. Nothing weaker proves it: `>>` lets an append-only file through to

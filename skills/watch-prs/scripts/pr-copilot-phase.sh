@@ -271,11 +271,12 @@ if [[ $STAGE = open ]]; then
     #
     # THAT ARGUMENT IS TRUE AND IT IS NOT THE WHOLE TRADE. Removing this was a regression,
     # found twice in two rounds, because the clearing is also the READINESS PROOF for the
-    # exact operation the write performs, and it stands before the only mutation this stage
-    # makes. Without it an unusable baseline — a directory, a FIFO, an unwritable or
-    # append-only file — is not found until the write far below, which is AFTER
-    # `gh pr comment` has revoked the previous Copilot signoff: the stage then reports that
-    # the phase did not open while having mutated the PR.
+    # exact operation the write performs, and it stands before ANY mutation this stage makes
+    # — it has two, the revocation comment and the reviewer request. Without it a baseline
+    # path that cannot take this write — a directory, a FIFO, an unwritable or append-only
+    # file — is not found until the write far below, which is AFTER `gh pr comment` has
+    # revoked the previous Copilot signoff: the stage then reports that the phase did not
+    # open while having mutated the PR.
     #
     # AND NOTHING WEAKER PROVES IT. Measured: `>>` opens for append, so an append-only file
     # passes the probe and fails the write; `<>` opens read-write, which REJECTS a
@@ -296,7 +297,10 @@ if [[ $STAGE = open ]]; then
     # status 2 — and the driver stops instead of accepting a pass that never happened. The
     # same refusal that used to fail open now fails closed, and the readiness proof is
     # unchanged: this is still a truncating open on the path, still bounded, still ahead of
-    # the revocation, so an unusable baseline is found before anything is posted.
+    # the revocation, so a path that CANNOT TAKE THIS WRITE is found before anything is
+    # posted. Not every unusable path: `/dev/null` and a write-only file accept it and are
+    # caught by the read-back further down, which is after the revocation. Those are the
+    # cases this ordering does not cover, and the read-back is what covers them.
     #
     # IT MUST NOT BE EMPTY AND MUST NOT PARSE AS AN ID. Empty is the legal "no floor" value
     # above; digits, or `comment:` and digits, are the two shapes the watch accepts. Anything

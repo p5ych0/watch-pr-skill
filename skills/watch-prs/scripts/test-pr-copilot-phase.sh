@@ -1083,8 +1083,10 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 # A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing
 # #245 did NOT remove. It is below the bootstrap, `run_limited` bounds it, and it is the
 # readiness proof for the exact operation the write performs — standing before the only
-# mutation this stage makes, so an unusable path is found before the signoff is revoked
-# rather than after.
+# mutation this stage makes — it has two, the revocation and the reviewer request — so a
+# path that CANNOT TAKE THAT WRITE is found before the signoff is revoked rather than after.
+# Not every unusable path: `/dev/null` and a write-only file accept it and are caught by the
+# read-back, which is after the revocation.
 #
 # AND IT LEAVES A SENTINEL, NOT AN EMPTY FILE, which is what makes this refusal fail
 # CLOSED. Emptying looked free because an empty baseline is LEGAL — it means "no prior

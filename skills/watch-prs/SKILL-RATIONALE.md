@@ -1495,10 +1495,11 @@ review it meant to hold back. `test-pr-watch.sh` stages that pair.
 
 THE CLEARING BELOW THE BOOTSTRAP STAYS, and removing it was a regression found in two
 consecutive rounds. It is bounded, so it was never #245's defect — and it is also the
-READINESS PROOF for the exact operation the write performs, standing before the only
-mutation this stage makes. Without it an unusable baseline is not found until the write,
-which is AFTER the previous Copilot signoff has been revoked: the stage then reports that
-the phase did not open while having mutated the PR.
+READINESS PROOF for the exact operation the write performs, standing before ANY mutation
+this stage makes — it has two, the revocation comment and the reviewer request. Without it
+a baseline path that cannot take that write is not found until the write itself, which is
+AFTER the previous Copilot signoff has been revoked: the stage then reports that the phase
+did not open while having mutated the PR.
 
 Nothing weaker proves it, and that was measured rather than assumed. `>>` opens for
 append, so an append-only file passes and the write fails; `<>` opens read-write, which
@@ -1518,8 +1519,10 @@ The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malform
 status 2, at the call and before any network read — and the driver stops rather than
 accepting a pass that never happened. The proof is unchanged: still a truncating open on
 the path, still bounded, still ahead of the revocation, so an unusable baseline is found
-before anything is posted. The refusal that used to fail open now fails closed, and there
-is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
+before anything is posted — meaning a path that CANNOT TAKE THAT WRITE. `/dev/null` and a
+write-only file accept it and are caught by the read-back instead, which is after the
+revocation, so they are outside what this ordering buys. The refusal that used to fail open
+now fails closed, and there is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
 the phase fixture asserts the exact string left behind, so the two halves cannot drift.
 
 THE HELPER MAKES NO PROMISE ABOUT THIS FILE'S CONTENTS AFTER A REFUSAL, and that
