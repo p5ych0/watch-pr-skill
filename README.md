@@ -428,11 +428,15 @@ Then:
      files set up at the start. **A value in that file is this round's baseline only
      when `open` returns 0.** After a refusal the stage promises nothing about the
      file's contents: depending on where the run stopped it may hold the previous
-     round's value, nothing, or the id this run captured. The stage empties it once it
-     is past the bootstrap — that open is also how it proves the path is usable before
-     it revokes anything, and it leaves a **sentinel** rather than an empty file, so a
-     refusal cannot hand the watch a value it would accept as "no prior review". Do not
-     read the file on a non-zero status; `pr-watch.sh` refuses the sentinel and stops. The order is revoke → prove → baseline → request: the
+     round's value, a refusal sentinel, or the id this run captured. Once past the
+     bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
+     whatever is there — that write is also how it checks the path can be written
+     before it revokes anything, so an unusable path stops the stage before the PR is
+     touched. It proves only that write at that moment, not the whole handoff:
+     `/dev/null` and a write-only file accept it and fail the later regular-file and
+     read-back checks. Where the sentinel survives, a refusal cannot hand the watch a
+     value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
+     and stops. Do not read the file on a non-zero status. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

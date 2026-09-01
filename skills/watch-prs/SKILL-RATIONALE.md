@@ -1470,7 +1470,10 @@ sha. After `--add-reviewer` there is nothing left to refuse with: the pass is in
 flight, and a caller reading a truncated id would arm the watch against the wrong
 review. #243.
 
-THE FILE WAS EMPTIED TWICE AND IS NOW EMPTIED ONCE. The clearing ABOVE the bootstrap is
+THE FILE WAS EMPTIED TWICE AND IS NOW WRITTEN ONCE BEFORE THE CAPTURE. What survives is a
+bounded READINESS WRITE that leaves `refused-no-baseline`, not an emptying; the argument
+below is why it exists and the sentinel section after it is why it is not a truncation to
+nothing. The clearing ABOVE the bootstrap is
 gone, and that is #245: an unbounded truncating open on a path the caller named, where
 `run_limited` does not exist yet.
 

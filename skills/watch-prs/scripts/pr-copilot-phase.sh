@@ -94,7 +94,7 @@ set -uo pipefail
 # bounded one below survives, and its argument is beside it rather than here: five review
 # rounds went into restating this in four files, and every round one of the copies had
 # drifted. `skills/watch-prs/SKILL-RATIONALE.md` carries the whole account under
-# **THE FILE WAS EMPTIED TWICE AND IS NOW EMPTIED ONCE**; what is stated here is only what
+# **THE FILE WAS EMPTIED TWICE AND IS NOW WRITTEN ONCE BEFORE THE CAPTURE**; what is here is
 # THIS arm did.
 #
 # AND NOT THE SYMLINK. The surviving clearing opens this path with `>`, so a symlink a
