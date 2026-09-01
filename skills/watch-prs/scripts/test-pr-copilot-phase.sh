@@ -1088,9 +1088,14 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 #
 # EMPTY IS THE WEAKER BASELINE AND IT IS PAID FOR KNOWINGLY. `test-pr-watch.sh` measures
 # that: the watch holds a verdict back only when the id it reads equals the baseline, and
-# skips the comparison entirely when the baseline is empty. So a refusal here costs at most
-# one waiting cycle, while removing the clearing cost a phase that reports "did not open"
-# after revoking a signoff — which is what two review rounds found.
+# skips the comparison entirely when the baseline is empty. So where the value emptied here
+# would have EQUALLED the current terminal review, the cost is PREMATURE ACCEPTANCE — the
+# watch announces `PR_REVIEW_READY` for a review no new request was made for, where the
+# stale id would have held it back as `awaiting_new_review`. Not a waiting cycle.
+#
+# It is still the trade to take, because removing the clearing costs a phase that reports
+# "did not open" after revoking a signoff — which is what two review rounds found — and that
+# one is unconditional while this is narrow. `SKILL-RATIONALE.md` carries the argument.
 world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
@@ -1098,10 +1103,13 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
     && pass "…and a refusal after the bounded clearing leaves no stale baseline" \
     || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
 # AND IT REQUESTED NOTHING, which is what every refusal guarantees — unlike "posts nothing",
-# which is false once the revocation has been written.
+# which is false once the revocation has been written. NOT "no watch is armed": the driver
+# reaches the wait step after a refusal whenever `exit` returns, which is what the open-window
+# case in `test-pr-skill-contract.sh` proves. What is true here is only that Copilot was never
+# asked, so nothing new is coming for that watch to find.
 grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested by a refused open" \
-    || pass "…with Copilot not requested, so no watch is armed against it"
+    || pass "…with Copilot not requested, so nothing new is coming for the watch to find"
 
 # A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks
 # waiting for a reader, and the top-of-file clearing skips a FIFO because it tests
@@ -1375,18 +1383,18 @@ got="$(run open 7 "$HEAD40" "$TMP/prior.txt")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'not permission to skip the pass' <<<"${got#*|}"; } \
     && pass "a failed request stops, and says so rather than reading as a slow reviewer" \
     || die "a failed --add-reviewer gave '${got}'"
-# AND THE FILE HOLDS THE CAPTURED ID, WHICH IS THE THIRD OUTCOME. A refusal has three
-# possible residues here and a reader must not be promised two: untouched where the
-# BOOTSTRAP refused, empty between the bounded clearing and the write, and — here — the id
-# the write already put there, because this refusal is PAST the write. Asserting the id
-# rather than merely "not stale" is what makes the case name the outcome instead of
-# excluding one.
+# AND THE FILE HOLDS THE CAPTURED ID — the residue of a refusal PAST the write, because the
+# write has already replaced the file. It is compared against `42`, the id the stub captured,
+# and not merely tested for being numeric: a regression writing some OTHER number in the
+# failure arm passes a shape test, and the driver would then reach the watch with a baseline
+# naming a review nobody captured — accepting an old verdict or waiting past the wrong one,
+# while this case reported the outcome asserted.
 _ar="$(cat "$TMP/prior.txt" 2>/dev/null)"
 case "$_ar" in
+    42) pass "…and a refusal past the write leaves the captured id, not an empty file" ;;
     stale-from-a-previous-round) die "the baseline write did not happen before the failed request" ;;
     "") die "a refusal past the write left the baseline empty, not the captured id" ;;
-    *[!0-9]*) die "the baseline file holds something that is not a review id: '$_ar'" ;;
-    *) pass "…and a refusal past the write leaves the captured id, not an empty file" ;;
+    *) die "the baseline file holds '$_ar', which is not the captured id 42" ;;
 esac
 
 world; got="$(run open 7)"

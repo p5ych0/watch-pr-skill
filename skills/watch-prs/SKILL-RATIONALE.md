@@ -1516,10 +1516,13 @@ here, EVERY unusable baseline path is discovered only at the write, which is aft
 signoff has been revoked, and the phase reports that it did not open having mutated the
 PR. A narrow premature acceptance against a certain half-mutated phase.
 
-WHAT THE FILE HOLDS AFTER A REFUSAL THEREFORE HAS THREE ANSWERS, and a reader should not
-be promised two: untouched where the bootstrap refused, empty between this clearing and
-the write, and the captured id after the write — a read-back mismatch or a failed
-`--add-reviewer` leaves what the write already put there. #245.
+WHAT THE FILE HOLDS AFTER A REFUSAL THEREFORE HAS FOUR ANSWERS, and a reader should not
+be promised fewer: untouched where the bootstrap refused, empty between the clearing and
+the write, the CAPTURED ID where the write succeeded and `--add-reviewer` then failed, and
+— where the read-back refused — whatever the OTHER process put there, since a mismatch is
+detected precisely when the file no longer holds what was written. That fourth is not the
+captured id and must not be described as it: `test-pr-copilot-phase.sh` stages its
+empty-file version. #245.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 

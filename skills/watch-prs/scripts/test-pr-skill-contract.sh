@@ -2460,9 +2460,11 @@ WHO="chatgpt-codex-connector[bot]" bash -c '
 # the caller left, because no helper ran to change it.
 #
 # WHAT THE FILE HOLDS IN A REAL RUN IS THE HELPER'S QUESTION, and `test-pr-copilot-phase.sh`
-# is where it is asked: untouched after a bootstrap refusal, empty after one between the
-# bounded clearing and the write, and the captured id after one past the write. None of the
-# three is asserted here.
+# is where it is asked: untouched after a bootstrap refusal, empty between the bounded
+# clearing and the write, the captured id where the write succeeded and the request then
+# failed, and whatever another process substituted where the READ-BACK refused — that one
+# fires precisely because the file stopped holding what was written, so it is not the
+# captured id. None of the four is asserted here.
 if grep -q 'WATCHED:' "$_ow_dir/seen" 2>/dev/null; then
     grep -qF 'WATCHED:[99]' "$_ow_dir/seen" \
         && pass "a refused open DOES reach the wait step, and arms it with whatever the file holds" \
