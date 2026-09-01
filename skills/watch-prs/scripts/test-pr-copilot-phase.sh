@@ -227,6 +227,42 @@ world; got="$(run record 7 "$TMP/body.md")"
     && pass "a clean Codex verdict records the phase" \
     || die "record gave '${got}'"
 
+# ── AND `record` READS ITS SHA BACK THE SAME WAY ──────────────────────────
+#
+# The sha read-back gained the bounded open, its own status and the child-side comparison
+# in #246, and none of its branches had a case: a regression removing the bound would hang
+# `record` on a substituted path, and one mishandling the status would post the signoff
+# after a transport that failed. The signoff is the irreversible part of this stage, so
+# "did not post" is the assertion that matters.
+#
+# Staged through the same `timeout` hook as the baseline case — it stands between the
+# bounded write and the bounded read — emptying the sha file so the read-back sees bytes
+# that are not the ones written.
+if command -v timeout >/dev/null 2>&1; then
+    _rl_real2="$(command -v timeout)"
+    world
+    _rbs="$TMP/rbsha"; rm -rf "$_rbs"; mkdir -p "$_rbs"; : > "$_rbs/sha.txt"
+    cat > "$TMP/bin/timeout" <<RLS
+#!/usr/bin/env bash
+"$_rl_real2" "\$@"; _rc=\$?
+case "\$*" in *printf*) : > "\$RB_ZERO_TARGET" 2>/dev/null ;; esac
+exit "\$_rc"
+RLS
+    chmod +x "$TMP/bin/timeout"
+    # A NAME OF ITS OWN. `got` is still holding the ordinary `record` run that the
+    # resume-command assertion below reads, and reusing it here made that assertion read
+    # this refusal instead — a case failing on another case's evidence.
+    _sha_got="$(RB_ZERO_TARGET="$_rbs/sha.txt" run record 7 "$TMP/body.md" "$_rbs/sha.txt")"
+    rm -f "$TMP/bin/timeout"
+    [ "${_sha_got%%|*}" = 1 ] \
+        && pass "a sha that did not survive being written stops record" \
+        || die "an emptied sha file gave '${_sha_got}'"
+    nothing_posted "the sha did not survive the write"
+    rm -rf "$_rbs"
+else
+    pass "no timeout on this platform, so the emptied-sha state is skipped by name"
+fi
+
 # ── AND THE RESUME COMMAND IT PRINTS IS ONE THAT RUNS ─────────────────────
 #
 # `record` stops and asks, and the whole point of stopping is that the answer can
@@ -1136,7 +1172,11 @@ fi
 # in. The hook is `timeout` — `run_limited` is a FUNCTION and cannot be shadowed on PATH,
 # but it invokes `timeout`, which is an ordinary lookup, and that call is what stands
 # between the helper's bounded write and its bounded read.
-if [ "$(id -u)" != 0 ] && command -v timeout >/dev/null 2>&1; then
+# NO ROOT GUARD. The neighbouring cases carry one because they revoke permissions and root
+# ignores that; this one only truncates a file the fixture itself made, so skipping it under
+# UID 0 recorded a pass for a scenario that had not run — and a self-check as root could
+# have reverted the child-side comparison with the suite green.
+if command -v timeout >/dev/null 2>&1; then
     _rl_real="$(command -v timeout)"
     world; : > "$W/review-id.out"          # an EMPTY baseline: the collision case
     _rbz="$TMP/rbzero"; rm -rf "$_rbz"; mkdir -p "$_rbz"
@@ -1159,7 +1199,7 @@ RLZ
         || pass "…with Copilot not requested"
     rm -rf "$_rbz"
 else
-    pass "running as root or without timeout, so the emptied-baseline state is skipped by name"
+    pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
 fi
 
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —

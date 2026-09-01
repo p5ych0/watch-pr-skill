@@ -844,7 +844,12 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # read back. `printf` can report success and fail at the flush, and taking the status only
 # works while there is something left to refuse WITH: after the comment is posted the
 # signoff is on the PR and this stage cannot be un-run.
-printf '%s\n' "$CODEX_SHA" > "$SHA_FILE" \
+# BOUNDED, LIKE `open`'S WRITES. Opening a path for writing can BLOCK — a FIFO at that
+# name waits for a reader that never arrives — and this write is the one immediately before
+# the signoff is posted, so a hang here stalls the stage with the phase half decided. `open`
+# has bounded both of its writes since #230; this was the copy left plain, which is the
+# same way its read-back ended up the weaker of the two. #246.
+run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$SHA_FILE" "$CODEX_SHA" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
 # READ BACK THE SAME WAY `open` DOES, and for the reasons it states: bounded, because
 # opening a path can block; with its own status, because `$(<…)` reports the substitution's
