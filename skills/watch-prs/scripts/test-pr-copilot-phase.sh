@@ -1080,27 +1080,25 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
     && pass "…and an empty baseline is written over a stale one, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
 
-# A REFUSAL LEAVES THE BASELINE FILE ALONE, WHICH IS #245's SECOND HALF. Both clearings
-# are gone, and this is the case that pins it: a refused `open` does not touch the caller's
-# file, so the previous round's id is still there afterwards.
+# A REFUSAL AFTER THE BOUNDED CLEARING LEAVES THE FILE EMPTY, and that clearing is the one
+# #245 did NOT remove. It is below the bootstrap, `run_limited` bounds it, and it is the
+# readiness proof for the exact operation the write performs — standing before the only
+# mutation this stage makes, so an unusable path is found before the signoff is revoked
+# rather than after.
 #
-# THAT IS NOT A WEAKER GUARANTEE, and `test-pr-watch.sh` is where the argument is measured
-# rather than asserted. The watch suppresses a terminal verdict on ONE condition — the id it
-# reads equals the baseline — and the comparison is skipped entirely for an empty one. So
-# emptying suppresses nothing: against a stale id the outcomes differ only when the stale id
-# EQUALS the current review, and there emptying is the worse of the two, turning a correct
-# `awaiting_new_review` into a `PR_REVIEW_READY` for the review it meant to hold back.
-#
-# What the clearing did buy was a `>` on a caller-named path, above the bootstrap where
-# nothing can bound it. That is what came out.
+# EMPTY IS THE WEAKER BASELINE AND IT IS PAID FOR KNOWINGLY. `test-pr-watch.sh` measures
+# that: the watch holds a verdict back only when the id it reads equals the baseline, and
+# skips the comparison entirely when the baseline is empty. So a refusal here costs at most
+# one waiting cycle, while removing the clearing cost a phase that reports "did not open"
+# after revoking a signoff — which is what two review rounds found.
 world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = "stale-from-a-previous-round" ]; } \
-    && pass "…and a refusal before the write leaves the caller's baseline file untouched" \
-    || die "a refused open altered the baseline file: '$(cat "$TMP/prior.txt" 2>/dev/null)'"
-# AND IT POSTED NOTHING, which is what makes the untouched file safe to leave: the phase did
-# not open, so no request is waiting for a baseline to bound it.
+{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
+    && pass "…and a refusal after the bounded clearing leaves no stale baseline" \
+    || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
+# AND IT REQUESTED NOTHING, which is what every refusal guarantees — unlike "posts nothing",
+# which is false once the revocation has been written.
 grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested by a refused open" \
     || pass "…with Copilot not requested, so no watch is armed against it"
@@ -1124,8 +1122,8 @@ if command -v mkfifo >/dev/null 2>&1; then
             && die "Copilot was requested despite the blocked baseline write" \
             || pass "…with Copilot not requested"
         # AND THE SIGNOFF WAS NOT REVOKED, which is the half that made removing the
-        # bounded clearing a regression rather than a subtraction. That clearing was
-        # also the READINESS check on this path, and it stood BEFORE the revocation:
+        # bounded clearing a regression rather than a subtraction. That clearing is
+        # also the READINESS proof on this path, and it stands BEFORE the revocation:
         # without one, a FIFO here is not discovered until the write far below, by
         # which time `gh pr comment` has already revoked the previous Copilot signoff
         # — so the stage reports that the phase did not open while having mutated the

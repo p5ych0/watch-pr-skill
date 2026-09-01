@@ -250,28 +250,36 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # AND IT IS NOT EMPTIED HERE EITHER. That clearing was bounded, so it was not #245's
-    # defect — but emptying bought the same nothing the pre-bootstrap one did, and leaving
-    # it would have left the file contradicting the argument beside it. Emptying is not a
-    # weaker form of protection here; it is the opposite of protection, because an empty
-    # baseline suppresses nothing while the value it replaced might have. What makes this
-    # round's baseline right is the WRITE below: bounded, its status taken, and read back
-    # and compared before Copilot is requested.
+    # THIS CLEARING STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
+    # truncating open above the bootstrap, where `run_limited` does not exist yet — a
+    # symlink there truncates its target and a FIFO there blocks with nothing to stop it.
+    # This one is below the bootstrap and bounded, and it was removed for a round on the
+    # argument that emptying buys nothing: the watch holds a verdict back only when the id
+    # it reads equals the baseline, and skips the comparison entirely when the baseline is
+    # empty, so an empty baseline holds nothing back.
     #
-    # BUT THE CLEARING WAS DOING A SECOND JOB, and only removing it made that visible: it
-    # was also the READINESS check on the path, and it stood BEFORE the revocation. Take it
-    # away and an unusable baseline — a directory, a FIFO, an unwritable file — is not found
-    # until the write far below, which is after `gh pr comment` has already revoked the
-    # previous Copilot signoff. The stage then reports that the phase did not open while
-    # having mutated the PR, which is the one outcome this ordering exists to prevent.
+    # THAT ARGUMENT IS TRUE AND IT IS NOT THE WHOLE TRADE. Removing this was a regression,
+    # found twice in two rounds, because the clearing is also the READINESS PROOF for the
+    # exact operation the write performs, and it stands before the only mutation this stage
+    # makes. Without it an unusable baseline — a directory, a FIFO, an unwritable or
+    # append-only file — is not found until the write far below, which is AFTER
+    # `gh pr comment` has revoked the previous Copilot signoff: the stage then reports that
+    # the phase did not open while having mutated the PR.
     #
-    # SO THE PROBE STAYS AND THE TRUNCATION GOES. `>>` opens for append: it blocks on a
-    # FIFO and fails on a directory or an unwritable path exactly as `>` did, and on the
-    # regular file this is meant for it writes no bytes and destroys nothing. Bounded for
-    # the same reason the write is — a blocking open is not a failing one, and `run_limited`
-    # turns it into a refusal while the phase has still done nothing.
-    run_limited 10 /usr/bin/env bash -p -c '>> "$1"' _ "$PRIOR_FILE" \
-        || { echo "ABORT: the baseline file '$PRIOR_FILE' cannot be opened for writing; it is a directory, is unwritable, or opening it blocked. Nothing has been posted."; exit 1; }
+    # AND NOTHING WEAKER PROVES IT. Measured: `>>` opens for append, so an append-only file
+    # passes the probe and fails the write; `<>` opens read-write, which REJECTS a
+    # write-only (mode 222) file the real write handles, and its only gain needs `chattr +a`
+    # and therefore root, so it would ship untestable. No shell redirection expresses the
+    # write's own mode — O_WRONLY without truncate or append — so the operation that proves
+    # it IS the truncation.
+    #
+    # THE PRICE IS PAID KNOWINGLY: a refusal between here and the write leaves the file
+    # empty rather than holding the previous round's id, and empty is the weaker of the two.
+    # It buys a phase that never reports "did not open" after mutating the PR, which is the
+    # stronger property — the emptier baseline costs at most one waiting cycle, and the
+    # half-mutated phase costs a revoked signoff nobody asked for.
+    run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$PRIOR_FILE" \
+        || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase

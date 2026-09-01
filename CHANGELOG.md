@@ -25,17 +25,25 @@
 
   The failure this prevents is therefore not a stale baseline; it is the destruction a
   caller never asked for. A `>` on a path the operator named could truncate whatever a
-  symlink pointed at, or hang on a FIFO planted there, in order to produce a value that is
-  weaker than the one it overwrote. A refused `open` now leaves the file exactly as it found
-  it, and **no review request is left waiting for a baseline to bound it**.
+  symlink pointed at, or hang on a FIFO planted there — above the bootstrap, where nothing
+  could bound either — in order to produce a value weaker than the one it overwrote. A
+  refusal from the bootstrap itself now leaves that file exactly as it found it, and **no
+  review request is left waiting for a baseline to bound it**.
 
   Not "posts nothing", which would be false: `open` revokes any earlier Copilot signoff
   before it captures the baseline, so a refusal after that point has already written one
-  comment to the PR. What every refusal does guarantee is that Copilot was never requested,
-  which is what makes the untouched baseline safe to leave. The readiness check on the
-  baseline path is kept ahead of that revocation, and no longer truncates to perform it —
-  `>>` blocks on a FIFO and fails on a directory just as `>` did, while writing no bytes to
-  the regular file it is meant for.
+  comment to the PR. What every refusal does guarantee is that Copilot was never requested.
+
+  **The clearing BELOW the bootstrap is kept**, and only the unbounded one is removed. It
+  was tried both ways in review, and removing it is a regression: bounded by `run_limited`,
+  it is also the readiness proof for the exact operation the write performs, and it stands
+  before the only mutation the stage makes. Without it an unusable baseline — a directory,
+  a FIFO, an unwritable or append-only file — is not found until the write, by which time
+  the signoff has been revoked, and the stage reports that the phase did not open while
+  having mutated the PR. Nothing weaker proves it: `>>` lets an append-only file through to
+  fail at the write, and `<>` rejects a write-only file the write handles. No shell
+  redirection expresses the write's own mode, so the operation that proves it is the
+  truncation.
 
   `skills/watch-prs/SKILL-RATIONALE.md` is updated with it. It carried the old argument —
   that the file is emptied above the bootstrap so a refusal cannot leave the previous

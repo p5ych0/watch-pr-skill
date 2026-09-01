@@ -1470,28 +1470,35 @@ sha. After `--add-reviewer` there is nothing left to refuse with: the pass is in
 flight, and a caller reading a truncated id would arm the watch against the wrong
 review. #243.
 
-A REFUSAL LEAVES THAT FILE ALONE, and it used to empty it twice — once above the
-bootstrap and once below. Both are gone. The reader they were written for is real, and
-that is why they outlived `record`'s by a release: with the driver's `exit` shadowed to
-return, a refused `open` falls past its fence into the wait step, which hands this file
-to `pr-watch.sh --after-review-file`.
+THE FILE WAS EMPTIED TWICE AND IS NOW EMPTIED ONCE. The clearing ABOVE the bootstrap is
+gone, and that is #245: an unbounded truncating open on a path the caller named, where
+`run_limited` does not exist yet — a symlink there truncates its target and a FIFO there
+blocks, with nothing to stop either. Do not restore it.
 
-What was wrong is the belief that emptying protects that reader. The watch holds a
+The reason it survived `record`'s removal by a release is that its reader is real: with
+the driver's `exit` shadowed to return, a refused `open` falls past its fence into the
+wait step, which hands this file to `pr-watch.sh --after-review-file`. What made it
+removable anyway is that emptying does not protect that reader. The watch holds a
 terminal verdict back on ONE condition — the id it reads equals the baseline — and skips
-the comparison entirely when the baseline is empty. An empty baseline therefore holds
-nothing back. Against a stale id the two are the same wherever the stale id differs from
-the current review, and where it does not, emptying is the WORSE of the two: it turns a
-correct `awaiting_new_review` into a `PR_REVIEW_READY` for the very review it meant to
-hold back. `test-pr-watch.sh` stages that pair.
+the comparison entirely when the baseline is empty, so an empty baseline holds nothing
+back. Where a stale id would have matched the current review, emptying is the WORSE of
+the two, turning a correct `awaiting_new_review` into a `PR_REVIEW_READY` for the very
+review it meant to hold back. `test-pr-watch.sh` stages that pair.
 
-So the clearing did not prevent the harm its own comment named, and it cost a `>` on a
-path the operator named — following a symlink to truncate its target, blocking on a FIFO,
-above the bootstrap where nothing could bound it. Do not restore it. What DID have to
-stay is the readiness check that clearing was also performing, ahead of the revocation:
-an unusable path found only at the write would be found after the previous Copilot
-signoff had already been revoked. It is `>>` now — it blocks on a FIFO and fails on a
-directory exactly as `>` did, and writes no bytes to the regular file it is meant for.
-#245.
+THE CLEARING BELOW THE BOOTSTRAP STAYS, and removing it was a regression found in two
+consecutive rounds. It is bounded, so it was never #245's defect — and it is also the
+READINESS PROOF for the exact operation the write performs, standing before the only
+mutation this stage makes. Without it an unusable baseline is not found until the write,
+which is AFTER the previous Copilot signoff has been revoked: the stage then reports that
+the phase did not open while having mutated the PR.
+
+Nothing weaker proves it, and that was measured rather than assumed. `>>` opens for
+append, so an append-only file passes and the write fails; `<>` opens read-write, which
+rejects a write-only file the real write handles, and its only gain needs root to stage.
+No shell redirection expresses the write's own mode, so the operation that proves it is
+the truncation. The price is that a refusal between the clearing and the write leaves the
+baseline empty rather than stale — at most one waiting cycle, against a revoked signoff
+nobody asked for. #245.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 
