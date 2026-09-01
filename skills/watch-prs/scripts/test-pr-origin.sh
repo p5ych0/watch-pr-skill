@@ -1786,8 +1786,25 @@ _sp_real() {   # _sp_real <command> ; sets $_sp_out to a path containing a space
     chmod +x "$_sp_d/$1" || die "could not make the spaced delegate wrapper for $1 executable"
     # AND IT IS PROVED USABLE BEFORE IT IS HANDED BACK, so a wrapper that was written but
     # cannot run is a failure here rather than a skip two lines later.
-    "$_sp_d/$1" --version >/dev/null 2>&1 || "$_sp_d/$1" >/dev/null 2>&1 \
-        || die "the spaced delegate wrapper for $1 does not run"
+    #
+    # PROBED WITH THE REAL OPERATION, NOT WITH `--version` OR A BARE CALL. `--version` is a
+    # GNU extension neither `mkdir` nor `rmdir` has on stock macOS, and both REQUIRE an
+    # operand — so a probe combining the two would have failed on every valid wrapper on
+    # the mac-shaped job and taken the whole file down before these cases ran. This is the
+    # portability trap this repository records: assert the invariant, not one platform's
+    # route to it. Each wrapper does the harmless thing its command is for, on a directory
+    # made for the purpose.
+    _sp_p="$_sp_d/probe.$1"
+    rm -rf "$_sp_p"
+    case "$1" in
+        mkdir) "$_sp_d/$1" "$_sp_p" >/dev/null 2>&1 && [ -d "$_sp_p" ] \
+                   || die "the spaced delegate wrapper for mkdir does not create a directory"
+               rm -rf "$_sp_p" ;;
+        rmdir) mkdir -p "$_sp_p" || die "could not stage the rmdir wrapper probe"
+               "$_sp_d/$1" "$_sp_p" >/dev/null 2>&1 && [ ! -e "$_sp_p" ] \
+                   || die "the spaced delegate wrapper for rmdir does not remove a directory" ;;
+        *)     die "no probe defined for the spaced delegate wrapper for $1" ;;
+    esac
     _sp_out="$_sp_d/$1"
     return 0
 }
