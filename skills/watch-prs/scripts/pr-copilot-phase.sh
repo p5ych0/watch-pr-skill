@@ -84,11 +84,16 @@ fi
 
 set -uo pipefail
 
-# ── NEITHER STAGE CLEARS THE FILE THE CALLER NAMED, AND `open`'S WENT LAST ─
+# ── `record` CLEARS NOTHING; `open` KEEPS THE BOUNDED CLEARING AND NOT THIS ONE ─
 # `open` had two clearings, and the reader they were written for IS real: with the driver's
 # `exit` shadowed to return, a refusal falls past its fence into the wait step, which hands
 # `$PRIOR_FILE` to `pr-watch.sh --after-review-file`. That is what makes `open` different
 # from `record`, and it is why its clearings outlived `record`'s by one change.
+#
+# ONLY THE ONE ABOVE THE BOOTSTRAP IS GONE — the arm this comment used to introduce. The
+# bounded one below survives, because it is also the readiness proof for the write and
+# stands ahead of the revocation; its own argument is beside it. So a bootstrap refusal
+# leaves this file untouched and a later refusal leaves it empty, and both are deliberate.
 #
 # BUT EMPTYING WAS NEVER THE PROTECTION, and that is what #245's second half turned out to
 # be. `pr-watch.sh` suppresses a terminal verdict on ONE condition — the id it finds equals

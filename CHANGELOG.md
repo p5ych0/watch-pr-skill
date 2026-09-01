@@ -2,12 +2,16 @@
 
 ## [2.0.97] — 2026-09-01
 
-- **`open` no longer clears the baseline file either, and emptying it was never the
-  protection.** `pr-copilot-phase.sh open` cleared its caller-named baseline twice — once
-  above the bootstrap, once after — and both are gone. The first was the same **unbounded
-  truncating open on a caller-named path** that came out of `record` in 2.0.96: `>` follows
-  a symlink and truncates its target, and a FIFO there blocks, with no `run_limited` yet
-  loaded to bound it.
+- **`open`'s UNBOUNDED baseline clearing is removed; the bounded one stays.**
+  `pr-copilot-phase.sh open` cleared its caller-named baseline twice — once above the
+  bootstrap, once after — and only the first is gone. It was the same **unbounded truncating
+  open on a caller-named path** that came out of `record` in 2.0.96: `>` follows a symlink
+  and truncates its target, and a FIFO there blocks, with no `run_limited` yet loaded to
+  bound it.
+
+  So a refusal from the bootstrap leaves the baseline as it found it, and a refusal after
+  the surviving clearing leaves it empty. Which of the two a reader gets depends on where
+  the run stopped, and the reason the second one is kept is below.
 
   It survived that release because the reader it was written for is real, and still is:
   with the driver's `exit` shadowed to return, a refused `open` falls past its fence into
