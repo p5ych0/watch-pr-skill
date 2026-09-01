@@ -38,7 +38,14 @@
   bootstrap refusal; this round's after a failed request; and **a substituted value that
   happens to be digits**, which a read-back mismatch leaves in place and which is as
   well-formed as any real baseline. In each case a terminal review with a different id is
-  announced as this round's answer though nothing was requested.
+  announced as this round's answer.
+
+  For every one of those except the failed request, nothing was asked for and the verdict
+  is simply not this round's. The failed request is different and is the one not to
+  generalise over: `gh pr edit --add-reviewer` has already run, and the remote may have
+  accepted it before the client reported the error — so a pass may genuinely be pending,
+  and the announced verdict is a *stale* one rather than an imaginary one. An operator
+  reading "nothing was requested" there would assume no Copilot pass is coming.
 
   What changed is narrower than "the fail-open is closed": the span between the readiness
   write and the capture no longer fails open on *every* refusal, only where the write itself
