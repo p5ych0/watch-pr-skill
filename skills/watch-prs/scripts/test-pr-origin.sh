@@ -1469,7 +1469,7 @@ rm -rf "$_wf_bin"
 # WHAT THEY ARE NOT is a cleanup guarantee — and since #266 there is less of one to give:
 # the EXIT trap is armed either way, but `rmdir` alone cannot empty a directory holding the
 # leaf the write opened, so a failed write leaves the reservation whichever spelling
-# refuses. The `rb_refuse` spelling is uniformity, not a mechanism. And
+# refuses — while that leaf is still there, a same-UID process being free to unlink it. The `rb_refuse` spelling is uniformity, not a mechanism. And
 # deleting a guard entirely is caught by the runtime cases, by status and by
 # diagnostic. What is left is worth keeping and worth stating honestly: both writes
 # take their status, and both name the write in their message, so a future edit

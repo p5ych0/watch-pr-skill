@@ -315,9 +315,9 @@ esac
 # directory before the process ends. The caller opens the result once to check and
 # read it, and sees the open fail rather than an empty file.
 #
-# A REFUSAL PAST THE WRITE LEAVES BOTH, and that is #266's residue rather than an
-# oversight: the cleanup is `rmdir` alone, which fails on a directory holding the
-# leaf. The leaf may hold NOTHING or a PREFIX of the value — the storage can accept
+# A REFUSAL PAST THE WRITE LEAVES BOTH — while the reservation is still non-empty when the
+# cleanup runs — and that is #266's residue rather than an oversight: `rmdir` alone fails on
+# a directory holding the leaf, and succeeds where a same-UID process has unlinked it first. The leaf may hold NOTHING or a PREFIX of the value — the storage can accept
 # part of it and then refuse — so the caller sees a non-zero status and must not read
 # the file, whatever is in it.
 umask 077
@@ -546,8 +546,9 @@ rb_cleanup() {   # give back what this run created, while it is still empty
     # `rmdir` NEEDS NO SUCH CONFINEMENT because it refuses a symlink outright and refuses a
     # non-empty directory, so it can only ever take an empty directory at this name.
     #
-    # THE RESIDUE IS THE LITTER ALREADY ACCEPTED. A refusal after a write now leaves the
-    # directory and its leaf, because `rmdir` fails on a non-empty directory — which is the
+    # THE RESIDUE IS THE LITTER ALREADY ACCEPTED. A refusal after a write leaves the
+    # directory and its leaf while the directory is still non-empty when this runs, because
+    # `rmdir` fails on one that is — which is the
     # cost `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts, and the same KIND:
     # no leaf destroyed, and nothing beneath the reservation.
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
@@ -569,7 +570,8 @@ rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap
 #
 # NOT AFTER THE WRITE, AND SINCE #266 THAT IS THE HONEST STATEMENT. The cleanup is
 # `rmdir` alone, which fails on a directory holding the leaf this run just wrote, so a
-# signal landing between the write and `trap - EXIT` leaves the reservation AND the leaf.
+# signal landing between the write and `trap - EXIT` leaves the reservation AND the leaf —
+# unless a same-UID process unlinked that leaf first, after which the `rmdir` succeeds.
 # That residue is the accepted cost in
 # `docs/decisions/2026-09-01-origin-cleanup-races.md`. What bought it is narrower than "no
 # removal resolves a name" — `rmdir` resolves `$RB_DIR`, and against a replaced name it can
