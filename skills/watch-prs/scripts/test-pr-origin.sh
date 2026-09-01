@@ -1737,6 +1737,11 @@ fi
 rm -rf "$_pin_dir" "$_pin_bin"
 # ── A SIGNAL DURING THE RESERVATION ITSELF LEAVES NOTHING BEHIND ───────────
 #
+# NOTHING OF THIS RUN'''S, and nothing at all in what this case stages: the signal lands
+# while the reservation is still empty, so the `rmdir` succeeds. A same-UID process that
+# has filled it by then makes the same `rmdir` fail, which is the accepted residue the
+# populated-reservation case below measures — not this one.
+#
 # `mkdir` is an external command. Armed after it returned, the traps protected only
 # what came later: a signal arriving while the child ran terminated this shell
 # while that child went on to create the directory, and the caller — which removes

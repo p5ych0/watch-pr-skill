@@ -310,9 +310,11 @@ esac
 # the operator owns. The value is written by the single redirection that creates
 # the object, below, so there is no interval and no second lookup.
 #
-# A REFUSAL BEFORE THE WRITE LEAVES NOTHING, which is what the exclusive create is
-# for: such a run creates no file at all, and the EXIT cleanup `rmdir`s the empty
-# directory before the process ends. The caller opens the result once to check and
+# A REFUSAL BEFORE THE WRITE LEAVES NOTHING OF THIS RUN'S, which is what the exclusive
+# create is for: such a run creates no file at all, and the EXIT cleanup `rmdir`s the
+# directory before the process ends — WHILE IT IS EMPTY. A same-UID process that has put
+# anything in it makes the `rmdir` fail and the reservation stays, which is the residue
+# `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts and the fixture measures. The caller opens the result once to check and
 # read it, and sees the open fail rather than an empty file.
 #
 # A REFUSAL PAST THE WRITE LEAVES BOTH — while the reservation is still non-empty when the
@@ -562,7 +564,9 @@ rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap
     [[ -n ${1-} ]] && echo "$1" >&2
     exit "${2:-1}"
 }
-# AND A SIGNAL BETWEEN THE RESERVATION AND THE WRITE GIVES THE RESERVATION BACK. The
+# AND A SIGNAL BETWEEN THE RESERVATION AND THE WRITE GIVES THE RESERVATION BACK, so long
+# as it is still empty — a same-UID process that has filled it makes the `rmdir` fail here
+# exactly as it does for a refusal. The
 # caller performs no cleanup after a non-zero status, deliberately — it cannot know
 # who created the path — so an interrupted run used to leak its `watch-pr.*`
 # directory for the life of the machine. The obligation moved here with the
@@ -670,8 +674,9 @@ rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and 
 # the way; creating a private child first does not change any of their answers, and
 # NOTHING IS WRITTEN into the child until the walk has passed. A refusal from the
 # walk removes the directory again — the EXIT cleanup `rmdir`s it, which succeeds
-# precisely because nothing has been written yet — so the reservation is given back
-# rather than left behind.
+# because THIS RUN has written nothing yet — so the reservation is given back rather
+# than left behind, unless a same-UID process has put something there in the meantime,
+# which is the accepted residue and not a case this ordering can close.
 #
 # HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
 # this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
