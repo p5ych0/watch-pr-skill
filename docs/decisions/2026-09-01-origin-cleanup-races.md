@@ -27,7 +27,11 @@ empty. So any refusal that fires while a same-UID process has put something in t
 directory leaves it: the mismatch refusal, the origin read's, the walks'. When this was
 written the cleanup had a second, leaf-removing shape and this race was the window before
 the flag selecting it flipped; #266 removed that shape, which widens the residue to every
-refusal and narrows what a refusal can touch to nothing.
+refusal and narrows what a refusal can touch: `rmdir` reaches no leaf and nothing beneath
+the reservation, which is what the old removal reached. It is not nothing — `rmdir` still
+resolves `$RB_DIR` by name, so a same-UID process that substitutes its own EMPTY directory
+after the ownership checks has that directory removed. That race is the one this record
+already bounds, and it stays open.
 
 **Cost: the reservation directory and whatever it contains, left behind under a parent the
 caller named.** The contents are RACER-CONTROLLED and there is no upper bound on them:
