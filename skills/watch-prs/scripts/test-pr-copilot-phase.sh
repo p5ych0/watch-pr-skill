@@ -291,32 +291,27 @@ _open_args="$(grep -c 'PRIOR_FILE="${3:-}"' "$DIR/pr-copilot-phase.sh")"
 [ "$(cat "$TMP/sha.txt" 2>/dev/null)" = "$HEAD40" ] \
     && pass "…and writes the signed-off sha into the file the caller named" \
     || die "the sha file holds '$(cat "$TMP/sha.txt" 2>/dev/null)', not $HEAD40"
-# …AND IT IS EMPTIED BEFORE ANY REFUSAL THAT FOLLOWS THE CLEARING. That clearing is after
-# the bootstrap now, where `run_limited` exists to bound it — #245 — so what it covers is
-# every refusal from the argument checks onwards, which is where the driver can still read
-# the file.
+# …AND NO REFUSAL CLEARS IT, WHICH IS #245. There were two clearings and neither protected
+# a read that can happen: the driver reads `$HEAD_FILE` in the success arm and in the `3`
+# arm, every refusal exits 1 into the `*)` arm which reads nothing, and on success or pause
+# the WRITE has already replaced the file. Both were unbounded truncating opens on a
+# caller-named path — `>` follows a symlink and truncates its target — so they could destroy
+# an operator's file to protect nothing.
+#
+# What is pinned here is that the previous value is LEFT, on a refusal after the bootstrap
+# and on one before it, so a later change restoring either clearing has to say why. The
+# consequence they used to stand for is asserted where it lives, in
+# `test-pr-skill-contract.sh`: a refused record fence assigns no `CODEX_SHA` and disturbs no
+# retained one.
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 got="$(run record 7 "$TMP/nope.md")"
-{ [ "${got%%|*}" != 0 ] && [ ! -s "$TMP/sha.txt" ]; } \
-    && pass "…and a refusal after the clearing leaves no stale sha behind it" \
-    || die "a refused record left '$(cat "$TMP/sha.txt" 2>/dev/null)' in the sha file (got '$got')"
-
-# A REFUSAL *BEFORE* THE CLEARING LEAVES THE PREVIOUS VALUE, AND THAT IS THE POINT OF #245.
-# There used to be a second clearing above the bootstrap for exactly these — a PR number
-# that is not a number, and a library that cannot load — and it was an UNBOUNDED truncating
-# open on a caller-named path: `>` follows a symlink and truncates its target, so an arm
-# nothing could read from was still able to destroy a file.
-#
-# It could not be bounded where it was, because `run_limited` arrives WITH the bootstrap.
-# It did not need to be: the driver reads `$HEAD_FILE` in the success arm and in the `3`
-# arm, and a refusal exits 1 into the `*)` arm, which reads nothing. The assertion is
-# therefore about the DRIVER rather than about this file, and it lives in
-# `test-pr-skill-contract.sh`; here what is pinned is that the value is left, so that a
-# later change restoring the clearing has to say why.
+{ [ "${got%%|*}" != 0 ] && [ "$(cat "$TMP/sha.txt")" = 'STALE-SHA' ]; } \
+    && pass "…and a refusal after the bootstrap leaves the sha file alone" \
+    || die "a refused record did something other than leave the sha file alone (got '$got', sha=[$(cat "$TMP/sha.txt" 2>/dev/null)])"
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 got="$(run record notanumber "$TMP/body.md")"
 { [ "${got%%|*}" != 0 ] && [ "$(cat "$TMP/sha.txt")" = 'STALE-SHA' ]; } \
-    && pass "…while one refusing before the clearing leaves it, which the driver never reads" \
+    && pass "…and so does one refusing before the arguments are checked" \
     || die "an argument refusal did something other than leave the sha file alone (got '$got', sha=[$(cat "$TMP/sha.txt" 2>/dev/null)])"
 world; printf '%s\n' 'STALE-SHA' > "$TMP/sha.txt"
 rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
@@ -329,9 +324,9 @@ _bs_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$
     && pass "…and so does one that cannot bootstrap at all" \
     || die "a bootstrap refusal did something other than leave the sha file alone (rc=$_bs_rc out='$_bs_out')"
 
-# AND THE CLEARING IS BOUNDED. It is the one that matters now, so a FIFO at the name must
-# stop the stage rather than hang it — with nothing posted, since this runs before the
-# signoff.
+# AND A FIFO AT THE SHA PATH STOPS THE STAGE RATHER THAN HANGING IT. With the clearings
+# gone the WRITE is the only open on that path, and it is bounded — so this now proves the
+# bound on the write, with nothing posted, since the write precedes the signoff.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/shafifo"
     mkfifo "$TMP/shafifo" 2>/dev/null && {
