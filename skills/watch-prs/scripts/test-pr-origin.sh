@@ -1752,17 +1752,77 @@ rm -rf "$_pin_dir" "$_pin_bin"
 # handler would have been installed. The stub announces itself so the signal lands
 # inside that interval rather than at a guessed moment.
 _mkd_real=""
-_mkd_real="$(command -v mkdir 2>/dev/null)" || _mkd_real=""
+# THE DELEGATE LIVES BEHIND A SPACE, DELIBERATELY, WHICH IS #267's COVERAGE. The shim
+# below used to interpolate this path into its own text unquoted, so a `PATH` entry with a
+# space in it broke the delegated call and the case reported that the slow `mkdir` never
+# ran — a staging failure that reads as a broken test. Ordinary CI resolves its tools from
+# a space-free `PATH`, so the regression would not show there; routing the delegate through
+# a directory whose name contains a space is what makes this case exercise the fix on every
+# run, rather than only on an affected contributor's machine.
+# IT SETS A GLOBAL RATHER THAN PRINTING. Called in a command substitution it would run in
+# a SUBSHELL, and the wrapper's target has to reach the wrapper — written into a file
+# beside it here, so nothing depends on an export crossing back out.
+_sp_out=""
+_sp_real() {   # _sp_real <command> ; sets $_sp_out to a path containing a space, or empty
+    _sp_out=""
+    # AN ABSENT DELEGATE IS THE ONLY THING THAT MAY SKIP, and it is why `_sp_out` can come
+    # back empty at all: the callers below already skip by name where their command is not
+    # on this platform. EVERY OTHER FAILURE IS A TEST FAILURE — a `mkdir`, a write or a
+    # `chmod` that does not work leaves the staging incomplete, and returning quietly would
+    # hand the callers the same empty value, so both would print their success-looking skip
+    # and the suite would finish without exercising the regression at all. That is the
+    # shape this repository records as worse than no check.
+    _sp_r="$(command -v "$1" 2>/dev/null)" || return 0
+    [ -n "$_sp_r" ] || return 0
+    _sp_d="$TMP/spaced bin"
+    mkdir -p "$_sp_d" || die "could not create the spaced delegate directory for $1"
+    # THE TARGET IS READ FROM A FILE, NOT EMBEDDED. Interpolating it into the wrapper is
+    # the very defect this coverage exists for, and quoting it there would need `%q`, which
+    # `/bin/sh` has not got. The wrapper reads the path and execs it quoted.
+    printf '%s\n' "$_sp_r" > "$_sp_d/$1.target" || die "could not write the spaced delegate target for $1"
+    { printf '#!/bin/sh\n'
+      printf 'IFS= read -r _t < "$0.target" || exit 1\n'
+      printf 'exec "$_t" "$@"\n'; } > "$_sp_d/$1" || die "could not write the spaced delegate wrapper for $1"
+    chmod +x "$_sp_d/$1" || die "could not make the spaced delegate wrapper for $1 executable"
+    # AND IT IS PROVED USABLE BEFORE IT IS HANDED BACK, so a wrapper that was written but
+    # cannot run is a failure here rather than a skip two lines later.
+    #
+    # PROBED WITH THE REAL OPERATION, NOT WITH `--version` OR A BARE CALL. `--version` is a
+    # GNU extension neither `mkdir` nor `rmdir` has on stock macOS, and both REQUIRE an
+    # operand — so a probe combining the two would have failed on every valid wrapper on
+    # the mac-shaped job and taken the whole file down before these cases ran. This is the
+    # portability trap this repository records: assert the invariant, not one platform's
+    # route to it. Each wrapper does the harmless thing its command is for, on a directory
+    # made for the purpose.
+    _sp_p="$_sp_d/probe.$1"
+    rm -rf "$_sp_p"
+    case "$1" in
+        mkdir) "$_sp_d/$1" "$_sp_p" >/dev/null 2>&1 && [ -d "$_sp_p" ] \
+                   || die "the spaced delegate wrapper for mkdir does not create a directory"
+               rm -rf "$_sp_p" ;;
+        rmdir) mkdir -p "$_sp_p" || die "could not stage the rmdir wrapper probe"
+               "$_sp_d/$1" "$_sp_p" >/dev/null 2>&1 && [ ! -e "$_sp_p" ] \
+                   || die "the spaced delegate wrapper for rmdir does not remove a directory" ;;
+        *)     die "no probe defined for the spaced delegate wrapper for $1" ;;
+    esac
+    _sp_out="$_sp_d/$1"
+    return 0
+}
+_sp_real mkdir; _mkd_real="$_sp_out"
 _mkd_bin="$TMP/mkdbin"; mkdir -p "$_mkd_bin"
 _mkd_mark="$TMP/mkd.created"
 rm -f "$_mkd_mark"
-printf '#!/usr/bin/env bash\n%s "$@" || exit 1\n: > "$RB_MKD_MARK"\nsleep 3\n' "$_mkd_real" > "$_mkd_bin/mkdir"
+# THE RESOLVED PATH CROSSES IN THE ENVIRONMENT AND IS INVOKED QUOTED. Interpolated into
+# the generated script unquoted, a path containing a space parses as two words: the
+# delegated call fails, the helper cannot create its reservation, and the case dies saying
+# the slow `mkdir` never reported — a staging failure that reads as a broken test. #267.
+printf '#!/usr/bin/env bash\n"$RB_MKD_REAL" "$@" || exit 1\n: > "$RB_MKD_MARK"\nsleep 3\n' > "$_mkd_bin/mkdir"
 chmod +x "$_mkd_bin/mkdir"
 _mkd_dir="$TMP/mkdt.$$"
 rm -rf "$_mkd_dir"
 if [ -n "$_mkd_real" ] && [ -x "$_mkd_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    RB_MKD_MARK="$_mkd_mark" PATH="$_mkd_bin:$PATH" \
+    RB_MKD_MARK="$_mkd_mark" RB_MKD_REAL="$_mkd_real" PATH="$_mkd_bin:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$_mkd_dir" ) >/dev/null 2>&1 &
 _mkd_pid=$!
 _mkd_n=0
@@ -1815,7 +1875,8 @@ rm -rf "$_mkd_bin"; rm -f "$_mkd_mark"
 # cover — and the mac-shaped CI job cannot see that, because it runs on an Ubuntu
 # filesystem.
 _sig_real=""
-_sig_real="$(command -v rmdir 2>/dev/null)" || _sig_real=""
+# BEHIND A SPACE TOO, for the reason the `mkdir` case above gives. #267.
+_sp_real rmdir; _sig_real="$_sp_out"
 _sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
 # AND THE STUB ANNOUNCES ITSELF. The interval to aim at is the one where the
 # cleanup is inside `rmdir`, and a fixed sleep is a guess at when that starts: too
@@ -1824,7 +1885,8 @@ _sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
 # directory from the FIRST signal and passes without ever delivering a second one.
 # The stub writes a marker, this waits for it, and the second `kill` is required to
 # succeed.
-printf '#!/usr/bin/env bash\n: > "$RB_SIG_MARK"\nsleep 2\nexec %s "$@"\n' "$_sig_real" > "$_sig_bin/rmdir"
+# THE RESOLVED PATH CROSSES IN THE ENVIRONMENT HERE TOO, for the reason above. #267.
+printf '#!/usr/bin/env bash\n: > "$RB_SIG_MARK"\nsleep 2\nexec "$RB_SIG_REAL" "$@"\n' > "$_sig_bin/rmdir"
 printf '#!/usr/bin/env bash\nsleep 3\n' > "$_sig_bin/git"
 chmod +x "$_sig_bin/rmdir" "$_sig_bin/git"
 _sig_dir="$TMP/sigt.$$"
@@ -1833,7 +1895,7 @@ _sig_mark="$TMP/sig.cleanup-started"
 rm -f "$_sig_mark"
 if [ -n "$_sig_real" ] && [ -x "$_sig_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    RB_SIG_MARK="$_sig_mark" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
+    RB_SIG_MARK="$_sig_mark" RB_SIG_REAL="$_sig_real" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
 _sig_pid=$!
 _sig_n=0
 while [ ! -d "$_sig_dir" ] && [ "$_sig_n" -lt 100 ]; do _sig_n=$(( _sig_n + 1 )); sleep 0.1; done
