@@ -430,8 +430,9 @@ Then:
      file's contents: depending on where the run stopped it may hold the previous
      round's value, nothing, or the id this run captured. The stage empties it once it
      is past the bootstrap — that open is also how it proves the path is usable before
-     it revokes anything — so a refusal before that point leaves your file untouched
-     and one after it usually does not. Do not read the file on a non-zero status. The order is revoke → prove → baseline → request: the
+     it revokes anything, and it leaves a **sentinel** rather than an empty file, so a
+     refusal cannot hand the watch a value it would accept as "no prior review". Do not
+     read the file on a non-zero status; `pr-watch.sh` refuses the sentinel and stops. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

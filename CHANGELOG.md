@@ -15,10 +15,20 @@
   file passes the guard and the open truncates its target.
 
   **After a refusal the helper promises nothing about that file's contents.** Where a run
-  stops decides what is left — the previous round's value, nothing, this round's captured id,
-  or another process's bytes — and none of it is this round's baseline. The only thing that
-  makes a value one is `open` returning 0. Three review rounds went into enumerating those
-  states and the list was wrong by one each time, so the invariant is stated instead.
+  stops decides what is left — the previous round's value, a refusal sentinel, this round's
+  captured id, or another process's bytes — and none of it is this round's baseline. The
+  only thing that makes a value one is `open` returning 0. Three review rounds went into
+  enumerating those states and the list was wrong by one each time, so the invariant is
+  stated instead.
+
+  **The readiness write leaves a sentinel rather than an empty file**, and that closes a
+  fail-open the earlier emptying had. An empty baseline is *legal* — it means "no prior
+  review to wait past" — so a refusal that emptied left a value `pr-watch.sh` accepts, and
+  with the driver's `exit` shadowed to return the watch announced `PR_REVIEW_READY` for a
+  review no request was made for. The sentinel is not a review id, so the watch refuses it
+  with `reason=malformed_review_id` before any network read and the driver stops. The
+  ordering guarantee is unchanged — still a truncating open, still bounded, still ahead of
+  the revocation — but it is no longer bought with a fail-open.
 
   **Truncation through a caller-named path is not what changed, and is not removable here.**
   The surviving clearing opens the baseline with `>`, so a symlink a same-UID process leaves

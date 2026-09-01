@@ -1503,18 +1503,21 @@ rejects a write-only file the real write handles, and its only gain needs root t
 No shell redirection expresses the write's own mode, so the operation that proves it is
 the truncation.
 
-THE PRICE IS PREMATURE ACCEPTANCE, NOT A WAITING CYCLE, and it is worth naming exactly. A
-refusal between the clearing and the write leaves this file EMPTY rather than stale; if
-that refusal falls through the driver's shadowed `exit` into the wait step, the empty
-baseline makes the watch skip its equality check, so a terminal review the previous
-round's id would have held back as `awaiting_new_review` is announced as
-`PR_REVIEW_READY` — a review no new request was made for, accepted as this round's answer.
-It needs the stale id to have equalled the current one, which is the narrow case.
+IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is not a detail. Emptying looked free
+because an empty baseline is LEGAL — it means "no prior review to wait past", which this
+stage can legitimately produce when Copilot has never reviewed. Which is exactly why it
+was dangerous: a refusal between that write and the real one left a value the watch
+ACCEPTS, and with the driver's `exit` shadowed to return, the watch skipped its equality
+check and announced `PR_REVIEW_READY` for a review no request was made for. The readiness
+proof was buying its ordering guarantee with a fail-OPEN.
 
-It is still the trade to take, because the alternative is unconditional: with no clearing
-here, EVERY unusable baseline path is discovered only at the write, which is after the
-signoff has been revoked, and the phase reports that it did not open having mutated the
-PR. A narrow premature acceptance against a certain half-mutated phase.
+The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
+status 2, at the call and before any network read — and the driver stops rather than
+accepting a pass that never happened. The proof is unchanged: still a truncating open on
+the path, still bounded, still ahead of the revocation, so an unusable baseline is found
+before anything is posted. The refusal that used to fail open now fails closed, and there
+is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
+the phase fixture asserts the exact string left behind, so the two halves cannot drift.
 
 THE HELPER MAKES NO PROMISE ABOUT THIS FILE'S CONTENTS AFTER A REFUSAL, and that
 replaces the list of residues this document carried for three rounds. Enumerating them

@@ -284,20 +284,25 @@ if [[ $STAGE = open ]]; then
     # write's own mode — O_WRONLY without truncate or append — so the operation that proves
     # it IS the truncation.
     #
-    # THE PRICE IS PAID KNOWINGLY, AND IT IS NOT A WAITING CYCLE. A refusal between here and
-    # the write leaves this file EMPTY rather than holding the previous round's id — and if
-    # that refusal falls through the driver's shadowed `exit` into the wait step, an empty
-    # baseline makes `pr-watch.sh` skip its equality check, so a terminal review that the
-    # previous round's id would have held back as `awaiting_new_review` is announced as
-    # `PR_REVIEW_READY` instead. The cost is PREMATURE ACCEPTANCE of a review no new request
-    # was made for, in the narrow case where the stale id equals the current one.
+    # IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is what stops the readiness proof
+    # from being a fail-open. Emptying looked free because an empty baseline is LEGAL — it
+    # means "no prior review to wait past", which is a real answer this stage can produce
+    # when Copilot has never reviewed. That is exactly why it was dangerous: a refusal
+    # between here and the write left a value the watch ACCEPTS. Falling through the
+    # driver's shadowed `exit`, the watch skips its equality check and announces
+    # `PR_REVIEW_READY` for a review no request was made for.
     #
-    # It is still the trade to take, because the alternative is unconditional: without this
-    # clearing EVERY unusable baseline path reaches the write only after the signoff has been
-    # revoked, and the phase reports "did not open" having mutated the PR. A narrow premature
-    # acceptance against a certain half-mutated phase.
-    run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$PRIOR_FILE" \
-        || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
+    # A SENTINEL IS NOT A REVIEW ID, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
+    # status 2 — and the driver stops instead of accepting a pass that never happened. The
+    # same refusal that used to fail open now fails closed, and the readiness proof is
+    # unchanged: this is still a truncating open on the path, still bounded, still ahead of
+    # the revocation, so an unusable baseline is found before anything is posted.
+    #
+    # IT MUST NOT BE EMPTY AND MUST NOT PARSE AS AN ID. Empty is the legal "no floor" value
+    # above; digits, or `comment:` and digits, are the two shapes the watch accepts. Anything
+    # else is refused, and this is spelled so a reader of the file sees why it is there.
+    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" refused-no-baseline > "$1"' _ "$PRIOR_FILE" \
+        || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase

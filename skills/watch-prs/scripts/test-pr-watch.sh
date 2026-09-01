@@ -832,6 +832,26 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
     && pass "…and trailing newlines are not part of the id" \
     || die "a baseline with trailing newlines did not match (rc=$rc out='$out')"
 
+# AND `pr-copilot-phase.sh`'S REFUSAL SENTINEL IS REFUSED, WHICH IS THE POINT OF IT. That
+# stage writes a readiness value into this same file before it revokes anything, and a
+# refusal between that write and the real one leaves the sentinel behind. It must NOT read
+# as a baseline: with the driver's `exit` shadowed to return, a refused `open` reaches this
+# watch, and an EMPTY file there would be taken as "no prior review" and let a terminal
+# verdict through as this round's answer — a pass that was never requested. The sentinel is
+# not a review id, so it is refused at the call, before any network read.
+#
+# THE TWO HALVES ARE PINNED TOGETHER: the phase fixture asserts the exact string the stage
+# leaves, and this asserts the same string is refused here. Change one and the other fails.
+printf 'refused-no-baseline\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
+    && pass "…and the phase's refusal sentinel is refused, not read as a baseline" \
+    || die "the refusal sentinel was not refused (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a terminal verdict was announced against the refusal sentinel: $out" \
+    || pass "…with no verdict announced for it"
+
 # AN EMPTY FILE IS A LEGAL BASELINE, meaning there was no prior review to wait past.
 # This is the case the unreadable one must NOT be allowed to look like.
 : > "$_bl"

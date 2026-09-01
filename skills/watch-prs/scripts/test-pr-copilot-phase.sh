@@ -1086,22 +1086,22 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 # mutation this stage makes, so an unusable path is found before the signoff is revoked
 # rather than after.
 #
-# EMPTY IS THE WEAKER BASELINE AND IT IS PAID FOR KNOWINGLY. `test-pr-watch.sh` measures
-# that: the watch holds a verdict back only when the id it reads equals the baseline, and
-# skips the comparison entirely when the baseline is empty. So where the value emptied here
-# would have EQUALLED the current terminal review, the cost is PREMATURE ACCEPTANCE — the
-# watch announces `PR_REVIEW_READY` for a review no new request was made for, where the
-# stale id would have held it back as `awaiting_new_review`. Not a waiting cycle.
-#
-# It is still the trade to take, because removing the clearing costs a phase that reports
-# "did not open" after revoking a signoff — which is what two review rounds found — and that
-# one is unconditional while this is narrow. `SKILL-RATIONALE.md` carries the argument.
+# AND IT LEAVES A SENTINEL, NOT AN EMPTY FILE, which is what makes this refusal fail
+# CLOSED. Emptying looked free because an empty baseline is LEGAL — it means "no prior
+# review to wait past" — so a refusal that emptied left a value the watch ACCEPTS, and with
+# the driver's `exit` returning the watch then announced `PR_REVIEW_READY` for a review no
+# request was made for. The sentinel is not a review id, so `pr-watch.sh` refuses it with
+# `reason=malformed_review_id` and the driver stops. `test-pr-watch.sh` holds that half.
 world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and a refusal after the bounded clearing leaves no stale baseline" \
-    || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
+_rb_res="$(cat "$TMP/prior.txt" 2>/dev/null)"
+case "$_rb_res" in
+    refused-no-baseline) pass "…and a refusal after the readiness write leaves a sentinel the watch refuses" ;;
+    stale-from-a-previous-round) die "the readiness write did not happen before the refusal" ;;
+    "") die "a refused open left an EMPTY baseline, which the watch accepts as 'no floor'" ;;
+    *) die "a refused open left '$_rb_res' in the baseline file" ;;
+esac
 # AND IT REQUESTED NOTHING, which is what every refusal guarantees — unlike "posts nothing",
 # which is false once the revocation has been written. NOT "no watch is armed": the driver
 # reaches the wait step after a refusal whenever `exit` returns, which is what the open-window
