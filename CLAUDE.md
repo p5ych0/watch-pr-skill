@@ -961,7 +961,8 @@ author side of that contract matters:
   establish intent, never permission. Where a limitation is genuinely accepted,
   record it on the base ref as a dated file in `docs/decisions/`.
 
-  **Three are accepted there, one record each.** #160: the transport candidate name
+  **Each accepted limitation has one record**, and they are enumerated in the reviewer
+  files rather than counted here — a count went stale the first time a record was added. #160: the transport candidate name
   is published in argv before the `mkdir` reserves it. #162: the reservation is an
   inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. And
   2026-08-29: `pr-setup.sh` removes NOTHING — not the files it wrote, not the transport,

@@ -588,6 +588,23 @@ readable origin ends with the reservation present and empty. That is stated in t
 and staged behaviourally on both sides. Raise a cost you think was underweighted as a
 non-blocking note.
 
+**A fourth is accepted since 2026-09-01**, in
+`docs/decisions/2026-09-01-origin-cleanup-races.md`: `pr-origin.sh` flips `RB_PHASE`
+inside each write's own redirection, so the leaf is OPEN before the assignment that marks
+it as this run's, and TWO races survive that shape. A refusal or a signal while the phase
+is still `pre` and a leaf exists leaves the reservation behind — `rmdir` alone cannot
+remove a directory holding a leaf — which is LITTER under a parent the caller named, never
+loss. And once the phase is `post` the cleanup removes `$OUT` by NAME, so a same-UID
+process that replaced the leaf between the write and the cleanup has its object removed
+instead; the exposure is one object, and only one placed inside a directory this run
+created with `mkdir -m 700`. Both costs are STAGED in `test-pr-origin.sh` rather than
+argued — one drives the pin mismatch with a racer that plants a leaf, the other drives the
+open-then-fail write with a racer that replaces it — so a bound that changes fails a case.
+Every alternative placement of the flip is tabulated in the record and each is worse; the
+class is closed only by a descriptor-relative removal, which shell has not got. Do not
+raise either race as a defect, and do not "fix" the flip by moving it out of the
+redirection. Raise a cost you think was underweighted as a non-blocking note.
+
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection.
