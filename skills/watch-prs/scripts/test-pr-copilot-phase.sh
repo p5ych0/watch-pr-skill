@@ -1080,7 +1080,7 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
     && pass "…and an empty baseline is written over a stale one, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
 
-# A REFUSAL AFTER THE BOUNDED CLEARING LEAVES THE FILE EMPTY, and that clearing is the one
+# A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing
 # #245 did NOT remove. It is below the bootstrap, `run_limited` bounds it, and it is the
 # readiness proof for the exact operation the write performs — standing before the only
 # mutation this stage makes, so an unusable path is found before the signoff is revoked

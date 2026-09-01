@@ -301,6 +301,14 @@ if [[ $STAGE = open ]]; then
     # IT MUST NOT BE EMPTY AND MUST NOT PARSE AS AN ID. Empty is the legal "no floor" value
     # above; digits, or `comment:` and digits, are the two shapes the watch accepts. Anything
     # else is refused, and this is spelled so a reader of the file sees why it is there.
+    #
+    # AND IT NARROWS THE WINDOW RATHER THAN CLOSING IT. This write truncates before it
+    # writes, so a failure between the two — ENOSPC, a quota — still leaves the file empty,
+    # which the watch still accepts as "no floor". No shell redirection truncates and writes
+    # atomically, so no writer can close that alone: the fix is that an EMPTY file stops
+    # being legal and "no prior review" gets an explicit token, which is a change to
+    # `pr-watch.sh`'s contract with three writers and is #264. Until then this is strictly
+    # narrower than emptying, which failed open on EVERY refusal in this span.
     run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" refused-no-baseline > "$1"' _ "$PRIOR_FILE" \
         || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
