@@ -1123,6 +1123,17 @@ if command -v mkfifo >/dev/null 2>&1; then
         grep -q -- '--add-reviewer' "$TMP/calls" \
             && die "Copilot was requested despite the blocked baseline write" \
             || pass "…with Copilot not requested"
+        # AND THE SIGNOFF WAS NOT REVOKED, which is the half that made removing the
+        # bounded clearing a regression rather than a subtraction. That clearing was
+        # also the READINESS check on this path, and it stood BEFORE the revocation:
+        # without one, a FIFO here is not discovered until the write far below, by
+        # which time `gh pr comment` has already revoked the previous Copilot signoff
+        # — so the stage reports that the phase did not open while having mutated the
+        # PR. Asserting only `--add-reviewer` could not see that: the request comes
+        # after the write either way.
+        grep -q 'gh pr comment' "$TMP/calls" \
+            && die "the previous Copilot signoff was revoked before the unusable baseline path was found" \
+            || pass "…and with the previous signoff not revoked, so the PR is untouched"
     }
     rm -f "$TMP/fifo.txt"
 else

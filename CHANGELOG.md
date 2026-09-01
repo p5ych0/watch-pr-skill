@@ -27,7 +27,20 @@
   caller never asked for. A `>` on a path the operator named could truncate whatever a
   symlink pointed at, or hang on a FIFO planted there, in order to produce a value that is
   weaker than the one it overwrote. A refused `open` now leaves the file exactly as it found
-  it, and posts nothing — so no request is left waiting for a baseline to bound it.
+  it, and **no review request is left waiting for a baseline to bound it**.
+
+  Not "posts nothing", which would be false: `open` revokes any earlier Copilot signoff
+  before it captures the baseline, so a refusal after that point has already written one
+  comment to the PR. What every refusal does guarantee is that Copilot was never requested,
+  which is what makes the untouched baseline safe to leave. The readiness check on the
+  baseline path is kept ahead of that revocation, and no longer truncates to perform it —
+  `>>` blocks on a FIFO and fails on a directory just as `>` did, while writing no bytes to
+  the regular file it is meant for.
+
+  `skills/watch-prs/SKILL-RATIONALE.md` is updated with it. It carried the old argument —
+  that the file is emptied above the bootstrap so a refusal cannot leave the previous
+  round's id — and `SKILL.md` sends a reader there, so leaving it would have handed the
+  superseded safety case to whoever went looking for the reasoning.
 
 ## [2.0.96] — 2026-09-01
 

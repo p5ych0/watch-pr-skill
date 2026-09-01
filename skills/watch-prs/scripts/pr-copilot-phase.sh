@@ -250,13 +250,28 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # AND IT IS NOT EMPTIED HERE EITHER. This clearing was bounded, so it was not #245's
-    # defect — but it bought the same nothing the one above the bootstrap did, and leaving
+    # AND IT IS NOT EMPTIED HERE EITHER. That clearing was bounded, so it was not #245's
+    # defect — but emptying bought the same nothing the pre-bootstrap one did, and leaving
     # it would have left the file contradicting the argument beside it. Emptying is not a
     # weaker form of protection here; it is the opposite of protection, because an empty
     # baseline suppresses nothing while the value it replaced might have. What makes this
     # round's baseline right is the WRITE below: bounded, its status taken, and read back
     # and compared before Copilot is requested.
+    #
+    # BUT THE CLEARING WAS DOING A SECOND JOB, and only removing it made that visible: it
+    # was also the READINESS check on the path, and it stood BEFORE the revocation. Take it
+    # away and an unusable baseline — a directory, a FIFO, an unwritable file — is not found
+    # until the write far below, which is after `gh pr comment` has already revoked the
+    # previous Copilot signoff. The stage then reports that the phase did not open while
+    # having mutated the PR, which is the one outcome this ordering exists to prevent.
+    #
+    # SO THE PROBE STAYS AND THE TRUNCATION GOES. `>>` opens for append: it blocks on a
+    # FIFO and fails on a directory or an unwritable path exactly as `>` did, and on the
+    # regular file this is meant for it writes no bytes and destroys nothing. Bounded for
+    # the same reason the write is — a blocking open is not a failing one, and `run_limited`
+    # turns it into a refusal while the phase has still done nothing.
+    run_limited 10 /usr/bin/env bash -p -c '>> "$1"' _ "$PRIOR_FILE" \
+        || { echo "ABORT: the baseline file '$PRIOR_FILE' cannot be opened for writing; it is a directory, is unwritable, or opening it blocked. Nothing has been posted."; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase
