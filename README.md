@@ -313,8 +313,10 @@ Then:
    "no findings" — and so is an unreadable baseline file. "There is no earlier
    review to wait past" is a real answer and is spelled `none`; an EMPTY file is a
    refusal, because every writer truncates before it writes and so a failed write
-   produces one. A failed read that quietly became either would let the watch
-   report the review the round just answered as the next one.
+   produces one. A failed read that quietly became the `none` token would let the
+   watch report the review the round just answered as the next one — which is why
+   the read is refused rather than degraded, and why empty is refused rather than
+   read as no floor.
 
    Every comment on the review counts as a finding, replies included. A reviewer
    sometimes delivers a clean verdict as a reply, and that is *not* exempted:

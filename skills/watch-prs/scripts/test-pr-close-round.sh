@@ -1053,6 +1053,36 @@ got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 # nothing.
 raw_is "$TMP/prior.txt" 'none
 ' "post's none baseline"
+
+# ── THE READ-BACK COMPARES THE TERMINATOR, AND WHY THAT IS ASSERTED ON THE SOURCE ─
+#
+# The read-back used `$(<…)`, which STRIPS trailing newlines, so it could not see the
+# delimiter `pr-watch.sh` now requires. A path replaced between the write and the read with
+# the SAME id and no newline compared equal, this stage posted the request, and the watch
+# then refused the file as `unterminated_after_review_file` — with the round IRREVERSIBLY
+# half-closed, since the summary is up and the next pass is queued.
+#
+# THE WINDOW CANNOT BE STAGED, and that is a fact about its shape rather than a gap left
+# open. The write and the read-back are ADJACENT: no external command runs between them, so
+# there is nothing on `PATH` a shim can attach to, and a racer would be aiming at an
+# interval of two shell operations — a case that tries would pass on scheduling. This was
+# built and did not land: a `gh` shim fires only at the post, which is after both.
+#
+# SO WHAT IS ASSERTED IS THE COMPARISON'S SHAPE: that the child compares against the value
+# WITH its newline, and that the caller no longer reads the file into a stripping
+# substitution. That is weaker than a behavioural case and it is the strongest thing
+# available here — and it is exact enough to fail: restoring `$(<…)` or dropping the
+# newline from the expected value both break it.
+_rb_body="$(awk '/# THE READ-BACK COMPARES RAW BYTES/,/nothing has been posted."; return 1; }/' "$SCRIPT")" || _rb_body=""
+case "$_rb_body" in
+    *'_ "$PRIOR_FILE" "$prior
+"'*) pass "the baseline read-back compares against the value INCLUDING its terminator" ;;
+    *) die "the read-back does not compare the terminator; a replacement stripping it would pass: '$_rb_body'" ;;
+esac
+case "$_rb_body" in
+    *'$(<"$PRIOR_FILE")'*) die "the read-back still reads through a substitution, which strips the terminator" ;;
+    *) pass "…and does not read it through a substitution, which would strip that byte" ;;
+esac
 { [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
     && pass "…and the prior file reads back as the none token rather than empty or a previous round's value" \
     || die "a head with no review yet left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"

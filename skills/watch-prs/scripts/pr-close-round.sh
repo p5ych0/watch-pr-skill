@@ -582,10 +582,32 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     prior="${prior:-none}"
     printf '%s\n' "$prior" > "$PRIOR_FILE" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted."; return 1; }
-    _back="$(<"$PRIOR_FILE")" \
-        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; nothing has been posted."; return 1; }
-    [ "$_back" = "$prior" ] \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; nothing has been posted."; return 1; }
+    # THE READ-BACK COMPARES RAW BYTES, TERMINATOR INCLUDED, IN THE CHILD. `$(<…)` strips
+    # trailing newlines, so it cannot see the delimiter the watch now requires: a path
+    # replaced between the write and the read with the SAME id and no newline compared
+    # equal, this stage posted the request, and the watch then refused the file as
+    # `unterminated_after_review_file` — with the round irreversibly half-closed, since the
+    # summary is up and the next pass is queued.
+    #
+    # AND THE COMPARISON HAPPENS IN THE CHILD, for the reason `pr-copilot-phase.sh` gives
+    # at its own read-back: `read` reports ordinary EOF and a read that failed part-way with
+    # the same status, so a child that hands its bytes back leaves the caller unable to tell
+    # them apart. `_r` is compared against the value plus its newline, and only the verdict
+    # crosses.
+    #
+    # NOT BOUNDED, AND THAT IS CONSISTENT RATHER THAN AN OVERSIGHT. `run_limited` is not
+    # loaded in this file, and bounding the read alone would buy nothing: the WRITE above it
+    # is a plain redirection, so a path that blocks on open has already blocked there. A
+    # watchdog here would need one there too, which is a different change from this one.
+    /usr/bin/env bash -p -c '
+        { [ -f /dev/fd/9 ] || exit 6
+          IFS= read -r -d "" _r <&9
+          _s=$?
+        } 9<"$1" || exit 4
+        [ "$_s" -eq 0 ] && exit 5
+        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$prior
+" \
+        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written including its terminating newline; nothing has been posted."; return 1; }
     # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
     # never triggered by a mention and never by a push — only by `--add-reviewer` —
     # so a Copilot round that posted the Codex mention requested nothing at all,
