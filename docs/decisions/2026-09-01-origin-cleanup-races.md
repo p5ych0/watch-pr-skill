@@ -72,6 +72,26 @@ with the residue the fix would leave — a post-write refusal would leak the dir
 its leaf, which is the litter this record already accepts, and of the same kind: nothing
 destroyed.
 
+## Why the flip is not moved instead
+
+The window exists because the flip is inside the redirection. Every other placement was
+tried, and each is worse — this is the comparison the reviewer files point at:
+
+| placement | residue |
+| --- | --- |
+| inside the redirection (today) | a signal in a two-instruction window leaves the reservation as it found it — litter |
+| before the redirection | a signal in the window runs the leaf-removing shape with nothing written: **loss**, not litter |
+| at the walks | every refusal between the walks and the write runs the leaf-removing shape for a leaf the run never created |
+| after the write | every refusal between the open and the write leaks, over a longer interval |
+| record the leaf's inode and compare before removing | check-then-use: the removal resolves the name again after the comparison, and `stat` is a name |
+| ignore signals across the write | trades a bounded litter for a write that cannot be interrupted — worse on a blocking target |
+| a descriptor-relative unlink in the handler | not available in shell |
+
+The current shape is the only one whose worst case is litter rather than loss, and it
+shrinks the interval to two adjacent operations. Note that the rows naming a leaf-removing
+shape describe a removal that is itself a defect (#266); once that is gone the comparison
+narrows further, but the flip stays where it is for the reason in the first row.
+
 ## What would change the accepted half
 
 A shell with descriptor-relative removal, or a transport that is not a shell. Until then a

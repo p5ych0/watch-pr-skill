@@ -2147,19 +2147,24 @@ _lit_bin="$TMP/litbin"; rm -rf "$_lit_bin"; mkdir -p "$_lit_bin"
 # THE REAL `mkdir` IS RESOLVED BEFORE THE SHIM IS ON `PATH`, and embedded absolutely: a
 # shim that called `mkdir` by name would find itself. It is not written literally because
 # the mac-shaped job builds its own `PATH` and stock macOS keeps it elsewhere.
+# THE PATH CROSSES IN THE ENVIRONMENT AND IS INVOKED QUOTED, which is what the `_rz` racer
+# above already does. Embedded unquoted, a resolved path containing a space parses as two
+# words, both delegated calls fail, the helper cannot create its reservation, and the case
+# reports that the racer planted nothing — a green-looking failure that measures nothing.
 _lit_real="$(command -v mkdir)"
 { printf '#!/bin/sh\n'
-  printf '%s "$@" || exit $?\n' "$_lit_real"
+  printf '"$RB_REAL_MKDIR" "$@" || exit $?\n'
   printf '[ -n "$RB_RACE_DIR" ] && [ -d "$RB_RACE_DIR" ] || exit 0\n'
   printf ': > "$RB_RACE_DIR/pin" || exit 1\n'
   printf ': > "$RB_RACE_DIR/sibling" || exit 1\n'
-  printf '%s -p "$RB_RACE_DIR/sub/deep" || exit 1\n' "$_lit_real"
+  printf '"$RB_REAL_MKDIR" -p "$RB_RACE_DIR/sub/deep" || exit 1\n'
   printf ': > "$RB_RACE_DIR/sub/deep/file" || exit 1\n'
   printf 'exit 0\n'; } > "$_lit_bin/mkdir"
 chmod +x "$_lit_bin/mkdir"
 _lit_dir="$TMP/lit.$$"; rm -rf "$_lit_dir"
 _lit_rc=0
 _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR="$_lit_dir" \
+    RB_REAL_MKDIR="$_lit_real" \
     HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
     /usr/bin/env bash -p "$SCRIPT" pin "$_lit_dir" 2>&1)" || _lit_rc=$?
