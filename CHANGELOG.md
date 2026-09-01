@@ -14,12 +14,19 @@
   filed. The symlink half needs no race — `[[ -f ]]` follows one, so a symlink to a regular
   file passes the guard and the open truncates its target.
 
-  Where a run stops decides what the file then holds, and there are four answers: a refusal
-  from the bootstrap leaves it as it found it; a refusal between the surviving clearing and
-  the write leaves it empty; a failed `gh pr edit --add-reviewer` leaves the captured id,
-  the write having already replaced the file; and a failed read-back leaves whatever another
-  process substituted, since that refusal fires exactly when the file stopped holding what
-  was written. The reason the surviving clearing is kept is below.
+  **After a refusal the helper promises nothing about that file's contents.** Where a run
+  stops decides what is left — the previous round's value, nothing, this round's captured id,
+  or another process's bytes — and none of it is this round's baseline. The only thing that
+  makes a value one is `open` returning 0. Three review rounds went into enumerating those
+  states and the list was wrong by one each time, so the invariant is stated instead.
+
+  **Truncation through a caller-named path is not what changed, and is not removable here.**
+  The surviving clearing opens the baseline with `>`, so a symlink a same-UID process leaves
+  at that name has its target truncated — and removing the clearing would not change that,
+  because the write beside it opens the same name the same way. That is what this handoff is,
+  here and in `gate`'s head file and `record`'s sha file. What is removed is narrower: an
+  open that was **unbounded** and stood where nothing could bound it. The reason the
+  surviving clearing is kept is below.
 
   It survived that release because the reader it was written for is real, and still is:
   with the driver's `exit` shadowed to return, a refused `open` falls past its fence into

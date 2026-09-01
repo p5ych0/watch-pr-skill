@@ -97,6 +97,12 @@ set -uo pipefail
 # **THE FILE WAS EMPTIED TWICE AND IS NOW EMPTIED ONCE**; what is stated here is only what
 # THIS arm did.
 #
+# AND NOT THE SYMLINK. The surviving clearing opens this path with `>`, so a symlink a
+# same-UID process leaves at that name still has its target truncated — removing the
+# clearing would not change that, since the WRITE beside it opens the same name the same
+# way. Truncating through a path the caller named is what this handoff IS. What comes out
+# here is narrower: an open that was UNBOUNDED and stood where nothing could bound it.
+#
 # EMPTYING WAS NEVER THE PROTECTION. `pr-watch.sh` holds a terminal verdict back on ONE
 # condition — the id it finds equals the baseline — and the whole comparison is guarded by
 # `[ -n "$AFTER_REVIEW" ]`, so an EMPTY baseline holds nothing back. This arm therefore did

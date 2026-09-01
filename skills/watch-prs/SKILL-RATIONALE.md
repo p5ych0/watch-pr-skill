@@ -1516,13 +1516,22 @@ here, EVERY unusable baseline path is discovered only at the write, which is aft
 signoff has been revoked, and the phase reports that it did not open having mutated the
 PR. A narrow premature acceptance against a certain half-mutated phase.
 
-WHAT THE FILE HOLDS AFTER A REFUSAL THEREFORE HAS FOUR ANSWERS, and a reader should not
-be promised fewer: untouched where the bootstrap refused, empty between the clearing and
-the write, the CAPTURED ID where the write succeeded and `--add-reviewer` then failed, and
-— where the read-back refused — whatever the OTHER process put there, since a mismatch is
-detected precisely when the file no longer holds what was written. That fourth is not the
-captured id and must not be described as it: `test-pr-copilot-phase.sh` stages its
-empty-file version. #245.
+THE HELPER MAKES NO PROMISE ABOUT THIS FILE'S CONTENTS AFTER A REFUSAL, and that
+replaces the list of residues this document carried for three rounds. Enumerating them
+kept producing a list that was wrong by one — a refusal past the write leaves the captured
+id, a CONTENT mismatch leaves what another process substituted, an unreadable-but-written
+file leaves the captured id again — and each correction invited the next. The invariant is
+the same in every case and does not have to be enumerated: after a refusal the file holds
+whatever the last successful operation left there, which may be the previous round's value,
+nothing, this round's captured id, or another process's bytes. NONE of it is this round's
+baseline, and the only thing that makes a value one is `open` returning 0.
+
+THE SYMLINK IS NOT CLOSED BY #245 AND WAS NEVER GOING TO BE. The surviving clearing opens
+`$PRIOR_FILE` with `>`, so a symlink a same-UID process leaves at that name has its target
+truncated — and removing the clearing would not change that, because the WRITE beside it is
+`printf … > "$1"` on the same name. Truncating through a caller-named path is what this
+handoff IS, here and in `gate`'s head file and `record`'s sha file. What #245 removed is
+narrower and real: an open that was UNBOUNDED and stood where nothing could bound it. #245.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 

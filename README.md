@@ -425,7 +425,13 @@ Then:
      current Copilot review id into, before requesting the pass; hand that same path
      to `pr-watch.sh --after-review-file` for the rounds that follow, or the first
      poll accepts a review made before the request. The loop uses one of the working
-     files set up at the start. The order is revoke → prove → baseline → request: the
+     files set up at the start. **A value in that file is this round's baseline only
+     when `open` returns 0.** After a refusal the stage promises nothing about the
+     file's contents: depending on where the run stopped it may hold the previous
+     round's value, nothing, or the id this run captured. The stage empties it once it
+     is past the bootstrap — that open is also how it proves the path is usable before
+     it revokes anything — so a refusal before that point leaves your file untouched
+     and one after it usually does not. Do not read the file on a non-zero status. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The

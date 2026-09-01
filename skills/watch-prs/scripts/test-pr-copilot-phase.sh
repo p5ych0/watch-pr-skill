@@ -1111,14 +1111,17 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested by a refused open" \
     || pass "…with Copilot not requested, so nothing new is coming for the watch to find"
 
-# A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks
-# waiting for a reader, and the top-of-file clearing skips a FIFO because it tests
-# `-f` — so the unconditional open below it was the one that waited, and the second
-# write is after the revocation has been posted, which is a hang with the phase half
-# advanced. A type check before the open is not the answer either: the open is what
-# blocks, and a check it precedes can be raced by whoever put the FIFO there. Both
-# writes run under the runtime watchdog now. Bounded by the harness as well, so a
-# regression hangs the case rather than the suite.
+# A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks waiting
+# for a reader, and what meets this FIFO is the BOUNDED CLEARING, before the revocation —
+# the top-of-file arm that used to run first is gone, and it would have skipped a FIFO
+# anyway, testing `-f`. So this case exercises the clearing and the refusal it produces,
+# which is why it can assert that nothing was posted.
+#
+# REACHING THE WRITE WITH A FIFO NEEDS A REPLACEMENT RACE, not a FIFO standing at the path,
+# and that is the separate case below. A type check before an open is not the answer to
+# either: the open is what blocks, and a check it precedes can be raced by whoever put the
+# FIFO there. Every open here runs under the runtime watchdog. Bounded by the harness as
+# well, so a regression hangs the case rather than the suite.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/fifo.txt"
     mkfifo "$TMP/fifo.txt" 2>/dev/null && {
