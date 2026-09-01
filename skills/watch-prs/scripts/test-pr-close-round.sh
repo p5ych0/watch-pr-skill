@@ -1025,17 +1025,23 @@ _hf_file="$(cat "$HEADF")" || _hf_rc=1
 # review — every round that pushes a new commit, and every Copilot round, since a
 # push never triggers one. The record must still carry the field, so the driver
 # can tell "no baseline yet" from "no record at all"; `pr-watch.sh` takes the
-# empty value as "wait on any terminal review".
+# `none` token as "wait on any terminal review".
 world; : > "$W/pr-review-state.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
-{ [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=$' <<<"${got#*|}"; } \
-    && pass "a head with no review yet closes, reporting an empty baseline" \
+{ [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=none$' <<<"${got#*|}"; } \
+    && pass "a head with no review yet closes, reporting the none baseline" \
     || die "an empty baseline gave '${got}'"
-# …AND IT REACHES THE FILE AS AN EMPTY FILE, which is an answer rather than a
-# failure. The driver tells it from a STALE value only because `gate` emptied the
-# file first — without that, last round's baseline would still be sitting there.
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and the prior file reads back empty rather than holding a previous round's value" \
+# …AND IT REACHES THE FILE AS THE `none` TOKEN — #264. It used to reach it as an EMPTY
+# file, which meant "no floor" and was therefore indistinguishable from a truncation whose
+# write then failed. The token has to be written on purpose, so the watch can tell the
+# answer from the accident: an empty file is `state=error` there now.
+#
+# `gate` STILL EMPTIES THIS FILE, and that is why the change is safe rather than merely
+# tidier — an emptied baseline reaching the watch is a refusal instead of a no-floor, so a
+# `post` that fails after `gate` stops the round rather than arming a watch against
+# nothing.
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
+    && pass "…and the prior file reads back as the none token rather than empty or a previous round's value" \
     || die "an empty baseline left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
 
 # AND THE FIELD IS STILL THERE, which is the whole difference between an answer

@@ -119,14 +119,20 @@ grep -qF 'A one-paragraph account' <<<"$_CAP" \
     && pass "…as ONE comment" \
     || die "the manual path posted $(grep -c '^gh ' "$TMP/calls") comments"
 
-# AND ON THE MANUAL PATH AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. This is
+# AND ON THE MANUAL PATH "NO PRIOR REVIEW" IS AN ANSWER, NOT A FAILURE. This is
 # the ORDINARY first request: Codex has not reviewed this head yet, so
 # `review-id` succeeds with an empty value. Treating that as unusable aborts
 # AFTER the request has been posted, leaving a pass in flight that nobody waits
 # for — which is what a digits-only check in the driver did.
+#
+# IT IS SPELLED `none` SINCE #264, and the spelling is the point. Empty used to BE the
+# no-floor value, so a writer whose truncation succeeded and whose write failed produced
+# it by accident and the watch armed against nothing. A token has to be written on
+# purpose. So the assertion is the exact string rather than "not a failure": emitting
+# empty here would restore the old ambiguity and pass a laxer check.
 world; : > "$W/prior.out"; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ -z "$(stdout)" ] && posted; } \
-    && pass "…and an empty baseline on the manual path is posted and reported, not refused" \
+{ [ "$rc" = 0 ] && [ "$(stdout)" = none ] && posted; } \
+    && pass "…and no prior review on the manual path reports the none token, not an empty value" \
     || die "a first request with no prior review gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
 
 # AND A COMMENT-BACKED BASELINE COMES THROUGH AS IT IS. A reviewer's newest
@@ -167,9 +173,13 @@ world; rc=0
 # `--after-review` on the initial automatic pass can capture the very review
 # being waited for: the trigger preceded this loop. So there is nothing to read,
 # and reading it anyway is the failure — not a wasted call.
+#
+# REPORTED AS `none` SINCE #264 rather than as nothing, for the reason the manual case
+# above gives — and the assertion is the exact string, since an empty value here would be
+# the ambiguity that change removed.
 world; rc="$(run 7 yes)"
-{ [ "$rc" = 0 ] && [ -z "$(stdout)" ]; } \
-    && pass "the automatic path posts and reports an EMPTY baseline" \
+{ [ "$rc" = 0 ] && [ "$(stdout)" = none ]; } \
+    && pass "the automatic path posts and reports the none token as its baseline" \
     || die "the automatic path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \

@@ -469,7 +469,29 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
         [ "$_s" -eq 0 ] && exit 5
         printf %s "$_r"' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
     case "$_bl_rc" in
-        0) AFTER_REVIEW="$_bl_out" ;;
+        # AN EMPTY FILE IS A REFUSAL, AND "NO PRIOR REVIEW" IS SPELLED `none`. #264.
+        #
+        # Empty used to BE the no-floor value, and that made absence indistinguishable from
+        # failure. Every writer truncates this file before writing it, so any failure between
+        # the truncation and the write left the legal "no floor" value — and with the driver's
+        # `exit` shadowed to return, a refused stage reaches this watch, the empty file passes,
+        # and an existing terminal verdict is announced as this round's answer. A pass that was
+        # never requested.
+        #
+        # The state is real and still has to be expressible — a first request, or a reviewer
+        # that has never reviewed — so it is expressed by PRESENCE rather than by absence.
+        # `none` is a value a writer has to produce on purpose; a truncation cannot fake it.
+        #
+        # THE VALUE FORM IS NOT CHANGED, deliberately. `--after-review ""` is passed by a
+        # caller holding the id in a hardened process of its own — `pr-close-round.sh`
+        # waiting on the pass its own push started — where empty is a choice rather than a
+        # residue, and nothing truncated a file to produce it.
+        0) case "$_bl_out" in
+               "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                   exit 2 ;;
+               none) AFTER_REVIEW="" ;;
+               *) AFTER_REVIEW="$_bl_out" ;;
+           esac ;;
         5) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_nul detail=$(q "$AFTER_REVIEW_FILE")" >&2
            exit 2 ;;
         6) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_not_regular detail=$(q "$AFTER_REVIEW_FILE")" >&2

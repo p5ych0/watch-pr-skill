@@ -470,7 +470,8 @@ something to act on and prints one line when the state changes:
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives
 # as a PATH: the value is never assigned in this shell, and an unreadable file is
-# `state=error` there rather than an empty baseline here.
+# `state=error` there rather than an empty baseline here — and an EMPTY file is
+# `state=error` too since #264, "no prior review" being spelled `none`.
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"; WATCH_RC=$?
 ```
 

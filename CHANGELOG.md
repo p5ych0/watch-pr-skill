@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.99] — 2026-09-01
+
+- **An empty baseline file is refused, and "no prior review" is spelled `none`.** The
+  `--after-review-file` handoff used an EMPTY file to mean "there is no prior review to
+  wait past" — a real state, and the ordinary one for a first request or a reviewer that
+  has never reviewed the head.
+
+  **Why that was a fail-open.** It expressed the state as an ABSENCE, which made it
+  indistinguishable from a failure. Every writer truncates that file before writing it, so
+  any failure between the truncation and the write left the legal no-floor value: ENOSPC, a
+  quota, an interrupted stage. And with the driver's `exit` shadowed to return — the state
+  the whole file handoff is defended for — a refused stage reaches the watch, the empty file
+  passes as "no floor", and an existing terminal verdict is announced as this round's
+  answer. **A pass that was never requested.**
+
+  **The fix is presence instead of absence.** `pr-watch.sh` refuses an empty file with
+  `reason=empty_after_review_file`, and accepts `none` as the no-floor value. A token has to
+  be written on purpose; a truncation cannot fake it. All three writers emit it —
+  `pr-request-review.sh` on both paths, `pr-close-round.sh post`, and
+  `pr-copilot-phase.sh open`, where it is the ordinary case because Copilot has usually not
+  reviewed the head when the phase opens.
+
+  **`pr-close-round.sh gate` still empties the file, and that is now a refusal rather than a
+  no-floor** — which is the direction that stops a round instead of announcing a pass nobody
+  requested, and is why the change is safe rather than merely tidier.
+
+  **The `--after-review` VALUE form is unchanged, deliberately.** It is passed by a caller
+  holding the id in a hardened process of its own, where empty is a choice rather than a
+  residue and nothing truncated a file to produce it.
+
+  What this does **not** close is the rest of #264 as widened: the file still cannot say
+  WHICH RUN wrote it, so a stale but well-formed id from an earlier round is accepted. That
+  needs the value bound to the run that produced it, which is a different design.
+
 ## [2.0.98] — 2026-09-01
 
 - **`pr-origin.sh`'s cleanup no longer removes a leaf by name, so it can no longer take a

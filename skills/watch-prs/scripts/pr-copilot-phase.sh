@@ -433,6 +433,11 @@ if [[ $STAGE = open ]]; then
     # because the driver reads the file only when this stage succeeds.
     # BOUNDED FOR THE SAME REASON, and it matters more here: the revocation is already
     # posted, so a hang leaves the phase half-advanced with nothing said about it.
+    # THE NO-FLOOR VALUE IS SPELLED `none` — #264, for the reason `pr-request-review.sh`
+    # gives: an empty file used to be the legal no-floor value, so a truncation that then
+    # failed produced it by accident. Copilot has usually not reviewed this head when the
+    # phase opens, so this is the ordinary case rather than an edge one.
+    PRIOR_REVIEW="${PRIOR_REVIEW:-none}"
     run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$PRIOR_FILE" "$PRIOR_REVIEW" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
     # BOUNDED TOO, because the write finishing does not make the next open safe: the

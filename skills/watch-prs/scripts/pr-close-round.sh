@@ -566,6 +566,13 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # irreversibly half-closed. So the file is written here — the read above is still
     # immediately before the request, which is what that ordering is for — and a failure
     # stops the stage with nothing posted and nothing queued.
+    # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY — #264. An empty file used to
+    # mean "no prior review", so a failure between this truncation and this write produced
+    # the legal value, and a driver whose `exit` returns then armed its watch with no floor
+    # at all. `gate` still EMPTIES this file, and that is now a refusal rather than a
+    # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
+    # direction that stops a round instead of announcing a pass nobody requested.
+    prior="${prior:-none}"
     printf '%s\n' "$prior" > "$PRIOR_FILE" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted."; return 1; }
     _back="$(<"$PRIOR_FILE")" \

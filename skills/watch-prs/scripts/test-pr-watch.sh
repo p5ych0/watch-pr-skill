@@ -852,14 +852,32 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a terminal verdict was announced against the refusal sentinel: $out" \
     || pass "…with no verdict announced for it"
 
-# AN EMPTY FILE IS A LEGAL BASELINE, meaning there was no prior review to wait past.
-# This is the case the unreadable one must NOT be allowed to look like.
-: > "$_bl"
+# "NOTHING TO WAIT PAST" IS SPELLED `none`, AND AN EMPTY FILE IS A REFUSAL — #264.
+#
+# Empty used to BE that value, which made it indistinguishable from a failure: every writer
+# truncates this file before writing it, so any failure in between left the legal no-floor
+# value, and with the driver's `exit` shadowed to return a refused stage armed this watch
+# with no floor at all. The state is real and still expressible, by a token a writer has to
+# produce on purpose.
+printf 'none\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
-    && pass "…an empty baseline file means 'nothing to wait past' and the review is reported" \
-    || die "an empty baseline file was not treated as no baseline (rc=$rc out='$out')"
+    && pass "…the none token means 'nothing to wait past' and the review is reported" \
+    || die "the none token was not treated as no baseline (rc=$rc out='$out')"
+
+# AND AN EMPTY FILE IS REFUSED, which is the half that makes the token worth having. This
+# is the state a truncation leaves, and taking it as "no floor" is the fail-open #264
+# closes — so it must be an error rather than an answer, and it must not announce a verdict.
+: > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=empty_after_review_file' <<<"$out"; } \
+    && pass "…while an EMPTY baseline file is refused, since a truncation produces it" \
+    || die "an empty baseline file was not refused (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a verdict was announced against an empty baseline file: $out" \
+    || pass "…with no verdict announced for it"
 
 # AND A FILE THAT CANNOT BE READ IS state=error, NOT AN EMPTY BASELINE. Degrading to
 # empty would make a failed read say exactly what the case above says, and the watch

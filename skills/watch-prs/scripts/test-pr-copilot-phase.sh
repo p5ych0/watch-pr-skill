@@ -994,11 +994,15 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested with no baseline to wait past" \
     || pass "…with Copilot not requested"
 
-# AN EMPTY BASELINE IS AN ANSWER: a head with no Copilot review yet has no id, and
-# `pr-watch.sh` takes that as "wait on any terminal review".
+# NO PRIOR REVIEW IS AN ANSWER, AND IT IS SPELLED `none` — #264. A head with no Copilot
+# review yet has no id, and `pr-watch.sh` takes the token as "wait on any terminal review".
+# It used to be spelled by an EMPTY file, which a truncation whose write then failed
+# produced by accident — so the answer and the accident were the same value, and the watch
+# armed against nothing either way. This is the ORDINARY case for `open`, since Copilot has
+# usually not reviewed the head when the phase is opened.
 world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$' <<<"${got#*|}"; } \
-    && pass "a head with no Copilot review yet opens, reporting an empty baseline" \
+{ [ "${got%%|*}" = 0 ] && grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=none$' <<<"${got#*|}"; } \
+    && pass "a head with no Copilot review yet opens, reporting the none baseline" \
     || die "an empty baseline gave '${got}'"
 
 # A DISMISSAL OR A REVOCATION DURING THE PROBES. Neither moves the head, so the
@@ -1073,11 +1077,12 @@ before 'pr-review-state.sh review-id' 'gh pr edit' \
 # the file must exist and be empty rather than be left as it was.
 world; : > "$W/review-id.out"; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-# ASSERTED ON THE VALUE A READER GETS, not on the file's size. `printf '%s\n' ""`
-# leaves one byte, so `-s` is true on a file that every reader sees as empty —
-# `$(<…)` strips trailing newlines, which is how `pr-watch.sh` reads it.
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and an empty baseline is written over a stale one, not left behind" \
+# ASSERTED ON THE VALUE A READER GETS, not on the file's size — `$(<…)` strips trailing
+# newlines, which is how `pr-watch.sh` reads it. The value is the `none` token since #264,
+# and asserting the exact string is what keeps this case honest: `-z` would pass against an
+# empty file, which is the state that used to mean the same thing and now means a failure.
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
+    && pass "…and the none token is written over a stale baseline, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
 
 # A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing

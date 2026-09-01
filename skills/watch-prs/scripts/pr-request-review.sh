@@ -209,7 +209,12 @@ fi
 # only reads the file on success — a post that then fails takes the failure arm,
 # where the file is never consumed. So an unwritable baseline stops with nothing
 # posted, which is the order the two failures should be in.
-printf '%s\n' "$PRIOR" || { echo "ABORT: the review baseline could not be written; nothing has been posted." >&2; exit 1; }
+# THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY. #264: an empty file used to mean
+# "no prior review", which made absence indistinguishable from failure — every writer
+# truncates before it writes, so any failure in between produced the legal value. The state
+# is real and still has to be expressible, so it is expressed by a value a writer produces
+# on purpose. A truncation cannot fake it, and `pr-watch.sh` refuses an empty file.
+printf '%s\n' "${PRIOR:-none}" || { echo "ABORT: the review baseline could not be written; nothing has been posted." >&2; exit 1; }
 
 # THE POST IS BRANCHED ON, because a failed one means no review was ever queued —
 # and the wait step would then poll for one until it timed out, reporting "no
