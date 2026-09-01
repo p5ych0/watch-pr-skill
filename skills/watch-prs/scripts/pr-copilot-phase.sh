@@ -84,14 +84,27 @@ fi
 
 set -uo pipefail
 
-# ── `open`'S BASELINE FILE IS EMPTIED BEFORE ANYTHING CAN REFUSE ───────────
-# A refusal above the clearing further down — an unreadable library, a PR number that is
-# not a number — leaves the PREVIOUS run's review id in the file, and something reads it as
-# this one's. For `open` that reader is real: with the driver's `exit` shadowed to return, a
-# refusal falls past its fence into the wait step, which hands `$PRIOR_FILE` to
-# `pr-watch.sh --after-review-file`, and a stale well-formed id is accepted there — so the
-# watch waits past a review that has already happened. That is why this clearing is here,
-# before the bootstrap and before any argument is looked at.
+# ── NEITHER STAGE CLEARS THE FILE THE CALLER NAMED, AND `open`'S WENT LAST ─
+# `open` had two clearings, and the reader they were written for IS real: with the driver's
+# `exit` shadowed to return, a refusal falls past its fence into the wait step, which hands
+# `$PRIOR_FILE` to `pr-watch.sh --after-review-file`. That is what makes `open` different
+# from `record`, and it is why its clearings outlived `record`'s by one change.
+#
+# BUT EMPTYING WAS NEVER THE PROTECTION, and that is what #245's second half turned out to
+# be. `pr-watch.sh` suppresses a terminal verdict on ONE condition — the id it finds equals
+# the baseline — and the whole comparison is guarded by `[ -n "$AFTER_REVIEW" ]`. So an
+# EMPTY baseline suppresses NOTHING. Against a stale id the two outcomes are the same
+# wherever they differ from the current review, and where they do not, emptying is the
+# WORSE of the two: `test-pr-watch.sh` stages exactly this pair — baseline `99` with the
+# current id `99` reports `awaiting_new_review`, and an EMPTY baseline with that same
+# current id reports `PR_REVIEW_READY`. Clearing converted a correct suppression into an
+# announcement of the very review it was supposed to hold back.
+#
+# So the clearing did not prevent the harm its own comment named — the watch taking a pass
+# that already finished — because empty and stale both fail to suppress it. What it did do
+# was open a caller-named path with `>` before the bootstrap, where `run_limited` does not
+# exist yet: a FIFO there blocks, and a symlink there truncates its target. That is the
+# whole of #245, and removing the arm removes it.
 #
 # `record` HAS NO CLEARING, HERE OR ANYWHERE, and #245 is why: it had two and neither
 # protected a read that can happen. Its file is read only in the driver's success arm and
@@ -127,13 +140,6 @@ set -uo pipefail
 # clearing now, here or after the bootstrap — the second one protected nothing either, for
 # the same reason — and what makes a stale value impossible is the WRITE: bounded, its
 # status taken, and compared in the child. #245.
-if [[ ${1:-} = open ]] && [[ -n ${4:-} ]] && [[ -f ${4} ]] && [[ ${4} = */* ]]; then
-    > "${4}" || {
-        echo "ABORT: the baseline file '${4}' exists and cannot be emptied; a stale review id would be left for the caller to read, and the watch would take a pass made before this request as the answer to it."
-        exit 1
-    }
-fi
-
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
@@ -244,18 +250,13 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # EMPTIED AGAIN HERE, and both clearings are load-bearing for THIS stage — unlike
-    # `record`, whose two were removed in #245 because nothing reads its file after a
-    # refusal. The one above the bootstrap covers a refusal from the bootstrap itself and
-    # declines a path that does not exist yet; this one covers every refusal after it, and
-    # takes the path the other declines. Empty is a LEGAL baseline, meaning no prior review,
-    # which is why the write below is status-checked rather than left to the reader.
-    # BOUNDED, because the open can block rather than fail. `run_limited` returns 124
-    # when it does, which is a refusal like any other here — the phase has not
-    # advanced and nothing has been posted.
-    run_limited 10 /usr/bin/env bash -p -c '> "$1"' _ "$PRIOR_FILE" \
-        || { echo "ABORT: could not empty the baseline file '$PRIOR_FILE'; it is unwritable, or opening it blocked."; exit 1; }
-
+    # AND IT IS NOT EMPTIED HERE EITHER. This clearing was bounded, so it was not #245's
+    # defect — but it bought the same nothing the one above the bootstrap did, and leaving
+    # it would have left the file contradicting the argument beside it. Emptying is not a
+    # weaker form of protection here; it is the opposite of protection, because an empty
+    # baseline suppresses nothing while the value it replaced might have. What makes this
+    # round's baseline right is the WRITE below: bounded, its status taken, and read back
+    # and compared before Copilot is requested.
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase

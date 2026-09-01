@@ -1080,16 +1080,30 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
     && pass "…and an empty baseline is written over a stale one, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
 
-# A REFUSAL LEAVES NO STALE BASELINE EITHER. The clearing happens at the top of the
-# file, before the bootstrap and before any argument is looked at, so an abort above
-# the write cannot leave the previous round's id for the caller to read as this
-# round's — which would arm the watch against a pass that already finished.
+# A REFUSAL LEAVES THE BASELINE FILE ALONE, WHICH IS #245's SECOND HALF. Both clearings
+# are gone, and this is the case that pins it: a refused `open` does not touch the caller's
+# file, so the previous round's id is still there afterwards.
+#
+# THAT IS NOT A WEAKER GUARANTEE, and `test-pr-watch.sh` is where the argument is measured
+# rather than asserted. The watch suppresses a terminal verdict on ONE condition — the id it
+# reads equals the baseline — and the comparison is skipped entirely for an empty one. So
+# emptying suppresses nothing: against a stale id the outcomes differ only when the stale id
+# EQUALS the current review, and there emptying is the worse of the two, turning a correct
+# `awaiting_new_review` into a `PR_REVIEW_READY` for the review it meant to hold back.
+#
+# What the clearing did buy was a `>` on a caller-named path, above the bootstrap where
+# nothing can bound it. That is what came out.
 world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and a refusal before the write leaves no stale baseline" \
-    || die "a refused open left '$(cat "$TMP/prior.txt")' in the baseline file"
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = "stale-from-a-previous-round" ]; } \
+    && pass "…and a refusal before the write leaves the caller's baseline file untouched" \
+    || die "a refused open altered the baseline file: '$(cat "$TMP/prior.txt" 2>/dev/null)'"
+# AND IT POSTED NOTHING, which is what makes the untouched file safe to leave: the phase did
+# not open, so no request is waiting for a baseline to bound it.
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested by a refused open" \
+    || pass "…with Copilot not requested, so no watch is armed against it"
 
 # A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks
 # waiting for a reader, and the top-of-file clearing skips a FIFO because it tests
@@ -1230,16 +1244,16 @@ else
     pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
 fi
 
-# AND AN `open` THAT CANNOT BOOTSTRAP LEAVES NO STALE BASELINE. This is the case #245's
-# review found missing, and it is the one that decides whether `open`'s pre-bootstrap
-# clearing may move the way `record`'s did. It may not: unlike `record`, a refused `open`
-# IS followed by a reader — with the driver's `exit` shadowed to return, execution falls
-# past the fence into the wait step, which hands `$PRIOR_FILE` to
-# `pr-watch.sh --after-review-file`, and a stale well-formed review id is accepted there.
+# AND AN `open` THAT CANNOT BOOTSTRAP LEAVES THE FILE ALONE TOO. This is the refusal only
+# the pre-bootstrap clearing could ever have covered — a library emptied in a copy of the
+# tree, which `rb_load` refuses before any argument is looked at — so it is the case that
+# would go red if the clearing came back.
 #
-# So this asserts the clearing that is still above the bootstrap, on the refusal only it
-# can cover: a library emptied in a copy of the tree, which `rb_load` refuses before any
-# argument is looked at.
+# The reader after this refusal IS real, unlike `record`'s: with the driver's `exit` shadowed
+# to return, execution falls past the fence into the wait step. What that reader gets is the
+# previous round's id rather than an empty file, and per `test-pr-watch.sh` that is the safer
+# of the two — an empty baseline suppresses nothing, while a stale one at least suppresses
+# the review it names.
 world; printf '%s\n' '99' > "$TMP/prior.txt"
 rm -rf "$TMP/brokeno"; cp -R "$DIR" "$TMP/brokeno" || die "could not copy the scripts for the open bootstrap case"
 : > "$TMP/brokeno/recordlib.sh"
@@ -1247,9 +1261,9 @@ _bo_rc=0
 _bo_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     "$TMP/brokeno/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" 2>&1)" || _bo_rc=$?
-{ [ "$_bo_rc" != 0 ] && [ ! -s "$TMP/prior.txt" ]; } \
-    && pass "an open that cannot bootstrap leaves no stale baseline for the watch to read" \
-    || die "an open bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the baseline file (rc=$_bo_rc out='$_bo_out')"
+{ [ "$_bo_rc" != 0 ] && [ "$(cat "$TMP/prior.txt" 2>/dev/null)" = 99 ]; } \
+    && pass "an open that cannot bootstrap leaves the caller's baseline file untouched" \
+    || die "an open bootstrap refusal altered the baseline file to '$(cat "$TMP/prior.txt" 2>/dev/null)' (rc=$_bo_rc out='$_bo_out')"
 rm -rf "$TMP/brokeno"
 
 # AND THE FILE IS REQUIRED. A caller that omits it would have the phase opened —

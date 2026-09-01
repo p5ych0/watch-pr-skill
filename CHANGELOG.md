@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.97] — 2026-09-01
+
+- **`open` no longer clears the baseline file either, and emptying it was never the
+  protection.** `pr-copilot-phase.sh open` cleared its caller-named baseline twice — once
+  above the bootstrap, once after — and both are gone. The first was the same **unbounded
+  truncating open on a caller-named path** that came out of `record` in 2.0.96: `>` follows
+  a symlink and truncates its target, and a FIFO there blocks, with no `run_limited` yet
+  loaded to bound it.
+
+  It survived that release because the reader it was written for is real, and still is:
+  with the driver's `exit` shadowed to return, a refused `open` falls past its fence into
+  the wait step, which hands the file to `pr-watch.sh --after-review-file`. `record` has no
+  such reader, so its clearings went first.
+
+  What was wrong is the assumption that emptying the file protects that reader. It does
+  not. The watch suppresses a terminal verdict on one condition — the id it reads equals the
+  baseline — and skips the comparison entirely when the baseline is empty. So an empty
+  baseline suppresses **nothing**. Against a stale id the two behave identically wherever
+  the stale id differs from the current review, and where it does not, emptying is the worse
+  of the two: `test-pr-watch.sh` stages the pair, and baseline `99` against current id `99`
+  reports `awaiting_new_review` while an *empty* baseline against that same id reports
+  `PR_REVIEW_READY` — an announcement of the very review the clearing existed to hold back.
+
+  The failure this prevents is therefore not a stale baseline; it is the destruction a
+  caller never asked for. A `>` on a path the operator named could truncate whatever a
+  symlink pointed at, or hang on a FIFO planted there, in order to produce a value that is
+  weaker than the one it overwrote. A refused `open` now leaves the file exactly as it found
+  it, and posts nothing — so no request is left waiting for a baseline to bound it.
+
 ## [2.0.96] — 2026-09-01
 
 - **`record`'s pre-bootstrap clearing is removed, and the one that matters is bounded.**
