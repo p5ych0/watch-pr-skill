@@ -110,11 +110,14 @@
 #          refused to trust.
 #        - AFTER it — an UNSAFE ANCESTOR, the git read, an empty origin, a newline
 #          in it, the pin's mismatch — this script created the directory, so it
-#          gives the directory back before stopping and there is nothing to collect.
-#          A FAILED WRITE IS THE EXCEPTION, since #266: the leaf is open by then,
-#          `rmdir` alone cannot remove a directory holding it, and the reservation
-#          is left. That residue is accepted in
-#          `docs/decisions/2026-09-01-origin-cleanup-races.md`.
+#          gives the directory back before stopping, WHILE THAT DIRECTORY IS EMPTY.
+#          The cleanup is one `rmdir` and it fails on anything else, so what is left
+#          to collect is decided by the reservation's CONTENTS and not by which
+#          refusal fired: a leaf this run wrote, which a failed write leaves open;
+#          or a sibling a same-UID process planted, which any of the refusals above
+#          can meet. Both residues are accepted in
+#          `docs/decisions/2026-09-01-origin-cleanup-races.md`, and both mean the
+#          same thing to a caller — the status is the answer, never the directory.
 #
 #          WITH ONE EXCEPTION, AND IT IS DELIBERATE. Every refusal gets `rmdir` alone
 #          since #266, and `rmdir` cannot remove a directory that holds a file. So a
