@@ -1043,10 +1043,15 @@ if [[ $MODE = pin ]]; then
     # refusal run the leaf-removing cleanup against a directory somebody had replaced.
     # With no removal to select, the wrapping has nothing to arm and the write is a write.
     #
-    # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
-    # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
-    # a failed write leaves exactly what a legitimately unset pin leaves: an empty
-    # file and success. The caller could not tell them apart, so this one says.
+    # THE WRITE'S STATUS IS TAKEN, AND IT IS THE ONLY THING THAT SAYS ANYTHING. An output
+    # target can open and then reject data — `/dev/full`, or a quota reached after the
+    # truncation above — and what it leaves is not one shape but two. ZERO BYTES is the
+    # dangerous one in `pin` mode: it is exactly what a legitimately unset pin leaves, so
+    # without this status a caller could not tell a refusal from an empty pin. A PREFIX is
+    # the other, measured under a one-block file-size limit with an origin longer than it,
+    # and it is dangerous differently — it LOOKS like a value, so a caller inspecting the
+    # file rather than the status reads a truncated remote as the session's identity.
+    # Neither is removed, since #266, so the status is all there is.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
     # ONLY `EXIT` IS RESET. The EXIT handler would try to give this reservation back,
