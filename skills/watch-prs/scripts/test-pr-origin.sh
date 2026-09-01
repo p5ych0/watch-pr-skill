@@ -1931,13 +1931,20 @@ esac
     && pass "…so the helper is never invoked, and nothing is aimed at /dir" \
     || die "a failed allocation still reached the helper: '$(cat "$TMP/alloccalls")'"
 
-# ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
+# ── A REFUSAL WITH AN EMPTY RESERVATION TAKES THE DIRECTORY WITH IT ────────
 #
 # Since #157 this script creates the transport directory, so every refusal PAST
 # that `mkdir` — the git read, an empty origin, a newline in it — owns something
-# nothing else will collect. (A failed WRITE is the exception since #266: the leaf
-# is open, `rmdir` cannot remove the directory, and the reservation is left by
-# design.) `rb_refuse` is what removes the rest, and
+# nothing else will collect.
+#
+# WHAT DECIDES WHETHER IT IS COLLECTED IS THE RESERVATION'S CONTENTS, not which refusal
+# fired. The cleanup is one `rmdir` since #266, so it takes an EMPTY directory and leaves
+# any other: a failed write leaves the leaf it opened, and a same-UID racer that plants a
+# sibling makes any of the refusals above leave one too — while a racer that empties the
+# reservation after a failed write lets the `rmdir` through. This case stages the empty
+# one, which is the ordinary path; the populated one is measured further down.
+#
+# `rb_refuse` is what removes it, and
 # nothing observed the directory after such a failure: the cases above assert
 # status and output, and each `run` now takes a fresh name, so removing the
 # `rmdir` from `rb_refuse` left every one of them green while each refused read
