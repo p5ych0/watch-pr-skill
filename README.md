@@ -1033,9 +1033,19 @@ plugin docs and open an issue.
   Nothing removes any of them.
 
   **Completeness is not usability, and this is the case to be careful with.** A
-  well-formed `origin` left by a refused run is indistinguishable by inspection from one a
-  successful run produced. What makes a value usable is the enclosing setup sequence
-  reporting success — `PR_SETUP status=ready` — and never the file looking finished. Leave them; they are a stale temporary directory under **the parent setup
+  well-formed `origin` or `pin` left by a refused run is indistinguishable by inspection
+  from one a successful run produced, so the file never tells you.
+
+  What does depends on which file it is. An `origin` is covered by
+  `PR_SETUP status=ready`, which is emitted after that read has been made and verified. A
+  `pin` is **not**: it is written later, by the driver's own `pr-origin.sh pin` call, and
+  setup has already reported `ready` by then — an interruption after that write leaves a
+  complete `pin` beside a `status=ready` line and the driver still aborts, because it never
+  gets to compare the pin against the remote it read. The only thing covering a `pin` is the
+  driver reaching the end of setup, past that comparison, without aborting.
+
+  So: **neither file is a result on its own, and `status=ready` is not the answer for
+  both.** If the run did not finish, discard what it left. Leave them; they are a stale temporary directory under **the parent setup
   selected** — `TMPDIR` where that is usable, `$HOME` where it is not, and the second of
   those two where the first attempt was retried — so look under the one the abort names
   rather than under `TMPDIR` by assumption. Removing them by hand is the one thing the
