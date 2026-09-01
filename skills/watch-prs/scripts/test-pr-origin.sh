@@ -2119,34 +2119,42 @@ else
 fi
 rm -rf "$_rz"
 
-# ── THE TWO CLEANUP RACES, MEASURED — `docs/decisions/2026-09-01-origin-cleanup-races.md` ─
+# ── THE PRE-PHASE CLEANUP'S LITTER, MEASURED — `docs/decisions/2026-09-01-origin-cleanup-races.md` ─
 #
-# Both are ACCEPTED, and these cases are what the acceptance rests on: if either bound
-# changes, one of them fails. They are not proofs that the helper is correct here; they are
-# the measurement of exactly how much it can leave and how much it can take.
+# The residue is ACCEPTED and this case is what the acceptance rests on: if the bound
+# changes, it fails. It is not a proof that the helper is correct here; it is the
+# measurement of exactly how much a refusal can leave.
 #
-# RACE A — A REFUSAL WHILE THE PHASE IS `pre` AND A LEAF EXISTS LEAVES THE TRANSPORT.
 # `RB_PHASE` flips inside each write's own redirection, so a signal delivered between the
-# open and the assignment runs the cleanup as `rmdir` alone — which necessarily fails on a
-# directory that now holds a leaf. That window is two instructions and a fixture aiming at
-# it would pass on scheduling, so what is staged is the SAME residue by a refusal that can
-# be driven: a same-UID racer plants a leaf the moment the directory exists, and the pin
-# mismatch then refuses with the phase still `pre`.
+# open and the assignment runs the cleanup as `rmdir` alone — which fails on a directory
+# that is not empty. That window is two instructions and a fixture aiming at it would pass
+# on scheduling, so what is staged is the SAME residue by a refusal that can be driven: a
+# same-UID racer populates the directory the moment it exists, and the pin mismatch then
+# refuses with the phase still `pre`.
+#
+# THE CONTENTS ARE RACER-CONTROLLED AND SO IS THE BOUND. An earlier version planted one
+# leaf, which measured an example rather than a maximum: once the mode-700 directory
+# exists, a same-UID process can create any number of files and subdirectories and the
+# `rmdir` leaves all of them. A leaf, a sibling and a nested subtree are planted here so
+# the case measures the shape of the residue rather than one instance of it.
 #
 # THE DIRECTORY MUST BE ONE THE HELPER CREATED, or the case is vacuous: `RB_PREEXISTED`
 # makes the cleanup decline a name that already stood, so a pre-made directory would
 # survive for a reason that has nothing to do with the phase. The racer is a `mkdir` on
 # `PATH` — the same shape the reservation cases use — which creates the directory the
-# helper asked for and then plants the leaf inside it.
+# helper asked for and then populates it.
 _lit_bin="$TMP/litbin"; rm -rf "$_lit_bin"; mkdir -p "$_lit_bin"
 # THE REAL `mkdir` IS RESOLVED BEFORE THE SHIM IS ON `PATH`, and embedded absolutely: a
-# shim that called `mkdir` by name would find itself. `/usr/bin/mkdir` is not written
-# literally because the mac-shaped job builds its own `PATH` and stock macOS keeps it
-# elsewhere.
+# shim that called `mkdir` by name would find itself. It is not written literally because
+# the mac-shaped job builds its own `PATH` and stock macOS keeps it elsewhere.
 _lit_real="$(command -v mkdir)"
 { printf '#!/bin/sh\n'
   printf '%s "$@" || exit $?\n' "$_lit_real"
-  printf '[ -n "$RB_RACE_DIR" ] && [ -d "$RB_RACE_DIR" ] && : > "$RB_RACE_DIR/pin"\n'
+  printf '[ -n "$RB_RACE_DIR" ] && [ -d "$RB_RACE_DIR" ] || exit 0\n'
+  printf ': > "$RB_RACE_DIR/pin" || exit 1\n'
+  printf ': > "$RB_RACE_DIR/sibling" || exit 1\n'
+  printf '%s -p "$RB_RACE_DIR/sub/deep" || exit 1\n' "$_lit_real"
+  printf ': > "$RB_RACE_DIR/sub/deep/file" || exit 1\n'
   printf 'exit 0\n'; } > "$_lit_bin/mkdir"
 chmod +x "$_lit_bin/mkdir"
 _lit_dir="$TMP/lit.$$"; rm -rf "$_lit_dir"
@@ -2155,77 +2163,28 @@ _lit_out="$(cd "$REPO" && run_limited 20 env PATH="$_lit_bin:$PATH" RB_RACE_DIR=
     HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     REVIEW_BUS_REMOTE='git@github.com:someone-else/not-this-one.git' \
     /usr/bin/env bash -p "$SCRIPT" pin "$_lit_dir" 2>&1)" || _lit_rc=$?
+# THE RACER ACTUALLY RAN, which every assertion below depends on. Without this a shim whose
+# writes all failed leaves an empty directory the cleanup removes, and the case would then
+# fail for a reason it does not name — or, worse, a future edit could make it pass by
+# planting nothing at all.
+{ [ -e "$_lit_dir/pin" ] || [ -e "$_lit_dir/sibling" ] || [ -e "$_lit_dir/sub/deep/file" ]; } \
+    && pass "the racer populated the reservation before the refusal" \
+    || die "nothing is in the reservation: either the racer planted nothing, in which case the bound below would be measured against an empty directory, or the cleanup removed it, which is the regression this section exists to catch"
 # THE REFUSAL IS THE MISMATCH, NOT THE EXCLUSION. If the racer's `mkdir` had failed, the
 # helper would refuse with status 2 before ever reading the checkout, and the residue below
 # would be a directory this run never made — the vacuous pass this assertion excludes.
 { [ "$_lit_rc" = 1 ] \
   && case "$_lit_out" in *"is not this checkout's origin"*) true ;; *) false ;; esac; } \
-    && pass "a pin mismatch refuses after the reservation, with the phase still pre-write" \
+    && pass "…and a pin mismatch refuses after the reservation, with the phase still pre-write" \
     || die "the litter case did not reach the mismatch refusal (rc=$_lit_rc): '$_lit_out'"
-# AND THE RESIDUE IS LITTER, WHICH IS THE BOUND THE RECORD ACCEPTS: the directory and the
-# foreign leaf are both still there. `rmdir` alone cannot remove a directory holding a leaf,
-# and nothing else runs. What must NOT have happened is the other half — the leaf-removing
-# shape reaching an object this run did not write.
-{ [ -d "$_lit_dir" ] && [ -f "$_lit_dir/pin" ]; } \
-    && pass "…and leaves its reservation behind rather than taking the foreign leaf" \
-    || die "the pre-phase refusal did not leave litter: dir=$([ -d "$_lit_dir" ] && echo yes || echo no) leaf=$([ -e "$_lit_dir/pin" ] && echo yes || echo no)"
+# AND EVERY PLANTED OBJECT SURVIVES, which is the bound the record accepts: the cleanup in
+# this phase is `rmdir` alone, so it removes an empty directory and NOTHING else. What must
+# not have happened is the other half — a removal reaching an object this run did not write.
+{ [ -d "$_lit_dir" ] && [ -f "$_lit_dir/pin" ] && [ -f "$_lit_dir/sibling" ] \
+  && [ -f "$_lit_dir/sub/deep/file" ]; } \
+    && pass "…and leaves the whole reservation behind, taking nothing the racer put there" \
+    || die "the pre-phase refusal removed something: dir=$([ -d "$_lit_dir" ] && echo yes || echo no) pin=$([ -e "$_lit_dir/pin" ] && echo yes || echo no) sibling=$([ -e "$_lit_dir/sibling" ] && echo yes || echo no) nested=$([ -e "$_lit_dir/sub/deep/file" ] && echo yes || echo no)"
 rm -rf "$_lit_dir" "$_lit_bin"
-
-# RACE B — ONCE THE PHASE IS `post`, THE CLEANUP REMOVES `$OUT` BY NAME, and a same-UID
-# process that has replaced the leaf has its object removed instead. The cleanup reaches
-# that state on two paths: a signal between the flip and the `trap - EXIT` after the write,
-# which is again two instructions, and the write's own guard — the leaf opened exclusively
-# and the storage then rejected the bytes. The second is drivable, and is what this stages.
-#
-# THE RACER IS `rm` ON `PATH`, because `rb_cleanup` runs `/usr/bin/env rm -f "$OUT"`. It
-# unlinks this run's leaf and puts a foreign object at the same name before handing over to
-# the real removal — which is the interleaving the record accepts, performed deterministically
-# rather than waited for.
-#
-# NOTHING THE RACER MAKES IS WRITTEN, and that is forced: `ulimit -f 0` is what makes the
-# helper's write fail, and it forbids the racer writing bytes just as much. A symlink and a
-# marker directory are created with no data, so both survive the limit — a plain file and an
-# `echo` log were tried first and were silently empty, which made the case pass vacuously.
-_rb_bin="$TMP/rbbin"; rm -rf "$_rb_bin"; mkdir -p "$_rb_bin"
-_rb_real_rm="$(command -v rm)"; _rb_real_ln="$(command -v ln)"; _rb_real_mkdir="$(command -v mkdir)"
-{ printf '#!/bin/sh\n'
-  printf '%s -p "$RB_RACE_MARK"\n' "$_rb_real_mkdir"
-  printf '%s -f "$RB_RACE_OUT"\n' "$_rb_real_rm"
-  printf '%s -s /nonexistent-foreign-target "$RB_RACE_OUT"\n' "$_rb_real_ln"
-  printf 'exec %s "$@"\n' "$_rb_real_rm"; } > "$_rb_bin/rm"
-chmod +x "$_rb_bin/rm"
-_rb_dir="$TMP/rbrace.$$"; rm -rf "$_rb_dir"
-_rb_mark="$TMP/rbrace-rm-called.$$"; rm -rf "$_rb_mark"
-_rb_rc=0
-# NO WATCHDOG, for the reason the write-failure case above gives: `run_limited` captures
-# into regular files, which a zero file-size limit forbids.
-_rb_out="$(cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
-    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
-    PATH="$_rb_bin:$PATH" RB_RACE_OUT="$_rb_dir/pin" RB_RACE_MARK="$_rb_mark" \
-    bash -c 'ulimit -f 0 2>/dev/null || exit 97
-             trap "" XFSZ
-             exec /usr/bin/env bash -p "$1" pin "$2"' _ "$SCRIPT" "$_rb_dir" 2>&1)" || _rb_rc=$?
-if [ "$_rb_rc" = 97 ]; then
-    echo "ok   - (this shell cannot set a zero file-size limit; the replacement-removal case did not run)"
-else
-    # THE CLEANUP ASKED `rm` FOR THE LEAF BY NAME. The marker is made by the racer, so it
-    # is evidence that the removal ran through a PATH-resolved `rm` at all — without it the
-    # assertion below would pass against a helper that reached no cleanup, and equally
-    # against one that had stopped removing by name, which is the change this case exists
-    # to notice.
-    [ -d "$_rb_mark" ] \
-        && pass "a write that opens and then fails reaches the leaf-removing cleanup" \
-        || die "the post-phase cleanup did not ask a PATH-resolved 'rm' for '\$OUT' (rc=$_rb_rc); either it was never reached or the removal is no longer by name, and the record needs revisiting: '$_rb_out'"
-    # AND IT TOOK THE REPLACEMENT. This is the cost the record accepts, stated as an
-    # assertion so that it cannot change unnoticed: if the cleanup ever stops removing by
-    # name — a descriptor-relative unlink, or a shape that proves the object is this run's —
-    # the foreign symlink survives and this case fails. That is the intended direction of
-    # failure, and the record is what should be revisited when it happens.
-    [ ! -L "$_rb_dir/pin" ] && [ ! -e "$_rb_dir/pin" ] \
-        && pass "…and removes by name, so a same-UID replacement inside its own reservation goes with it" \
-        || die "the foreign object at the leaf survived; the removal is no longer by name and the record needs revisiting"
-fi
-rm -rf "$_rb_dir" "$_rb_mark" "$_rb_bin"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
