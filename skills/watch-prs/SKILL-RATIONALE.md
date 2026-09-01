@@ -272,8 +272,8 @@ time to cover the copies that had silently missed one. A rule proven in one copy
 is unproven in the others. See `identitylib.sh` and issue #18.
 
 What a drifted copy costs: an origin whose host cannot be derived, defaulted to
-github.com while the path split still yields a plausible `acme/widget`, points
-every `gh` call at the unrelated PUBLIC repository of that name — reading,
+github.com while the path split still yields a plausible owner-and-repository pair,
+points every `gh` call at the unrelated PUBLIC repository of that name — reading,
 commenting on and merging there. So the parser refuses rather than guessing: an
 origin that names no host, or one whose transport reaches no GitHub server, is
 not an identity.
