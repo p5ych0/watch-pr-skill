@@ -98,9 +98,10 @@ raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
         || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
 }
 stdout()  { cat "$OUT"; }
-# THE BASELINE IS READ FROM THE FILE THE CALL NAMED, not from stdout. Since #263 the
-# helper opens that file itself and renames onto it, because the driver's `> "$PRIOR_FILE"`
-# followed a symlink and was opened before this process started.
+# THE BASELINE IS READ FROM THE FILE THE CALL NAMED, not from stdout. Since #263 the helper
+# RENAMES onto that path rather than opening it to write, because the driver's
+# `> "$PRIOR_FILE"` followed a symlink and was opened before this process started — and a
+# helper-side writing open would have followed it just the same.
 baseline() { cat "$BASEF"; }
 stderr()  { cat "$ERR"; }
 posted()  { grep -q '^gh ' "$TMP/calls"; }

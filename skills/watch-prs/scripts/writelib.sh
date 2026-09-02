@@ -122,9 +122,12 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # open — `O_NOFOLLOW`, `O_NONBLOCK`, and the type from `fstat` on the handle. What this refuses is a
     # caller naming something that is not a handoff file, early and with nothing written:
     #
-    #   * a DIRECTORY, or a symlink to one. `mv` onto a directory moves the source INSIDE it
-    #     and reports success, so without this the temporary lands in a directory the caller
-    #     did not mean and only the postcondition below notices.
+    #   * a DIRECTORY, or a symlink to one. The EXACT RENAME below refuses this on its own —
+    #     `rename(2)` will not put a file over a directory — so what this buys is an earlier
+    #     refusal with no temporary created, and a message about the caller's argument rather
+    #     than about a rename that failed. It is a convenience over the rename, NOT a
+    #     substitute for it: the two-operand `mv` would move the source INSIDE the directory
+    #     and report success, which is why the rename must stay exact.
     #   * a DEVICE or a SOCKET. `mv -f` replaces every non-directory inode it can rename
     #     over, so a run with permission — root in a container, with `/dev/null` named as
     #     the handoff path — would replace the character device with a regular file.
@@ -136,9 +139,14 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # the whole of #263 — the rename then replaces the LINK and leaves the file it pointed
     # at untouched, which is what a plain `>` did not do.
     #
-    # WHERE A RACER CHANGES THE ANSWER AFTERWARDS, the postcondition is what catches it and
-    # the residue is bounded below. That is the case this test does not close, and does not
-    # claim to.
+    # THE TYPE IS ASKED ONCE, AND A LATE SWAP IS NOT REFUSED. A racer who installs a FIFO,
+    # a device or a socket between this test and the rename has it REPLACED: `rename(2)`
+    # takes any non-directory destination, the value arrives, and the postcondition passes.
+    # A DIRECTORY is the exception, and only because the rename itself refuses one. This is
+    # the documented limit rather than an oversight — no shell-reachable rename is
+    # conditional on the destination's type, and a re-check is the same race one instruction
+    # later — and `test-writelib.sh` pins the outcome so a change here fails rather than
+    # widening it quietly. A caller must not expect a refusal for a late special inode.
     if [ -e "$1" ] && [ ! -f "$1" ]; then
         echo "'$1' is not a regular file; a handoff target must be a regular file or absent"
         return 1

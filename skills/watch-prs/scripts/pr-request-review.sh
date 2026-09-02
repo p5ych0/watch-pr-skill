@@ -7,8 +7,12 @@
 #   the file  the review-id baseline — the `none` token where there is no prior
 #           review to wait past, which is always the case on the automatic path, and
 #           `comment:<id>` where the reviewer's newest verdict came through the
-#           comment channel rather than as a submitted review. NEVER empty: the
-#           watch refuses an empty baseline, because a failed write produces one.
+#           comment channel rather than as a submitted review. NEVER empty: the watch
+#           refuses an empty baseline. That refusal was written when a failed write
+#           produced one — every writer truncated before it wrote — and the rename
+#           stopped that: a write that fails now leaves the previous contents. It stays
+#           because `gate`'s explicit clearing and a file left by an older version both
+#           still produce an empty file, and neither is an answer.
 #           WRITTEN BY RENAME through `writelib.sh` rather than sent to stdout for the
 #           driver to redirect: `>` in the driving shell follows a symlink, so a path a
 #           same-UID process had replaced cost the operator the file it pointed at, and

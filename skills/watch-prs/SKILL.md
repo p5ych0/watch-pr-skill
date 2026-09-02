@@ -388,10 +388,12 @@ then
 #     0  posted — the baseline is in the FILE the option names, and it is the `none`
 #        token on the automatic path, where the trigger preceded us and there is
 #        nothing to capture. `none` means "no prior review to wait past"; an EMPTY
-#        value is refused by the watch, since a failed write produces one. Nothing
-#        is written to stdout: the helper opens that file and RENAMES onto it, where
-#        a `> "$PRIOR_FILE"` here would be opened by this shell before the helper
-#        starts and would follow a symlink
+#        value is refused by the watch — not because a failed write still produces one,
+#        which the rename stopped, but because an explicit clearing and a file left by
+#        an older version both can, and neither is an answer. Nothing
+#        is written to stdout: the helper RENAMES onto that path — it never opens the
+#        path you name in order to write it — where a `> "$PRIOR_FILE"` here would be
+#        opened by this shell before the helper starts and would follow a symlink
 #     1  stopped — nothing was posted
 #
 # Write the account into `$REQUEST_FILE` with your file-writing tool — not from
@@ -415,7 +417,7 @@ then
 # WHY:
 # THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
 # WHY:
-# AND THE HELPER OPENS THAT FILE, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
+# AND THE HELPER RENAMES ONTO THAT PATH, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
 # WHY:
 # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 # WHY:

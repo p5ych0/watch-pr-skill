@@ -1169,7 +1169,7 @@ assignment to prove, because the value never lands here at all.
 
 `pr-origin.sh` settled the same question the same way, and for the same reason.
 
-## AND THE HELPER OPENS THAT FILE, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
+## AND THE HELPER RENAMES ONTO THAT PATH, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
 
 A separate invariant from the one above, and separately load-bearing: a path can be
 handed over in two ways, and only one of them is safe. `> "$PRIOR_FILE"` also carries
@@ -1177,11 +1177,14 @@ a path rather than a name, so it satisfies the claim above completely — and it
 the defect. #263.
 
 `>` follows a symlink, so a same-UID process that had replaced that path cost the
-operator the file it pointed at. Worse than the other eight sites: the redirection is
+operator the file it pointed at. Worse than the other nine sites: the redirection is
 opened by THIS shell BEFORE the helper starts, so nothing the helper could check would
 have caught it in time. Given the path as an argument instead, the helper writes it
-through `writelib.sh`, which renames ONTO the name rather than opening it — the link
-is what goes, never the file at the other end.
+through `writelib.sh`, which never opens the caller's path to write it at all: the
+value goes into a temporary and is RENAMED onto the name, so the link is what goes and
+never the file at the other end. That is the whole property, and it is why the claim
+says renames rather than opens — a helper-side writing open would follow the link
+exactly as this shell's redirection did.
 
 It is an OPTION and not a third positional argument. The body used to be one, and a
 caller still passing that form would have had their body file overwritten with the

@@ -56,8 +56,8 @@ out="$(rb_empty_handoff "$TMP/toempty")" \
 
 # ── A SYMLINK AT THE TARGET LOSES THE LINK, NEVER THE FILE ─────────────────
 #
-# THIS IS THE WHOLE OF #263. `>` follows a symlink, so every one of the seven writes this
-# library replaced would truncate whatever the link pointed at — an arbitrary file of the
+# THIS IS THE WHOLE OF #263. `>` follows a symlink, so every one of the ten handoff sites
+# this library replaced would truncate whatever the link pointed at — an arbitrary file of the
 # operator's, outside the session's working directory, on every invocation that got that
 # far. `rename(2)` replaces the NAME, so the link goes and its target does not.
 printf 'PRECIOUS\n' > "$TMP/victim"
@@ -161,12 +161,13 @@ _wl_stray="$(find "$TMP/realdir" -name '*.rb-write.*' 2>/dev/null | head -1)"
     && pass "…leaving no temporary inside it" \
     || die "a temporary was left in the linked directory: $_wl_stray"
 
-# ── A DIRECTORY AT THE TARGET IS A REFUSAL, VIA THE POSTCONDITION ──────────
+# ── A DIRECTORY AT THE TARGET IS A REFUSAL, AND THE RENAME IS WHAT REFUSES IT ──
 #
-# `mv` onto an existing directory moves the source INSIDE it and reports SUCCESS, so the
-# rename's status cannot see this: a caller that named a directory would be told its value
-# had crossed when it had not. Asking before the rename would be the check-then-open shape
-# #245 convicted; the postcondition asks what actually happened.
+# THE EXACT RENAME REFUSES A DIRECTORY DESTINATION ON ITS OWN — `rename(2)` will not put a
+# file over one — so the type test below is an EARLIER refusal with no temporary created,
+# not the thing that makes this safe. The two-operand `mv` would move the source INSIDE the
+# directory and report success, which is why the rename must stay exact and why this case
+# asserts the reason as well as the outcome.
 rm -rf "$TMP/adir"; mkdir -p "$TMP/adir"
 out="$(rb_write_handoff "$TMP/adir" "nope")" \
     && die "a directory target was accepted" \
