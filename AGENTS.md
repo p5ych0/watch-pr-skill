@@ -196,16 +196,25 @@ When reviewing a change here:
 - **the rename must be EXACT-DESTINATION, and `mv SRC DEST` is not.** It stats the
   destination and, where that resolves to a **directory**, moves the source inside
   it — following a symlink to get there. `rename(2)` does neither. So the library
-  asks for `mv -T` first and falls back to `perl`'s `rename`, which *is* that call.
+  asks for `mv -T` first and falls back to `perl`'s `rename`, which *is* that call, and
+  refuses if neither runs.
   **BSD `mv -h` is not the other half of `-T`**: its contract is only "if the target
   is a symbolic link to a directory, do not follow it", so an **actual** directory
   swapped in takes the ordinary two-operand path and the file inside it is
   overwritten. A change that reintroduces `-h` as the non-GNU spelling is a defect.
-- **a genuine refusal from the exact form must not fall through to the plain one.**
-  `rename` failing because the destination is a directory is the answer the write
-  wants; dropping through to `mv -f` there performs the move it just refused. The
-  exit code is what separates "the rename was made and refused" from "`perl` did not
-  run".
+- **an exact rename or a refusal — there is no plain-`mv` fallback.** One was kept for a
+  platform with neither `mv -T` nor `perl`, and it turned every way `perl` can FAIL into the
+  unsafe path: `PERL5OPT=-MDefinitelyMissing` makes it exit before it reaches `rename`, and
+  the fallback then performed the move the exact form exists to refuse. Telling "aborted"
+  from "not installed" means reading a status the environment controls; having no fallback
+  needs no such reading. Reintroducing one is a defect.
+- **the type refusal answers what the CALLER named, and it is asked once.** A special inode
+  a RACER installs between the test and the rename is REPLACED, not refused — `rename(2)`
+  takes any non-directory destination and no shell-reachable rename is conditional on the
+  destination's type, so a re-check before the rename is the same race one instruction
+  later. That is a stated limit with a fixture pinning it, not an oversight: the inode is in
+  the session's own working directory, so whatever appears there mid-write was put there by
+  a process that already writes it. Do not add the re-check.
 - **the temporary is created ONCE, exclusively, by the same open that writes it.**
   Creating it and opening it again by name is a check-then-open inside the fix. Its
   name carries two `$RANDOM` draws — a builtin, so no `PATH` entry answers for it —

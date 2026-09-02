@@ -333,6 +333,79 @@ else
     pass "…(the swapped-target cases are skipped: this platform has no mv or no perl)"
 fi
 
+# ── A `perl` THAT CANNOT RUN IS A REFUSAL, NOT A FALLBACK ──────────────────
+#
+# THIS IS THE `mv -T`-LESS PLATFORM'S ONLY EXACT RENAME, so every way `perl` can fail used
+# to become the unsafe path. An inherited `PERL5OPT=-MDefinitelyMissing` makes it exit
+# before it reaches `rename`, and with a plain-`mv` fallback behind it the move the exact
+# form exists to refuse was performed anyway — into a directory the racer swapped in, over a
+# file they had seeded there. Removing the fallback is what closes it, and this is the case
+# that says so: `-T` rejected, `perl` sabotaged, an actual directory swapped in.
+if command -v mv >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
+    mkdir -p "$TMP/pbin"
+    { printf '#!/bin/sh\n'
+      printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
+      printf 'if [ ! -e "$RB_SWAPPED" ]; then\n'
+      printf '  : > "$RB_SWAPPED"\n'
+      printf '  rm -f "$_t"; mkdir -p "$_t"; cp "$RB_KEEP" "$_t/${_s##*/}"\n'
+      printf 'fi\n'
+      printf '[ "$1" = -T ] && { echo "mv: illegal option -- T" >&2; exit 1; }\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/pbin/mv"
+    chmod +x "$TMP/pbin/mv"
+    _wp="$TMP/perlrace"; rm -rf "$_wp"; mkdir -p "$_wp/session"
+    printf 'the file the racer wants destroyed\n' > "$_wp/keep"
+    : > "$_wp/session/handoff"
+    _wl_pathsave="$PATH"
+    RB_MV_REAL="$(command -v mv)" RB_KEEP="$_wp/keep" RB_SWAPPED="$_wp/done" \
+        PERL5OPT=-MDefinitelyMissingModuleForThisTest PATH="$TMP/pbin:$PATH" \
+        rb_write_handoff "$_wp/session/handoff" "a value" >/dev/null 2>&1 \
+        && _wl_rc=0 || _wl_rc=$?
+    PATH="$_wl_pathsave"
+    [ "$_wl_rc" != 0 ] \
+        && pass "a perl that aborts before renaming is a refusal, not a fall-through" \
+        || die "a sabotaged perl was treated as though no exact rename had been attempted"
+    [ "$(cat "$_wp/session/handoff/"* 2>/dev/null)" = 'the file the racer wants destroyed' ] \
+        && pass "…so the directory swapped in keeps the file the racer seeded" \
+        || die "the fallback overwrote the seeded file: '$(cat "$_wp/session/handoff/"* 2>/dev/null)'"
+    rm -rf "$_wp" "$TMP/pbin"
+else
+    pass "…(the sabotaged-perl case is skipped: no mv or no perl on this platform)"
+fi
+
+# ── A SPECIAL TARGET INSTALLED AFTER THE TYPE TEST IS REPLACED, AND THAT IS THE LIMIT ──
+#
+# THE TYPE TEST ANSWERS WHAT THE CALLER NAMED, ONCE. `rename(2)` takes any non-directory
+# destination and no shell-reachable rename can be made conditional on the destination's
+# type, so a FIFO a racer installs between the test and the rename is REPLACED rather than
+# refused — and a re-check before the rename is the same race one instruction later.
+#
+# THIS CASE EXISTS TO PIN THAT, not to hide it. The bound is who can be hurt: the inode is
+# in the session's own working directory, so anything appearing there mid-write was put
+# there by a process that already writes that directory, and what it loses is its own. An
+# operator's FIFO at the path was there when the test was asked and IS refused, which the
+# case further up proves. If a later change makes the late swap a refusal, this case fails
+# and the limit gets re-read rather than silently widened.
+if command -v mv >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1; then
+    mkdir -p "$TMP/fbin"
+    { printf '#!/bin/sh\n'
+      printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
+      printf 'if [ ! -e "$RB_SWAPPED" ]; then : > "$RB_SWAPPED"; rm -f "$_t"; mkfifo "$_t"; fi\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/fbin/mv"
+    chmod +x "$TMP/fbin/mv"
+    _wf="$TMP/fiforace"; rm -rf "$_wf"; mkdir -p "$_wf"; : > "$_wf/handoff"
+    _wl_pathsave="$PATH"
+    RB_MV_REAL="$(command -v mv)" RB_SWAPPED="$_wf/done" PATH="$TMP/fbin:$PATH" \
+        rb_write_handoff "$_wf/handoff" "a value" >/dev/null 2>&1 \
+        && _wl_rc=0 || _wl_rc=$?
+    PATH="$_wl_pathsave"
+    { [ "$_wl_rc" = 0 ] && [ -f "$_wf/handoff" ] && [ "$(cat "$_wf/handoff")" = "a value" ]; } \
+        && pass "a FIFO installed after the type test is replaced, and the value still crosses" \
+        || die "the late-swapped FIFO gave rc=$_wl_rc and '$(cat "$_wf/handoff" 2>/dev/null)'"
+    rm -rf "$_wf" "$TMP/fbin"
+else
+    pass "…(the late-swapped FIFO case is skipped: no mv or no mkfifo here)"
+fi
+
 # ── A RACER THAT REPLACES THE SOURCE, NOT THE TARGET ───────────────────────
 #
 # THE TEMPORARY'S NAME IS PUBLISHED THE MOMENT IT EXISTS, and everything above is about the

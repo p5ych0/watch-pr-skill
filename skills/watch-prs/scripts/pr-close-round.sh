@@ -625,9 +625,11 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # crosses.
     #
     # NOT BOUNDED, AND THAT IS CONSISTENT RATHER THAN AN OVERSIGHT. `run_limited` is not
-    # loaded in this file, and bounding the read alone would buy nothing: the WRITE above it
-    # is a plain redirection, so a path that blocks on open has already blocked there. A
-    # watchdog here would need one there too, which is a different change from this one.
+    # loaded in this file, and bounding the read alone would buy little: since #263 the
+    # WRITE above it creates its temporary exclusively, which cannot wait on a FIFO — but it
+    # can still stall on an unresponsive mount during pathname resolution or the rename, so
+    # a path that hangs has already hung there. A watchdog here would need one there too,
+    # which is a different change from this one.
     /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9

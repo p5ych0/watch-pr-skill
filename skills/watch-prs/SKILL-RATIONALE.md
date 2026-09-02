@@ -1148,12 +1148,16 @@ checks both ids it compares — and `CLAUDE.md` records what a second copy of a 
 costs: every field check in `recordlib.sh` was written out two or three times and
 every one was found missing from at least one copy.
 
-The value has ONE consumer. So it is redirected into `$PRIOR_FILE` and read where it
-is used, by a privileged helper that already knows what a review id looks like. That
-is `prefer removing the dependency over guarding it` applied to three guards at once,
+The value has ONE consumer. So it goes into `$PRIOR_FILE` and is read where it is
+used, by a privileged helper that already knows what a review id looks like. That is
+`prefer removing the dependency over guarding it` applied to three guards at once,
 and it is the same answer `pr-origin.sh` gives: a path rather than a name. #243.
 
-## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME — AND THE HELPER OPENS IT.
+It was a REDIRECTION until #263 — `> "$PRIOR_FILE"` on this shell's side. The path is
+handed over as `--baseline-file` now and the helper renames onto it; the next claim is
+about that half.
+
+## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
 
 A name can be made readonly or transforming by a startup file, and both failures
 are invisible at the point of use. A path is neither: the helper writes the file,
@@ -1163,20 +1167,26 @@ It used to read the file back and prove the assignment against a second read of 
 which is where a name could still have defeated the handoff. Since #243 there is no
 assignment to prove, because the value never lands here at all.
 
-The path is handed over as `--baseline-file` rather than as a REDIRECTION, and that
-is #263. `> "$PRIOR_FILE"` here follows a symlink, so a same-UID process that had
-replaced that path cost the operator the file it pointed at — and the redirection is
-opened by THIS shell before the helper starts, so nothing the helper could check
-would have stopped it. Given the path instead, the helper writes it through
-`writelib.sh`, which renames onto the name rather than opening it: the link is what
-goes, never the file at the other end.
+`pr-origin.sh` settled the same question the same way, and for the same reason.
+
+## AND THE HELPER OPENS THAT FILE, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
+
+A separate invariant from the one above, and separately load-bearing: a path can be
+handed over in two ways, and only one of them is safe. `> "$PRIOR_FILE"` also carries
+a path rather than a name, so it satisfies the claim above completely — and it was
+the defect. #263.
+
+`>` follows a symlink, so a same-UID process that had replaced that path cost the
+operator the file it pointed at. Worse than the other eight sites: the redirection is
+opened by THIS shell BEFORE the helper starts, so nothing the helper could check would
+have caught it in time. Given the path as an argument instead, the helper writes it
+through `writelib.sh`, which renames ONTO the name rather than opening it — the link
+is what goes, never the file at the other end.
 
 It is an OPTION and not a third positional argument. The body used to be one, and a
 caller still passing that form would have had their body file overwritten with the
 baseline — worse than the silent drop the arity refusal exists to prevent. Spelled
 out, the old form still lands on that refusal.
-
-`pr-origin.sh` settled the same question the same way, and for the same reason.
 
 ## THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 

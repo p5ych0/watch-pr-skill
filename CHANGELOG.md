@@ -86,7 +86,10 @@
   the directory once it exists, point the target at a directory of their own, and put a file
   worth keeping there under that name for `mv -f` to overwrite. `-T` is the GNU spelling and
   `perl`'s `rename` **is** `rename(2)`, so it is what covers the case where `mv -T` is not
-  there. BSD `mv -h` is not: its contract is only "if the target is a symbolic link to a
+  there — and if neither runs the write **refuses**, with no plain-`mv` fallback: keeping one
+  turned every way `perl` can fail into the unsafe path, including an inherited `PERL5OPT`
+  that aborts it before it reaches `rename`. The cost is that a platform with neither cannot
+  run this loop, loudly and with the reason named. BSD `mv -h` is not: its contract is only "if the target is a symbolic link to a
   directory, do not follow it", so an **actual** directory swapped in takes the ordinary
   two-operand path and the file inside it is overwritten just the same. Each is attempted as
   the real operation rather than probed — a `mv` that does not know an option fails on the

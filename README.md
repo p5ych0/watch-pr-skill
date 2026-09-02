@@ -312,8 +312,10 @@ Then:
    see **Watching without prompts**. An unreadable state is a stop, never
    "no findings" — and so is an unreadable baseline file. "There is no earlier
    review to wait past" is a real answer and is spelled `none`; an EMPTY file is a
-   refusal, because every writer truncates before it writes and so a failed write
-   produces one. A failed read that quietly became the `none` token would let the
+   refusal, because that is what a failed write used to leave — every writer truncated
+   before it wrote. Since 2.1.0 they rename instead, so a failed write leaves the
+   previous contents rather than an empty file, and the refusal stays because the
+   token is what a reader can trust either way. A failed read that quietly became the `none` token would let the
    watch report the review the round just answered as the next one — which is why
    the read is refused rather than degraded, and why empty is refused rather than
    read as no floor.

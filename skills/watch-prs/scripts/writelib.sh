@@ -34,6 +34,16 @@
 # open itself refusing, not a test preceding one, so there is no window between the question
 # and the answer.
 #
+# IT ANSWERS WHAT THE CALLER NAMED, AND IT IS ASKED ONCE. A special inode a RACER installs
+# after this test is REPLACED by the rename rather than refused: `rename(2)` takes any
+# non-directory destination, and no rename reachable from a shell can be made conditional on
+# the destination's type — a re-check before the rename is the same race one instruction
+# later. That is a bounded outcome rather than a hole, and the bound is who can be hurt: the
+# inode is in the session's own working directory, so anything appearing there mid-write was
+# put there by a process that already writes that directory, and what it loses is its own.
+# An operator's FIFO or device at the path was there when this was asked, and IS refused.
+# Do not add the re-check; state the limit.
+#
 # A SQUATTER ON THE TEMPORARY COSTS A REFUSAL, NOT A TRUNCATION. The name carries the
 # caller's path and this shell's pid, and a same-UID process that gets there first makes the
 # exclusive create fail — including where what it left is a symlink, since `set -C` refuses
@@ -183,26 +193,24 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # the exact form just refused. So `3` means "the rename was made and refused" and stops;
     # anything else means `perl` itself did not run.
     #
-    # THE PLAIN FORM IS THE LAST RESORT AND NOT THE FIRST, kept so that a platform with
-    # neither `mv -T` nor `perl` still works, with the postcondition below as its only cover.
-    # Neither platform this project builds and tests on is that platform.
+    # AND THERE IS NO PLAIN-`mv` FALLBACK, WHICH IS A REMOVAL RATHER THAN A GAP. One was
+    # kept, so that a platform with neither spelling still worked — and it turned every way
+    # `perl` can fail into the unsafe path. An inherited `PERL5OPT=-MDefinitelyMissing` makes
+    # `perl` exit 2 before it reaches `rename`, and the fallback then performed the move the
+    # exact form exists to refuse. Telling "perl aborted" from "perl is not installed" means
+    # reading an exit status the environment controls; having no fallback needs no such
+    # reading. So: `mv -T`, or `perl`, or a refusal. The cost is that a platform with
+    # neither cannot run this loop — loudly, with the reason named — and neither platform
+    # this project builds and tests on is that platform. `README.md` states the requirement.
     #
-    # AND `--` BEFORE THE OPERANDS, ON ALL THREE. A handoff path is the CALLER'S, and a
-    # relative one may begin with `-`: the temporary derived from it does too, so `mv` reads
-    # the source as an option bundle and `perl` reads it as a switch. Every attempt then
-    # fails on the option, the write refuses, and a path that was perfectly writable takes
-    # the stage down. `--` is where each of them stops parsing.
-    _rb_wh_mv=0
-    /usr/bin/env mv -T -f -- "$_rb_wh_tmp" "$1" 2>/dev/null || {
-        /usr/bin/env perl -e 'rename($ARGV[0], $ARGV[1]) or exit 3' -- "$_rb_wh_tmp" "$1" 2>/dev/null
-        _rb_wh_mv=$?
-        if [ "$_rb_wh_mv" -eq 3 ]; then
-            echo "could not rename '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"
-            return 1
-        fi
-        [ "$_rb_wh_mv" -eq 0 ] || /usr/bin/env mv -f -- "$_rb_wh_tmp" "$1" \
-            || { echo "could not move '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"; return 1; }
-    }
+    # AND `--` BEFORE THE OPERANDS, ON BOTH. A handoff path is the CALLER'S, and a relative
+    # one may begin with `-`: the temporary derived from it does too, so `mv` reads the
+    # source as an option bundle and `perl` reads it as a switch. Both attempts then fail on
+    # the option, the write refuses, and a path that was perfectly writable takes the stage
+    # down. `--` is where each of them stops parsing.
+    /usr/bin/env mv -T -f -- "$_rb_wh_tmp" "$1" 2>/dev/null \
+        || /usr/bin/env perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "$_rb_wh_tmp" "$1" 2>/dev/null \
+        || { echo "could not rename '$_rb_wh_tmp' onto '$1' — it is unchanged and the temporary is left behind. An exact-destination rename is required: 'mv -T' or a working 'perl'"; return 1; }
     # AND THE POSTCONDITION ASKS WHAT IS AT THE TARGET, NOT MERELY WHAT KIND OF THING IT IS.
     # It runs after the rename rather than before it, so it asks what actually happened —
     # which catches the interleaving the type test cannot, a racer making the target a

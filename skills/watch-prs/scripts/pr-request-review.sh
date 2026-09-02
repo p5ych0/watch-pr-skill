@@ -90,10 +90,11 @@ rb_load() { return 127; }
 # THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
 # say: an empty `loadlib.sh` leaves the stub, the stub returns 127, and without
 # this arm the only trace is a bare exit status.
-# NO `2>&1` ON THESE, unlike the helpers whose contract is stdout. `rb_load`
-# reports on stderr, and so does everything this script says — stdout carries the
-# baseline or nothing. Redirecting here would put a load failure on the one stream
-# the caller reads as a value.
+# NO `2>&1` ON THESE, unlike the helpers whose contract is stdout. `rb_load` reports on
+# stderr, and so does everything this script says. Nothing at all goes to stdout since
+# #263 — the baseline crosses in the file `--baseline-file` names — so redirecting here
+# would only mix a load failure into a stream the caller has no use for, while hiding it
+# from the one it reads.
 rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty" >&2
