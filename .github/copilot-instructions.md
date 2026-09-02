@@ -220,7 +220,9 @@ When reviewing a change here:
   rename and with its own no-follow, non-blocking, fstat-on-the-handle answer; what the test refuses is a caller naming
   something that is not a handoff file. A directory (`mv` moves the source *inside*
   it and reports success), a FIFO, a device or a socket (`mv -f` renames over every
-  non-directory inode it may, so `/dev/null` named here became a regular file), or a
+  non-directory inode it may, so `/dev/null` named here WOULD become a regular file — the
+  old truncating write merely wrote INTO the device, which is harmless, so this risk arrived
+  with the rename and the type test is what answers it), or a
   symlink to any of those. **A symlink to a regular file passes and must** — that is
   the whole point of the change, and refusing it would be a different helper.
 - **the rename must be EXACT-DESTINATION, and `mv SRC DEST` is not.** It stats the

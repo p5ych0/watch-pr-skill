@@ -465,8 +465,11 @@ Then:
      directory** is accepted, and it costs the **link** — `rename(2)` never follows a final
      symlink, so it replaces the link and leaves the directory alone. Neither loses you
      anything inside that directory, which is the property; only one of them is a refusal.
-     `/dev/null` named here is refused rather
-     than turned into a regular file, which is what the old truncating write did to it.
+     `/dev/null` named here is refused, and it is worth being exact about what that
+     saves you from: the **old** truncating write opened the device and wrote into it,
+     which is harmless. The replacement risk arrived with the rename — `rename(2)` will
+     put a regular file over any non-directory inode — and it is the type refusal, not
+     the rename, that keeps the device a device.
      A symlink to a regular file is accepted, and the **link** is what gets replaced —
      never the file it points at, which was the whole of the change.
 
