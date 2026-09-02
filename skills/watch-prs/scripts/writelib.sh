@@ -133,7 +133,10 @@
 #
 # SO IT IS ONE OPEN AND EVERY ANSWER COMES FROM IT. `O_NOFOLLOW` refuses a symlink at the
 # open, `O_NONBLOCK` makes a FIFO return at once instead of waiting, `-f` on the HANDLE gives
-# the type of the inode actually opened, and the bytes are slurped and matched whole.
+# the type of the inode actually opened, and the bytes are read with `sysread` until a
+# zero-length read and matched whole — a slurp returns what arrived BEFORE an I/O error, so
+# a matching prefix followed by a failure read as a complete head; `sysread` returns undef
+# on the error and this refuses.
 #
 # NOTHING CROSSES BACK, WHICH IS THE POINT FOR THAT CALLER. The driver does not need the sha
 # — it needs to know a gate proved one — so this answers with a STATUS and the driver uses it
@@ -145,16 +148,18 @@ rb_handoff_is_sha() {
         sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
         stat($h) or exit 3;
         exit 4 unless -f _;
-        local $/;
-        my $got = <$h>;
-        $got = "" unless defined $got;
+        my $got = "";
+        while (1) {
+            my $n = sysread($h, my $buf, 65536);
+            exit 6 unless defined $n;
+            last if $n == 0;
+            $got .= $buf;
+        }
         exit 5 unless $got =~ /\A[0-9a-f]{40}\n\z/;
         exit 0;
     ' -- "$1" 2>/dev/null
 }
 
-rb_write_handoff() { _rb_handoff "$1" value "$2"; }
-rb_empty_handoff() { _rb_handoff "$1" empty; }
 
 _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # THE TARGET MUST BE ABSENT OR A REGULAR FILE, AND THIS IS NOT THE CONVICTED SHAPE.
@@ -376,10 +381,12 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         # THE READ-BACK OPENS THE TARGET, WHICH IS THE ONE OPEN THIS LIBRARY MAKES — so it
         # is the one place a racer can still cost the caller a HANG rather than a refusal.
         # `[ -f ]` above answers before the open, and a FIFO swapped in between the two had
-        # `read` waiting for a writer that never comes: of the six VALUE calls, which are
-        # the only ones that reach this open, three have no
-        # watchdog, and in the round-closing baseline path that hang lands AFTER the thread
-        # replies are resolved, leaving the round half-closed.
+        # `read` waiting for a writer that never comes. Every one of the TEN handoffs reaches
+        # an open of the target now — this read-back for a value, the size check for an
+        # emptying — and SEVEN of them have no watchdog: the four clearings, the two value
+        # writes in `pr-close-round.sh` and the one in `pr-request-review.sh`. In the
+        # round-closing baseline path that hang lands AFTER the thread replies are resolved,
+        # leaving the round half-closed.
         #
         # SO THE OPEN IS NON-BLOCKING AND THE TYPE COMES FROM `fstat`, NOT FROM A TEST
         # BEFORE IT. `O_NONBLOCK` makes opening a FIFO for reading return at once instead of
@@ -388,10 +395,18 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         # this a postcondition rather than another guard. `[ ! -L ]` and `[ -f ]` above stay
         # as the cheap early answer with a clearer message; neither is load-bearing now.
         #
-        # AND A NUL IS STILL A REFUSAL. Slurped, the bytes come back whole, so a forgery
+        # AND A NUL IS STILL A REFUSAL. Read whole, the bytes come back whole, so a forgery
         # spelled "the requested value, then a NUL, then anything" no longer compares equal
         # by being truncated at the delimiter — it compares unequal, which is the same
         # answer reached without depending on a reader's stopping rule.
+        #
+        # READ WITH `sysread` UNTIL A ZERO-LENGTH READ, NOT SLURPED. `local $/` and `<$h>`
+        # return the bytes accumulated BEFORE an I/O error, so on a failing network or FUSE
+        # filesystem a read that delivered the expected value and then failed came back
+        # looking complete and compared equal — the driver then resolved threads on a head
+        # nobody had finished reading. `sysread` returns undef on error, which is a refusal,
+        # and the loop ends only on a genuine zero-length read: clean EOF is established,
+        # not assumed.
         # AND `O_NOFOLLOW`, BECAUSE `[ ! -L ]` ABOVE IS A TEST AND THIS IS THE OPEN. A racer
         # who replaces the target with a SYMLINK between the two, pointing at a regular file
         # holding the requested bytes, satisfies `fstat` on the referent and the byte
@@ -409,9 +424,13 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
             sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
             stat($h) or exit 3;
             exit 4 unless -f _;
-            local $/;
-            my $got = <$h>;
-            $got = "" unless defined $got;
+            my $got = "";
+            while (1) {
+                my $n = sysread($h, my $buf, 65536);
+                exit 6 unless defined $n;
+                last if $n == 0;
+                $got .= $buf;
+            }
             exit 5 unless $got eq $ARGV[1] . "\n";
             exit 0;
         ' -- "$1" "$3" 2>/dev/null \
@@ -441,3 +460,14 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     fi
     return 0
 }
+
+# THE PUBLIC NAMES ARE DEFINED LAST, AFTER THE IMPLEMENTATION THEY CALL. A library truncated
+# part-way — a partial copy, a write that stopped — used to define these two wrappers and
+# not `_rb_handoff`, and that shape passed every load check: `rb_load` verifies the public
+# symbol and the direct-source children stub it, so both saw `rb_write_handoff` defined and
+# proceeded. The wrapper then resolved the MISSING private name on `PATH`, and an executable
+# called `_rb_handoff` exiting 0 reported the write or the clearing done with nothing touched
+# — the same forgery the stubs exist to stop, one name deeper. With the wrappers at the END,
+# any truncation leaves the public names undefined, and the stub or the loader refuses.
+rb_write_handoff() { _rb_handoff "$1" value "$2"; }
+rb_empty_handoff() { _rb_handoff "$1" empty; }

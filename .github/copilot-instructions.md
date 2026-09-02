@@ -267,8 +267,8 @@ When reviewing a change here:
   file whose raw bytes are what the call asked for. That read is the ONE place the library
   opens the target, and it opens `O_NOFOLLOW`: `[ ! -L ]` before it is a test and this is
   the open, so a racer swapping in a symlink to a file holding the right bytes between the
-  two satisfied `fstat` and the comparison both. An emptying is zero bytes, asked from the
-  inode with `-s`, so that path opens nothing at all.
+  two satisfied `fstat` and the comparison both. An emptying is zero bytes, asked of the same
+  kind of descriptor — one `sysopen`, the type and the size both from `fstat` on that handle.
 - **the create is `O_CREAT|O_EXCL`, and `set -C` is not that.** Bash's noclobber fails a
   redirection only where the existing file is REGULAR, so a FIFO pre-placed at the
   temporary's name is OPENED and the write BLOCKS. `perl`'s `sysopen` has no such
@@ -277,9 +277,10 @@ When reviewing a change here:
   recreates an unbounded hang.
 - **the read-back opens non-blocking and takes the type from the HANDLE.** `[ -f ]` before
   the open is a cheap early answer, not the protection: a FIFO swapped in between the two
-  had the read waiting for a writer. Of the SIX value calls — the only ones that reach this
-  open, since the four emptyings never open the target — THREE have no watchdog: the two in
-  `pr-close-round.sh` and the one in `pr-request-review.sh`. `fstat`
+  had the read waiting for a writer. All TEN handoffs reach an open of the target now — the
+  value read-back and the emptying's size check alike — and SEVEN have no watchdog: the four
+  clearings, the two value writes in `pr-close-round.sh` and the one in
+  `pr-request-review.sh`. An audit of opens or watchdogs that skips the clearings is short. `fstat`
   on the descriptor that was actually opened is what removes the window; a change back to
   `read < "$path"` leaves every behavioural case green.
 - **`perl` runs with its environment cleared — `env -i`, keeping only `PATH`.** `PERL5OPT`
@@ -325,6 +326,13 @@ When reviewing a change here:
   rename leaves it exactly as it was; the POSTCONDITION refuses after the rename, so a
   substituted inode can be at the target. Read a refusal as "this handoff did not happen",
   never as "the previous handoff is still readable".
+- **the public wrappers are defined LAST in `writelib.sh`, after `_rb_handoff`.** A library
+  truncated between them defined the wrappers and not the implementation, passed every load
+  check, and then resolved `_rb_handoff` on `PATH` — the stub forgery one name deeper. Order
+  is the defence; a wrapper above its implementation is the defect back.
+- **both perl readers use a `sysread` loop ending on a zero-length read, not a slurp.** A
+  slurp returns what arrived before an I/O error, so a matching prefix followed by a failure
+  read as a complete head. `sysread` returns undef on the error and the reader refuses.
 - **a child that sources the library directly defines a refusing stub FIRST.** Sourcing an
   empty `writelib.sh` succeeds and leaves the name undefined, and an undefined name is a
   `PATH` lookup: an executable called `rb_write_handoff` exiting 0 made a readiness write

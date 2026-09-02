@@ -405,7 +405,7 @@ fi
 # THE READ-BACK IS THE ONE OPEN THIS LIBRARY MAKES, so it is the one place a racer can cost
 # the caller a HANG rather than a refusal. `[ -f ]` answers before the open, and a FIFO
 # swapped in between the two had `read` waiting for a writer that never comes — of the six
-# VALUE calls, which are the only ones that reach this open, three have no watchdog, and in the round-closing baseline path that hang lands
+# TEN handoffs reach an open of the target now, and seven have no watchdog, and in the round-closing baseline path that hang lands
 # AFTER the thread replies are resolved, leaving the round half-closed.
 #
 # STAGED THROUGH THE `mv` SHIM, which performs the real rename and then replaces the target.
@@ -795,6 +795,68 @@ if command -v mv >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1 \
 else
     pass "…(the emptying-race case is skipped: no mv with -T, or no mkfifo)"
 fi
+
+# ── A PARTIAL LIBRARY DOES NOT HAND `_rb_handoff` TO `PATH` ────────────────
+#
+# The refusing stubs and `rb_load` both check the PUBLIC name. A library truncated after the
+# wrappers but before `_rb_handoff` defined the public name and not the private one, passed
+# both checks, and then resolved `_rb_handoff` on `PATH` — an executable by that name exiting
+# 0 reported a write or a clearing done with nothing touched. The wrappers are defined LAST
+# now, so any truncation leaves the public names undefined and the stub refuses.
+#
+# STAGED AS THE OLD SHAPE WOULD HAVE BEEN CUT: the library up to the line before `_rb_handoff`
+# begins, with a logging `_rb_handoff` forger on `PATH`, called through a stubbed child exactly
+# as the helpers call it.
+_pl="$TMP/partial"; rm -rf "$_pl"; mkdir -p "$_pl/bin"
+_pl_cut="$(grep -n '^_rb_handoff() {' "$SELF_DIR/writelib.sh" | head -1 | cut -d: -f1)"
+[ -n "$_pl_cut" ] || die "could not find _rb_handoff's definition to cut the library at"
+head -n "$((_pl_cut - 1))" "$SELF_DIR/writelib.sh" > "$_pl/writelib.sh"
+: > "$_pl/forger.log"
+{ printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$_pl/forger.log"; printf 'exit 0\n'; } > "$_pl/bin/_rb_handoff"
+chmod +x "$_pl/bin/_rb_handoff"
+printf 'stale\n' > "$_pl/target"
+rc=0
+run_limited 10 env PATH="$_pl/bin:$PATH" bash -p -c \
+    'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "new"' \
+    _ "$_pl" "$_pl/target" >/dev/null 2>&1 || rc=$?
+[ "$rc" != 0 ] \
+    && pass "a library cut before _rb_handoff is refused by the stubbed child" \
+    || die "a partial library reported a write done (rc=$rc)"
+[ ! -s "$_pl/forger.log" ] \
+    && pass "…and the PATH executable named _rb_handoff was never run" \
+    || die "the wrapper resolved _rb_handoff on PATH"
+[ "$(cat "$_pl/target")" = stale ] \
+    && pass "…with the target untouched" \
+    || die "a partial library changed the target"
+# AND THE ORDER IS ASSERTED ON THE SOURCE, since it is the order that makes the cut above
+# leave the public name undefined rather than the private one.
+_pl_impl="$(grep -n '^_rb_handoff() {' "$SELF_DIR/writelib.sh" | head -1 | cut -d: -f1)"
+_pl_wrap="$(grep -n '^rb_write_handoff() {' "$SELF_DIR/writelib.sh" | head -1 | cut -d: -f1)"
+_pl_wrap2="$(grep -n '^rb_empty_handoff() {' "$SELF_DIR/writelib.sh" | head -1 | cut -d: -f1)"
+{ [ -n "$_pl_impl" ] && [ -n "$_pl_wrap" ] && [ -n "$_pl_wrap2" ] \
+  && [ "$_pl_impl" -lt "$_pl_wrap" ] && [ "$_pl_impl" -lt "$_pl_wrap2" ]; } \
+    && pass "…because _rb_handoff is defined before both public wrappers" \
+    || die "a public wrapper is defined before _rb_handoff (impl=$_pl_impl write=$_pl_wrap empty=$_pl_wrap2)"
+rm -rf "$_pl"
+
+# ── BOTH READERS ESTABLISH CLEAN EOF RATHER THAN ASSUMING IT ─────────────
+#
+# `local $/` and `<$h>` return the bytes accumulated BEFORE an I/O error, so on a failing
+# network or FUSE filesystem a read that delivered the expected value and then failed came
+# back looking complete and compared equal. No portable fixture can make a regular file fail
+# mid-read, so the mechanism is asserted on the source: both readers loop on `sysread`,
+# refuse an undefined return, and end only on a zero-length read.
+_wl_readers="$(grep -c 'my \$n = sysread(\$h, my \$buf, 65536);' "$SELF_DIR/writelib.sh")" || _wl_readers=0
+[ "$_wl_readers" -eq 2 ] \
+    && pass "both readers read with sysread rather than a slurp" \
+    || die "$_wl_readers reader(s) use a sysread loop; a slurp returns a matching prefix before an I/O error as success"
+_wl_undef="$(grep -c 'exit 6 unless defined \$n;' "$SELF_DIR/writelib.sh")" || _wl_undef=0
+[ "$_wl_undef" -eq 2 ] \
+    && pass "…and both refuse a read that returned an error" \
+    || die "$_wl_undef reader(s) refuse an undefined sysread"
+grep -q 'local \$/;' "$SELF_DIR/writelib.sh" \
+    && die "a slurp is back in writelib.sh; it returns what arrived before an I/O error" \
+    || pass "…and no slurp remains"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
