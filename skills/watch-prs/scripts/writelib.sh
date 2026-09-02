@@ -147,12 +147,32 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # `mv` RATHER THAN `cp`: the point is the rename, and a copy would open the target for
     # writing and be exactly the truncation this exists to remove.
     #
-    # NOT `mv -T`, WHICH WOULD SETTLE THE DIRECTORY CASE OUTRIGHT. It is a GNU extension
-    # and this suite runs against stock BSD tools on the mac-shaped job, where it is a
-    # usage error — so a helper written around it would refuse every write on that
-    # platform. The test above is what stands in for it, and the postcondition below is
-    # what covers the race the test cannot.
-    /usr/bin/env mv -f "$_rb_wh_tmp" "$1" \
+    # AND AN EXACT-DESTINATION `mv`, BECAUSE THE TWO-OPERAND FORM IS NOT A RENAME. `mv SRC
+    # DEST` STATS `DEST` FIRST and, where it resolves to a DIRECTORY, moves the source
+    # INSIDE it — following a symlink to do so. `rename(2)` does neither: it never follows a
+    # symlink in the final component of either operand, so the link is what it replaces.
+    # The directory behaviour is the UTILITY's, and it is the whole of the attack: a racer
+    # reads the temporary's name out of the directory once it exists — randomness makes a
+    # name unguessable, not unobservable — points the target at a directory of their own,
+    # and puts a file worth keeping there under that name for `mv -f` to overwrite. The
+    # postcondition sees it afterwards, which is after the loss.
+    #
+    # SO THE EXACT FORM IS ASKED FOR FIRST, AND EACH ATTEMPT IS THE REAL OPERATION. `-T` is
+    # the GNU spelling and `-h` the BSD one — `-h` is precisely this case, "if the target is
+    # a symbolic link to a directory, do not follow it" — and a `mv` that does not know an
+    # option fails on the option, having moved nothing, so the next attempt is safe to make.
+    # Probing with `--version` would ask a different question and answer it wrongly, which
+    # is #269; probing with a scratch directory would need that directory REMOVED, which is
+    # the class `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts.
+    #
+    # THE PLAIN FORM IS THE LAST RESORT AND NOT THE FIRST, and it is kept so that a platform
+    # whose `mv` has neither spelling still works, with the postcondition below as its only
+    # cover. Neither platform this project builds and tests on is that platform; making it a
+    # refusal instead would take the loop down on any platform that is, to close a window
+    # that needs a same-UID racer already holding the file it wants destroyed.
+    { /usr/bin/env mv -T -f "$_rb_wh_tmp" "$1" 2>/dev/null \
+      || /usr/bin/env mv -h -f "$_rb_wh_tmp" "$1" 2>/dev/null \
+      || /usr/bin/env mv -f "$_rb_wh_tmp" "$1"; } \
         || { echo "could not move '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"; return 1; }
     # AND THE TARGET IS A REGULAR FILE AFTERWARDS, WHICH IS A POSTCONDITION AND NOT A GUARD.
     # It asks what actually happened rather than what was true a moment ago, so a racer that

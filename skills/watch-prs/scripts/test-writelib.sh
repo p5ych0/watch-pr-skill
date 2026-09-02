@@ -231,5 +231,66 @@ grep -qE '(^|[^a-z_])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$_wl_code" \
     && die "writelib.sh removes something; the decision record convicts that class" \
     || pass "the library contains no removal of any kind"
 
+# ── A RACER THAT SWAPS THE TARGET AFTER THE TYPE TEST ──────────────────────
+#
+# THE TWO-OPERAND `mv` IS NOT A RENAME, and that is what this case is about. `mv SRC DEST`
+# STATS `DEST` first and, where it resolves to a DIRECTORY, moves the source INSIDE it —
+# following a symlink to get there. `rename(2)` never follows a symlink in the final
+# component of either operand, so the directory behaviour belongs to the UTILITY.
+#
+# THE ATTACK NEEDS NO GUESSWORK, which is why the unguessable temporary is not the answer
+# here: the racer READS the name out of the directory once it exists, points the target at
+# a directory of their own, and puts a file worth keeping there under that name. `mv -f`
+# then overwrites it, and the postcondition sees it afterwards — after the loss.
+#
+# STAGED THROUGH AN `mv` SHIM, which is the only hook between the type test and the rename:
+# everything the write does in between is a builtin. The shim receives the temporary's real
+# path as its source operand, so it can seed the racer's directory under exactly the right
+# basename and swap the target — which is the race, run deterministically rather than hoped
+# for.
+_wl_exact=""
+if command -v mv >/dev/null 2>&1; then
+    : > "$TMP/probe-a"
+    mv -T -f "$TMP/probe-a" "$TMP/probe-b" 2>/dev/null && _wl_exact=-T
+    if [ -z "$_wl_exact" ]; then
+        : > "$TMP/probe-a"
+        mv -h -f "$TMP/probe-a" "$TMP/probe-b" 2>/dev/null && _wl_exact=-h
+    fi
+fi
+if [ -n "$_wl_exact" ]; then
+    _wr="$TMP/racer"; rm -rf "$_wr"; mkdir -p "$_wr/session" "$_wr/attacker"
+    printf 'the file the racer wants destroyed\n' > "$_wr/keep"
+    : > "$_wr/session/handoff"
+    _wl_pathsave="$PATH"; mkdir -p "$TMP/rbin"
+    { printf '#!/bin/sh\n'
+      # The source operand is the last-but-one argument; the target is the last.
+      printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
+      printf 'if [ ! -L "$_t" ]; then\n'
+      # SEED FIRST, THEN SWAP: the racer's directory has to hold the victim under the
+      # temporary's own basename before the rename can be misdirected onto it.
+      printf '  ln "$RB_KEEP" "$RB_ATTACK/${_s##*/}" 2>/dev/null || cp "$RB_KEEP" "$RB_ATTACK/${_s##*/}"\n'
+      printf '  rm -f "$_t" && ln -s "$RB_ATTACK" "$_t"\n'
+      printf 'fi\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/rbin/mv"
+    chmod +x "$TMP/rbin/mv"
+    RB_MV_REAL="$(command -v mv)" RB_KEEP="$_wr/keep" RB_ATTACK="$_wr/attacker" \
+        PATH="$TMP/rbin:$PATH" rb_write_handoff "$_wr/session/handoff" "a value" >/dev/null 2>&1 \
+        && _wl_rc=0 || _wl_rc=$?
+    PATH="$_wl_pathsave"
+    [ "$(cat "$_wr/attacker/"* 2>/dev/null)" = 'the file the racer wants destroyed' ] \
+        && pass "a target swapped for a symlink to the racer's directory does not cost the file inside it" \
+        || die "the racer's file was overwritten by the rename: '$(cat "$_wr/attacker/"* 2>/dev/null)'"
+    # AND THE VALUE STILL CROSSED, because an exact rename replaces the LINK: the swap costs
+    # the racer their symlink and nothing else. Asserting only the survival would pass just
+    # as well against a refusal that left the handoff empty.
+    { [ "$_wl_rc" = 0 ] && [ ! -L "$_wr/session/handoff" ] \
+        && [ "$(cat "$_wr/session/handoff")" = "a value" ]; } \
+        && pass "…the link being what the rename replaced, with the value across" \
+        || die "the swapped target gave rc=$_wl_rc and '$(cat "$_wr/session/handoff" 2>/dev/null)'"
+    rm -rf "$_wr" "$TMP/rbin"
+else
+    pass "…(the swapped-target case is skipped: this mv has neither -T nor -h)"
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

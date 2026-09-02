@@ -146,18 +146,22 @@ rb_load() { return 127; }
 # this arm the only trace is a bare exit status — the ordinary-looking empty
 # answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
 # own refusals report their own reason and their own status.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
+# `writelib.sh` IS THE FIRST LOAD, AND IT IS FIRST BECAUSE OF THE ARMS BELOW IT. The
+# stale head and baseline have to be cleared before anything that can REFUSE, and since
+# #263 the clearing renames — so the library that owns the rule has to be loaded before
+# they run, and every other load has to come after them. `recordlib.sh` was first while
+# the clearing was a raw `>` above the bootstrap.
+#
+# SO IT CARRIES THE `loadlib_empty` DIAGNOSTIC, which belongs to whichever load is first:
+# an empty `loadlib.sh` leaves the refusing stub, the stub returns 127, and without this
+# arm the only trace is a bare exit status — the ordinary-looking empty answer `CLAUDE.md`
+# forbids. 127 is the stub's and nothing else's. Moving the diagnostic is what
+# `test-pr-identity.sh` checks, and moving a load without it is what that fixture caught.
+rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
-# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
-# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
-# named there and nowhere else. Putting this one ahead of it made that report come
-# from a bare `|| exit 1`, so the helper refused in silence and
-# `test-pr-identity.sh` caught it.
 rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
-rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || exit 1
-
 # ── THE STALE HEAD AND BASELINE ARE CLEARED AS EARLY AS THEY CAN BE SAFELY CLEARED,
 # which since #263 is HERE rather than above the bootstrap. Everything below this can
 # refuse, and a refusal that happens before the files are emptied leaves the PREVIOUS
@@ -172,12 +176,20 @@ rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || exit 1
 # an inline rename is the duplicated rule `CLAUDE.md` forbids, so the arms moved to where
 # the library that owns the rule is loaded.
 #
-# WHAT THE MOVE COSTS is three loads' worth of window: `loadlib.sh` unreadable or empty,
-# `recordlib.sh` empty, or `writelib.sh` empty now refuse with the previous round's values
-# still in place. WHAT MAKES THAT SAFE is where the driver reads them — only inside this
-# stage's SUCCESS arm (`SKILL.md` § 5c), never after a refusal — so a stale value left by
-# an abort is never the value a round is closed on. The old ordering bought a guarantee
-# against a read that does not happen, at the price of the truncation that does.
+# SO EVERY OTHER LOAD IS BELOW THEM, and that ordering is the finding rather than a
+# preference. The driver's head-file check is NOT inside the gate's success arm — it is the
+# next statement after it, and its own comment says why: `AND ITS IDENTITY IS PROVEN BEFORE
+# ITS CONTENT, because a refusal can be walked past`. A shadowed `exit` in the driving shell
+# walks past the failed `gate`, the content check then accepts a previous round's 40-hex
+# OID, and the operator reaches the irreversible reply-and-resolve step with nothing pushed
+# and nothing gated. A refusal that leaves the stale bytes is therefore not safe, and the
+# round-2 claim that it was is withdrawn.
+#
+# WHAT REMAINS ABOVE THEM is `_RB_SELF_DIR` and the two states in which the rule itself
+# cannot be loaded: `loadlib.sh` unreadable or empty, and a `writelib.sh` that defines
+# nothing. Those cannot be closed from here — clearing before the library is loaded is what
+# forced the raw `>` in the first place, and an inline rename is the duplicated rule
+# `CLAUDE.md` forbids. Every refusal this stage makes for a reason of its own is below.
 #
 # STILL BEFORE `shift`, so `$1` is the stage and `$6` and `$7` are the two files.
 #
@@ -217,6 +229,8 @@ if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
         exit 1
     }
 fi
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
+
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted

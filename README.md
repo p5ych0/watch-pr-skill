@@ -437,7 +437,10 @@ Then:
      so it never opens the path you named. A target that is not a regular file — a
      directory, a FIFO, a device, a socket, or a symlink to any of those — stops the
      stage before the PR is touched, and is **left exactly as it was**: nothing is
-     replaced and nothing is written through. `/dev/null` named here is refused rather
+     replaced and nothing is written through. Where the platform's `mv` takes `-T` or
+     `-h` — GNU and BSD respectively, which covers Linux and macOS — the rename is the
+     exact-destination form, so a path swapped for a symlink to a directory after that
+     check costs the link and nothing inside that directory. `/dev/null` named here is refused rather
      than turned into a regular file, which is what the old truncating write did to it.
      A symlink to a regular file is accepted, and the **link** is what gets replaced —
      never the file it points at, which was the whole of the change.

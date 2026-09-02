@@ -20,11 +20,12 @@
   that no library load can refuse while a previous round's values are still readable — and
   with no library loaded there was nothing to rename with, so those two arms stayed raw
   `>` redirections behind a `[[ -f ]]` that follows a link exactly as the redirection does.
-  They now sit immediately after `writelib.sh` loads. The window that opens in exchange is
-  three loads wide, and what closes it is where the driver reads those files: only inside
-  the stage's success arm, never after a refusal, so a stale value an abort leaves is never
-  the value a round is closed on. The truncation it used to be traded against happened on
-  every call.
+  `writelib.sh` is now the FIRST library the stage loads and the arms sit directly under it,
+  with every other load below them, so the clearing still happens before any refusal the
+  stage makes for a reason of its own. That ordering is load-bearing rather than tidy: the
+  driver reads the head file in the statement AFTER the gate's `if`, not inside its success
+  arm, because a refusal can be walked past — so a previous round's OID left in that file
+  would be accepted as a proven head.
 
   **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
   beside the target, writes the value into it, and moves it over — so where the target is a
@@ -57,9 +58,18 @@
 
   A **postcondition** covers the one interleaving the type test cannot: a racer turning the
   target into a directory after the test and before the rename. The temporary's name carries
-  two `$RANDOM` draws precisely for that case — with a name built only from the path and the
-  pid, the racer could pre-place a file worth keeping under it and have `mv -f` overwrite it,
-  so the residue is litter rather than loss.
+  two `$RANDOM` draws for that case, so the residue it can leave is litter rather than loss.
+
+  **And the rename asks for the exact-destination form first**, because the two-operand `mv`
+  is not a rename: it stats the destination and, where that resolves to a **directory**,
+  moves the source inside it — following a symlink to get there. `rename(2)` never follows a
+  symlink in the final component, so the directory behaviour belongs to the utility. Without
+  the exact form the unguessable name buys less than it looks: a racer can **read** it out of
+  the directory once it exists, point the target at a directory of their own, and put a file
+  worth keeping there under that name for `mv -f` to overwrite. `-T` is the GNU spelling and
+  `-h` the BSD one, each attempted as the real operation — a `mv` that does not know an
+  option fails on the option, having moved nothing — with the plain form kept last so a
+  platform with neither still works.
 
   **Nothing is removed, including the temporary a failed write leaves behind.**
   `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the removal class, and

@@ -943,18 +943,17 @@ for _st_bad in "PR:x:$CODEXBOT" "reviewer:7:some-other-bot[bot]"; do
         && pass "…and a gate refused on the $_st_what leaves no stale head either" \
         || die "a bad $_st_what left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
 done
-# AND A BOOTSTRAP REFUSAL LEAVES BOTH FILES ALONE, which is the trade #263 made and the
-# direction it made it in. The emptying used to run ABOVE the bootstrap so that no library
-# load could refuse ahead of it — and that ordering is exactly what forced it to be a raw
-# `>`, since no library was loaded yet to rename with. `>` FOLLOWS A SYMLINK, and so does
-# the `[[ -f ]]` in front of it, so a link at either path was accepted and the operator's
-# file at the other end was truncated on every `gate` call that got that far.
+# AND A BOOTSTRAP REFUSAL STILL LEAVES NO STALE HEAD, which is the invariant #234 set and
+# #263 had to keep while moving the clearing below the bootstrap. The clearing renames now,
+# so `writelib.sh` is loaded FIRST and every other load comes after the two arms — this
+# case stages an emptied `recordlib.sh`, which is a load that now happens below them.
 #
-# WHAT MAKES LEAVING THEM SAFE is WHERE the driver reads them: only inside this stage's
-# SUCCESS arm (`SKILL.md` § 5c), never after a refusal. So a stale value an abort leaves
-# is never the value a round is closed on, while the truncation it used to buy that with
-# happened on every call. The window is three loads wide — `loadlib.sh` unreadable or
-# empty, `recordlib.sh` empty, `writelib.sh` empty — and this case stages the middle one.
+# AND IT IS THE DRIVER'S SECOND LINE OF DEFENCE THAT MAKES IT MATTER, not the helper's
+# status. `SKILL.md` reads the head file in the statement AFTER the gate's `if`, not inside
+# its success arm, and says why: `a refusal can be walked past`. With a shadowed `exit` in
+# the driving shell the failed gate is walked past, so a previous round's 40-hex OID left
+# here would be accepted as a proven head and the operator would reach the irreversible
+# reply-and-resolve step with nothing pushed and nothing gated.
 world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
 # THE REFUSAL IS STAGED BY EMPTYING A LIBRARY IN A COPY OF THE TREE, which is a
 # real bootstrap failure — `rb_load` refuses and the stage exits at the top of the
@@ -965,12 +964,26 @@ printf '%s\n' 'STALE-BASELINE' > "$TMP/prior.txt"
 _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _st_rc=$?
-{ [ "$_st_rc" != 0 ] && [ -s "$HEADF" ]; } \
-    && pass "…and a gate that cannot bootstrap refuses without touching the head file" \
-    || die "a bootstrap refusal gave rc=$_st_rc and left '$(cat "$HEADF" 2>/dev/null)' in the head file (out='$_st_out')"
-[ -s "$TMP/prior.txt" ] \
-    && pass "…and without touching the prior file" \
-    || die "a bootstrap refusal emptied the prior file, which no longer happens above the loads"
+{ [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
+    && pass "…and a gate that cannot bootstrap leaves no stale head either" \
+    || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
+# AND NO STALE BASELINE, for the same reason and by the same means. #234.
+[ ! -s "$TMP/prior.txt" ] \
+    && pass "…and no stale baseline either" \
+    || die "a bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
+# AND THE DRIVER'S OWN CHECK IS RUN OVER WHAT WAS LEFT, rather than the fixture asserting
+# emptiness and calling that equivalent. This is `SKILL.md`'s content case, verbatim in
+# shape: it is what stands between a walked-past refusal and the irreversible resolve, and
+# what a stale 40-hex OID would satisfy. Reading the file the helper actually left is the
+# only way this case can see the difference.
+case "$(<"$HEADF")" in
+    *[!0-9a-f]*|"")          _st_driver=refused ;;
+    ????????????????????????????????????????) _st_driver=accepted ;;
+    *)                       _st_driver=refused ;;
+esac
+[ "$_st_driver" = refused ] \
+    && pass "…so the driver's head check refuses even when the gate's refusal is walked past" \
+    || die "the driver's head check ACCEPTED what a bootstrap refusal left, which is a resolve on a round that never gated"
 
 # AND A SYMLINKED HEAD FILE KEEPS ITS TARGET, WHICH IS THE WHOLE OF #263 ON THIS PATH.
 # `[[ -f ]]` follows a link, so the old truncation accepted one and emptied the operator's
