@@ -125,7 +125,7 @@ rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON" >&2; exit 1; }
 # Spelled out, the old form still lands on the refusal above and the new one cannot be
 # confused with it.
 { [ "$#" -le 2 ] || { [ "$#" -eq 4 ] && [ "$3" = --baseline-file ]; }; } \
-    || { echo "ABORT: this takes two arguments and the body on stdin (got $# — the body is no longer a file)" >&2; exit 1; }
+    || { echo "ABORT: this takes <pr> <auto-review> --baseline-file <path> and the body on stdin (got $# — a third positional was the body file, and the body is no longer a file)" >&2; exit 1; }
 PR="${1:-}"; AUTO_REVIEW="${2:-}"; BASELINE_FILE="${4:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')" >&2; exit 1 ;;
