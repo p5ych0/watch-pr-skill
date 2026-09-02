@@ -163,7 +163,14 @@ esac
 # AND NOTHING WAS CREATED BESIDE IT, which is what refusing by TYPE buys over refusing by
 # postcondition: the earlier draft ran the rename first and only then noticed, leaving the
 # temporary inside the directory.
-_wl_stray2="$(find "$TMP" -maxdepth 1 -name 'adir.rb-write.*' 2>/dev/null | head -1)"
+# A GLOB RATHER THAN `find -maxdepth`, which is GNU-only: BSD `find` on stock macOS
+# rejects it as a usage error, and with the error discarded the `||` fallback turned that
+# into "no temporary exists" — the assertion passing without ever running. A pattern that
+# matches nothing expands to itself, which `-e` refuses, so no `nullglob` is needed.
+_wl_stray2=""
+for _wl_c in "$TMP"/adir.rb-write.*; do
+    [ -e "$_wl_c" ] && _wl_stray2="$_wl_c"
+done
 [ -z "$_wl_stray2" ] \
     && pass "…leaving no temporary beside the directory" \
     || die "a temporary was left beside the refused directory: $_wl_stray2"

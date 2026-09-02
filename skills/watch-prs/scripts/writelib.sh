@@ -39,12 +39,20 @@
 # exclusive create fail — including where what it left is a symlink, since `set -C` refuses
 # any existing path. The run stops with nothing written and nothing renamed.
 #
-# NO BOUND, AND THAT IS A REMOVAL RATHER THAN AN OVERSIGHT. Three of these sites ran under
-# `run_limited` because a plain `>` on a caller-named path can BLOCK: a FIFO there waits for
-# a reader that never comes. An exclusive create cannot block — if anything is at the name,
-# including a FIFO, the open fails instead of waiting — so the reason for the watchdog is
-# gone with the shape that needed it. The read-backs beside these writes keep theirs, and
-# must: they open the target by name, where a FIFO can still be waiting.
+# NO BOUND HERE, AND THE CALLERS KEEP THEIRS. This library sets no watchdog of its own: it
+# is a shell function, and `run_limited` bounds a COMMAND. That is a fact about where the
+# bound can live, NOT a claim that none is needed — read the other way it invites a
+# maintainer to drop the three that exist and recreate a hang with the phase half-open.
+#
+# WHAT THE EXCLUSIVE CREATE SETTLES IS THE FIFO AND ONLY THE FIFO. A plain `>` on a
+# caller-named path waits for a reader that never comes; `set -C` makes that open fail
+# instead. It does not make this function non-blocking: pathname resolution, the write and
+# the `mv` can each stall on an unresponsive filesystem. So the three call sites that were
+# bounded still are, with `run_limited` moved around a CHILD that sources this library —
+# `pr-copilot-phase.sh`'s readiness, baseline and sha writes, the second of which stands
+# after the Copilot-signoff revocation, where a hang leaves the phase half-open with no
+# diagnostic. The read-backs beside them keep theirs for a reason of their own: they open
+# the target by name, where a FIFO can still be waiting.
 #
 # NOTHING IS REMOVED, INCLUDING ON FAILURE. A write or a rename that fails leaves the
 # temporary behind, and this library does not unlink it — `docs/decisions/2026-08-29-setup-leaf-cleanup.md`

@@ -1342,6 +1342,97 @@ else
     pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
 fi
 
+# ── A `mv` THAT NEVER RETURNS IS WHAT THE THREE WATCHDOGS ARE FOR ──────────
+#
+# THE BOUNDS HAD NO CASE UNTIL NOW, which is how they came to be removed for a round.
+# `writelib.sh` creates its temporary exclusively, and O_CREAT|O_EXCL cannot wait — so the
+# FIFO cases above, which used to be what exercised these watchdogs, now return from the
+# TYPE CHECK before any open happens. Nothing left in the suite blocked, and all three
+# `run_limited` wrappers could have been deleted with the suite green.
+#
+# WHAT CAN STILL BLOCK IS EVERYTHING ELSE THE WRITE DOES: pathname resolution, the write
+# itself, and the rename, any of which stalls on an unresponsive mount. The `mv` is the
+# last of those and the one a fixture can own, so it is where the stall is staged.
+#
+# THE TWO BOUNDS ARE TOLD APART BY THE STATUS, not by a clock. The helper's own is 10s and
+# the harness's `run` is 25s, so a working watchdog refuses with the stage's own `1` and a
+# missing one is killed by the harness with `124`. Asserting the status rather than the
+# elapsed time is what keeps this from racing a loaded runner: both numbers are in the
+# suite already, and only their ORDER matters.
+#
+# ONE CALL BLOCKS AT A TIME, selected by count, because the three sites are on different
+# sides of the two mutations and that is the whole point of bounding each: `open`'s first
+# write stands before the revocation, its second after it and before the request, and
+# `record`'s before the signoff is posted.
+if command -v mv >/dev/null 2>&1; then
+    _mv_realb="$(command -v mv)"
+    # THE SLEEP TAKES ITS OWN STDOUT, and that is not tidiness. The helper's write is a
+    # command substitution, which reads until the pipe closes — an orphaned sleeper holding
+    # the inherited descriptor would keep the substitution blocked for its whole duration
+    # even after the watchdog killed the shell between them, and the case would then be
+    # measuring the harness rather than the helper.
+    { printf '#!/bin/sh\n'
+      printf '_n=$(cat "$RB_MV_COUNT" 2>/dev/null || echo 0); _n=$((_n+1))\n'
+      printf 'echo "$_n" > "$RB_MV_COUNT"\n'
+      printf '[ "$_n" = "$RB_MV_BLOCK_AT" ] && exec sleep 120 >/dev/null 2>&1\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/bin/mv"
+    chmod +x "$TMP/bin/mv"
+
+    # (1) THE READINESS WRITE, which stands before either mutation.
+    world; _rbb="$TMP/rbblock"; rm -rf "$_rbb"; mkdir -p "$_rbb"
+    printf 'seed\n' > "$_rbb/prior.txt"; : > "$TMP/mvn"
+    got="$(RB_MV_REAL="$_mv_realb" RB_MV_COUNT="$TMP/mvn" RB_MV_BLOCK_AT=1 \
+        run open 7 "$HEAD40" "$_rbb/prior.txt")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a stalled rename in the readiness write is refused by the helper's own bound" \
+        || die "a stalled readiness write gave '${got}' — 124 is the harness watchdog, which means the helper's bound is gone"
+    case "${got#*|}" in
+        *"could not write the baseline file"*) pass "…naming the write that stalled" ;;
+        *) die "the stalled readiness write refused for another reason: '${got#*|}'" ;;
+    esac
+    [ -z "$(posted)" ] \
+        && pass "…before the revocation, so the PR is untouched" \
+        || die "the revocation was posted despite the readiness write stalling"
+
+    # (2) THE BASELINE WRITE, which stands AFTER the revocation and before the request.
+    # This is the one whose hang leaves the phase half-open, so its bound is the one that
+    # matters most and the reason all three were restored.
+    world; : > "$W/review-id.out"; : > "$TMP/mvn"
+    got="$(RB_MV_REAL="$_mv_realb" RB_MV_COUNT="$TMP/mvn" RB_MV_BLOCK_AT=2 \
+        run open 7 "$HEAD40" "$_rbb/prior.txt")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a stalled rename in the post-revocation baseline write is refused by the helper's own bound" \
+        || die "a stalled baseline write gave '${got}' — 124 is the harness watchdog, which means the helper's bound is gone"
+    case "${got#*|}" in
+        *"could not write the review baseline"*) pass "…naming the write that stalled" ;;
+        *) die "the stalled baseline write refused for another reason: '${got#*|}'" ;;
+    esac
+    _cap cat "$TMP/calls"
+    case "$_CAP" in
+        *--add-reviewer*) die "Copilot was requested after the baseline write stalled" ;;
+        *) pass "…with Copilot not requested, so the phase is left closed rather than half-open" ;;
+    esac
+
+    # (3) `record`'S SHA WRITE, which stands immediately before the signoff is posted.
+    world; : > "$TMP/mvn"; rm -f "$TMP/sha.txt"; : > "$TMP/sha.txt"
+    got="$(RB_MV_REAL="$_mv_realb" RB_MV_COUNT="$TMP/mvn" RB_MV_BLOCK_AT=1 \
+        run record 7 "$TMP/body.md")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a stalled rename in the signed-off sha write is refused by the helper's own bound" \
+        || die "a stalled sha write gave '${got}' — 124 is the harness watchdog, which means the helper's bound is gone"
+    case "${got#*|}" in
+        *"could not write the signed-off sha"*) pass "…naming the write that stalled" ;;
+        *) die "the stalled sha write refused for another reason: '${got#*|}'" ;;
+    esac
+    [ -z "$(posted)" ] \
+        && pass "…with no signoff posted" \
+        || die "a signoff was posted after the sha write stalled"
+
+    rm -f "$TMP/bin/mv"; rm -rf "$_rbb"
+else
+    pass "no mv on this platform, so the stalled-rename cases are skipped by name"
+fi
+
 # AND AN `open` THAT CANNOT BOOTSTRAP LEAVES THE FILE ALONE TOO. This is the refusal only
 # the pre-bootstrap clearing could ever have covered — a library emptied in a copy of the
 # tree, which `rb_load` refuses before any argument is looked at — so it is the case that

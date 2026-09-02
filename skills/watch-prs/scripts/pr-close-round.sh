@@ -118,60 +118,6 @@ fi
 
 set -uo pipefail
 
-# ── THE STALE HEAD IS CLEARED BEFORE THE BOOTSTRAP, not after the arguments are
-# parsed. Everything below this — the library loads, the identity, the argument
-# validation — can refuse, and a refusal that happens before the file is emptied
-# leaves the PREVIOUS round's OID in it. The driver proves the head before it
-# resolves any thread, so a stale OID passing that proof is a resolve on a round
-# that never gated. Measured: emptying an inline `recordlib.sh` makes this stage
-# exit at `reason=recordlib_empty`, which is above every line that parses `$5`.
-#
-# WITH NOTHING BUT RESERVED WORDS AND A REDIRECTION, because no library has been
-# loaded yet and none is needed. It is deliberately BEFORE `shift`, so `$1` is the
-# stage and `$6` is the head file.
-#
-# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test
-# here would be a second copy of the rule `recordlib.sh` owns — `sha_reason` is not
-# loaded yet, so there would be no way to ask it — and the pre-#202 form puts the
-# head ITSELF in that position. A commit id contains no `/`, and every head file
-# this loop names is a path under the session's working directory, so the slash
-# tells the two apart without knowing what an OID looks like. Without it, a file
-# named after a sha in the current directory would be truncated by a call that is
-# about to be refused for passing the old form.
-#
-# AND NOT THE SUMMARY, because truncating a head file that IS the summary destroys
-# the account this stage is about to post. That refusal is below too, and this must
-# not commit the damage it exists to prevent.
-#
-# AND THE TRUNCATION'S STATUS IS TAKEN. A head file that cannot be truncated — its
-# permissions changed, its filesystem gone read-only — keeps the PREVIOUS round's
-# OID, and a bootstrap refusal after that leaves exactly the state this block
-# exists to prevent. Refusing here is safe in a way it is not further down: nothing
-# has been loaded, nothing pushed, nothing posted.
-if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
-   && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
-    > "${6}" || {
-        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept."
-        exit 1
-    }
-fi
-# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A
-# bootstrap refusal above the truncation further down leaves the PREVIOUS round's
-# baseline in place, and the driver's watch takes what it finds: a review that
-# predates this round, accepted as the answer to a request this round never made.
-# The exceptions are the summary — truncating it destroys the account — and the head
-# file, which the arm above has already emptied and whose emptiness must not be
-# mistaken for this one's. Both are refused properly further down; this only
-# declines to do damage before that refusal can be reached. #234.
-if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
-   && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
-   && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
-    > "${7}" || {
-        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept."
-        exit 1
-    }
-fi
-
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
@@ -210,6 +156,67 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
 # from a bare `|| exit 1`, so the helper refused in silence and
 # `test-pr-identity.sh` caught it.
 rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || exit 1
+
+# ── THE STALE HEAD AND BASELINE ARE CLEARED AS EARLY AS THEY CAN BE SAFELY CLEARED,
+# which since #263 is HERE rather than above the bootstrap. Everything below this can
+# refuse, and a refusal that happens before the files are emptied leaves the PREVIOUS
+# round's OID and baseline in them.
+#
+# THEY USED TO RUN ABOVE THE BOOTSTRAP, with nothing but reserved words and a redirection,
+# so that no library load could refuse ahead of them. That ordering is what made them the
+# LAST two `>` truncations in this file, and `>` FOLLOWS A SYMLINK: `[[ -f ]]` follows one
+# too, so a link at either path was accepted and the operator's file at the other end was
+# truncated — the exact defect #263 exists to remove, on the earliest path into this stage.
+# A `[[ -L ]]` in front of the redirection is the check-then-use shape #245 convicted, and
+# an inline rename is the duplicated rule `CLAUDE.md` forbids, so the arms moved to where
+# the library that owns the rule is loaded.
+#
+# WHAT THE MOVE COSTS is three loads' worth of window: `loadlib.sh` unreadable or empty,
+# `recordlib.sh` empty, or `writelib.sh` empty now refuse with the previous round's values
+# still in place. WHAT MAKES THAT SAFE is where the driver reads them — only inside this
+# stage's SUCCESS arm (`SKILL.md` § 5c), never after a refusal — so a stale value left by
+# an abort is never the value a round is closed on. The old ordering bought a guarantee
+# against a read that does not happen, at the price of the truncation that does.
+#
+# STILL BEFORE `shift`, so `$1` is the stage and `$6` and `$7` are the two files.
+#
+# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test here
+# would be a second copy of the rule `recordlib.sh` owns, and the pre-#202 form puts the
+# head ITSELF in that position. A commit id contains no `/`, and every head file this loop
+# names is a path under the session's working directory, so the slash tells the two apart
+# without knowing what an OID looks like.
+#
+# AND NOT THE SUMMARY, because emptying a head file that IS the summary destroys the
+# account this stage is about to post. That refusal is below too, and this must not commit
+# the damage it exists to prevent.
+#
+# AND THE EMPTYING'S STATUS IS TAKEN. A head file that cannot be emptied — its permissions
+# changed, its filesystem gone read-only, something that is not a regular file at the name
+# — keeps the PREVIOUS round's OID. Refusing here is safe in a way it is not further down:
+# nothing has been pushed and nothing posted.
+if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
+    _rb_eh="$(rb_empty_handoff "${6}")" || {
+        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept: $_rb_eh"
+        exit 1
+    }
+fi
+# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A refusal
+# above the write further down leaves the PREVIOUS round's baseline in place, and the
+# driver's watch takes what it finds: a review that predates this round, accepted as the
+# answer to a request this round never made. The exceptions are the summary — emptying it
+# destroys the account — and the head file, which the arm above has already emptied and
+# whose emptiness must not be mistaken for this one's. Both are refused properly further
+# down; this only declines to do damage before that refusal can be reached. #234.
+if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
+   && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
+    _rb_eh="$(rb_empty_handoff "${7}")" || {
+        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept: $_rb_eh"
+        exit 1
+    }
+fi
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted

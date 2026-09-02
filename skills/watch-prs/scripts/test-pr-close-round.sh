@@ -943,9 +943,18 @@ for _st_bad in "PR:x:$CODEXBOT" "reviewer:7:some-other-bot[bot]"; do
         && pass "…and a gate refused on the $_st_what leaves no stale head either" \
         || die "a bad $_st_what left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
 done
-# AND A BOOTSTRAP REFUSAL TOO, which is earlier than any argument. With no origin
-# and no pin, `rb_identity` cannot answer and the stage exits before it has parsed
-# anything — so the clearing has to happen before the loads, not after them.
+# AND A BOOTSTRAP REFUSAL LEAVES BOTH FILES ALONE, which is the trade #263 made and the
+# direction it made it in. The emptying used to run ABOVE the bootstrap so that no library
+# load could refuse ahead of it — and that ordering is exactly what forced it to be a raw
+# `>`, since no library was loaded yet to rename with. `>` FOLLOWS A SYMLINK, and so does
+# the `[[ -f ]]` in front of it, so a link at either path was accepted and the operator's
+# file at the other end was truncated on every `gate` call that got that far.
+#
+# WHAT MAKES LEAVING THEM SAFE is WHERE the driver reads them: only inside this stage's
+# SUCCESS arm (`SKILL.md` § 5c), never after a refusal. So a stale value an abort leaves
+# is never the value a round is closed on, while the truncation it used to buy that with
+# happened on every call. The window is three loads wide — `loadlib.sh` unreadable or
+# empty, `recordlib.sh` empty, `writelib.sh` empty — and this case stages the middle one.
 world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
 # THE REFUSAL IS STAGED BY EMPTYING A LIBRARY IN A COPY OF THE TREE, which is a
 # real bootstrap failure — `rb_load` refuses and the stage exits at the top of the
@@ -956,15 +965,40 @@ printf '%s\n' 'STALE-BASELINE' > "$TMP/prior.txt"
 _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _st_rc=$?
-{ [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
-    && pass "…and a gate that cannot bootstrap leaves no stale head either" \
-    || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
-# AND NO STALE BASELINE, for the same reason and by the same means. The truncation
-# further down never runs when the bootstrap refuses, so a previous round's value
-# would still be sitting there for the driver's watch to take. #234.
-[ ! -s "$TMP/prior.txt" ] \
-    && pass "…and no stale baseline either" \
-    || die "a bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
+{ [ "$_st_rc" != 0 ] && [ -s "$HEADF" ]; } \
+    && pass "…and a gate that cannot bootstrap refuses without touching the head file" \
+    || die "a bootstrap refusal gave rc=$_st_rc and left '$(cat "$HEADF" 2>/dev/null)' in the head file (out='$_st_out')"
+[ -s "$TMP/prior.txt" ] \
+    && pass "…and without touching the prior file" \
+    || die "a bootstrap refusal emptied the prior file, which no longer happens above the loads"
+
+# AND A SYMLINKED HEAD FILE KEEPS ITS TARGET, WHICH IS THE WHOLE OF #263 ON THIS PATH.
+# `[[ -f ]]` follows a link, so the old truncation accepted one and emptied the operator's
+# file at the other end — outside the session's working directory, on an ordinary `gate`
+# rather than on a refusal. `rb_write_handoff` renames, so the LINK is what goes.
+#
+# BOTH FILES, because they were two separate arms with the same defect and a fix applied
+# to one of them would leave the other exactly as it was.
+for _sl_which in head prior; do
+    world
+    _sld="$TMP/slink-$_sl_which"; rm -rf "$_sld"; mkdir -p "$_sld"
+    printf 'the operator file, which must survive\n' > "$_sld/victim"
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$TMP/other.txt"
+    ln -s "$_sld/victim" "$_sld/link"
+    if [ "$_sl_which" = head ]; then _sl_head="$_sld/link"; _sl_prior="$TMP/other.txt"
+    else _sl_head="$TMP/other.txt"; _sl_prior="$_sld/link"; fi
+    printf 'the round summary\n' > "$TMP/summary.md"
+    _sl_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$_sl_head" "$_sl_prior" 2>&1)"; _sl_rc=$?
+    [ "$(cat "$_sld/victim" 2>/dev/null)" = 'the operator file, which must survive' ] \
+        && pass "a symlinked $_sl_which file leaves the operator's file at the other end intact" \
+        || die "the symlinked $_sl_which file truncated its target (rc=$_sl_rc out='$_sl_out')"
+    [ ! -L "$_sld/link" ] \
+        && pass "…the link itself being what the rename replaced" \
+        || die "the symlinked $_sl_which file was written through rather than replaced"
+    rm -rf "$_sld"
+done
 
 # AND A FILE NAMED AFTER AN OID IN THE CURRENT DIRECTORY IS NOT TOUCHED. The
 # pre-#202 form puts the head itself in that position, and the bootstrap clear runs
@@ -984,17 +1018,28 @@ got="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/
 # uid 0 from writing, and containers run this suite as root — so the case would
 # report a defect in the implementation when the fixture is what could not be set
 # up. It probes the mode bits first and skips itself by name when they do not bite.
-world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
-chmod 400 "$HEADF"
-if ( > "$HEADF" ) 2>/dev/null; then
-    chmod 600 "$HEADF"
-    pass "…(the untruncatable-head case is skipped: this uid can write through mode 400)"
+# AND SINCE #263 IT IS THE DIRECTORY'S MODE THAT DECIDES, not the file's. A rename does
+# not open the target, so mode 400 on the head file no longer stops the emptying — it
+# succeeds, which is the better outcome and not the one this case is about. What still
+# stops it is a containing directory that will not take the temporary, so that is what is
+# staged; the file is put in one of its own so nothing else in the fixture loses its write.
+world
+_ut="$TMP/unwritable"; rm -rf "$_ut"; mkdir -p "$_ut"
+printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$_ut/head.txt"
+chmod 500 "$_ut"
+if ( : > "$_ut/probe" ) 2>/dev/null; then
+    chmod 700 "$_ut"; rm -rf "$_ut"
+    pass "…(the unemptiable-head case is skipped: this uid can create through mode 500)"
 else
-    got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
-    chmod 600 "$HEADF"
+    got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$_ut/head.txt")"
+    chmod 700 "$_ut"
     { [ "${got%%|*}" = 1 ] && grep -qF 'cannot be emptied' <<<"${got#*|}"; } \
         && pass "…and a head file that cannot be emptied stops the stage" \
-        || die "an untruncatable head file gave '${got}'"
+        || die "an unemptiable head file gave '${got}'"
+    [ -s "$_ut/head.txt" ] \
+        && pass "…with the stale head still there, since nothing could be written" \
+        || die "the unemptiable head file was emptied anyway"
+    rm -rf "$_ut"
 fi
 
 # AND THE ALIAS REFUSAL IS THE EXCEPTION, deliberately: truncating a head file that

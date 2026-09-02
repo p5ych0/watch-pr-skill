@@ -6,13 +6,25 @@
   longer costs you the file it points at.** Three values cross from a helper to the driver
   in a file whose path the driver chose — the gated head, the review baseline, and the
   signed-off sha — and every one of the seven sites that wrote them spelled it
-  `printf … > "$THE_PATH"`.
+  `printf … > "$THE_PATH"`. Two more sites EMPTIED those files with a bare `>`, which is
+  the same open with nothing to write.
 
   **The failure.** `>` follows a symlink. A same-UID process that replaced one of those
   paths had the symlink's **target** truncated: an arbitrary file of the operator's,
   outside the session's working directory entirely, and on **every invocation that got that
   far** rather than only on a refusal. Removing the clearings in 2.0.97 did not help,
   because the write beside them opened the same name the same way.
+
+  **The last two were above the bootstrap, and that is why they were the last two.**
+  `pr-close-round.sh gate` clears the head and baseline files before it loads anything, so
+  that no library load can refuse while a previous round's values are still readable — and
+  with no library loaded there was nothing to rename with, so those two arms stayed raw
+  `>` redirections behind a `[[ -f ]]` that follows a link exactly as the redirection does.
+  They now sit immediately after `writelib.sh` loads. The window that opens in exchange is
+  three loads wide, and what closes it is where the driver reads those files: only inside
+  the stage's success arm, never after a refusal, so a stale value an abort leaves is never
+  the value a round is closed on. The truncation it used to be traded against happened on
+  every call.
 
   **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
   beside the target, writes the value into it, and moves it over — so where the target is a
