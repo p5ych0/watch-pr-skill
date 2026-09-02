@@ -272,11 +272,14 @@ When reviewing a change here:
   over `/dev/null` replaces a process-wide device and takes out whatever else is running.
   Stage a device of the fixture's own with `mknod`, and skip by name where that needs
   privilege it has not got.
-- **randomness in the temporary's name bounds residue and collisions, NOT the directory
-  swap.** A racer who waits for the temporary to appear reads its basename out of the
-  directory: the name is unguessable, not unobservable. The exact-destination rename is what
-  refuses a directory destination. Crediting the randomness with that safety is how the
-  first version of this defence shipped.
+- **the EXACT RENAME is what refuses the directory swap — not the randomness and not the
+  postcondition.** A directory installed after the type test makes both `mv -T` and `perl`'s
+  `rename` refuse, so nothing is moved inside it and the postcondition never runs. A racer
+  who waits for the temporary to appear reads its basename out of the directory anyway: the
+  name is unguessable, not unobservable. Randomness bounds an accidental collision and a
+  name pre-placed before it exists; the postcondition validates what arrived. Crediting
+  either with the directory swap is how someone talks themselves into weakening the rename,
+  and it is how the first version of this defence shipped.
 - **a non-zero status is not a promise the target is untouched.** Every refusal before the
   rename leaves it exactly as it was; the POSTCONDITION refuses after the rename, so a
   substituted inode can be at the target. Read a refusal as "this handoff did not happen",

@@ -41,8 +41,10 @@
   **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
   beside the target, writes the value into it, and moves it over — so where the target is a
   symlink it is the link that goes and never the file it points at. The target IS inspected
-  first, and that refusal is load-bearing; what never happens is an OPEN of it, so the
-  write's safety does not rest on the answer that inspection gave. Measured both ways: a
+  first, and that refusal is load-bearing; what never happens is an open of it **to write
+  it**, so the write's safety does not rest on the answer that inspection gave. The value
+  postcondition does open it, to read, past the rename and with its own no-follow,
+  non-blocking, fstat-on-the-handle answer. Measured both ways: a
   plain redirection on a symlink truncates the victim, and the rename leaves the victim's
   bytes untouched.
 
@@ -90,9 +92,12 @@
   then a NUL, then anything" compares equal, and the driver's `$(<…)` would drop the NUL and
   accept the 40-hex prefix.
 
-  A **postcondition** covers the one interleaving the type test cannot: a racer turning the
-  target into a directory after the test and before the rename. The temporary's name carries
-  two `$RANDOM` draws for that case, so the residue it can leave is litter rather than loss.
+  **The directory swap is refused by the rename, not caught afterwards.** A directory
+  installed after the type test makes both `mv -T` and `perl`'s `rename` refuse, so nothing
+  is moved inside it — neither the postcondition nor the temporary's randomness is what
+  protects that, and treating either as a second line of defence is how the exact rename
+  gets weakened. The randomness bounds an accidental collision and a name pre-placed before
+  it exists; the postcondition validates what actually arrived at the target.
 
   **And the rename asks for the exact-destination form first**, because the two-operand `mv`
   is not a rename: it stats the destination and, where that resolves to a **directory**,

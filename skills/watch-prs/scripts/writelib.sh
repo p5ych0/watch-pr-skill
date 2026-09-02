@@ -157,18 +157,26 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # prevents that loss is the EXACT-DESTINATION rename below, which refuses a directory
     # destination outright rather than moving the source inside it.
     _rb_wh_tmp="$1.rb-write.$$.${RANDOM}${RANDOM}"
-    # ONE EXCLUSIVE OPEN, AND THE WRITE GOES INTO IT. Creating the temporary and then
-    # opening it AGAIN by name to write would be a check-then-open of its own: a same-UID
-    # process can replace it between the two, and the second open — a plain `>` — would
-    # follow a symlink or block on a FIFO, which is the whole defect this library exists to
-    # remove, reproduced inside it. The redirection on the subshell is the only open.
+    # ONE EXCLUSIVE OPEN, AND THE WRITE GOES THROUGH THAT HANDLE. Creating the temporary and
+    # then opening it AGAIN by name to write would be a check-then-open of its own: a
+    # same-UID process can replace it between the two, and the second open would follow a
+    # symlink or block on a FIFO, which is the whole defect this library exists to remove,
+    # reproduced inside it. `sysopen` returns the handle the write then uses, so there is one
+    # open and no name is resolved twice.
     #
     # AND `set -C` IS NOT THAT OPEN, WHICH IS WHY THIS IS NOT A REDIRECTION. Bash's
     # noclobber does what POSIX says: the redirection fails if the file exists AND IS A
     # REGULAR FILE. For every other type it opens anyway — so a FIFO pre-placed at the
     # temporary's name by a same-UID watcher was OPENED and the write BLOCKED, waiting for a
-    # reader that never comes, in the two call sites that have no watchdog. Measured.
-    # `O_CREAT|O_EXCL` has no such exemption: it refuses whatever is there, of any type.
+    # reader that never comes. Measured. `O_CREAT|O_EXCL` has no such exemption: it refuses
+    # whatever is there, of any type.
+    #
+    # AND THE HANG WOULD REACH SEVEN OF THE TEN CALLERS, not two. This open runs for every
+    # handoff, emptyings included, so the ones with no watchdog are the four emptyings —
+    # both pre-bootstrap and both in `gate` — plus the two value writes in
+    # `pr-close-round.sh` and the one in `pr-request-review.sh`. Only the three in
+    # `pr-copilot-phase.sh` are bounded. The read-back's own count is smaller and is stated
+    # separately below, because the emptyings never reach it.
     #
     # SO THE OPEN IS `perl`'s `sysopen`, WHICH IS THE SYSCALL. The same reason the rename is
     # `rename(2)` rather than `mv SRC DEST`: the shell's spellings of these operations carry
@@ -259,10 +267,15 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # AND THE POSTCONDITION ASKS WHAT IS AT THE TARGET, NOT MERELY WHAT KIND OF THING IT IS.
     # It is the ONE place this library opens the target, and it does so only to READ: the
     # write never opens it, which is the whole of #263.
-    # It runs after the rename rather than before it, so it asks what actually happened —
-    # which catches the interleaving the type test cannot, a racer making the target a
-    # directory after that test. The temporary is inside that directory in that case, under
-    # its unguessable name, and is left there: nothing here removes.
+    # It runs after the rename rather than before it, so it asks what actually happened.
+    #
+    # AND THE DIRECTORY SWAP IS NOT WHAT IT CATCHES — the EXACT RENAME is. A directory
+    # installed after the type test makes both `mv -T` and `perl`'s `rename` refuse, so this
+    # never runs and the temporary is never moved inside it; a directory appearing after the
+    # rename arrives when the temporary's name is already gone. Crediting this check, or the
+    # temporary's randomness, with that safety is how someone talks themselves into weakening
+    # the rename. What this validates is WHAT ARRIVED at the target — which is the source
+    # race below, and nothing to do with directories.
     #
     # THE SOURCE IS RACEABLE TOO, and a type check alone cannot see it. The temporary's name
     # is published in the directory the moment it exists, so a same-UID process can replace
