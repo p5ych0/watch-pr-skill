@@ -115,9 +115,11 @@ rb_empty_handoff() { _rb_handoff "$1" empty; }
 
 _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # THE TARGET MUST BE ABSENT OR A REGULAR FILE, AND THIS IS NOT THE CONVICTED SHAPE.
-    # #245 convicted a check that PRECEDES AN OPEN OF THE SAME NAME, where the race changes
-    # what the open hits. Nothing here ever opens the target — not before this test and not
-    # after it — so the rename's safety does not rest on the answer. What this refuses is a
+    # #245 convicted a check that PRECEDES A WRITING OPEN OF THE SAME NAME, where the race
+    # changes what the open hits. Nothing here opens the target to WRITE it, before this
+    # test or after it, so the rename's safety does not rest on the answer. The value
+    # postcondition opens it to READ, past the rename, and answers its own question at that
+    # open — `O_NOFOLLOW`, `O_NONBLOCK`, and the type from `fstat` on the handle. What this refuses is a
     # caller naming something that is not a handoff file, early and with nothing written:
     #
     #   * a DIRECTORY, or a symlink to one. `mv` onto a directory moves the source INSIDE it
@@ -283,7 +285,8 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         # THE READ-BACK OPENS THE TARGET, WHICH IS THE ONE OPEN THIS LIBRARY MAKES — so it
         # is the one place a racer can still cost the caller a HANG rather than a refusal.
         # `[ -f ]` above answers before the open, and a FIFO swapped in between the two had
-        # `read` waiting for a writer that never comes: five of the eight call sites have no
+        # `read` waiting for a writer that never comes: of the six VALUE calls, which are
+        # the only ones that reach this open, three have no
         # watchdog, and in the round-closing baseline path that hang lands AFTER the thread
         # replies are resolved, leaving the round half-closed.
         #

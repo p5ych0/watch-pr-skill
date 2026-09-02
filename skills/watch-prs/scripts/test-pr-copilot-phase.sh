@@ -1158,7 +1158,8 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # A FIFO AT THAT PATH STOPS THE PHASE RATHER THAN HANGING IT, which is the outcome from
 # before #263 reached a different way. Opening a path for WRITING blocks waiting for a
 # reader, and that is what the readiness write existed to catch before the revocation.
-# `rb_write_handoff` never opens the target: it refuses one that is not a regular file.
+# `rb_write_handoff` never opens the target for WRITING: it refuses one that is not a
+# regular file, and the only open it makes is the postcondition's read past the rename.
 #
 # THE READINESS WRITE STILL HAS ITS JOB, and it is the same one — proving the path is
 # usable before the revocation. What it refuses is now stated by TYPE rather than

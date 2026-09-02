@@ -186,8 +186,10 @@ When reviewing a change here:
   `printf … > "$FILE"`, `: > "$FILE"` — all three follow a link. So does the
   `[[ -f ]]` usually written in front of one, which is why the guard never helped.
 - **the target's TYPE is refused before anything is created, and that is not a
-  check-then-open.** Nothing in the library ever opens the target, so the rename's
-  safety does not rest on the answer; what the test refuses is a caller naming
+  check-then-open.** Nothing in the library opens the target to WRITE it — the value goes
+  into a temporary and is renamed onto the name — so the rename's safety does not rest on
+  the answer. The value postcondition does open it, to READ, on the other side of the
+  rename and with its own no-follow, non-blocking, fstat-on-the-handle answer; what the test refuses is a caller naming
   something that is not a handoff file. A directory (`mv` moves the source *inside*
   it and reports success), a FIFO, a device or a socket (`mv -f` renames over every
   non-directory inode it may, so `/dev/null` named here became a regular file), or a

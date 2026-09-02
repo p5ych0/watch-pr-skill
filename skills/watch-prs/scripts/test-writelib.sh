@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # The handoff write: `rb_write_handoff` and `rb_empty_handoff` in writelib.sh.
 #
-# These rules were written seven times across `pr-close-round.sh` and
-# `pr-copilot-phase.sh` — every one of them a `printf … > "$CALLER_NAMED_PATH"`, and every
-# one of them following a symlink. They are proven against the definition here, and
+# These rules were written out at every call site instead of once — a
+# `printf … > "$CALLER_NAMED_PATH"` or a bare `>`, every one of them following a symlink.
+# Counted from the tree there are TEN call sites in THREE helpers: six in
+# `pr-close-round.sh` (two pre-bootstrap emptyings, two `gate` emptyings, the head write,
+# the baseline write), three in `pr-copilot-phase.sh`, and one in `pr-request-review.sh` —
+# the last found only in review, because its unsafe open was in `SKILL.md` rather than in a
+# helper. They are proven against the definition here, and
 # `test-pr-identity.sh` proves each caller is wired to it. Issue #263.
 set -Eeuo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,9 +83,10 @@ printf 'through\n' > "$TMP/link2"
 
 # ── A TARGET THAT IS NOT A REGULAR FILE IS REFUSED, AND SURVIVES ───────────
 #
-# The old writes OPENED the caller's path, so a FIFO blocked for a reader that never came
-# and a device or socket was written into. Nothing opens the target now — and nothing
-# renames over it either, because `mv -f` replaces every non-directory inode it can, which
+# The old writes OPENED the caller's path FOR WRITING, so a FIFO blocked for a reader that
+# never came and a device or socket was written into. Nothing writes to the target now — the
+# value postcondition opens it to READ, past the rename, which is a different question — and
+# nothing renames over it either, because `mv -f` replaces every non-directory inode it can, which
 # would turn `/dev/null` named as a handoff path into a regular file. The type is refused
 # before anything is created.
 #
@@ -387,8 +392,8 @@ fi
 #
 # THE READ-BACK IS THE ONE OPEN THIS LIBRARY MAKES, so it is the one place a racer can cost
 # the caller a HANG rather than a refusal. `[ -f ]` answers before the open, and a FIFO
-# swapped in between the two had `read` waiting for a writer that never comes — five of the
-# eight call sites have no watchdog, and in the round-closing baseline path that hang lands
+# swapped in between the two had `read` waiting for a writer that never comes — of the six
+# VALUE calls, which are the only ones that reach this open, three have no watchdog, and in the round-closing baseline path that hang lands
 # AFTER the thread replies are resolved, leaving the round half-closed.
 #
 # STAGED THROUGH THE `mv` SHIM, which performs the real rename and then replaces the target.
