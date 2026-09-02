@@ -1,5 +1,50 @@
 # Changelog
 
+## [2.1.0] — 2026-09-02
+
+- **The file handoffs rename instead of truncating, so a symlink at one of those paths no
+  longer costs you the file it points at.** Three values cross from a helper to the driver
+  in a file whose path the driver chose — the gated head, the review baseline, and the
+  signed-off sha — and every one of the seven sites that wrote them spelled it
+  `printf … > "$THE_PATH"`.
+
+  **The failure.** `>` follows a symlink. A same-UID process that replaced one of those
+  paths had the symlink's **target** truncated: an arbitrary file of the operator's,
+  outside the session's working directory entirely, and on **every invocation that got that
+  far** rather than only on a refusal. Removing the clearings in 2.0.97 did not help,
+  because the write beside them opened the same name the same way.
+
+  **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
+  beside the target, writes the value into it, and moves it over — so where the target is a
+  symlink it is the link that goes and never the file it points at. Measured both ways: a
+  plain redirection on a symlink truncates the victim, and the rename leaves the victim's
+  bytes untouched.
+
+  **It is not another check-then-open**, which is the shape #245 already convicted.
+  Nothing asks what is at the target before writing to it; the target is never opened at
+  all. The temporary is created exclusively under `set -C` **in the same open that writes
+  it** — creating it and then opening it again by name would be that shape reappearing
+  inside the fix, with the second open free to follow a symlink or block on a FIFO.
+
+  **Three watchdogs went with the shape that needed them.** Those writes ran under
+  `run_limited` because a plain `>` on a caller-named path blocks on a FIFO waiting for a
+  reader. An exclusive create cannot block — if anything is at the name, a FIFO included,
+  the open fails instead of waiting — so the reason is gone. The read-backs beside them
+  keep theirs, and must: they open the target by name.
+
+  **Two behaviours change, both in the safe direction.** A FIFO at one of these paths is now
+  **replaced** by the regular file holding the value instead of stopping the round — it was
+  a racer's artefact on a name that belongs to the session, and refusing over it was a
+  denial of service the racer got for free. And a directory at the path is caught by a
+  **postcondition**: `mv` onto one moves the source inside it and reports success, so the
+  rename's status cannot see it.
+
+  **Nothing is removed, including the temporary a failed write leaves behind.**
+  `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the removal class, and
+  `test-writelib.sh` asserts the library contains no removal at all — so the residue is one
+  file in the session's own working directory, which is the litter
+  `docs/decisions/2026-09-01-origin-cleanup-races.md` already accepts.
+
 ## [2.0.99] — 2026-09-01
 
 - **An empty baseline file is refused, and "no prior review" is spelled `none`.** The

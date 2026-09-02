@@ -100,6 +100,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/loadlib.sh
         "$ROOT"/recordlib.sh
         "$ROOT"/clocklib.sh
+        "$ROOT"/writelib.sh
         "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
 # the skill only when present (robust if a consumer strips it); in the plugin it

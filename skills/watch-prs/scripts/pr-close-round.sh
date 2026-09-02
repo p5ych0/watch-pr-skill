@@ -204,6 +204,12 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
+# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
+# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
+# named there and nowhere else. Putting this one ahead of it made that report come
+# from a bare `|| exit 1`, so the helper refused in silence and
+# `test-pr-identity.sh` caught it.
+rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
@@ -324,8 +330,13 @@ fi
 # nothing. Do not "fix" this by writing the `none` token here: the token means there was
 # no prior review, which this gate has not established and must not claim.
 if [ "$STAGE" = gate ]; then
-    > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
-    > "$PRIOR_FILE" || { echo "ABORT: could not empty the prior file '$PRIOR_FILE'."; exit 1; }
+    # EMPTIED BY WRITING AN EMPTY VALUE AND RENAMING IT OVER, not by truncating the name.
+    # `>` follows a symlink, so a same-UID process that replaced either of these paths had
+    # the file it pointed at emptied instead. #263.
+    _rb_wh="$(rb_empty_handoff "$HEAD_FILE")" \
+        || { echo "ABORT: could not empty the head file '$HEAD_FILE': $_rb_wh"; exit 1; }
+    _rb_wh="$(rb_empty_handoff "$PRIOR_FILE")" \
+        || { echo "ABORT: could not empty the prior file '$PRIOR_FILE': $_rb_wh"; exit 1; }
 fi
 
 case "$PR" in
@@ -551,8 +562,8 @@ report_gated() {   # report_gated <head> ; writes the head to $HEAD_FILE, then r
     # write that succeeded on a file that holds something else is caught there —
     # by the stage that depends on it, at no cost, and on the read that matters. A
     # second check here would be a branch no fixture can stage.
-    printf '%s\n' "$1" > "$HEAD_FILE" \
-        || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read."; return 1; }
+    _rb_wh="$(rb_write_handoff "$HEAD_FILE" "$1")" \
+        || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read: $_rb_wh"; return 1; }
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$1 mode=$_MODE"
     return 0
 }
@@ -580,8 +591,8 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
     # direction that stops a round instead of announcing a pass nobody requested.
     prior="${prior:-none}"
-    printf '%s\n' "$prior" > "$PRIOR_FILE" \
-        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted."; return 1; }
+    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$prior")" \
+        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
     # THE READ-BACK COMPARES RAW BYTES, TERMINATOR INCLUDED, IN THE CHILD. `$(<…)` strips
     # trailing newlines, so it cannot see the delimiter the watch now requires: a path
     # replaced between the write and the read with the SAME id and no newline compared

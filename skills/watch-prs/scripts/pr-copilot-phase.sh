@@ -193,6 +193,12 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
+# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
+# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
+# named there and nowhere else. Putting this one ahead of it made that report come
+# from a bare `|| exit 1`, so the helper refused in silence and
+# `test-pr-identity.sh` caught it.
+rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted as
@@ -318,8 +324,14 @@ if [[ $STAGE = open ]]; then
     # being legal and "no prior review" gets an explicit token, which is a change to
     # `pr-watch.sh`'s contract with three writers and is #264. Until then this is strictly
     # narrower than emptying, which failed open on EVERY refusal in this span.
-    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" refused-no-baseline > "$1"' _ "$PRIOR_FILE" \
-        || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
+    # WRITTEN THROUGH `rb_write_handoff`, WHICH RENAMES RATHER THAN TRUNCATING — #263. A
+    # plain `>` on this path follows a symlink, so a same-UID process that replaced it had
+    # the file it pointed at truncated instead. And the WATCHDOG IS GONE with the shape that
+    # needed it: it was here because a `>` on a caller-named path can block on a FIFO, and
+    # an exclusive create cannot block — if anything is at the temporary's name the open
+    # fails rather than waiting.
+    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" refused-no-baseline)" \
+        || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'. Nothing has been posted: $_rb_wh"; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase
@@ -443,8 +455,8 @@ if [[ $STAGE = open ]]; then
     # failed produced it by accident. Copilot has usually not reviewed this head when the
     # phase opens, so this is the ordinary case rather than an edge one.
     PRIOR_REVIEW="${PRIOR_REVIEW:-none}"
-    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$PRIOR_FILE" "$PRIOR_REVIEW" \
-        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
+    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$PRIOR_REVIEW")" \
+        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested: $_rb_wh"; exit 1; }
     # BOUNDED TOO, because the write finishing does not make the next open safe: the
     # path is named in argv, and a same-UID process can put a FIFO there between the
     # two. This read is on the same side of the revocation as the write, so a hang
@@ -946,7 +958,7 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # the signoff is posted, so a hang here stalls the stage with the phase half decided. `open`
 # has bounded both of its writes since #230; this was the copy left plain, which is the
 # same way its read-back ended up the weaker of the two. #246.
-run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$SHA_FILE" "$CODEX_SHA" \
+_rb_wh="$(rb_write_handoff "$SHA_FILE" "$CODEX_SHA")" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
 # READ BACK THE SAME WAY `open` DOES, and for the reasons it states: bounded, because
 # opening a path can block; with its own status, because `$(<…)` reports the substitution's

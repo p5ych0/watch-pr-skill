@@ -33,7 +33,8 @@ COPILOTBOT='copilot-pull-request-reviewer[bot]'
 # as `pr-merge-gate.sh`'s fixtures are: the script finds its siblings next to
 # itself, which is what makes any of this possible.
 DIR="$TMP/s"; mkdir -p "$DIR" "$TMP/bin"
-cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" "$DIR/" \
+cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" \
+   "$SELF_DIR/writelib.sh" "$DIR/" \
     || { die "the subject could not be staged"; echo "RESULT: FAIL"; exit 1; }
 # `pr-watch.sh` VALIDATES ITS BASELINE, like the real one: a stub that accepts
 # anything cannot tell a well-formed id from the noise that stops the next round.
