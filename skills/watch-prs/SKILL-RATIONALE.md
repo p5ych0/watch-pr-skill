@@ -1359,7 +1359,7 @@ content read sits inside the arm where the answer was no.
 Both tests, not one. `-ef` compares the files and answers nothing when the path does not
 exist; `=` compares the names and catches that case.
 
-## AND IT IS PROVEN A REGULAR FILE BEFORE IT IS OPENED, or the read can never return.
+## AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
 
 `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS until a writer
 arrives. This shell has no watchdog and no non-blocking read, so a FIFO at that name does
@@ -1373,14 +1373,26 @@ makes. So a same-UID process that replaces the head file with a FIFO before `gat
 leaves it there through the whole stage — and a driver whose `exit` returns walks past the
 refusal and opens it.
 
-`[[ -f ]]` is a reserved word and asks about the resolved file, so a FIFO, a device, a
-socket, a directory and a dangling symlink all take the refusal arm. It is a test before an
-open and a racer can still change the answer between them; that is a hang rather than a
-wrong answer, and there is nothing in this shell that closes it — the point is that the
-UNRACED case, which is the reachable one, no longer hangs.
+A `[[ -f ]]` in front of the substitution was the first answer and it is not enough: that is
+a test and then a SEPARATE open of the same name, so a racer between them is answered about
+one inode and the shell then opens another. No additional pathname test closes that window —
+only asking the question of the descriptor that was opened does.
 
-The `else` arm now covers both reasons, because they have the same consequence and the same
-instruction: no gate wrote a head there, so resolve nothing.
+So the read is `rb_handoff_is_sha`, in a child that sources `writelib.sh` directly: one
+`sysopen` with `O_NOFOLLOW` and `O_NONBLOCK`, the type from `fstat` on that handle, and the
+bytes slurped and matched against exactly forty lowercase hexadecimal characters and the
+newline the writer emits. A symlink is refused at the open, a FIFO returns at once instead of
+waiting, and every answer comes from the inode that was actually read.
+
+NOTHING CROSSES BACK, and that is why this shape is available at all. The driver does not
+need the sha — it needs to know a gate proved one — so the helper answers with a STATUS and
+this `if` uses it as the condition. A value would have to land in a name, and a name a
+startup file has made readonly loses it silently, which is the defect `THE ANSWER GOES TO A
+FILE` above is about.
+
+The `else` arm covers the alias and everything else, because they have the same instruction:
+no gate wrote a head there, so resolve nothing. It re-asks the identity to say which, since
+`[[` opens nothing and the two send an operator to different places.
 
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 

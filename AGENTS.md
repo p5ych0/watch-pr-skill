@@ -268,6 +268,14 @@ When reviewing a change here:
 - **the driver must not redirect onto a handoff path.** `helper … > "$PRIOR_FILE"` is opened
   by the driving shell before the helper starts, so nothing the helper checks can catch a
   link there. The path is handed over as an argument and the helper renames onto it.
+- **every question about the target comes from ONE opened descriptor.** `[ ! -L ]`, `[ -f ]`
+  and a size or content test are separate resolutions of the same name, so a racer between
+  any two is answered about a different inode each time. The value branch and the emptying
+  both `sysopen` with `O_NOFOLLOW|O_NONBLOCK` and take the type from `fstat` on the handle; a
+  size asked as `[ ! -s "$path" ]` is the defect. The same rule is why the DRIVER reads the
+  head file through `rb_handoff_is_sha` instead of `[[ -f ]]` and then a substitution — that
+  pair is a test and then a separate open, and a FIFO arriving between them blocks a shell
+  with no watchdog.
 - **`--` before the operands, on every attempt.** A handoff path is the caller's and a
   relative one may begin with `-`, so the temporary derived from it does too: without it
   `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable

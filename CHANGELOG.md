@@ -84,6 +84,13 @@
   `PATH` is a removal rather than a denylist, so there is no list of perl variables to keep
   in step.
 
+  **Every question about the target comes from one opened descriptor.** `[ ! -L ]`, `[ -f ]`
+  and a size or content test are separate resolutions of the same name, so a racer between any
+  two is answered about a different inode. The value read-back, the emptying's size check and
+  the driver's own head check all `sysopen` with `O_NOFOLLOW|O_NONBLOCK` and answer from that
+  handle — which is also why `SKILL.md` no longer reads `$HEAD_FILE` with a substitution: a
+  test and then an open is a window a FIFO can arrive in, and that shell has no watchdog.
+
   **And the postcondition proves the VALUE, because the SOURCE is raceable too.** The
   temporary's name is published in its directory the moment it exists, so a racer can
   replace *that* path and the exact rename then moves their inode onto the handoff path

@@ -244,6 +244,16 @@ case "$_wl_src" in
     *'stat($h)'*) pass "…with the type taken from the handle rather than from a preceding test" ;;
     *) die "the read-back does not fstat the handle it opened" ;;
 esac
+# AND THE EMPTYING ASKS THE SAME WAY. `[ ! -s "$1" ]` resolves the name a THIRD time after
+# `[ ! -L ]` and `[ -f ]`, so a symlink to an empty file or a FIFO swapped in before it was
+# measured instead of the file the rename put there — and the call returned 0 with the target
+# not the zero-byte regular file it promised. Only the source can see this: the tests above it
+# catch every swap a fixture can plant.
+case "$_wl_src" in
+    *'[ ! -s "$1" ]'*) die "the emptying still asks the size of the NAME; a swap before it is measured instead" ;;
+    *'$s[7] == 0'*)   pass "…and the emptying takes its size from the same handle it opened" ;;
+    *) die "the emptying does not verify zero bytes from an opened handle" ;;
+esac
 
 # ── AN UNWRITABLE DIRECTORY IS A REFUSAL, AND THE TARGET IS UNCHANGED ──────
 if [ "$(id -u)" != 0 ]; then
@@ -679,6 +689,112 @@ fi
     [ ! -s ./-dashed ] || { printf 'FAIL - a dash-leading path was not emptied\n'; exit 1; }
 ) && pass "a handoff path beginning with a dash is a path, not an option" \
   || die "the dash-leading path case failed"
+
+# ── THE READ SIDE: `rb_handoff_is_sha` ────────────────────────────────────
+#
+# THE DRIVER'S READ LIVES HERE FOR THE REASON THE WRITE DOES. `SKILL.md` asked
+# `[[ -f $HEAD_FILE ]]` and then `case "$(<"$HEAD_FILE")"`, which is a test and then a
+# separate open of the same name — a FIFO swapped in between them BLOCKS a shell that has no
+# watchdog and no non-blocking read, before the thread-resolution step. One `sysopen` with
+# `O_NOFOLLOW|O_NONBLOCK`, the type from `fstat` on that handle, and the bytes slurped and
+# matched whole is the only shape that answers about the inode it read.
+[ "$(type -t rb_handoff_is_sha 2>/dev/null)" = function ] \
+    || die "writelib.sh does not define rb_handoff_is_sha"
+_wh="$TMP/sharead"; rm -rf "$_wh"; mkdir -p "$_wh"
+_wh_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+# THE VALUE THE WRITER PRODUCES IS ACCEPTED, which is the case that has to pass or the driver
+# never proceeds — and it is written by the library rather than by hand, so the two halves
+# cannot drift apart on the terminator.
+rb_write_handoff "$_wh/head" "$_wh_sha" >/dev/null 2>&1 \
+    && rb_handoff_is_sha "$_wh/head" \
+    && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha" \
+    || die "the value this library writes is not accepted by its own reader"
+# AND THE SHAPES THAT MUST NOT BE. A short id, a long one, uppercase, non-hex, empty, and a
+# 40-hex value with anything after it — the last being what a stopping reader would accept.
+for _wh_bad in "" "aaaaaaaa" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+               "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+               "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag" ; do
+    printf '%s\n' "$_wh_bad" > "$_wh/bad"
+    rb_handoff_is_sha "$_wh/bad" \
+        && die "rb_handoff_is_sha accepted '$_wh_bad'" \
+        || _wh_ok=1
+done
+[ "${_wh_ok:-0}" = 1 ] \
+    && pass "…and a short, long, uppercase, non-hex or empty value is refused" \
+    || die "the bad-shape loop did not run"
+# A 40-HEX PREFIX FOLLOWED BY A NUL is the forgery a reader that stops at the delimiter
+# accepts, and it is the exact shape the driver's own `$(<…)` would have swallowed.
+printf '%s\n\000trailing' "$_wh_sha" > "$_wh/nul"
+rb_handoff_is_sha "$_wh/nul" \
+    && die "a 40-hex prefix followed by a NUL was accepted as a commit id" \
+    || pass "…and a 40-hex prefix followed by a NUL is refused"
+# A MISSING TERMINATOR is refused too: every writer here emits one, so its absence means the
+# bytes are not what this library wrote.
+printf '%s' "$_wh_sha" > "$_wh/noterm"
+rb_handoff_is_sha "$_wh/noterm" \
+    && die "a head file with no terminating newline was accepted" \
+    || pass "…and a value with no terminating newline is refused"
+# A SYMLINK TO A GOOD VALUE IS REFUSED AT THE OPEN, which is `O_NOFOLLOW`: the driver must
+# read the file the gate wrote, not one a racer pointed the name at.
+ln -s "$_wh/head" "$_wh/link"
+rb_handoff_is_sha "$_wh/link" \
+    && die "a symlink to a valid head file was followed" \
+    || pass "…and a symlink is refused at the open rather than followed"
+# A FIFO RETURNS INSTEAD OF BLOCKING, which is the whole reason this is not a shell read.
+# Bounded, because against a blocking open the case never returns.
+if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_wh/fifo" 2>/dev/null; then
+    rc=0
+    run_limited 10 bash -c '. "$1"; rb_handoff_is_sha "$2"' _ "$SELF_DIR/writelib.sh" "$_wh/fifo" || rc=$?
+    case "$rc" in
+        124|125) die "rb_handoff_is_sha BLOCKED on a FIFO; the open is not non-blocking" ;;
+        0)       die "a FIFO was accepted as a head file" ;;
+        *)       pass "…and a FIFO is refused promptly rather than waited on" ;;
+    esac
+else
+    pass "…(the FIFO reader case is skipped: no mkfifo, or this filesystem refused one)"
+fi
+# AND A MISSING PATH IS A REFUSAL, not an error the caller has to distinguish.
+rb_handoff_is_sha "$_wh/absent" \
+    && die "an absent path was accepted as a head file" \
+    || pass "…and an absent path is refused"
+rm -rf "$_wh"
+
+# ── THE EMPTYING POSTCONDITION ASKS ONE DESCRIPTOR TOO ─────────────────────
+#
+# `[ ! -L ]`, `[ -f ]` and `[ ! -s ]` are three separate resolutions of the name, so a racer
+# between any two of them is answered about a different inode each time: a symlink to an
+# empty file swapped in before the size test made `-s` examine the REPLACEMENT and the call
+# return 0 with the target not the zero-byte regular file it promised.
+#
+# STAGED THROUGH THE `mv` SHIM, WHICH PROVES THE OUTCOME AND NOT THE MECHANISM. The swap
+# lands before the `[ ! -L ]` and `[ -f ]` that precede the size question, so those catch it
+# whichever way the size is asked — the interleaving the fix is FOR is between them and the
+# size test, which is sub-instruction and cannot be staged. What this asserts is that the
+# call refuses, promptly, with no hang. The mechanism is asserted on the source below, and
+# that is the half that fails if the size goes back to `[ ! -s ]`.
+if command -v mv >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1 \
+   && { : > "$TMP/probe-e"; mv -T -f -- "$TMP/probe-e" "$TMP/probe-e2" 2>/dev/null; }; then
+    mkdir -p "$TMP/ebin"
+    { printf '#!/bin/sh\n'
+      printf 'for a in "$@"; do _t="$a"; done\n'
+      printf '"$RB_MV_REAL" "$@" || exit $?\n'
+      printf 'rm -f "$_t"; mkfifo "$_t"\n'
+      printf 'exit 0\n'; } > "$TMP/ebin/mv"
+    chmod +x "$TMP/ebin/mv"
+    _we="$TMP/emptyrace"; rm -rf "$_we"; mkdir -p "$_we"; printf 'seed\n' > "$_we/handoff"
+    rc=0
+    out="$(run_limited 10 env RB_MV_REAL="$(command -v mv)" PATH="$TMP/ebin:$PATH" \
+        bash -c '. "$1"; rb_empty_handoff "$2"' \
+        _ "$SELF_DIR/writelib.sh" "$_we/handoff")" || rc=$?
+    case "$rc" in
+        124|125) die "the emptying postcondition BLOCKED on a FIFO at the target" ;;
+        0)       die "a FIFO at the target after the rename was reported as a successful emptying: '$out'" ;;
+        *)       pass "an emptying whose target is replaced after the rename is refused" ;;
+    esac
+    rm -rf "$_we" "$TMP/ebin"
+else
+    pass "…(the emptying-race case is skipped: no mv with -T, or no mkfifo)"
+fi
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

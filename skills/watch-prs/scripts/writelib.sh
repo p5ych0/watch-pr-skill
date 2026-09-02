@@ -119,6 +119,40 @@
 #
 # The caller supplies its own abort prose: these are three stages with three consequences,
 # and a shared message would name none of them.
+# rb_handoff_is_sha <path>
+#   0  the path is a plain regular file holding exactly one 40-character lowercase
+#      hexadecimal commit id and the terminating newline this library writes
+#   1  it is not, or could not be read
+#
+# THE READ SIDE OF THE SAME RULE, and it exists because the DRIVER needs it. `SKILL.md`
+# asked `[[ -f $HEAD_FILE ]]` and then `case "$(<"$HEAD_FILE")"`, which is a test and then a
+# separate open of the same name: a same-UID process that replaced a regular file with a FIFO
+# between them had the substitution BLOCK, in a shell with no watchdog and no non-blocking
+# read, before the thread-resolution step. No additional pathname test closes that; only
+# asking the question of the descriptor that was opened does.
+#
+# SO IT IS ONE OPEN AND EVERY ANSWER COMES FROM IT. `O_NOFOLLOW` refuses a symlink at the
+# open, `O_NONBLOCK` makes a FIFO return at once instead of waiting, `-f` on the HANDLE gives
+# the type of the inode actually opened, and the bytes are slurped and matched whole.
+#
+# NOTHING CROSSES BACK, WHICH IS THE POINT FOR THAT CALLER. The driver does not need the sha
+# — it needs to know a gate proved one — so this answers with a STATUS and the driver uses it
+# as a condition. A value would have to land in a name, and a name a startup file has made
+# readonly loses it silently.
+rb_handoff_is_sha() {
+    /usr/bin/env -i PATH="$PATH" perl -e '
+        use Fcntl qw(O_RDONLY O_NONBLOCK O_NOFOLLOW);
+        sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
+        stat($h) or exit 3;
+        exit 4 unless -f _;
+        local $/;
+        my $got = <$h>;
+        $got = "" unless defined $got;
+        exit 5 unless $got =~ /\A[0-9a-f]{40}\n\z/;
+        exit 0;
+    ' -- "$1" 2>/dev/null
+}
+
 rb_write_handoff() { _rb_handoff "$1" value "$2"; }
 rb_empty_handoff() { _rb_handoff "$1" empty; }
 
@@ -383,11 +417,27 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         ' -- "$1" "$3" 2>/dev/null \
             || { echo "'$1' does not hold what this call wrote, or is no longer a plain file; the temporary was replaced before the rename, or the target was, and the value did not cross"; return 1; }
     else
-        # ZERO BYTES, ASKED WITHOUT AN OPEN. An emptying has no value to compare, and `-s`
-        # answers it from the inode — so this path never opens the target at all, which
-        # matters because the pre-bootstrap clearing in `pr-close-round.sh` is unbounded.
-        [ ! -s "$1" ] \
-            || { echo "'$1' is not empty after the emptying; it was replaced while the claim was being removed"; return 1; }
+        # ZERO BYTES, ON THE SAME ONE DESCRIPTOR. `[ ! -L ]`, `[ -f ]` and `[ ! -s ]` are
+        # three separate resolutions of the name, so a racer between any two of them is
+        # answered about a different inode each time — a FIFO or a symlink to an empty file
+        # swapped in before the size test made `-s` examine the REPLACEMENT and this return
+        # 0 with the target not the zero-byte regular file it promised. The value branch
+        # above already asks its questions of one open handle; this asks the same way.
+        #
+        # AND IT STILL CANNOT BLOCK OR FOLLOW. `O_NONBLOCK` means opening a FIFO returns at
+        # once instead of waiting — which matters because the pre-bootstrap clearing in
+        # `pr-close-round.sh` has no watchdog — and `O_NOFOLLOW` refuses a symlink at the
+        # open rather than resolving it. The size comes from `fstat` on the handle, so it is
+        # the size of the file that was opened.
+        /usr/bin/env -i PATH="$PATH" perl -e '
+            use Fcntl qw(O_RDONLY O_NONBLOCK O_NOFOLLOW);
+            sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
+            my @s = stat($h) or exit 3;
+            exit 4 unless -f _;
+            exit 5 unless $s[7] == 0;
+            exit 0;
+        ' -- "$1" 2>/dev/null \
+            || { echo "'$1' is not an empty regular file after the emptying; it was replaced while the claim was being removed"; return 1; }
     fi
     return 0
 }

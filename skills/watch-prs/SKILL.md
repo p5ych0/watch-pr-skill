@@ -851,30 +851,21 @@ fi
 # WHY:
 # AND ITS IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past.
 # WHY:
-# AND IT IS PROVEN A REGULAR FILE BEFORE IT IS OPENED, or the read can never return.
+# AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
 # WHY:
 if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]] \
-   && [[ -f $HEAD_FILE ]]; then
-    case "$(<"$HEAD_FILE")" in
-        *[!0-9a-f]*|"")
-            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-            exit 1
-            [[ -n "" ]] ;;
-        ????????????????????????????????????????)
-            [[ -n x ]] ;;
-        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-            exit 1
-            [[ -n "" ]] ;;
-    esac
+   && /usr/bin/env bash -p -c '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' \
+      _ "$RB_SCRIPTS" "$HEAD_FILE"; then
+    [[ -n x ]]
 else
     # THE TWO REASONS ARE NAMED APART, because they send the operator to different places:
-    # an alias means the gate refused before it could write, and a special file means
-    # something replaced the path. Re-asking costs nothing — `[[` opens nothing — and a
-    # merged message would tell them neither.
+    # an alias means the gate refused before it could write, and anything else means the
+    # file does not hold a head this round proved. Re-asking the identity costs nothing —
+    # `[[` opens nothing — and a merged message would tell them neither.
     if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
         echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
     else
-        echo "ABORT: $HEAD_FILE is not a plain regular file, so no gate wrote a head there and reading it could block. Do not resolve any thread."
+        echo "ABORT: $HEAD_FILE does not hold a commit id, is not a plain regular file, or could not be read. No gate has proven a head. Do not resolve any thread."
     fi
     exit 1
     [[ -n "" ]]

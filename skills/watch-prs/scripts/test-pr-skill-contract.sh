@@ -1638,15 +1638,21 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # differ, which is what a symlink in a scratch directory produces. The executed cases
 # below cover the same ground; this keeps the ORDERING assertion honest about what it is
 # anchored to.
-# THE `-f` HALF IS MATCHED TOO, and it is a third line rather than a third clause on the
-# first: `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS with no
-# watchdog and no non-blocking read in this shell — so a FIFO left at that name by a
-# same-UID process hangs the driver instead of refusing. `gate` cannot prevent it: its
-# clearing skips a non-regular path and `rb_empty_handoff` refuses one and leaves it.
+# AND THE CONTENT COMES FROM ONE DESCRIPTOR, which is the half a pathname test cannot do.
+# `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS with no watchdog
+# and no non-blocking read in this shell — so a FIFO left at that name hangs the driver
+# instead of refusing. `gate` cannot prevent it: its clearing skips a non-regular path and
+# `rb_empty_handoff` refuses one and leaves it. A `[[ -f ]]` in front of the substitution is
+# a test and then a SEPARATE open of the same name, so it narrows the window rather than
+# closing it; `rb_handoff_is_sha` opens once with `O_NOFOLLOW|O_NONBLOCK` and answers from
+# that handle.
 _hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\] \\$' "$SKILL" | head -1 | cut -d: -f1)" || true
-grep -q '^   && \[\[ -f \$HEAD_FILE \]\]; then$' "$SKILL" \
-    && pass "…and the head file is proven a regular file before it is opened" \
-    || die "the driver opens \$HEAD_FILE without proving it regular; a FIFO there blocks the read forever"
+grep -q 'rb_handoff_is_sha "\$2"' "$SKILL" \
+    && pass "…and the head content is read through the library's one-descriptor reader" \
+    || die "the driver reads \$HEAD_FILE itself; a test then a substitution is a check-before-open"
+grep -q 'case "\$(<"\$HEAD_FILE")" in' "$SKILL" \
+    && die "the driver still opens \$HEAD_FILE with a substitution; a FIFO there blocks it forever" \
+    || pass "…and no longer opens it with a substitution of its own"
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
     && pass "…and the head is proven, identity first, after the gate and before the replies" \
@@ -1662,7 +1668,7 @@ _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)
 # the file once for its LENGTH and again for its ALPHABET, so a value that was forty
 # characters on the first read and something else on the second satisfied both. One read
 # is the invariant; requiring exactly one occurrence is what states it.
-_hf_dup="$(grep -c 'case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
+_hf_dup="$(grep -c 'rb_handoff_is_sha "\$2"' "$SKILL")" || _hf_dup=0
 [ "$_hf_dup" -eq 1 ] \
     && pass "…and the head file is read exactly once, with the post fence not repeating it" \
     || die "the head file is read in $_hf_dup place(s); it must be read once, before the replies"
@@ -1676,7 +1682,7 @@ _hf_dup="$(grep -c 'case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
 # gated head, after which the threads are resolved claiming a head nobody wrote.
 _hp_dir="$TMP_CL/hp"; mkdir -p "$_hp_dir" || die "the head-proof scratch directory could not be made"
 awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_dir/hp.sh"
-{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'case "$(<"$HEAD_FILE")" in' "$_hp_dir/hp.sh"; } \
+{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'rb_handoff_is_sha "$2"' "$_hp_dir/hp.sh"; } \
     && pass "the head proof lifts, so the cases below reach the code they name" \
     || die "the head proof did not lift; the cases prove nothing"
 
@@ -1685,8 +1691,10 @@ awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_d
 # after the `.` runs whatever the fence did, and asserting on it proves only that `exit`
 # was shadowed. Each refusal arm ends in `[[ -n "" ]]`, so a refusal reports non-zero
 # even with `exit` returning, and the success arm ends in `[[ -n x ]]`.
+# `RB_SCRIPTS` IS SUPPLIED, because the block now reaches `writelib.sh` through it. A case
+# that left it unset would exercise the child's own refusal rather than the read.
 _hp_run() {   # _hp_run <head-file> <summary-file> ; prints "S:<status> <output>"
-    HEAD_FILE="$1" SUMMARY_FILE="$2" bash -c '
+    HEAD_FILE="$1" SUMMARY_FILE="$2" RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         exit() { return 0; }
         . "$1" 2>/dev/null; _s=$?
         printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null
@@ -1706,7 +1714,7 @@ _hp_run() {   # _hp_run <head-file> <summary-file> ; prints "S:<status> <output>
 # BOUNDED, AND THAT IS THE ASSERTION: against the unguarded read this never returns, so a
 # timeout here is the defect rather than a slow machine.
 if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_hp_dir/head-fifo" 2>/dev/null; then
-    _hp_fifo="$(run_limited 10 env HEAD_FILE="$_hp_dir/head-fifo" SUMMARY_FILE="$_hp_dir/summary" \
+    _hp_fifo="$(run_limited 10 env HEAD_FILE="$_hp_dir/head-fifo" SUMMARY_FILE="$_hp_dir/summary" RB_SCRIPTS="$SCRIPT_DIR" \
         bash -c '
             exit() { return 0; }
             . "$1" 2>/dev/null; _s=$?
