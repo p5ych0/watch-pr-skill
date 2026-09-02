@@ -836,9 +836,10 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 # stage writes a readiness value into this same file before it revokes anything, and a
 # refusal between that write and the real one leaves the sentinel behind. It must NOT read
 # as a baseline: with the driver's `exit` shadowed to return, a refused `open` reaches this
-# watch, and an EMPTY file there would be taken as "no prior review" and let a terminal
-# verdict through as this round's answer — a pass that was never requested. The sentinel is
-# not a review id, so it is refused at the call, before any network read.
+# watch, and an EMPTY file there WOULD have been taken as "no prior review" and let a
+# terminal verdict through as this round's answer — a pass that was never requested. Since
+# #264 an empty file is refused here on its own account; the sentinel is refused as well,
+# for not being a review id, and it says WHY rather than leaving the watch to infer it.
 #
 # THE TWO HALVES ARE PINNED TOGETHER: the phase fixture asserts the exact string the stage
 # leaves, and this asserts the same string is refused here. Change one and the other fails.
@@ -852,20 +853,77 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a terminal verdict was announced against the refusal sentinel: $out" \
     || pass "…with no verdict announced for it"
 
-# AN EMPTY FILE IS A LEGAL BASELINE, meaning there was no prior review to wait past.
-# This is the case the unreadable one must NOT be allowed to look like.
-: > "$_bl"
+# "NOTHING TO WAIT PAST" IS SPELLED `none`, AND AN EMPTY FILE IS A REFUSAL — #264.
+#
+# Empty used to BE that value, which made it indistinguishable from a failure: every writer
+# truncates this file before writing it, so any failure in between left the legal no-floor
+# value, and with the driver's `exit` shadowed to return a refused stage armed this watch
+# with no floor at all. The state is real and still expressible, by a token a writer has to
+# produce on purpose.
+printf 'none\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
-    && pass "…an empty baseline file means 'nothing to wait past' and the review is reported" \
-    || die "an empty baseline file was not treated as no baseline (rc=$rc out='$out')"
+    && pass "…the none token means 'nothing to wait past' and the review is reported" \
+    || die "the none token was not treated as no baseline (rc=$rc out='$out')"
 
-# AND A FILE THAT CANNOT BE READ IS state=error, NOT AN EMPTY BASELINE. Degrading to
-# empty would make a failed read say exactly what the case above says, and the watch
-# would then accept the previous terminal review as this round's — the whole failure
-# the baseline exists to prevent, arriving through the read instead of through the
-# absence of a flag.
+# AND AN EMPTY FILE IS REFUSED, which is the half that makes the token worth having. This
+# is the state a truncation leaves, and taking it as "no floor" is the fail-open #264
+# closes — so it must be an error rather than an answer, and it must not announce a verdict.
+: > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=empty_after_review_file' <<<"$out"; } \
+    && pass "…while an EMPTY baseline file is refused, since a truncation produces it" \
+    || die "an empty baseline file was not refused (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a verdict was announced against an empty baseline file: $out" \
+    || pass "…with no verdict announced for it"
+
+# AND A WRITE THAT STOPPED BEFORE ITS NEWLINE IS REFUSED, WHICH IS WHAT MAKES THE TOKEN
+# WORTH ANYTHING. Every writer ends with `printf '%s\n'`, so the trailing newline is the
+# completion delimiter: a write that failed part-way — a full filesystem, a quota reached
+# mid-flush — leaves the value without it.
+#
+# WITHOUT THAT CHECK THE TOKEN IS FAKEABLE BY THE VERY FAILURE IT EXISTS FOR: a `none`
+# whose newline never landed reads as the deliberate no-floor value, since a command
+# substitution discards trailing newlines and the bare prefix is indistinguishable from a
+# finished write. Staged for BOTH shapes, because an id has the same defect and is the one
+# an earlier reading of this change missed — `123` truncated from `1234` is a well-formed
+# id that no shape test can reject.
+# AND A FILE HOLDING ONLY THE DELIMITER IS EMPTY TOO. It passes the empty-FILE check,
+# since it has a byte in it, and strips to nothing — so without a second look the shape
+# test accepts it as "no floor" and the fail-open returns one step later. This is the exact
+# shape `printf '%s\n' ""` produces, which is what every writer emitted before this change,
+# so a file left by an older plugin or by a caller written against the old contract has it.
+printf '\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=empty_after_review_file' <<<"$out"; } \
+    && pass "…and a file holding only the delimiter is refused as empty" \
+    || die "a newline-only baseline file was not refused (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a verdict was announced against a newline-only baseline: $out" \
+    || pass "…with no verdict announced for it"
+
+for _un_v in none 4321; do
+    printf '%s' "$_un_v" > "$_bl"
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && grep -q 'reason=unterminated_after_review_file' <<<"$out"; } \
+        && pass "…and a '$_un_v' written without its terminating newline is refused" \
+        || die "an unterminated '$_un_v' baseline was not refused (rc=$rc out='$out')"
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
+        && die "a verdict was announced against an unterminated baseline: $out" \
+        || pass "…with no verdict announced for it"
+done
+
+# AND A FILE THAT CANNOT BE READ IS state=error, NOT A BASELINE. Degrading to empty made
+# a failed read say exactly what the no-floor case above said, and the watch would then
+# accept the previous terminal review as this round's — the whole failure the baseline
+# exists to prevent, arriving through the read instead of through the absence of a flag.
+# Since #264 empty is itself refused, so the two collide no longer; the reason for a
+# distinct status is unchanged, because an operator has to be told which recovery applies.
 rm -f "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
@@ -937,9 +995,12 @@ else
 fi
 
 # AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
-# holding one read back as the empty string — which is the legitimate "no prior review
-# to wait past" — and the watch announced the terminal review this round just handled
-# as the next one. Asserted on the CONSEQUENCE as well as the reason: no READY line.
+# holding one read back as the empty string — which was the legitimate "no prior review
+# to wait past" when this was written — and the watch announced the terminal review this
+# round just handled as the next one. Since #264 empty is refused too, so this would now
+# be caught either way; the case stays because it pins the READ rather than the shape, and
+# a NUL dropped in silence is a file the reader cannot claim to have understood. Asserted
+# on the CONSEQUENCE as well as the reason: no READY line.
 printf '\000' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?

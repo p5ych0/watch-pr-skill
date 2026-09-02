@@ -418,15 +418,20 @@ fi
 # runs under the same watchdog every other probe here uses, and an expiry is
 # `state=error` like any unreadable answer.
 #
-# AND A NUL BYTE IS NOT AN EMPTY BASELINE. `$(<file)` DROPS NUL bytes, so a file
-# holding one read back as the empty string — which is the LEGITIMATE "there is no
-# prior review to wait past" — and the watch would announce the terminal review this
-# round just handled as the next one. Measured: bash warned about the ignored null
+# AND A NUL BYTE IS NOT A BASELINE. `$(<file)` DROPS NUL bytes, so a file holding one
+# read back as the empty string — which was the LEGITIMATE "there is no prior review to
+# wait past" when this was written — and the watch would announce the terminal review
+# this round just handled as the next one. Measured: bash warned about the ignored null
 # byte and the run reported an ordinary timeout. The child reads with `read -d ""`
 # instead, whose delimiter IS the NUL: finding one is a successful read and that is
 # what makes it a refusal, while an ordinary file ends at EOF with status 1 and the
-# whole content assigned. The trailing newline every writer leaves is stripped by the
-# capture, as before.
+# whole content assigned.
+#
+# SINCE #264 EMPTY IS NOT LEGITIMATE EITHER, so that particular coincidence is gone —
+# and the reason for reading this way is unchanged, because a NUL dropped in silence is
+# a file the reader cannot claim to have understood whatever the remains look like. The
+# trailing newline every writer leaves is NOT stripped by the capture any more: it is
+# the completion delimiter, preserved through a sentinel and required below.
 if [ -n "$AFTER_REVIEW_FILE" ]; then
     # The child's statuses, and they are distinct because each names a different
     # thing to tell an operator: 4 the open failed, 5 a NUL byte, 6 not a regular
@@ -461,15 +466,86 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
     _bl_lim=10
     [ "$_bl_rem" -lt "$_bl_lim" ] && _bl_lim="$_bl_rem"
     [ "$_bl_lim" -lt 1 ] && _bl_lim=1
+    # THE TRAILING NEWLINE IS PRESERVED THROUGH THE READ, and it is the COMPLETION
+    # DELIMITER. Every writer ends with `printf '%s\n'`, so a write that failed part-way —
+    # a full filesystem, a quota reached mid-flush — leaves the value without it. Without
+    # that byte the reader cannot tell a finished write from a truncated one: a `none` whose
+    # newline never landed is the accepted no-floor token, and a `123` truncated from `1234`
+    # is a well-formed id. Both are fail-opens of exactly the kind this change is closing.
+    #
+    # A COMMAND SUBSTITUTION STRIPS TRAILING NEWLINES, so the child appends a sentinel the
+    # parent removes — the same shape `pr-origin.sh` uses to keep `git`'s own terminator.
+    #
+    # THE TWO WRITES ARE CHAINED, and that is not style. Written as two statements, a data
+    # `printf` that wrote a PREFIX and then failed left the sentinel's own success as the
+    # child's status, so the parent saw 0 and took the prefix — which is the failure this
+    # whole read is about, reintroduced by the mechanism added to detect it. With `&&` the
+    # sentinel never runs on a failed data write, and the child exits non-zero.
     _bl_out="$(probe "$_bl_lim" /usr/bin/env bash -p -c '
         { [ -f /dev/fd/9 ] || exit 6
           IFS= read -r -d "" _r <&9
           _s=$?
         } 9<"$1" || exit 4
         [ "$_s" -eq 0 ] && exit 5
-        printf %s "$_r"' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+        printf %s "$_r" && printf x' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
+    [ "$_bl_rc" -eq 0 ] && _bl_out="${_bl_out%x}"
     case "$_bl_rc" in
-        0) AFTER_REVIEW="$_bl_out" ;;
+        # AN EMPTY FILE IS A REFUSAL, AND "NO PRIOR REVIEW" IS SPELLED `none`. #264.
+        #
+        # Empty used to BE the no-floor value, and that made absence indistinguishable from
+        # failure. Every writer truncates this file before writing it, so any failure between
+        # the truncation and the write left the legal "no floor" value — and with the driver's
+        # `exit` shadowed to return, a refused stage reaches this watch, the empty file passes,
+        # and an existing terminal verdict is announced as this round's answer. A pass that was
+        # never requested.
+        #
+        # The state is real and still has to be expressible — a first request, or a reviewer
+        # that has never reviewed — so it is expressed by PRESENCE rather than by absence.
+        # `none` is a value a writer has to produce on purpose; a truncation cannot fake it.
+        #
+        # THE VALUE FORM IS NOT CHANGED, deliberately. `--after-review ""` is passed by a
+        # caller holding the id in a hardened process of its own — `pr-close-round.sh`
+        # waiting on the pass its own push started — where empty is a choice rather than a
+        # residue, and nothing truncated a file to produce it.
+        0) case "$_bl_out" in
+               "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                   exit 2 ;;
+               # THE WRITE MUST HAVE FINISHED, which is what the terminator says. Checked
+               # BEFORE the value is looked at, so no shape test ever runs on a prefix.
+               #
+               # AT LEAST ONE, THEN ALL OF THEM STRIPPED. What the terminator proves is that
+               # the LAST byte written was the newline the writer ends with, which a
+               # truncated write cannot have; how many precede it is not part of the value,
+               # and a reader that took only one would refuse a file a writer never produces
+               # for a reason that has nothing to do with completion.
+               *"
+")  while :; do
+                       case "$_bl_out" in
+                           *"
+")  _bl_out="${_bl_out%
+}" ;;
+                           *) break ;;
+                       esac
+                   done ;;
+               *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=unterminated_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                  exit 2 ;;
+           esac
+           # AND EMPTY AFTER STRIPPING IS EMPTY. A file holding only the delimiter passes
+           # the check above — it is not an empty FILE — and strips to nothing, which the
+           # shape test below then accepts as "no floor". That is the fail-open this change
+           # exists to close, reached one step later.
+           #
+           # IT IS NOT HYPOTHETICAL: `printf '%s\n' ""` is exactly what the writers emitted
+           # before #264, so a baseline file left by an older version of this plugin, or by
+           # a caller written against the old contract, has precisely this shape.
+           case "$_bl_out" in
+               "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                   exit 2 ;;
+           esac
+           case "$_bl_out" in
+               none) AFTER_REVIEW="" ;;
+               *) AFTER_REVIEW="$_bl_out" ;;
+           esac ;;
         5) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_nul detail=$(q "$AFTER_REVIEW_FILE")" >&2
            exit 2 ;;
         6) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_file_not_regular detail=$(q "$AFTER_REVIEW_FILE")" >&2

@@ -314,8 +314,15 @@ fi
 # EMPTIED BY THE GATE, ALONGSIDE THE HEAD. A `post` that fails after a previous
 # round wrote a baseline would otherwise leave the OLD value readable, and the
 # driver's watch would take it — accepting a review that predates this round as the
-# answer to the request this round did not make. Empty is a legitimate baseline, so
-# an emptied file is not a refusal; it is the absence of a claim.
+# answer to the request this round did not make.
+#
+# AND SINCE #264 AN EMPTIED FILE IS A REFUSAL, WHICH IS STRONGER THAN WHAT THIS WAS FOR.
+# Empty used to be a legitimate baseline, so emptying here removed the stale claim and
+# left "no floor" in its place — better than the stale value and still a value the watch
+# accepts. The watch refuses an empty file now, so a `post` that fails after this gate
+# stops the round with `empty_after_review_file` instead of arming a watch against
+# nothing. Do not "fix" this by writing the `none` token here: the token means there was
+# no prior review, which this gate has not established and must not claim.
 if [ "$STAGE" = gate ]; then
     > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
     > "$PRIOR_FILE" || { echo "ABORT: could not empty the prior file '$PRIOR_FILE'."; exit 1; }
@@ -566,12 +573,41 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # irreversibly half-closed. So the file is written here — the read above is still
     # immediately before the request, which is what that ordering is for — and a failure
     # stops the stage with nothing posted and nothing queued.
+    # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY — #264. An empty file used to
+    # mean "no prior review", so a failure between this truncation and this write produced
+    # the legal value, and a driver whose `exit` returns then armed its watch with no floor
+    # at all. `gate` still EMPTIES this file, and that is now a refusal rather than a
+    # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
+    # direction that stops a round instead of announcing a pass nobody requested.
+    prior="${prior:-none}"
     printf '%s\n' "$prior" > "$PRIOR_FILE" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted."; return 1; }
-    _back="$(<"$PRIOR_FILE")" \
-        || { echo "ABORT: could not read back the review baseline from '$PRIOR_FILE'; nothing has been posted."; return 1; }
-    [ "$_back" = "$prior" ] \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE'; nothing has been posted."; return 1; }
+    # THE READ-BACK COMPARES RAW BYTES, TERMINATOR INCLUDED, IN THE CHILD. `$(<…)` strips
+    # trailing newlines, so it cannot see the delimiter the watch now requires: a path
+    # replaced between the write and the read with the SAME id and no newline compared
+    # equal, this stage posted the request, and the watch then refused the file as
+    # `unterminated_after_review_file` — with the round irreversibly half-closed, since the
+    # summary is up and the next pass is queued.
+    #
+    # AND THE COMPARISON HAPPENS IN THE CHILD, for the reason `pr-copilot-phase.sh` gives
+    # at its own read-back: `read` reports ordinary EOF and a read that failed part-way with
+    # the same status, so a child that hands its bytes back leaves the caller unable to tell
+    # them apart. `_r` is compared against the value plus its newline, and only the verdict
+    # crosses.
+    #
+    # NOT BOUNDED, AND THAT IS CONSISTENT RATHER THAN AN OVERSIGHT. `run_limited` is not
+    # loaded in this file, and bounding the read alone would buy nothing: the WRITE above it
+    # is a plain redirection, so a path that blocks on open has already blocked there. A
+    # watchdog here would need one there too, which is a different change from this one.
+    /usr/bin/env bash -p -c '
+        { [ -f /dev/fd/9 ] || exit 6
+          IFS= read -r -d "" _r <&9
+          _s=$?
+        } 9<"$1" || exit 4
+        [ "$_s" -eq 0 ] && exit 5
+        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$prior
+" \
+        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written including its terminating newline; nothing has been posted."; return 1; }
     # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
     # never triggered by a mention and never by a push — only by `--add-reviewer` —
     # so a Copilot round that posted the Codex mention requested nothing at all,

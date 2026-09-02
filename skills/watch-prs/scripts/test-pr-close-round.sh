@@ -141,6 +141,17 @@ exit 0
 GITSH
 chmod +x "$TMP/bin/gh" "$TMP/bin/git"
 
+# THE TERMINATING NEWLINE IS ASSERTED ON RAW BYTES, because nothing else here can see it.
+# `$(…)` and `cat` in a substitution both strip trailing newlines, so an assertion phrased
+# on the captured value passes whether or not the writer emitted the delimiter — while
+# `pr-watch.sh` refuses a baseline without it as `unterminated_after_review_file`. A writer
+# changed to emit a bare token would leave this suite green and break the real handoff.
+raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
+    printf '%s' "$2" > "$TMP/raw.expected" || die "could not stage the raw expectation for $3"
+    cmp -s "$1" "$TMP/raw.expected" \
+        && pass "…and $3 lands as raw bytes with its terminating newline" \
+        || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
+}
 world() {   # world ; the state in which a round closes cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/local.out"
@@ -1020,30 +1031,68 @@ _hf_file="$(cat "$HEADF")" || _hf_rc=1
     && pass "…and the head the gate reports is exactly the head it wrote to the file" \
     || die "the gate's record and its head file disagree: record='$_hf_rec' file='$_hf_file' rc='${got%%|*}/$_hf_rc'"
 
-# ── A HEAD WITH NO REVIEW YET REPORTS AN EMPTY BASELINE, AND THAT IS AN ANSWER ─
+# ── A HEAD WITH NO REVIEW YET REPORTS THE `none` BASELINE, AND THAT IS AN ANSWER ─
 # `pr-review-state.sh review-id` returns nothing when the current head has no
 # review — every round that pushes a new commit, and every Copilot round, since a
 # push never triggers one. The record must still carry the field, so the driver
 # can tell "no baseline yet" from "no record at all"; `pr-watch.sh` takes the
-# empty value as "wait on any terminal review".
+# `none` token as "wait on any terminal review".
 world; : > "$W/pr-review-state.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
-{ [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=$' <<<"${got#*|}"; } \
-    && pass "a head with no review yet closes, reporting an empty baseline" \
-    || die "an empty baseline gave '${got}'"
-# …AND IT REACHES THE FILE AS AN EMPTY FILE, which is an answer rather than a
-# failure. The driver tells it from a STALE value only because `gate` emptied the
-# file first — without that, last round's baseline would still be sitting there.
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and the prior file reads back empty rather than holding a previous round's value" \
-    || die "an empty baseline left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
+{ [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=none$' <<<"${got#*|}"; } \
+    && pass "a head with no review yet closes, reporting the none baseline" \
+    || die "a head with no review yet gave '${got}'"
+# …AND IT REACHES THE FILE AS THE `none` TOKEN — #264. It used to reach it as an EMPTY
+# file, which meant "no floor" and was therefore indistinguishable from a truncation whose
+# write then failed. The token has to be written on purpose, so the watch can tell the
+# answer from the accident: an empty file is `state=error` there now.
+#
+# `gate` STILL EMPTIES THIS FILE, and that is why the change is safe rather than merely
+# tidier — an emptied baseline reaching the watch is a refusal instead of a no-floor, so a
+# `post` that fails after `gate` stops the round rather than arming a watch against
+# nothing.
+raw_is "$TMP/prior.txt" 'none
+' "post's none baseline"
+
+# ── THE READ-BACK COMPARES THE TERMINATOR, AND WHY THAT IS ASSERTED ON THE SOURCE ─
+#
+# The read-back used `$(<…)`, which STRIPS trailing newlines, so it could not see the
+# delimiter `pr-watch.sh` now requires. A path replaced between the write and the read with
+# the SAME id and no newline compared equal, this stage posted the request, and the watch
+# then refused the file as `unterminated_after_review_file` — with the round IRREVERSIBLY
+# half-closed, since the summary is up and the next pass is queued.
+#
+# THE WINDOW CANNOT BE STAGED, and that is a fact about its shape rather than a gap left
+# open. The write and the read-back are ADJACENT: no external command runs between them, so
+# there is nothing on `PATH` a shim can attach to, and a racer would be aiming at an
+# interval of two shell operations — a case that tries would pass on scheduling. This was
+# built and did not land: a `gh` shim fires only at the post, which is after both.
+#
+# SO WHAT IS ASSERTED IS THE COMPARISON'S SHAPE: that the child compares against the value
+# WITH its newline, and that the caller no longer reads the file into a stripping
+# substitution. That is weaker than a behavioural case and it is the strongest thing
+# available here — and it is exact enough to fail: restoring `$(<…)` or dropping the
+# newline from the expected value both break it.
+_rb_body="$(awk '/# THE READ-BACK COMPARES RAW BYTES/,/nothing has been posted."; return 1; }/' "$SCRIPT")" || _rb_body=""
+case "$_rb_body" in
+    *'_ "$PRIOR_FILE" "$prior
+"'*) pass "the baseline read-back compares against the value INCLUDING its terminator" ;;
+    *) die "the read-back does not compare the terminator; a replacement stripping it would pass: '$_rb_body'" ;;
+esac
+case "$_rb_body" in
+    *'$(<"$PRIOR_FILE")'*) die "the read-back still reads through a substitution, which strips the terminator" ;;
+    *) pass "…and does not read it through a substitution, which would strip that byte" ;;
+esac
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
+    && pass "…and the prior file reads back as the none token rather than empty or a previous round's value" \
+    || die "a head with no review yet left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
 
 # AND THE FIELD IS STILL THERE, which is the whole difference between an answer
 # and a malformed record. Asserted on the record itself rather than on the value,
 # because a record that simply dropped the field also has an "empty" value.
 grep -qF ' prior-review=' <<<"${got#*|}" \
     && pass "…with the field present, so an absent record stays distinguishable" \
-    || die "the empty-baseline record dropped the field entirely: '${got#*|}'"
+    || die "the none-baseline record dropped the field entirely: '${got#*|}'"
 
 # THE SAME ON THE PATH WHERE THE BASELINE IS ALSO HANDED TO THE WATCH. A first
 # auto-review round has no prior review to wait past, and the gate must not refuse

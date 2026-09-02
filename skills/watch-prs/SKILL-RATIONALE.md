@@ -1447,12 +1447,15 @@ job runs on Ubuntu and cannot see it. That was #238; removing the read closed it
 the shape — so the rule lives in the process that consumes the value rather than in
 the shell that only carries it.
 
-The distinction it has to keep is between a file that is EMPTY and one that could not
-be READ. Empty is legitimate: it means there was no prior review to wait past, which
-is the ordinary first request on a fresh head. A failed read degraded to empty would
-say exactly that, and the watch would then accept the terminal review this round just
-handled as the next one — the whole failure the baseline exists to prevent, arriving
-through the read rather than through a missing flag. It is `state=error` instead. An
+The distinction it has to keep is between a value that says "no prior review" and any
+failure to produce one. That state is legitimate — it is the ordinary first request on a
+fresh head — and since #264 it is spelled `none` rather than by an EMPTY file. Empty used
+to be the spelling, and it could not be told from a failure: every writer truncates this
+file before writing it, so a truncation whose write then failed produced the legal
+no-floor value, and a driver whose `exit` returns armed its watch with no floor at all.
+A failed READ degraded to empty said the same thing, and the watch would then accept the
+terminal review this round just handled as the next one — the whole failure the baseline
+exists to prevent. Both are `state=error` now: an unreadable file, and an empty one. An
 empty PATH is refused at the option, for the same reason one step earlier: a caller
 expanding a name that was never assigned satisfies the argument count, and an empty
 value would skip the read entirely and leave the watch with no baseline at all.
@@ -1487,9 +1490,11 @@ The reason it survived `record`'s removal by a release is that its reader is rea
 the driver's `exit` shadowed to return, a refused `open` falls past its fence into the
 wait step, which hands this file to `pr-watch.sh --after-review-file`. What made it
 removable anyway is that emptying does not protect that reader. The watch holds a
-terminal verdict back on ONE condition — the id it reads equals the baseline — and skips
-the comparison entirely when the baseline is empty, so an empty baseline holds nothing
-back. Where a stale id would have matched the current review, emptying is the WORSE of
+terminal verdict back on ONE condition — the id it reads equals the baseline — and skipped
+the comparison entirely when the baseline was empty, so an empty baseline held nothing
+back. (Since #264 an empty file is refused outright and the no-floor value is `none`, which
+skips the comparison in the same way; what follows is about a value that skips it, whichever
+spelling reaches the watch.) Where a stale id would have matched the current review, emptying is the WORSE of
 the two, turning a correct `awaiting_new_review` into a `PR_REVIEW_READY` for the very
 review it meant to hold back. `test-pr-watch.sh` stages that pair.
 
@@ -1508,12 +1513,18 @@ No shell redirection expresses the write's own mode, so the operation that prove
 the truncation.
 
 IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is not a detail. Emptying looked free
-because an empty baseline is LEGAL — it means "no prior review to wait past", which this
-stage can legitimately produce when Copilot has never reviewed. Which is exactly why it
-was dangerous: a refusal between that write and the real one left a value the watch
-ACCEPTS, and with the driver's `exit` shadowed to return, the watch skipped its equality
-check and announced `PR_REVIEW_READY` for a review no request was made for. The readiness
-proof was buying its ordering guarantee with a fail-OPEN.
+because an empty baseline was LEGAL when this was written — it meant "no prior review to
+wait past", which this stage can legitimately produce when Copilot has never reviewed.
+Which is exactly why it was dangerous: a refusal between that write and the real one left a
+value the watch ACCEPTED, and with the driver's `exit` shadowed to return, the watch
+skipped its equality check and announced `PR_REVIEW_READY` for a review no request was made
+for. The readiness proof was buying its ordering guarantee with a fail-OPEN.
+
+SINCE #264 AN EMPTY BASELINE IS NO LONGER LEGAL, and "no prior review" is spelled `none` —
+so the emptying this section argues against is refused by the watch on its own account now,
+and the sentinel is belt as well as braces rather than the only thing standing there. The
+argument for writing a sentinel is unchanged and so is the code: a value written on purpose
+is what a reader can trust, and this section is why.
 
 The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
 status 2, at the call and before any network read — and the driver stops rather than

@@ -385,8 +385,10 @@ then
 
 #   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
-#     0  posted — the baseline is on stdout, and it is EMPTY on the automatic
-#        path, where the trigger preceded us and there is nothing to capture
+#     0  posted — the baseline is on stdout, and it is the `none` token on the
+#        automatic path, where the trigger preceded us and there is nothing to
+#        capture. `none` means "no prior review to wait past"; an EMPTY value is
+#        refused by the watch, since a failed write produces one
 #     1  stopped — nothing was posted
 #
 # Write the account into `$REQUEST_FILE` with your file-writing tool — not from
@@ -452,12 +454,14 @@ something to act on and prints one line when the state changes:
 # waiting on — written by step 2, step 5 and step 7 — and it is authoritative only
 # where the stage that wrote it returned 0. Those steps abort on anything else, but
 # an `exit` that returns carries a refusal into this line, and the file then holds
-# the previous round's id, this round's captured id, a refusal sentinel, or nothing.
-# The watch decides on SHAPE, not on who wrote it, and it refuses ONLY a value that is
-# non-empty and not a review id. An EMPTY file is accepted as "no baseline", and any id
-# is accepted. So the sentinel is refused while it survives — the capture overwrites it
-# — but a readiness write that failed after truncating leaves an empty file that is
-# accepted, and a substituted value that happens to be digits is accepted too. Both
+# the previous round's id, this round's captured id, the `none` token where there was
+# no prior review to capture, a refusal sentinel, or nothing.
+# The watch decides on SHAPE, not on who wrote it: since #264 it refuses an EMPTY file
+# and one whose last byte is not the writer's newline, accepts `none` as "no baseline",
+# accepts any id, and refuses anything else. So the sentinel is refused, and so is a
+# readiness write that failed after truncating — it leaves an empty file, which no
+# longer passes. What is still accepted is a substituted value that happens to be a
+# COMPLETE id, and both
 # ids are, so a terminal review with a different id is reported as this round's
 # answer. Where the refusal came before the request, nothing was asked for and that
 # verdict is not this round's; where `--add-reviewer` itself failed, the request has
@@ -470,7 +474,8 @@ something to act on and prints one line when the state changes:
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives
 # as a PATH: the value is never assigned in this shell, and an unreadable file is
-# `state=error` there rather than an empty baseline here.
+# `state=error` there rather than an empty baseline here — and an EMPTY file is
+# `state=error` too since #264, "no prior review" being spelled `none`.
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"; WATCH_RC=$?
 ```
 

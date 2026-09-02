@@ -145,6 +145,17 @@ exit 0
 GHSH
 chmod +x "$TMP/bin/gh"
 
+# THE TERMINATING NEWLINE IS ASSERTED ON RAW BYTES, because nothing else here can see it.
+# `$(…)` and `cat` in a substitution both strip trailing newlines, so an assertion phrased
+# on the captured value passes whether or not the writer emitted the delimiter — while
+# `pr-watch.sh` refuses a baseline without it as `unterminated_after_review_file`. A writer
+# changed to emit a bare token would leave this suite green and break the real handoff.
+raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
+    printf '%s' "$2" > "$TMP/raw.expected" || die "could not stage the raw expectation for $3"
+    cmp -s "$1" "$TMP/raw.expected" \
+        && pass "…and $3 lands as raw bytes with its terminating newline" \
+        || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
+}
 world() {   # world ; the state in which the phase advances cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/head.out"
@@ -994,11 +1005,15 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested with no baseline to wait past" \
     || pass "…with Copilot not requested"
 
-# AN EMPTY BASELINE IS AN ANSWER: a head with no Copilot review yet has no id, and
-# `pr-watch.sh` takes that as "wait on any terminal review".
+# NO PRIOR REVIEW IS AN ANSWER, AND IT IS SPELLED `none` — #264. A head with no Copilot
+# review yet has no id, and `pr-watch.sh` takes the token as "wait on any terminal review".
+# It used to be spelled by an EMPTY file, which a truncation whose write then failed
+# produced by accident — so the answer and the accident were the same value, and the watch
+# armed against nothing either way. This is the ORDINARY case for `open`, since Copilot has
+# usually not reviewed the head when the phase is opened.
 world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$' <<<"${got#*|}"; } \
-    && pass "a head with no Copilot review yet opens, reporting an empty baseline" \
+{ [ "${got%%|*}" = 0 ] && grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=none$' <<<"${got#*|}"; } \
+    && pass "a head with no Copilot review yet opens, reporting the none baseline" \
     || die "an empty baseline gave '${got}'"
 
 # A DISMISSAL OR A REVOCATION DURING THE PROBES. Neither moves the head, so the
@@ -1068,17 +1083,22 @@ before 'pr-review-state.sh review-id' 'gh pr edit' \
     && pass "…and captures it before Copilot is requested" \
     || die "the baseline is captured after the request: $(cat "$TMP/calls")"
 
-# AN EMPTY BASELINE IS WRITTEN, NOT SKIPPED. No prior Copilot review is the ordinary
-# first pass, and `pr-watch.sh` reads empty as "there is nothing to wait past" — so
-# the file must exist and be empty rather than be left as it was.
+# THE `none` BASELINE IS WRITTEN, NOT SKIPPED. No prior Copilot review is the ordinary
+# first pass, and `pr-watch.sh` reads the `none` token as "there is nothing to wait past" —
+# so the file must be written rather than left as it was. It used to be written EMPTY,
+# which #264 made a refusal, because a truncation whose write then failed produced the
+# same bytes.
 world; : > "$W/review-id.out"; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-# ASSERTED ON THE VALUE A READER GETS, not on the file's size. `printf '%s\n' ""`
-# leaves one byte, so `-s` is true on a file that every reader sees as empty —
-# `$(<…)` strips trailing newlines, which is how `pr-watch.sh` reads it.
-{ [ -f "$TMP/prior.txt" ] && [ -z "$(cat "$TMP/prior.txt")" ]; } \
-    && pass "…and an empty baseline is written over a stale one, not left behind" \
+# ASSERTED ON THE VALUE A READER GETS, not on the file's size — `$(<…)` strips trailing
+# newlines, which is how `pr-watch.sh` reads it. The value is the `none` token since #264,
+# and asserting the exact string is what keeps this case honest: `-z` would pass against an
+# empty file, which is the state that used to mean the same thing and now means a failure.
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
+    && pass "…and the none token is written over a stale baseline, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
+raw_is "$TMP/prior.txt" 'none
+' "open's none baseline"
 
 # A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing
 # #245 did NOT remove. It is below the bootstrap, `run_limited` bounds it, and it is the
@@ -1089,11 +1109,16 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 # read-back, which is after the revocation.
 #
 # AND IT LEAVES A SENTINEL, NOT AN EMPTY FILE, which is what makes this refusal fail
-# CLOSED. Emptying looked free because an empty baseline is LEGAL — it means "no prior
-# review to wait past" — so a refusal that emptied left a value the watch ACCEPTS, and with
+# CLOSED. Emptying looked free because an empty baseline WAS legal — it meant "no prior
+# review to wait past" — so a refusal that emptied left a value the watch ACCEPTED, and with
 # the driver's `exit` returning the watch then announced `PR_REVIEW_READY` for a review no
 # request was made for. The sentinel is not a review id, so `pr-watch.sh` refuses it with
 # `reason=malformed_review_id` and the driver stops. `test-pr-watch.sh` holds that half.
+#
+# SINCE #264 AN EMPTY FILE IS REFUSED TOO — `reason=empty_after_review_file` — so the
+# emptying this case argues against would now be caught on its own account. The sentinel
+# stays because it names the reason rather than leaving the watch to infer one, and the
+# assertion below still distinguishes the two so a change back to emptying is visible.
 world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
 printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
@@ -1101,7 +1126,7 @@ _rb_res="$(cat "$TMP/prior.txt" 2>/dev/null)"
 case "$_rb_res" in
     refused-no-baseline) pass "…and a refusal after the readiness write leaves a sentinel the watch refuses" ;;
     stale-from-a-previous-round) die "the readiness write did not happen before the refusal" ;;
-    "") die "a refused open left an EMPTY baseline, which the watch accepts as 'no floor'" ;;
+    "") die "a refused open left an EMPTY baseline, which #264 made a refusal rather than the sentinel this stage should leave" ;;
     *) die "a refused open left '$_rb_res' in the baseline file" ;;
 esac
 # AND IT REQUESTED NOTHING — at THIS refusal, which is a staged head-read failure and so is
@@ -1198,12 +1223,14 @@ else
     pass "no /dev/null on this platform, so the device-path state is skipped by name"
 fi
 
-# AND A READ THAT FAILS IS NOT AN EMPTY BASELINE. `printf "%s" "$(<…)"` exits 0
-# whatever the substitution did, so a path the read-back cannot open came back as
-# SUCCESS with empty output — and where there is legitimately no earlier Copilot
-# review the baseline IS empty, so the comparison passed and the phase opened against
-# a file nothing can read. The watch then refuses, after the revocation and the request
-# have gone out.
+# AND A READ THAT FAILS IS NOT A BASELINE. `printf "%s" "$(<…)"` exits 0 whatever the
+# substitution did, so a path the read-back cannot open came back as SUCCESS with empty
+# output — and where there was legitimately no earlier Copilot review the baseline WAS
+# empty, so the comparison passed and the phase opened against a file nothing can read.
+# The watch then refuses, after the revocation and the request have gone out. Since #264
+# the legitimate value is `none\n`, so that exact collision is gone and the reason for
+# taking the status is not: a read that fails must not be able to look like any value a
+# writer produces.
 #
 # STAGED WITH A WRITE-ONLY FILE rather than by racing the window. `chmod 222` is the
 # same state a mid-window removal produces for the reader — both writes succeed and
@@ -1227,12 +1254,14 @@ else
     pass "running as root, so the unreadable read-back is skipped by name"
 fi
 
-# AND A READ THAT RETURNS NOTHING IS NOT AN EMPTY BASELINE. This is the case the
-# read-back could not see before #246: `read` reports ordinary EOF and a read that failed
-# part-way with the SAME status, so a child that hands its bytes back leaves the caller
-# comparing "" against "" and passing. An empty baseline is LEGITIMATE — no earlier
-# Copilot review is the ordinary first pass — which is why this one collided and the
-# forty-character sha never did.
+# AND A READ THAT RETURNS NOTHING IS NOT A BASELINE. This is the case the read-back could
+# not see before #246: `read` reports ordinary EOF and a read that failed part-way with the
+# SAME status, so a child that hands its bytes back leaves the caller comparing "" against
+# "" and passing. An empty baseline WAS legitimate then — no earlier Copilot review is the
+# ordinary first pass — which is why this one collided and the forty-character sha never
+# did. Since #264 that value is `none\n`, which a read failing at the first byte cannot
+# equal; one failing at the FIFTH still returns `none`, and the comparison being on the raw
+# bytes including the terminator is what catches it.
 #
 # STAGED BY EMPTYING THE FILE BETWEEN THE WRITE AND THE READ, which is the state a failed
 # read produces for the comparison: the bytes that come back are not the bytes that went

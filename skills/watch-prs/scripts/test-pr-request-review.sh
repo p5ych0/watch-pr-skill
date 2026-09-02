@@ -75,6 +75,19 @@ run() {   # run [args…] ; prints "<rc>", with stdout in $OUT and stderr in $ER
         /usr/bin/env bash -p "$DIR/pr-request-review.sh" "$@" <"$BODY_IN" >"$OUT" 2>"$ERR") || rc=$?
     printf '%s' "$rc"
 }
+# THE TERMINATING NEWLINE IS ASSERTED ON RAW BYTES, because nothing else in this file can
+# see it. `$(…)` and `cat` in a substitution both strip trailing newlines, so every
+# assertion phrased on the captured value passes whether or not the writer emitted the
+# delimiter — and `pr-watch.sh` refuses a baseline without it as
+# `unterminated_after_review_file`. A writer changed to emit a bare token would leave this
+# suite green and break the real handoff, which is the shape of the defect this whole
+# change is about.
+raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
+    printf '%s' "$2" > "$TMP/raw.expected" || die "could not stage the raw expectation for $3"
+    cmp -s "$1" "$TMP/raw.expected" \
+        && pass "…and $3 lands as raw bytes with its terminating newline" \
+        || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
+}
 stdout()  { cat "$OUT"; }
 stderr()  { cat "$ERR"; }
 posted()  { grep -q '^gh ' "$TMP/calls"; }
@@ -119,15 +132,23 @@ grep -qF 'A one-paragraph account' <<<"$_CAP" \
     && pass "…as ONE comment" \
     || die "the manual path posted $(grep -c '^gh ' "$TMP/calls") comments"
 
-# AND ON THE MANUAL PATH AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. This is
+# AND ON THE MANUAL PATH "NO PRIOR REVIEW" IS AN ANSWER, NOT A FAILURE. This is
 # the ORDINARY first request: Codex has not reviewed this head yet, so
 # `review-id` succeeds with an empty value. Treating that as unusable aborts
 # AFTER the request has been posted, leaving a pass in flight that nobody waits
 # for — which is what a digits-only check in the driver did.
+#
+# IT IS SPELLED `none` SINCE #264, and the spelling is the point. Empty used to BE the
+# no-floor value, so a writer whose truncation succeeded and whose write failed produced
+# it by accident and the watch armed against nothing. A token has to be written on
+# purpose. So the assertion is the exact string rather than "not a failure": emitting
+# empty here would restore the old ambiguity and pass a laxer check.
 world; : > "$W/prior.out"; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ -z "$(stdout)" ] && posted; } \
-    && pass "…and an empty baseline on the manual path is posted and reported, not refused" \
+{ [ "$rc" = 0 ] && [ "$(stdout)" = none ] && posted; } \
+    && pass "…and no prior review on the manual path reports the none token, not an empty value" \
     || die "a first request with no prior review gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
+raw_is "$OUT" 'none
+' "the manual path's none baseline"
 
 # AND A COMMENT-BACKED BASELINE COMES THROUGH AS IT IS. A reviewer's newest
 # verdict arrives either as a submitted review, whose id is digits, or as a clean
@@ -167,10 +188,16 @@ world; rc=0
 # `--after-review` on the initial automatic pass can capture the very review
 # being waited for: the trigger preceded this loop. So there is nothing to read,
 # and reading it anyway is the failure — not a wasted call.
+#
+# REPORTED AS `none` SINCE #264 rather than as nothing, for the reason the manual case
+# above gives — and the assertion is the exact string, since an empty value here would be
+# the ambiguity that change removed.
 world; rc="$(run 7 yes)"
-{ [ "$rc" = 0 ] && [ -z "$(stdout)" ]; } \
-    && pass "the automatic path posts and reports an EMPTY baseline" \
+{ [ "$rc" = 0 ] && [ "$(stdout)" = none ]; } \
+    && pass "the automatic path posts and reports the none token as its baseline" \
     || die "the automatic path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
+raw_is "$OUT" 'none
+' "the automatic path's none baseline"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \
     || pass "…and never looks one up"
@@ -241,9 +268,12 @@ rc="$(run 7 yes)"
     && pass "…and the mention is matched case-insensitively, as the trigger is" \
     || die "a mixed-case mention on the automatic path gave rc=$rc, posted=$(cat "$TMP/calls")"
 
-# ── A BASELINE THAT CANNOT BE READ IS NOT AN EMPTY BASELINE ────────────────
-# Read as empty it becomes the automatic path's answer on the manual path, and
-# the watch then accepts the PREVIOUS review as this round's.
+# ── A BASELINE THAT CANNOT BE READ IS NOT A BASELINE ───────────────────────
+# Read as empty it became the automatic path's answer on the manual path, and the
+# watch then accepted the PREVIOUS review as this round's. Since #264 the automatic
+# path's answer is the `none` token and an empty value is refused by the watch, so
+# that particular collision is gone — and the reason to refuse here is unchanged: a
+# read that failed must not be able to produce ANY value a caller would act on.
 world; printf '2\n' > "$W/prior.rc"
 rc="$(run 7 no)"
 _cap stderr
