@@ -636,7 +636,8 @@ fi
 # driver's `$(<…)` then drops the trailing NUL and accepts the 40-hex prefix, the gate reports
 # success, and the threads are resolved on a head this call never handed over.
 #
-# THE READ SLURPS NOW, so this is caught by the COMPARISON: the extra bytes come back with the
+# THE READ RUNS TO A CLEAN EOF NOW — a `sysread` loop, not a slurp, since a slurp returns
+# what arrived before an I/O error — so this is caught by the COMPARISON: the extra bytes come back with the
 # rest and the strings differ. The case is kept because the state is still reachable and the
 # outcome still matters — and because a reader that stops at a delimiter is an easy thing to
 # reintroduce, at which point this goes red rather than the driver going wrong.
@@ -696,7 +697,8 @@ fi
 # `[[ -f $HEAD_FILE ]]` and then `case "$(<"$HEAD_FILE")"`, which is a test and then a
 # separate open of the same name — a FIFO swapped in between them BLOCKS a shell that has no
 # watchdog and no non-blocking read, before the thread-resolution step. One `sysopen` with
-# `O_NOFOLLOW|O_NONBLOCK`, the type from `fstat` on that handle, and the bytes slurped and
+# `O_NOFOLLOW|O_NONBLOCK`, the type from `fstat` on that handle, and the bytes read by a
+# `sysread` loop to a zero-length read and
 # matched whole is the only shape that answers about the inode it read.
 [ "$(type -t rb_handoff_is_sha 2>/dev/null)" = function ] \
     || die "writelib.sh does not define rb_handoff_is_sha"

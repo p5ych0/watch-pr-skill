@@ -1380,7 +1380,8 @@ only asking the question of the descriptor that was opened does.
 
 So the read is `rb_handoff_is_sha`, in a child that sources `writelib.sh` directly: one
 `sysopen` with `O_NOFOLLOW` and `O_NONBLOCK`, the type from `fstat` on that handle, and the
-bytes slurped and matched against exactly forty lowercase hexadecimal characters and the
+bytes read by a `sysread` loop to a clean EOF — a slurp returns what arrived before an I/O
+error — and matched against exactly forty lowercase hexadecimal characters and the
 newline the writer emits. A symlink is refused at the open, a FIFO returns at once instead of
 waiting, and every answer comes from the inode that was actually read.
 
