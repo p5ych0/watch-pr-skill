@@ -44,13 +44,13 @@
 
   **It is not another check-then-open**, which is the shape #245 already convicted.
   Nothing asks what is at the target before writing to it; the target is never opened at
-  all. The temporary is created exclusively under `set -C` **in the same open that writes
+  all. The temporary is created exclusively with `O_CREAT|O_EXCL` **in the same open that writes
   it** — creating it and then opening it again by name would be that shape reappearing
   inside the fix, with the second open free to follow a symlink or block on a FIFO.
 
   **The three watchdogs stay, and the reason for them has changed.** They were there
   because a plain `>` on a caller-named path blocks on a FIFO waiting for a reader, and
-  `set -C` does make the temporary's open fail rather than wait. But `O_EXCL` only settles
+  the exclusive create does make the temporary's open fail rather than wait. But `O_EXCL` only settles
   that one case: pathname resolution, the write and the `mv` can all still stall on an
   unresponsive filesystem, and the baseline write stands **after** the Copilot-signoff
   revocation, where a hang leaves the phase half-open with no diagnostic. So the bound is
@@ -65,11 +65,20 @@
   a socket, or a symlink to any of them. A symlink to a **regular file** is accepted, and
   the link is what the rename replaces.
 
+  **`perl` runs with its environment cleared.** `PERL5OPT` and `PERL5LIB` are read before
+  the program is, so an inherited value could stop every handoff in the loop — the same
+  class as a poisoned `PATH`, except that this one can be **removed**. `env -i` keeping only
+  `PATH` is a removal rather than a denylist, so there is no list of perl variables to keep
+  in step.
+
   **And the postcondition proves the VALUE, because the SOURCE is raceable too.** The
   temporary's name is published in its directory the moment it exists, so a racer can
   replace *that* path and the exact rename then moves their inode onto the handoff path
   faithfully — a type check is satisfied by exactly what arrives. The target must be a
-  non-symlink regular file whose raw bytes are what the call asked for. A NUL in it is a
+  non-symlink regular file whose raw bytes are what the call asked for, and that read
+  **opens non-blocking and takes the type from the handle**: `[ -f ]` before an open is a
+  cheap early answer and not the protection, since a FIFO swapped in between the two had
+  the read waiting for a writer that never comes. A NUL in it is a
   refusal on its own: `read -d ''` stops at one, so a forgery spelled "the requested value,
   then a NUL, then anything" compares equal, and the driver's `$(<…)` would drop the NUL and
   accept the 40-hex prefix.

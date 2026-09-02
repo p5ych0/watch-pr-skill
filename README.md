@@ -181,8 +181,14 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 
 ## Platform support
 
-Portable: the plugin shells out to `git`, `gh` and `jq` only. v1's Linux-only
-caveat is gone with the daemons it was about.
+Portable: the plugin shells out to `git`, `gh`, `jq` and — since 2.1.0 — `perl`.
+v1's Linux-only caveat is gone with the daemons it was about.
+
+`perl` is a hard requirement rather than a convenience, and the reason is below
+under **Running a helper by hand**: the file handoffs need an `O_CREAT|O_EXCL`
+create and an exact-destination rename, and a shell has a safe spelling of
+neither. macOS ships it and so does every Linux distribution this loop has run
+on; without it, every handoff refuses and says so.
 
 **The helpers run in a privileged shell**, started that way by the skill itself —
 `/usr/bin/env bash -p …`. That is what stops a `BASH_ENV` startup file, an

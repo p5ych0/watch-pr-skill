@@ -249,7 +249,7 @@ When reviewing a change here:
   and that bounds a residue rather than preventing an attack: a racer **reads** the
   name out of the directory once it exists, so randomness is not what stops the
   directory swap. The exact rename is.
-- **`set -C` settles the FIFO and nothing else.** It is not a reason to remove a
+- **the exclusive create settles the FIFO and nothing else.** It is not a reason to remove a
   watchdog. Pathname resolution, the write and the rename can each stall on an
   unresponsive mount, so the three bounded call sites in `pr-copilot-phase.sh` keep
   their `run_limited`, wrapped around a child that sources the library — the
@@ -262,6 +262,21 @@ When reviewing a change here:
   the caller reads a head this run never gated. The target must be a non-symlink regular
   file whose raw bytes are what the call asked for; an emptying is zero bytes, asked from
   the inode with `-s` so that path never opens the target at all.
+- **the create is `O_CREAT|O_EXCL`, and `set -C` is not that.** Bash's noclobber fails a
+  redirection only where the existing file is REGULAR, so a FIFO pre-placed at the
+  temporary's name is OPENED and the write BLOCKS. `perl`'s `sysopen` has no such
+  exemption, which is why `perl` is a requirement of the library rather than a fallback
+  behind `mv` — a shell has no other exclusive create. Restoring a redirection there
+  recreates an unbounded hang.
+- **the read-back opens non-blocking and takes the type from the HANDLE.** `[ -f ]` before
+  the open is a cheap early answer, not the protection: a FIFO swapped in between the two
+  had the read waiting for a writer, and five of the call sites have no watchdog. `fstat`
+  on the descriptor that was actually opened is what removes the window; a change back to
+  `read < "$path"` leaves every behavioural case green.
+- **`perl` runs with its environment cleared — `env -i`, keeping only `PATH`.** `PERL5OPT`
+  and `PERL5LIB` are read before the program is, so an inherited value could stop every
+  handoff in the loop. Clearing is a removal; a denylist of perl variables would be one
+  behind the next one.
 - **a NUL in the read-back is a refusal on its own.** `read -d ''` stops AT the delimiter,
   so a forgery spelled "the requested value, then a NUL, then anything" compares EQUAL —
   and the driver's `$(<…)` drops the trailing NUL and accepts the 40-hex prefix. The read's

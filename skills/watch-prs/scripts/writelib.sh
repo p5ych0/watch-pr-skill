@@ -19,7 +19,7 @@
 #
 # WHAT THIS DOES INSTEAD: WRITE, THEN RENAME.
 #
-#   1. create a temporary beside the target, EXCLUSIVELY, under `set -C`
+#   1. create a temporary beside the target, EXCLUSIVELY, with `O_CREAT|O_EXCL`
 #   2. write the value into it and take the status
 #   3. `mv` it over the target
 #
@@ -48,7 +48,7 @@
 #
 # A SQUATTER ON THE TEMPORARY COSTS A REFUSAL, NOT A TRUNCATION. The name carries the
 # caller's path and this shell's pid, and a same-UID process that gets there first makes the
-# exclusive create fail — including where what it left is a symlink, since `set -C` refuses
+# exclusive create fail — whatever it left, of whatever type, since `O_CREAT|O_EXCL` refuses
 # any existing path. The run stops with nothing written and nothing renamed.
 #
 # NO BOUND HERE, AND THE CALLERS KEEP THEIRS. This library sets no watchdog of its own: it
@@ -57,8 +57,10 @@
 # maintainer to drop the three that exist and recreate a hang with the phase half-open.
 #
 # WHAT THE EXCLUSIVE CREATE SETTLES IS THE FIFO AND ONLY THE FIFO. A plain `>` on a
-# caller-named path waits for a reader that never comes; `set -C` makes that open fail
-# instead. It does not make this function non-blocking: pathname resolution, the write and
+# caller-named path waits for a reader that never comes; the exclusive create makes that open
+# fail instead — `set -C` did NOT, which is #271: bash's noclobber fails a redirection only
+# where the existing file is REGULAR, so a FIFO at the temporary's name was opened and the
+# write blocked. It does not make this function non-blocking: pathname resolution, the write and
 # the `mv` can each stall on an unresponsive filesystem. So the three call sites that were
 # bounded still are, with `run_limited` moved around a CHILD that sources this library —
 # `pr-copilot-phase.sh`'s readiness, baseline and sha writes, the second of which stands
@@ -166,7 +168,16 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # alternative is a create that is exclusive for regular files only, which is the defect
     # above; a shell has no other exclusive create — `mkdir` refuses every type but makes a
     # directory, and `ln` needs a source that has the same problem one step earlier.
-    /usr/bin/env perl -e '
+    #
+    # AND IT RUNS WITH THE ENVIRONMENT CLEARED, `env -i` KEEPING ONLY `PATH`. `perl` reads
+    # its own environment before it reads the program: `PERL5OPT=-MDefinitelyMissing` makes
+    # it exit before the first statement, and `PERL5LIB` and `PERLLIB` redirect where it
+    # finds modules. That is the same class as a poisoned `PATH` — an inherited value that
+    # redirects an external command — except that this one can be REMOVED, and `PATH` cannot
+    # be, since it is the question `PATH` exists to answer. `env -i` is a removal rather than
+    # a denylist, so there is no list of perl variables to keep in step: `CLAUDE.md` records
+    # that a list of names is wrong by omission, and this needs none.
+    /usr/bin/env -i PATH="$PATH" perl -e '
         use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
         sysopen(my $h, $ARGV[0], O_WRONLY|O_CREAT|O_EXCL, 0600) or exit 2;
         if ($ARGV[1] eq "value") { print $h $ARGV[2], "\n" or exit 3; }
@@ -222,7 +233,7 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # the option, the write refuses, and a path that was perfectly writable takes the stage
     # down. `--` is where each of them stops parsing.
     /usr/bin/env mv -T -f -- "$_rb_wh_tmp" "$1" 2>/dev/null \
-        || /usr/bin/env perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "$_rb_wh_tmp" "$1" 2>/dev/null \
+        || /usr/bin/env -i PATH="$PATH" perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "$_rb_wh_tmp" "$1" 2>/dev/null \
         || { echo "could not rename '$_rb_wh_tmp' onto '$1' — it is unchanged and the temporary is left behind. An exact-destination rename is required: 'mv -T' or a working 'perl'"; return 1; }
     # AND THE POSTCONDITION ASKS WHAT IS AT THE TARGET, NOT MERELY WHAT KIND OF THING IT IS.
     # It runs after the rename rather than before it, so it asks what actually happened —
@@ -248,22 +259,36 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         # `cat` is a name. `read -d ''` reads to the first NUL — which is end of file here —
         # and reports 1 at EOF whether or not it read anything, so the STATUS is not the
         # answer and the comparison is.
+        # THE READ-BACK OPENS THE TARGET, WHICH IS THE ONE OPEN THIS LIBRARY MAKES — so it
+        # is the one place a racer can still cost the caller a HANG rather than a refusal.
+        # `[ -f ]` above answers before the open, and a FIFO swapped in between the two had
+        # `read` waiting for a writer that never comes: five of the eight call sites have no
+        # watchdog, and in the round-closing baseline path that hang lands AFTER the thread
+        # replies are resolved, leaving the round half-closed.
         #
-        # AND A SUCCESSFUL READ IS A REFUSAL, WHICH IS THE OPPOSITE OF HOW IT LOOKS.
-        # `read -d ''` returns 0 only when it FOUND the delimiter, and the delimiter is
-        # NUL — so success here means the file carries one. Without this a racer's file
-        # holding the requested value followed by a NUL and anything at all compares EQUAL,
-        # because the read stopped at the NUL: the value looks like it crossed, the driver's
-        # `$(<…)` drops the trailing NUL and accepts the 40-hex prefix, and the round is
-        # resolved on a head this call did not hand over. The downstream raw-byte read-backs
-        # already treat a delimiter this way.
-        _rb_wh_back=
-        if IFS= read -r -d '' _rb_wh_back < "$1"; then
-            echo "'$1' contains a NUL, so it is not a value this call wrote; the temporary was replaced before the rename, or the target was"
-            return 1
-        fi
-        [ "$_rb_wh_back" = "$3
-" ] || { echo "'$1' does not hold what this call wrote; the temporary was replaced before the rename, or the target was, and the value did not cross"; return 1; }
+        # SO THE OPEN IS NON-BLOCKING AND THE TYPE COMES FROM `fstat`, NOT FROM A TEST
+        # BEFORE IT. `O_NONBLOCK` makes opening a FIFO for reading return at once instead of
+        # waiting, and `-f _` on the HANDLE asks about the inode that was actually opened —
+        # so there is no window between the question and the answer, which is what makes
+        # this a postcondition rather than another guard. `[ ! -L ]` and `[ -f ]` above stay
+        # as the cheap early answer with a clearer message; neither is load-bearing now.
+        #
+        # AND A NUL IS STILL A REFUSAL. Slurped, the bytes come back whole, so a forgery
+        # spelled "the requested value, then a NUL, then anything" no longer compares equal
+        # by being truncated at the delimiter — it compares unequal, which is the same
+        # answer reached without depending on a reader's stopping rule.
+        /usr/bin/env -i PATH="$PATH" perl -e '
+            use Fcntl qw(O_RDONLY O_NONBLOCK);
+            sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK) or exit 2;
+            stat($h) or exit 3;
+            exit 4 unless -f _;
+            local $/;
+            my $got = <$h>;
+            $got = "" unless defined $got;
+            exit 5 unless $got eq $ARGV[1] . "\n";
+            exit 0;
+        ' -- "$1" "$3" 2>/dev/null \
+            || { echo "'$1' does not hold what this call wrote, or is no longer a plain file; the temporary was replaced before the rename, or the target was, and the value did not cross"; return 1; }
     else
         # ZERO BYTES, ASKED WITHOUT AN OPEN. An emptying has no value to compare, and `-s`
         # answers it from the inode — so this path never opens the target at all, which

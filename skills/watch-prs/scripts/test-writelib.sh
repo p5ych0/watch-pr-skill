@@ -216,6 +216,21 @@ case "$_wl_src" in
     *'O_WRONLY|O_CREAT|O_EXCL'*) pass "…and the create is a real O_EXCL open, so any collision refuses" ;;
     *) die "the value write is not an exclusive create" ;;
 esac
+# AND THE READ-BACK IS NON-BLOCKING, WITH THE TYPE TAKEN FROM THE HANDLE. This is the half
+# no behavioural case can reach: the `[ -f ]` before the read catches every FIFO a fixture
+# can plant, and the interleaving the fix is for is between that test and the open. A revert
+# to `read < "$1"` would leave every behavioural case green and reintroduce the hang, so the
+# mechanism is what is asserted — `O_NONBLOCK` so the open of a FIFO returns instead of
+# waiting, and `stat($h)` with `-f _` so the type comes from the inode that was opened
+# rather than from a test that preceded it.
+case "$_wl_src" in
+    *'O_RDONLY|O_NONBLOCK'*) pass "…and the read-back opens non-blocking, so a FIFO cannot hang it" ;;
+    *) die "the read-back is not a non-blocking open; a FIFO swapped in after the type test would block it" ;;
+esac
+case "$_wl_src" in
+    *'stat($h)'*) pass "…with the type taken from the handle rather than from a preceding test" ;;
+    *) die "the read-back does not fstat the handle it opened" ;;
+esac
 
 # ── AN UNWRITABLE DIRECTORY IS A REFUSAL, AND THE TARGET IS UNCHANGED ──────
 if [ "$(id -u)" != 0 ]; then
@@ -338,41 +353,80 @@ else
     pass "…(the swapped-target cases are skipped: this platform has no mv or no perl)"
 fi
 
-# ── A `perl` THAT CANNOT RUN IS A REFUSAL, NOT A FALLBACK ──────────────────
+# ── A HOSTILE PERL ENVIRONMENT IS REMOVED, NOT SURVIVED ────────────────────
 #
-# `perl` IS A REQUIREMENT OF THIS LIBRARY, not a fallback behind `mv`. It performs the
-# exclusive create — the shell has no other open that refuses a non-regular inode — and the
-# exact rename wherever `mv -T` is not there. An inherited `PERL5OPT=-MDefinitelyMissing`
-# makes it exit before it reaches either, and what that must produce is a REFUSAL: while a
-# plain-`mv` fallback stood behind it, that same sabotage let the two-operand form perform
-# the move the exact rename exists to refuse.
+# `perl` READS ITS ENVIRONMENT BEFORE IT READS THE PROGRAM. `PERL5OPT=-MDefinitelyMissing`
+# makes it exit before the first statement, and `PERL5LIB` and `PERLLIB` redirect where it
+# finds modules — so an inherited value could stop every handoff in the loop, and while a
+# plain-`mv` fallback stood behind the rename it could steer one into the two-operand form
+# the exact rename exists to refuse.
 #
-# THE REFUSAL NOW HAPPENS AT THE CREATE, which is earlier than the defect was, so the target
-# is untouched and nothing was renamed at all — a stronger outcome than the one this case
-# was written for and the reason it asserts the target rather than a seeded file.
+# `env -i` IS WHY THIS PASSES RATHER THAN REFUSES. The variables are cleared rather than
+# listed, so the case asserts the ordinary outcome under sabotage: the value crosses. A
+# denylist would need this case per variable and would be one behind the next one.
 if command -v perl >/dev/null 2>&1; then
-    _wp="$TMP/perlrace"; rm -rf "$_wp"; mkdir -p "$_wp"
+    _wp="$TMP/perlenv"; rm -rf "$_wp"; mkdir -p "$_wp"
     printf 'the previous value\n' > "$_wp/handoff"
-    PERL5OPT=-MDefinitelyMissingModuleForThisTest \
-        rb_write_handoff "$_wp/handoff" "a value" >/dev/null 2>&1 \
-        && _wl_rc=0 || _wl_rc=$?
-    [ "$_wl_rc" != 0 ] \
-        && pass "a perl that cannot run is a refusal, not a fall-through to a weaker write" \
-        || die "a sabotaged perl was treated as though the handoff had been made"
-    [ "$(cat "$_wp/handoff")" = 'the previous value' ] \
-        && pass "…with the target untouched, because the refusal is at the create" \
-        || die "the sabotaged run changed the target: '$(cat "$_wp/handoff")'"
-    # AND NO TEMPORARY WAS LEFT, since the create is what refused.
-    _wl_stray3=""
-    for _wl_c in "$_wp"/handoff.rb-write.*; do
-        [ -e "$_wl_c" ] && _wl_stray3="$_wl_c"
-    done
-    [ -z "$_wl_stray3" ] \
-        && pass "…and no temporary beside it" \
-        || die "a temporary was left by the refused create: $_wl_stray3"
+    out="$(PERL5OPT=-MDefinitelyMissingModuleForThisTest PERL5LIB=/nonexistent-for-this-test \
+        rb_write_handoff "$_wp/handoff" "a value" 2>&1)" && _wl_rc=0 || _wl_rc=$?
+    { [ "$_wl_rc" = 0 ] && [ "$(cat "$_wp/handoff")" = "a value" ]; } \
+        && pass "a hostile PERL5OPT and PERL5LIB are cleared, so the value still crosses" \
+        || die "a sabotaged perl environment reached the handoff: rc=$_wl_rc '$out'"
     rm -rf "$_wp"
 else
-    pass "…(the sabotaged-perl case is skipped: no perl on this platform)"
+    pass "…(the perl-environment case is skipped: no perl on this platform)"
+fi
+
+# ── A FIFO SWAPPED IN AFTER THE RENAME REFUSES RATHER THAN BLOCKING ────────
+#
+# THE READ-BACK IS THE ONE OPEN THIS LIBRARY MAKES, so it is the one place a racer can cost
+# the caller a HANG rather than a refusal. `[ -f ]` answers before the open, and a FIFO
+# swapped in between the two had `read` waiting for a writer that never comes — five of the
+# eight call sites have no watchdog, and in the round-closing baseline path that hang lands
+# AFTER the thread replies are resolved, leaving the round half-closed.
+#
+# STAGED THROUGH THE `mv` SHIM, which performs the real rename and then replaces the target.
+# A shell FUNCTION cannot be the hook: the library invokes `/usr/bin/env`, which resolves
+# `mv` on `PATH` and never sees one.
+#
+# AND THIS CASE ALONE DOES NOT PROVE THE FIX, which is worth saying rather than implying.
+# The swap lands before the `[ -f ]` that precedes the read, so that test catches this
+# instance whichever open follows it — the interleaving the fix is FOR is between that test
+# and the open, which is sub-instruction and cannot be staged from a fixture. What this
+# proves is the OUTCOME: a refusal, promptly, with the FIFO still there. The mechanism is
+# asserted on the source below, and that is the half that fails if the read goes back to a
+# shell redirection.
+#
+# BOUNDED, AND THE BOUND IS PART OF THE ASSERTION: against a blocking read it never returns,
+# so a `124` here is the defect and not a slow machine.
+if command -v mkfifo >/dev/null 2>&1 && command -v mv >/dev/null 2>&1 \
+   && { : > "$TMP/probe-t"; mv -T -f -- "$TMP/probe-t" "$TMP/probe-t2" 2>/dev/null; }; then
+    mkdir -p "$TMP/qbin"
+    { printf '#!/bin/sh\n'
+      printf 'for a in "$@"; do _t="$a"; done\n'
+      printf '"$RB_MV_REAL" "$@" || exit $?\n'
+      printf 'rm -f "$_t"; mkfifo "$_t"\n'
+      printf 'exit 0\n'; } > "$TMP/qbin/mv"
+    chmod +x "$TMP/qbin/mv"
+    _wr2="$TMP/postfifo"; rm -rf "$_wr2"; mkdir -p "$_wr2"; : > "$_wr2/handoff"
+    rc=0
+    # THE ENVIRONMENT GOES ON THE SUBJECT, NOT ON `run_limited`. Prefixing it onto the
+    # watchdog puts the shimmed `PATH` in front of the watchdog's own lookup of `timeout`,
+    # which `test-testlib.sh` fails the suite for.
+    out="$(run_limited 10 env RB_MV_REAL="$(command -v mv)" PATH="$TMP/qbin:$PATH" \
+        bash -c '. "$1"; rb_write_handoff "$2" "a value"' \
+        _ "$SELF_DIR/writelib.sh" "$_wr2/handoff")" || rc=$?
+    case "$rc" in
+        124|125) die "the read-back BLOCKED on a FIFO swapped in after the rename" ;;
+        0)       die "a FIFO at the target after the rename was reported as a successful handoff" ;;
+        *)       pass "a FIFO swapped in after the rename refuses rather than blocking" ;;
+    esac
+    [ -p "$_wr2/handoff" ] \
+        && pass "…and the shim really did leave a FIFO there, so the case proves what it says" \
+        || die "the post-rename shim did not leave a FIFO; the refusal came from something else"
+    rm -rf "$_wr2" "$TMP/qbin"
+else
+    pass "…(the post-rename FIFO case is skipped: no mkfifo, or this mv has no -T)"
 fi
 
 # ── A FIFO PRE-PLACED AT THE TEMPORARY'S NAME REFUSES RATHER THAN BLOCKING ─
