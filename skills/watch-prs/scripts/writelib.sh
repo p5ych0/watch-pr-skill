@@ -328,9 +328,17 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     if [ "$2" = value ]; then
         # THE RAW BYTES, TERMINATOR INCLUDED, READ WITH A BUILTIN. `$(<…)` strips trailing
         # newlines, so it cannot see the delimiter every reader of these files requires, and
-        # `cat` is a name. `read -d ''` reads to the first NUL — which is end of file here —
-        # and reports 1 at EOF whether or not it read anything, so the STATUS is not the
-        # answer and the comparison is.
+        # `cat` is a name. `local $/` makes perl SLURP — the whole file, whatever is in it —
+        # so the comparison is on the complete bytes and there is no reader's stopping rule
+        # to reason about.
+        #
+        # WHICH IS ALSO HOW A NUL IS REFUSED, and it used to take an argument. This was
+        # `read -d ''`, which stops AT the first NUL, so a forgery spelled "the requested
+        # value, then a NUL, then anything" filled the variable with exactly the expected
+        # bytes and compared EQUAL — the driver's `$(<…)` then drops the trailing NUL and
+        # accepts the 40-hex prefix. Catching it meant reading the read's STATUS backwards,
+        # since it returns 0 only when it FOUND the delimiter. Slurped, the extra bytes are
+        # simply there and the comparison fails; nothing has to be interpreted.
         # THE READ-BACK OPENS THE TARGET, WHICH IS THE ONE OPEN THIS LIBRARY MAKES — so it
         # is the one place a racer can still cost the caller a HANG rather than a refusal.
         # `[ -f ]` above answers before the open, and a FIFO swapped in between the two had

@@ -621,12 +621,15 @@ else
 fi
 
 # AND A FORGERY THAT IS THE REQUESTED VALUE FOLLOWED BY A NUL. This is the one shape the
-# byte comparison alone cannot see: `read -d ''` stops AT the NUL, so the variable holds
-# exactly the expected bytes and the comparison passes. The driver's `$(<…)` then drops the
-# trailing NUL and accepts the 40-hex prefix, so the gate reports success and the threads
-# are resolved on a head this call never handed over. What catches it is the READ'S STATUS
-# meaning the opposite of how it looks: `read -d ''` returns 0 only when it FOUND the
-# delimiter, so a successful read is a file with a NUL in it.
+# byte comparison could not see WHILE THE READ STOPPED AT A DELIMITER. `read -d ''` stops AT
+# the NUL, so the variable held exactly the expected bytes and the comparison passed — the
+# driver's `$(<…)` then drops the trailing NUL and accepts the 40-hex prefix, the gate reports
+# success, and the threads are resolved on a head this call never handed over.
+#
+# THE READ SLURPS NOW, so this is caught by the COMPARISON: the extra bytes come back with the
+# rest and the strings differ. The case is kept because the state is still reachable and the
+# outcome still matters — and because a reader that stops at a delimiter is an easy thing to
+# reintroduce, at which point this goes red rather than the driver going wrong.
 if command -v mv >/dev/null 2>&1; then
     mkdir -p "$TMP/nbin"
     { printf '#!/bin/sh\n'

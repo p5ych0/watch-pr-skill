@@ -17,7 +17,7 @@
   far** rather than only on a refusal. Removing the clearings in 2.0.97 did not help,
   because the write beside them opened the same name the same way.
 
-  **And the ninth was the driver's own redirection.** `SKILL.md` ran the opening request as
+  **And the last one found was the driver's own redirection.** `SKILL.md` ran the opening request as
   `pr-request-review.sh N "$AUTO_REVIEW" … > "$PRIOR_FILE"`, which is the same `>` — opened
   by the driving shell *before* the helper starts, so nothing the helper could check would
   have caught a link there. The path is handed over as `--baseline-file` now and the helper
@@ -91,10 +91,10 @@
   non-symlink regular file whose raw bytes are what the call asked for, and that read
   **opens non-blocking and takes the type from the handle**: `[ -f ]` before an open is a
   cheap early answer and not the protection, since a FIFO swapped in between the two had
-  the read waiting for a writer that never comes. A NUL in it is a
-  refusal on its own: `read -d ''` stops at one, so a forgery spelled "the requested value,
-  then a NUL, then anything" compares equal, and the driver's `$(<…)` would drop the NUL and
-  accept the 40-hex prefix.
+  the read waiting for a writer that never comes. The read **slurps**, so a forgery spelled
+  "the requested value, then a NUL, then anything" comes back whole and compares unequal —
+  with a reader that stopped at the NUL it compared *equal*, and the driver's `$(<…)` would
+  then drop the NUL and accept the 40-hex prefix.
 
   **The directory swap is refused by the rename, not caught afterwards.** A directory
   installed after the type test makes both `mv -T` and `perl`'s `rename` refuse, so nothing

@@ -61,8 +61,9 @@ world() {   # world ; auto-review off, a readable baseline, a working post
 }
 
 # STDOUT AND STDERR ARE CAPTURED APART, because keeping them apart is the
-# contract: stdout carries the baseline or nothing, so a reason leaking onto it
-# is read by the driver as a review id.
+# contract: stdout carries NOTHING, so a reason leaking onto it is output the caller has no
+# use for and cannot see on the stream it does read. The baseline crosses in the file named
+# by `--baseline-file`, which is the next paragraph.
 OUT="$TMP/out"; ERR="$TMP/err"
 # THE BASELINE IS A FILE THE CALLER NAMES SINCE #263, not this helper's stdout. The driver
 # used to redirect — `> "$PRIOR_FILE"` — and that open follows a symlink and happens in the
