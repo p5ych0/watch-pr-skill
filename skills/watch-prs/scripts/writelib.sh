@@ -29,10 +29,12 @@
 # leaves the victim's bytes untouched and puts a regular file at the name.
 #
 # AND IT IS NOT A CHECK-THEN-OPEN GUARD, which #245 already convicted and which this must
-# not reintroduce. Nothing here asks what is at the target before writing to it: the target
-# is never opened at all. `set -C` on the TEMPORARY is not that shape either — it is the
-# open itself refusing, not a test preceding one, so there is no window between the question
-# and the answer.
+# not reintroduce. The distinction is not that nothing is asked — the type test below asks
+# exactly what is at the target, and it is load-bearing. It is that nothing OPENS the
+# target: the value is written into a temporary and RENAMED onto the name, so the answer the
+# test gave is not what the write's safety rests on, and a racer who changes the answer
+# afterwards costs a refusal rather than an operator's file. #245's shape was a test whose
+# answer licensed an open of the thing tested.
 #
 # IT ANSWERS WHAT THE CALLER NAMED, AND IT IS ASKED ONCE. A special inode a RACER installs
 # after this test is REPLACED by the rename rather than refused: `rename(2)` takes any
@@ -138,22 +140,40 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # follow a symlink or block on a FIFO, which is the whole defect this library exists to
     # remove, reproduced inside it. The redirection on the subshell is the only open.
     #
-    # VIA A SUBSHELL, so `set -C` does not leak into the caller's shell — these helpers
-    # clobber deliberately elsewhere, and turning noclobber on for the rest of the run would
-    # be a change nobody asked for.
+    # AND `set -C` IS NOT THAT OPEN, WHICH IS WHY THIS IS NOT A REDIRECTION. Bash's
+    # noclobber does what POSIX says: the redirection fails if the file exists AND IS A
+    # REGULAR FILE. For every other type it opens anyway — so a FIFO pre-placed at the
+    # temporary's name by a same-UID watcher was OPENED and the write BLOCKED, waiting for a
+    # reader that never comes, in the two call sites that have no watchdog. Measured.
+    # `O_CREAT|O_EXCL` has no such exemption: it refuses whatever is there, of any type.
     #
-    # `set -C` MAKES IT O_CREAT|O_EXCL, so an entry already at that name — a regular file, a
-    # symlink to something precious, a FIFO — fails the open instead of being written
-    # through or waited on. THAT IS NOT THE SAME AS "CANNOT BLOCK": pathname resolution and
-    # the write itself can still stall on an unresponsive filesystem, which is why the
-    # callers that were bounded before still are.
-    if [ "$2" = value ]; then
-        ( set -C; printf '%s\n' "$3" > "$_rb_wh_tmp" ) 2>/dev/null \
-            || { echo "could not create '$_rb_wh_tmp' exclusively and write it; the name is taken, its directory is unwritable, or the storage refused the bytes"; return 1; }
-    else
-        ( set -C; > "$_rb_wh_tmp" ) 2>/dev/null \
-            || { echo "could not create '$_rb_wh_tmp' exclusively; the name is taken, or its directory is unwritable"; return 1; }
-    fi
+    # SO THE OPEN IS `perl`'s `sysopen`, WHICH IS THE SYSCALL. The same reason the rename is
+    # `rename(2)` rather than `mv SRC DEST`: the shell's spellings of these operations carry
+    # exemptions the syscalls do not have, and reading the exemption out of a utility's
+    # documentation is how both of these were got wrong. It also settles the option-parsing
+    # question for the create, since paths travel in `@ARGV` and are never parsed.
+    #
+    # ONE OPEN, AND THE WRITE GOES THROUGH THE SAME HANDLE. Creating the temporary and then
+    # opening it again by name would be a check-then-open of its own, with the second open
+    # free to follow a symlink or block on a FIFO — the defect reproduced inside the fix.
+    #
+    # AND THE STATUSES ARE DISTINCT, so a refusal says which step refused: 2 the exclusive
+    # create, 3 the write or the close — `close` is where a full filesystem is reported, and
+    # a `print` that succeeded proves nothing without it — and anything else is `perl` itself
+    # not running, which is a refusal too. There is no arm that proceeds.
+    #
+    # THIS MAKES `perl` A REQUIREMENT rather than a fallback, and `README.md` says so. The
+    # alternative is a create that is exclusive for regular files only, which is the defect
+    # above; a shell has no other exclusive create — `mkdir` refuses every type but makes a
+    # directory, and `ln` needs a source that has the same problem one step earlier.
+    /usr/bin/env perl -e '
+        use Fcntl qw(O_WRONLY O_CREAT O_EXCL);
+        sysopen(my $h, $ARGV[0], O_WRONLY|O_CREAT|O_EXCL, 0600) or exit 2;
+        if ($ARGV[1] eq "value") { print $h $ARGV[2], "\n" or exit 3; }
+        close($h) or exit 3;
+        exit 0;
+    ' -- "$_rb_wh_tmp" "$2" "${3-}" 2>/dev/null \
+        || { echo "could not create '$_rb_wh_tmp' exclusively and write it; the name is taken by an entry of some type, its directory is unwritable, the storage refused the bytes, or perl could not run — this handoff needs a working perl"; return 1; }
     # `mv` RATHER THAN `cp`: the point is the rename, and a copy would open the target for
     # writing and be exactly the truncation this exists to remove.
     #
@@ -182,16 +202,9 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     #
     # `perl`'s `rename` IS rename(2), and that is the one primitive that covers both: it
     # never follows a symlink in a final component, and it refuses a directory destination
-    # outright. Measured both ways. It is second rather than first because `mv` is already a
-    # dependency of this loop and `perl` is one more process to justify — and it is reached
-    # on every platform whose `mv` lacks `-T`, macOS included, where the CI job already keeps
-    # `perl` on its mac-shaped PATH because macOS ships it.
-    #
-    # A GENUINE REFUSAL IS NOT A REASON TO FALL BACK, which is the whole point of the exit
-    # code below. `rename` failing because the destination is a directory is the exact answer
-    # this wants, and dropping through to the plain form there would perform the very move
-    # the exact form just refused. So `3` means "the rename was made and refused" and stops;
-    # anything else means `perl` itself did not run.
+    # outright. Measured both ways. It is second rather than first only to save a process
+    # where `mv -T` is there; `perl` is a requirement of this library either way, since the
+    # exclusive create above has no other spelling.
     #
     # AND THERE IS NO PLAIN-`mv` FALLBACK, WHICH IS A REMOVAL RATHER THAN A GAP. One was
     # kept, so that a platform with neither spelling still worked — and it turned every way

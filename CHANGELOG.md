@@ -93,9 +93,8 @@
   directory, do not follow it", so an **actual** directory swapped in takes the ordinary
   two-operand path and the file inside it is overwritten just the same. Each is attempted as
   the real operation rather than probed — a `mv` that does not know an option fails on the
-  option, having moved nothing — and a genuine refusal from the exact form stops there
-  rather than falling through to the plain one, which would perform the move it just
-  refused. The plain form is kept last so a platform with neither still works.
+  option, having moved nothing — and if neither runs, the write refuses. There is no plain
+  `mv` behind them: keeping one turned every way `perl` can fail into the unsafe path.
 
   **Nothing is removed, including the temporary a failed write leaves behind.**
   `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the removal class, and

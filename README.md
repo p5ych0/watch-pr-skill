@@ -198,6 +198,18 @@ rather than starting unprotected.
 executable, because the shell reading it has to be privileged from its first line
 and only the caller can arrange that.
 
+**`perl` must be present**, and since 2.1.0 it is a hard requirement rather than a
+convenience. The file handoffs — the gated head, the review baseline, the signed-off
+sha — are written by creating a temporary with `O_CREAT|O_EXCL` and renaming it onto
+the caller's path, and the shell has no spelling of either that is safe. `set -C`
+fails a redirection only where the existing file is **regular**, so a FIFO left at the
+temporary's name is opened and the write blocks; and `mv SRC DEST` moves the source
+*inside* `DEST` where that resolves to a directory, following a symlink to get there.
+`perl`'s `sysopen` and `rename` are the syscalls, without the exemptions. macOS ships
+`perl`, and so does every Linux distribution this loop has run on; where `mv -T` is
+available the rename uses it and saves a process. If neither exact rename can run, the
+write refuses and says so rather than falling back to something weaker.
+
 **Contributors need that `env`, users do not.** The plugin never depends on the
 shebang: the skill supplies `-p` on every call, and so does every call a helper
 makes to another helper. The test suite is the exception — it executes the

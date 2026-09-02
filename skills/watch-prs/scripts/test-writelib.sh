@@ -205,10 +205,15 @@ case "$_wl_src" in
         pass "the temporary's name carries two \$RANDOM draws, so it cannot be pre-placed" ;;
     *) die "the temporary's name is not built from \$RANDOM; a racer could pre-place it" ;;
 esac
-# AND THE CREATE IS STILL EXCLUSIVE, which is what makes a COLLISION — guessed or accidental
-# — a refusal rather than a write through whatever is there.
+# AND THE CREATE IS `O_CREAT|O_EXCL` RATHER THAN NOCLOBBER, which is the difference between
+# refusing a collision and refusing SOME collisions. Bash's `set -C` does what POSIX says —
+# the redirection fails if the file exists and is a REGULAR file — so a FIFO pre-placed at
+# the temporary's name was opened and the write blocked. The behavioural case below proves
+# the outcome; this asserts the mechanism, because a change back to a redirection would look
+# harmless and the FIFO case is the only thing that would catch it.
 case "$_wl_src" in
-    *'( set -C; printf'*) pass "…and the create is exclusive, so a collision refuses" ;;
+    *'set -C'*) die "the create is back to noclobber, which does not refuse a non-regular inode" ;;
+    *'O_WRONLY|O_CREAT|O_EXCL'*) pass "…and the create is a real O_EXCL open, so any collision refuses" ;;
     *) die "the value write is not an exclusive create" ;;
 esac
 
@@ -335,41 +340,75 @@ fi
 
 # ── A `perl` THAT CANNOT RUN IS A REFUSAL, NOT A FALLBACK ──────────────────
 #
-# THIS IS THE `mv -T`-LESS PLATFORM'S ONLY EXACT RENAME, so every way `perl` can fail used
-# to become the unsafe path. An inherited `PERL5OPT=-MDefinitelyMissing` makes it exit
-# before it reaches `rename`, and with a plain-`mv` fallback behind it the move the exact
-# form exists to refuse was performed anyway — into a directory the racer swapped in, over a
-# file they had seeded there. Removing the fallback is what closes it, and this is the case
-# that says so: `-T` rejected, `perl` sabotaged, an actual directory swapped in.
-if command -v mv >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
-    mkdir -p "$TMP/pbin"
-    { printf '#!/bin/sh\n'
-      printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
-      printf 'if [ ! -e "$RB_SWAPPED" ]; then\n'
-      printf '  : > "$RB_SWAPPED"\n'
-      printf '  rm -f "$_t"; mkdir -p "$_t"; cp "$RB_KEEP" "$_t/${_s##*/}"\n'
-      printf 'fi\n'
-      printf '[ "$1" = -T ] && { echo "mv: illegal option -- T" >&2; exit 1; }\n'
-      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/pbin/mv"
-    chmod +x "$TMP/pbin/mv"
-    _wp="$TMP/perlrace"; rm -rf "$_wp"; mkdir -p "$_wp/session"
-    printf 'the file the racer wants destroyed\n' > "$_wp/keep"
-    : > "$_wp/session/handoff"
-    _wl_pathsave="$PATH"
-    RB_MV_REAL="$(command -v mv)" RB_KEEP="$_wp/keep" RB_SWAPPED="$_wp/done" \
-        PERL5OPT=-MDefinitelyMissingModuleForThisTest PATH="$TMP/pbin:$PATH" \
-        rb_write_handoff "$_wp/session/handoff" "a value" >/dev/null 2>&1 \
+# `perl` IS A REQUIREMENT OF THIS LIBRARY, not a fallback behind `mv`. It performs the
+# exclusive create — the shell has no other open that refuses a non-regular inode — and the
+# exact rename wherever `mv -T` is not there. An inherited `PERL5OPT=-MDefinitelyMissing`
+# makes it exit before it reaches either, and what that must produce is a REFUSAL: while a
+# plain-`mv` fallback stood behind it, that same sabotage let the two-operand form perform
+# the move the exact rename exists to refuse.
+#
+# THE REFUSAL NOW HAPPENS AT THE CREATE, which is earlier than the defect was, so the target
+# is untouched and nothing was renamed at all — a stronger outcome than the one this case
+# was written for and the reason it asserts the target rather than a seeded file.
+if command -v perl >/dev/null 2>&1; then
+    _wp="$TMP/perlrace"; rm -rf "$_wp"; mkdir -p "$_wp"
+    printf 'the previous value\n' > "$_wp/handoff"
+    PERL5OPT=-MDefinitelyMissingModuleForThisTest \
+        rb_write_handoff "$_wp/handoff" "a value" >/dev/null 2>&1 \
         && _wl_rc=0 || _wl_rc=$?
-    PATH="$_wl_pathsave"
     [ "$_wl_rc" != 0 ] \
-        && pass "a perl that aborts before renaming is a refusal, not a fall-through" \
-        || die "a sabotaged perl was treated as though no exact rename had been attempted"
-    [ "$(cat "$_wp/session/handoff/"* 2>/dev/null)" = 'the file the racer wants destroyed' ] \
-        && pass "…so the directory swapped in keeps the file the racer seeded" \
-        || die "the fallback overwrote the seeded file: '$(cat "$_wp/session/handoff/"* 2>/dev/null)'"
-    rm -rf "$_wp" "$TMP/pbin"
+        && pass "a perl that cannot run is a refusal, not a fall-through to a weaker write" \
+        || die "a sabotaged perl was treated as though the handoff had been made"
+    [ "$(cat "$_wp/handoff")" = 'the previous value' ] \
+        && pass "…with the target untouched, because the refusal is at the create" \
+        || die "the sabotaged run changed the target: '$(cat "$_wp/handoff")'"
+    # AND NO TEMPORARY WAS LEFT, since the create is what refused.
+    _wl_stray3=""
+    for _wl_c in "$_wp"/handoff.rb-write.*; do
+        [ -e "$_wl_c" ] && _wl_stray3="$_wl_c"
+    done
+    [ -z "$_wl_stray3" ] \
+        && pass "…and no temporary beside it" \
+        || die "a temporary was left by the refused create: $_wl_stray3"
+    rm -rf "$_wp"
 else
-    pass "…(the sabotaged-perl case is skipped: no mv or no perl on this platform)"
+    pass "…(the sabotaged-perl case is skipped: no perl on this platform)"
+fi
+
+# ── A FIFO PRE-PLACED AT THE TEMPORARY'S NAME REFUSES RATHER THAN BLOCKING ─
+#
+# THIS IS WHAT NOCLOBBER COULD NOT DO. `set -C` fails the redirection only when the existing
+# file is REGULAR — POSIX says so and bash implements it — so a same-UID watcher that
+# predicted the name and left a FIFO there had the open BLOCK, waiting for a reader that
+# never comes. Two of the call sites have no watchdog, so that is a hang rather than a
+# refusal. `O_CREAT|O_EXCL` has no such exemption.
+#
+# BOUNDED, because the point of the case is that it does NOT hang: an unbounded call against
+# the unfixed library never returns and the file reports nothing at all.
+if command -v mkfifo >/dev/null 2>&1; then
+    _wq="$TMP/tmpfifo"; rm -rf "$_wq"; mkdir -p "$_wq"
+    : > "$_wq/handoff"
+    # THE NAME IS THE ONE THE LIBRARY WILL DERIVE, which needs the pid and the two draws it
+    # will use — so the FIFO is planted by a child that computes them the same way and then
+    # calls the library in that same process. Assigning to `RANDOM` SEEDS the generator, so
+    # doing it twice with the same value makes the second pair equal the first: that is how
+    # the fixture predicts a name it is the whole point of the design that a racer cannot.
+    rc=0
+    out="$(run_limited 10 bash -c '
+        . "$1"
+        RANDOM=1; _t="$2.rb-write.$$.${RANDOM}${RANDOM}"
+        mkfifo "$_t" 2>/dev/null || exit 9
+        RANDOM=1; rb_write_handoff "$2" "a value"
+    ' _ "$SELF_DIR/writelib.sh" "$_wq/handoff")" || rc=$?
+    case "$rc" in
+        124|125) die "the write BLOCKED on a FIFO at the temporary's name; noclobber does not refuse one" ;;
+        9)       pass "(the temporary-FIFO case is skipped: mkfifo refused on this filesystem)" ;;
+        0)       die "a FIFO at the temporary's name was accepted: '$out'" ;;
+        *)       pass "a FIFO pre-placed at the temporary's name refuses rather than blocking" ;;
+    esac
+    rm -rf "$_wq"
+else
+    pass "…(the temporary-FIFO case is skipped: no mkfifo on this platform)"
 fi
 
 # ── A SPECIAL TARGET INSTALLED AFTER THE TYPE TEST IS REPLACED, AND THAT IS THE LIMIT ──
