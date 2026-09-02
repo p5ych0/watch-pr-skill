@@ -147,9 +147,16 @@ _RB_LIB_DIR="${BASH_SOURCE[0]%/*}"
 # SO THE RULE IS REACHED IN A CHILD THAT SOURCES `writelib.sh` DIRECTLY, which is how both
 # orderings hold at once. `rb_load` is not used and is not needed: an emptied `loadlib.sh`
 # leaves the stub, the stub refuses, and every load below would fail — but none of that is
-# above the clearing any more, because this reaches the library without the loader. An
-# emptied library leaves `rb_empty_handoff` undefined, the child exits non-zero, and this
-# refuses, which is the direction `rb_load` fails in, reached without it.
+# above the clearing any more, because this reaches the library without the loader.
+#
+# AND THE CHILD DEFINES A REFUSING STUB BEFORE IT SOURCES, for the reason `rb_load`'s own
+# bootstrap does. Sourcing an EMPTY `writelib.sh` succeeds — there is nothing in it to fail
+# — and leaves the name undefined, and an undefined name is then looked up on `PATH`: an
+# executable called `rb_empty_handoff` that exits 0 reported the clearing done with the
+# stale head untouched, and a later refusal was then walked past onto that head. With the
+# stub in place an empty library leaves the stub, the stub returns 127, and this refuses
+# at the clearing rather than somewhere later — the direction `rb_load` fails in, reached
+# without it. Every child that sources this library directly carries the same stub.
 #
 # WHAT REMAINS ABOVE IS THE INSTALLATION ITSELF: a `writelib.sh` that is unreadable or
 # defines nothing. Neither can be defended from inside
@@ -175,7 +182,7 @@ _RB_LIB_DIR="${BASH_SOURCE[0]%/*}"
 if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
     _rb_eh="$(/usr/bin/env bash -p -c \
-        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
+        'rb_empty_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
         _ "$_RB_LIB_DIR" "${6}")" || {
         echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept: $_rb_eh"
         exit 1
@@ -192,7 +199,7 @@ if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
    && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
     _rb_eh="$(/usr/bin/env bash -p -c \
-        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
+        'rb_empty_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
         _ "$_RB_LIB_DIR" "${7}")" || {
         echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept: $_rb_eh"
         exit 1

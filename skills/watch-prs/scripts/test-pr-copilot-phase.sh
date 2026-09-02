@@ -1328,6 +1328,41 @@ else
     pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
 fi
 
+# ── AN EMPTY `writelib.sh` DOES NOT HAND THE WRITE TO `PATH` ───────────────
+#
+# The bounded writes source the library in a child, and sourcing an EMPTY file succeeds —
+# leaving `rb_write_handoff` undefined, which is then a command lookup. An executable by that
+# name exiting 0 would make the readiness write "succeed" with nothing written, and the phase
+# would then revoke the previous signoff without the sentinel it relies on.
+#
+# THIS CASE PROVES THE OUTCOME, AND SAYS WHICH LINE OF DEFENCE PRODUCES IT. In this helper
+# `rb_load` verifies `writelib.sh` defined `rb_write_handoff` at bootstrap, so an empty
+# library is refused BEFORE `open` reaches any write and the forger is never reachable from
+# a fixture — the case below passes with or without the child's stub. The stub still matters:
+# it is what stands in the window between that load and the child's own source, and it is
+# what every direct-source child carries. So the MECHANISM is asserted on the source, which is
+# the half that fails if a stub is dropped.
+world; cp "$DIR/writelib.sh" "$TMP/writelib.keep"; : > "$DIR/writelib.sh"
+: > "$TMP/forger.log"
+{ printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$TMP/forger.log"; printf 'exit 0\n'; } > "$TMP/bin/rb_write_handoff"
+chmod +x "$TMP/bin/rb_write_handoff"
+got="$(run open 7 "$HEAD40" "$TMP/prior.txt")"
+rm -f "$TMP/bin/rb_write_handoff"; cp "$TMP/writelib.keep" "$DIR/writelib.sh"
+[ "${got%%|*}" = 1 ] \
+    && pass "an empty writelib.sh stops open at the readiness write" \
+    || die "an empty writelib.sh gave '${got}'"
+[ ! -s "$TMP/forger.log" ] \
+    && pass "…and the PATH executable by the library's name was never run" \
+    || die "the readiness write fell through to a PATH executable named rb_write_handoff"
+[ -z "$(posted)" ] \
+    && pass "…with the previous signoff not revoked" \
+    || die "the signoff was revoked after a forged readiness write"
+_cp_src="$(grep -v '^[[:space:]]*#' "$DIR/pr-copilot-phase.sh")" || _cp_src=""
+_cp_stubs="$(grep -c 'rb_write_handoff() { return 127; }; \. "\$1"/writelib.sh' <<<"$_cp_src")" || _cp_stubs=0
+[ "$_cp_stubs" -eq 3 ] \
+    && pass "…and all three direct-source children define the refusing stub before they source" \
+    || die "$_cp_stubs of the three direct-source children carry the refusing stub; an empty library would hand the name to PATH"
+
 # ── A `mv` THAT NEVER RETURNS IS WHAT THE THREE WATCHDOGS ARE FOR ──────────
 #
 # THE BOUNDS HAD NO CASE UNTIL NOW, which is how they came to be removed for a round.

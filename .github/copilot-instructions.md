@@ -325,6 +325,13 @@ When reviewing a change here:
   rename leaves it exactly as it was; the POSTCONDITION refuses after the rename, so a
   substituted inode can be at the target. Read a refusal as "this handoff did not happen",
   never as "the previous handoff is still readable".
+- **a child that sources the library directly defines a refusing stub FIRST.** Sourcing an
+  empty `writelib.sh` succeeds and leaves the name undefined, and an undefined name is a
+  `PATH` lookup: an executable called `rb_write_handoff` exiting 0 made a readiness write
+  "succeed" with nothing written, and one called `rb_empty_handoff` reported a clearing done
+  with the stale head untouched. `rb_x() { return 127; }` ahead of the `.` is what `rb_load`'s
+  own bootstrap does, and every direct-source child — the six in `pr-close-round.sh`,
+  `pr-copilot-phase.sh` and `SKILL.md` — carries it. One without it is the defect back.
 - **nothing in the library is removed, including the temporary a failed write
   leaves.** `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the class.
 - **the clearing in `gate` runs above the bootstrap, and that ordering is

@@ -1041,6 +1041,31 @@ else
 fi
 rm -rf "$_nd"
 
+# AND AN EMPTY `writelib.sh` DOES NOT HAND THE CLEARING TO `PATH`. Sourcing an empty file
+# succeeds and leaves `rb_empty_handoff` undefined, and an undefined name is a command
+# lookup — so an executable by that name exiting 0 reported the clearing done with the stale
+# head untouched, and a later bootstrap refusal was then walked past onto it. The child
+# defines a refusing stub before it sources; this stages the forger and asserts it never ran.
+world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the forger case"
+: > "$TMP/broken/writelib.sh"
+: > "$TMP/forger.log"
+{ printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$TMP/forger.log"; printf 'exit 0\n'; } > "$TMP/bin/rb_empty_handoff"
+chmod +x "$TMP/bin/rb_empty_handoff"
+_fg_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+    "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _fg_rc=$?
+rm -f "$TMP/bin/rb_empty_handoff"
+[ "$_fg_rc" != 0 ] \
+    && pass "an empty writelib.sh refuses at the clearing rather than reporting it done" \
+    || die "an empty writelib.sh let the gate continue (out='$_fg_out')"
+[ ! -s "$TMP/forger.log" ] \
+    && pass "…and the PATH executable by the library's name was never run" \
+    || die "the clearing fell through to a PATH executable named rb_empty_handoff"
+grep -q 'cannot be emptied' <<<"$_fg_out" \
+    && pass "…refusing at the clearing itself, not at a later load" \
+    || die "the refusal came from somewhere other than the clearing: '$_fg_out'"
+
 # AND A SYMLINKED HEAD FILE SURVIVES THAT PATH TOO, which is the pair of invariants meeting:
 # the clearing is above every load AND it renames, so a bootstrap refusal neither leaves a
 # stale head nor truncates whatever the path pointed at.

@@ -1735,6 +1735,32 @@ else
     pass "(the FIFO head-file case is skipped: no mkfifo, or this filesystem refused one)"
 fi
 
+# AN EMPTY `writelib.sh` DOES NOT HAND THE HEAD CHECK TO `PATH`. The driver's child sources
+# the library and calls `rb_handoff_is_sha`; sourcing an empty file succeeds and leaves the
+# name undefined, so it became a command lookup — and an executable by that name exiting 0
+# accepted a stale head and sent the driver on to resolve threads. The child defines a
+# refusing stub before it sources. Staged with `RB_SCRIPTS` pointing at a directory whose
+# `writelib.sh` is empty, a valid-looking head, `exit` returning, and the forger on `PATH`.
+_hp_forge="$_hp_dir/forge"; mkdir -p "$_hp_forge/bin"; : > "$_hp_forge/writelib.sh"
+printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/stale"
+printf '%s\n' 'the summary' > "$_hp_dir/summary"
+: > "$_hp_forge/forger.log"
+{ printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$_hp_forge/forger.log"; printf 'exit 0\n'; } > "$_hp_forge/bin/rb_handoff_is_sha"
+chmod +x "$_hp_forge/bin/rb_handoff_is_sha"
+_hp_fg="$(HEAD_FILE="$_hp_dir/stale" SUMMARY_FILE="$_hp_dir/summary" RB_SCRIPTS="$_hp_forge" \
+    PATH="$_hp_forge/bin:$PATH" bash -c '
+        exit() { return 0; }
+        . "$1" 2>/dev/null; _s=$?
+        printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"
+case "${_hp_fg##*S:}" in
+    0*) die "an empty writelib.sh plus a PATH forger accepted a stale head: $_hp_fg" ;;
+    *)  pass "an empty writelib.sh refuses the head check rather than handing it to PATH" ;;
+esac
+[ ! -s "$_hp_forge/forger.log" ] \
+    && pass "…and the PATH executable by the library's name was never run" \
+    || die "the head check fell through to a PATH executable named rb_handoff_is_sha"
+rm -rf "$_hp_forge"
+
 # THE ALIAS, with a summary that is a valid-looking OID and `exit` returning.
 printf '%s' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/summary"
 _hp_out="$(_hp_run "$_hp_dir/summary" "$_hp_dir/summary")"

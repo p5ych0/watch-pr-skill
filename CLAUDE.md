@@ -582,9 +582,13 @@ rediscovering them.
   round's OID to be accepted as a proven head. And `pr-copilot-phase.sh`'s three bounded
   writes run in a child because `run_limited` bounds a COMMAND and not a shell function;
   the loader is a function in the PARENT, so there is nothing for the child to call. Both
-  get the loader's guarantee by a different route: an emptied library leaves the symbol
-  undefined, the child exits non-zero, and the caller refuses — which is the direction
-  `rb_load` fails in, reached without it. `test-pr-identity.sh`'s by-hand-load check keys
+  get the loader's guarantee by a different route — AND ONLY BECAUSE EACH CHILD DEFINES A
+  REFUSING STUB BEFORE IT SOURCES. Sourcing an empty library succeeds and leaves the name
+  undefined, and an undefined name is looked up on `PATH`: an executable by that name exiting
+  0 reported a clearing done and a readiness write made with nothing touched. With
+  `rb_x() { return 127; }` ahead of the `.`, an empty library leaves the stub and the child
+  exits 127, so the caller refuses — the direction `rb_load` fails in, reached without it. A
+  direct-source child WITHOUT the stub is the defect back. `test-pr-identity.sh`'s by-hand-load check keys
   on the scripts' own loads, so neither is a violation of it.
 
   **`SKILL.md` is the exception, and it is deliberate.** Its bash runs in the

@@ -348,7 +348,7 @@ if [[ $STAGE = open ]]; then
     # leaves `rb_write_handoff` undefined, the child exits non-zero, and this refuses —
     # which is the same direction `rb_load` fails in, reached without it.
     _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
-        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+        'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
         _ "$_RB_SELF_DIR" "$PRIOR_FILE" refused-no-baseline)" \
         || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'. Nothing has been posted: $_rb_wh"; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
@@ -476,7 +476,7 @@ if [[ $STAGE = open ]]; then
     # phase opens, so this is the ordinary case rather than an edge one.
     PRIOR_REVIEW="${PRIOR_REVIEW:-none}"
     _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
-        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+        'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
         _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$PRIOR_REVIEW")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested: $_rb_wh"; exit 1; }
     # THIS IS THE WRITE THE HALF-OPEN RISK BELONGS TO. It stands after the revocation and
@@ -957,7 +957,7 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # half decided. `open` has bounded both of its writes since #230; this was the copy left
 # plain, which is the same way its read-back ended up the weaker of the two. #246.
 _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
-    '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+    'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
     _ "$_RB_SELF_DIR" "$SHA_FILE" "$CODEX_SHA")" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
 # AND NOT READ BACK AGAIN HERE, for the reason `open` gives at its own write: since #263

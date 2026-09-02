@@ -854,7 +854,7 @@ fi
 # AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
 # WHY:
 if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]] \
-   && /usr/bin/env bash -p -c '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' \
+   && /usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' \
       _ "$RB_SCRIPTS" "$HEAD_FILE"; then
     [[ -n x ]]
 else
