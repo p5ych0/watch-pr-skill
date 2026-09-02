@@ -30,7 +30,7 @@ DIR="$TMP/s"; mkdir -p "$DIR" "$TMP/bin"
 # since opening a FIFO for writing blocks for a reader that never arrives. Same
 # reason `pr-ci-state.sh` loads it. #243.
 cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" \
-   "$SELF_DIR/testlib.sh" "$DIR/" \
+   "$SELF_DIR/testlib.sh" "$SELF_DIR/writelib.sh" "$DIR/" \
     || { die "the subject could not be staged"; echo "RESULT: FAIL"; exit 1; }
 # `pr-review-state.sh` ANSWERS TWO DIFFERENT QUESTIONS HERE — `verdict` and
 # `review-id` — and they fail independently, so the stub keys on the subcommand
@@ -246,32 +246,39 @@ world; got="$(run record 7 "$TMP/body.md")"
 # after a transport that failed. The signoff is the irreversible part of this stage, so
 # "did not post" is the assertion that matters.
 #
-# Staged through the same `timeout` hook as the baseline case — it stands between the
-# bounded write and the bounded read — emptying the sha file so the read-back sees bytes
-# that are not the ones written.
-if command -v timeout >/dev/null 2>&1; then
-    _rl_real2="$(command -v timeout)"
+# STAGED THROUGH AN `mv` HOOK SINCE #263, and the hook moved because the write did. The
+# value used to be written by a bounded `printf`, so a `timeout` shim stood between the
+# write and the read; it goes through `rb_write_handoff` now, whose last act is
+# `/usr/bin/env mv` of the temporary onto the target. A shim there runs at exactly the same
+# point — after the value is in place, before the read-back — and is a closer likeness of
+# the real race, which is something modifying the file after the stage wrote it.
+if command -v mv >/dev/null 2>&1; then
+    _mv_real2="$(command -v mv)"
     world
     _rbs="$TMP/rbsha"; rm -rf "$_rbs"; mkdir -p "$_rbs"; : > "$_rbs/sha.txt"
-    cat > "$TMP/bin/timeout" <<RLS
-#!/usr/bin/env bash
-"$_rl_real2" "\$@"; _rc=\$?
-case "\$*" in *printf*) : > "\$RB_ZERO_TARGET" 2>/dev/null ;; esac
-exit "\$_rc"
-RLS
-    chmod +x "$TMP/bin/timeout"
+    # THE REAL `mv` CROSSES IN THE ENVIRONMENT AND IS INVOKED QUOTED, which is #267's
+    # lesson: embedded unquoted, a resolved path with a space in it would break the shim
+    # and the case would report a staging failure rather than measuring anything.
+    { printf '#!/bin/sh\n'
+      printf '"$RB_MV_REAL" "$@" || exit $?\n'
+      printf '[ -n "$RB_ZERO_TARGET" ] && : > "$RB_ZERO_TARGET"\n'
+      printf 'exit 0\n'; } > "$TMP/bin/mv"
+    chmod +x "$TMP/bin/mv"
     # A NAME OF ITS OWN. `got` is still holding the ordinary `record` run that the
     # resume-command assertion below reads, and reusing it here made that assertion read
     # this refusal instead — a case failing on another case's evidence.
-    _sha_got="$(RB_ZERO_TARGET="$_rbs/sha.txt" run record 7 "$TMP/body.md" "$_rbs/sha.txt")"
-    rm -f "$TMP/bin/timeout"
-    [ "${_sha_got%%|*}" = 1 ] \
+    _sha_got="$(RB_MV_REAL="$_mv_real2" RB_ZERO_TARGET="$_rbs/sha.txt" \
+        run record 7 "$TMP/body.md" "$_rbs/sha.txt")"
+    rm -f "$TMP/bin/mv"
+    # THE HOOK MUST HAVE FIRED, or this measures a run that simply worked. An empty target
+    # after a refusal is the evidence: the stage wrote the sha and something emptied it.
+    { [ "${_sha_got%%|*}" = 1 ] && [ ! -s "$_rbs/sha.txt" ]; } \
         && pass "a sha that did not survive being written stops record" \
-        || die "an emptied sha file gave '${_sha_got}'"
+        || die "an emptied sha file gave '${_sha_got}' with sha.txt='$(cat "$_rbs/sha.txt" 2>/dev/null)'"
     nothing_posted "the sha did not survive the write"
     rm -rf "$_rbs"
 else
-    pass "no timeout on this platform, so the emptied-sha state is skipped by name"
+    pass "no mv on this platform, so the emptied-sha state is skipped by name"
 fi
 
 # ── AND THE RESUME COMMAND IT PRINTS IS ONE THAT RUNS ─────────────────────
@@ -335,23 +342,30 @@ _bs_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$
     && pass "…and so does one that cannot bootstrap at all" \
     || die "a bootstrap refusal did something other than leave the sha file alone (rc=$_bs_rc out='$_bs_out')"
 
-# AND A FIFO AT THE SHA PATH STOPS THE STAGE RATHER THAN HANGING IT. With the clearings
-# gone the WRITE is the only open on that path, and it is bounded — so this now proves the
-# bound on the write, with nothing posted, since the write precedes the signoff.
+# AND A FIFO AT THE SHA PATH STOPS THE STAGE RATHER THAN HANGING IT — the same outcome as
+# before #263, reached a different way. The write used to OPEN this path, so a FIFO blocked
+# for a reader that never came and only the watchdog ended it. `rb_write_handoff` never
+# opens the target: it refuses one that is not a regular file, before anything is created.
+#
+# SO THE FIFO IS LEFT WHERE IT WAS, which is asserted as well as the status. Replacing it
+# would also have been safe — the rename would have put a regular file at the name — and it
+# was briefly the behaviour here. Refusing keeps the promise `README.md` already makes and
+# leaves one fewer thing about this handoff that changed.
+#
+# 124 AND 125 ARE STILL A FAILURE, because they are the harness saying the stage hung,
+# which is the thing the FIFO used to cause and the reason this case exists.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/shafifo"
     mkfifo "$TMP/shafifo" 2>/dev/null && {
         _sf_got="$(run record 7 "$TMP/body.md" "$TMP/shafifo")"
-        # THE HELPER'S OWN REFUSAL, NOT THE HARNESS WATCHDOG'S. `run` wraps every call in
-        # `run_limited 25`, so an UNBOUNDED write would block on the FIFO until that fired
-        # and come back 124 — which "not zero" accepts, and the case would report the write
-        # as bounded precisely when it is not. Status 1 is the helper refusing; 124 and 125
-        # are the harness saying it never did.
         case "${_sf_got%%|*}" in
             1) pass "…and a FIFO at the sha path stops record instead of hanging it" ;;
             124|125) die "record hung on the FIFO and the harness watchdog stopped it: '${_sf_got}'" ;;
             *) die "a FIFO sha path gave '${_sf_got}'" ;;
         esac
+        [ -p "$TMP/shafifo" ] \
+            && pass "…leaving the FIFO where it was rather than replacing it" \
+            || die "the FIFO sha path is no longer a FIFO"
         nothing_posted "the sha path was a FIFO"
     }
     rm -f "$TMP/shafifo"
@@ -1105,8 +1119,10 @@ raw_is "$TMP/prior.txt" 'none
 # readiness proof for the exact operation the write performs — standing before
 # EITHER PR MUTATION — the revocation comment and the reviewer request — so a path that
 # CANNOT TAKE THAT WRITE is found before the signoff is revoked rather than after.
-# Not every unusable path: `/dev/null` and a write-only file accept it and are caught by the
-# read-back, which is after the revocation.
+# EVERY unusable path, since #263: the write refuses the target by TYPE before creating
+# anything, so `/dev/null`, a socket and a FIFO are caught HERE. They used to pass this
+# probe and be caught only by a caller-side read-back on the far side of the revocation —
+# and that read-back is gone, its work now done inside `rb_write_handoff`.
 #
 # AND IT LEAVES A SENTINEL, NOT AN EMPTY FILE, which is what makes this refusal fail
 # CLOSED. Emptying looked free because an empty baseline WAS legal — it meant "no prior
@@ -1141,35 +1157,34 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested by a refused open" \
     || pass "…with Copilot not requested, so nothing new is coming for the watch to find"
 
-# A FIFO AT THAT PATH DOES NOT HANG THE PHASE. Opening a path for WRITING blocks waiting
-# for a reader, and what meets this FIFO is the BOUNDED CLEARING, before the revocation —
-# the top-of-file arm that used to run first is gone, and it would have skipped a FIFO
-# anyway, testing `-f`. So this case exercises the clearing and the refusal it produces,
-# which is why it can assert that nothing was posted.
+# A FIFO AT THAT PATH STOPS THE PHASE RATHER THAN HANGING IT, which is the outcome from
+# before #263 reached a different way. Opening a path for WRITING blocks waiting for a
+# reader, and that is what the readiness write existed to catch before the revocation.
+# `rb_write_handoff` never opens the target for WRITING: it refuses one that is not a
+# regular file, and the only open it makes is the postcondition's read past the rename.
 #
-# REACHING THE WRITE WITH A FIFO NEEDS A REPLACEMENT RACE, not a FIFO standing at the path,
-# and that is the separate case below. A type check before an open is not the answer to
-# either: the open is what blocks, and a check it precedes can be raced by whoever put the
-# FIFO there. Every open here runs under the runtime watchdog. Bounded by the harness as
-# well, so a regression hangs the case rather than the suite.
+# THE READINESS WRITE STILL HAS ITS JOB, and it is the same one — proving the path is
+# usable before the revocation. What it refuses is now stated by TYPE rather than
+# discovered by blocking on it: a directory, a device, a socket or a FIFO at the name, or a
+# containing directory that will not take a file.
+#
+# AND THE ORIGINAL CONCERNS ARE BOTH ASSERTED: the stage must not HANG, and it must not
+# report failure after mutating the PR.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/fifo.txt"
     mkfifo "$TMP/fifo.txt" 2>/dev/null && {
         got="$(run open 7 "$HEAD40" "$TMP/fifo.txt")"
-        [ "${got%%|*}" = 1 ] \
-            && pass "a FIFO baseline path stops the phase instead of hanging it" \
-            || die "a FIFO baseline path gave '${got}'"
+        case "${got%%|*}" in
+            1) pass "a FIFO baseline path stops the phase instead of hanging it" ;;
+            124|125) die "open hung on the FIFO and the harness watchdog stopped it: '${got}'" ;;
+            *) die "a FIFO baseline path gave '${got}'" ;;
+        esac
+        [ -p "$TMP/fifo.txt" ] \
+            && pass "…leaving the FIFO where it was rather than replacing it" \
+            || die "the FIFO baseline path is no longer a FIFO"
         grep -q -- '--add-reviewer' "$TMP/calls" \
-            && die "Copilot was requested despite the blocked baseline write" \
+            && die "Copilot was requested despite the unusable baseline path" \
             || pass "…with Copilot not requested"
-        # AND THE SIGNOFF WAS NOT REVOKED, which is the half that made removing the
-        # bounded clearing a regression rather than a subtraction. That clearing is
-        # also the READINESS proof on this path, and it stands BEFORE the revocation:
-        # without one, a FIFO here is not discovered until the write far below, by
-        # which time `gh pr comment` has already revoked the previous Copilot signoff
-        # — so the stage reports that the phase did not open while having mutated the
-        # PR. Asserting only `--add-reviewer` could not see that: the request comes
-        # after the write either way.
         grep -q 'gh pr comment' "$TMP/calls" \
             && die "the previous Copilot signoff was revoked before the unusable baseline path was found" \
             || pass "…and with the previous signoff not revoked, so the PR is untouched"
@@ -1179,48 +1194,63 @@ else
     pass "no mkfifo on this platform, so the FIFO state is skipped by name"
 fi
 
-# AND THE READ-BACK IS BOUNDED TOO, which is a SEPARATE window from the write. The
-# write finishing does not make the next open safe: the path is named in argv, and a
-# same-UID process can put a FIFO there between the two. Staged by substituting the
-# path after the write, through a `mkfifo` shim on PATH that runs when the helper's
-# own bounded writer exits — the closest a self-contained case gets to that window
-# without a second process. Both opens are on the same side of the revocation, so a
-# hang at either leaves the phase half advanced.
-if command -v mkfifo >/dev/null 2>&1; then
-    world; rm -rf "$TMP/rbdir"; mkdir -p "$TMP/rbdir"
-    _rb_path="$TMP/rbdir/prior.txt"
-    # A DIRECTORY WHERE THE READ EXPECTS A FILE is the substitution this can stage
-    # deterministically: the write creates the file, and the read then meets something
-    # it cannot read. What is asserted is that the stage REFUSES rather than continuing.
-    got="$(run open 7 "$HEAD40" "$TMP/rbdir")"
-    [ "${got%%|*}" = 1 ] \
-        && pass "a baseline path that cannot be written or read back stops the phase" \
-        || die "a directory baseline path gave '${got}'"
-    grep -q -- '--add-reviewer' "$TMP/calls" \
-        && die "Copilot was requested despite the unusable baseline path" \
-        || pass "…with Copilot not requested"
-    rm -rf "$TMP/rbdir"
-else
-    pass "no mkfifo on this platform, so the read-back substitution is skipped by name"
-fi
+# AND A DIRECTORY AT THAT PATH STILL STOPS IT BEFORE THE REVOCATION. It is caught by the
+# TYPE TEST in `rb_write_handoff`, before a temporary is created — and the exact rename
+# would refuse it anyway, since `rename(2)` will not put a file over a directory, so this is
+# refused twice over and neither refusal is the postcondition. What matters to this case is
+# only WHEN: before `gh pr comment`, or the stage reports that the phase did not open while
+# having revoked the previous signoff.
+world; rm -rf "$TMP/dirbase"; mkdir -p "$TMP/dirbase"
+got="$(run open 7 "$HEAD40" "$TMP/dirbase")"
+[ "${got%%|*}" = 1 ] \
+    && pass "a directory at the baseline path stops the phase" \
+    || die "a directory baseline path gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested despite the unusable baseline path" \
+    || pass "…with Copilot not requested"
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "the previous Copilot signoff was revoked before the unusable baseline path was found" \
+    || pass "…and with the previous signoff not revoked, so the PR is untouched"
+rm -rf "$TMP/dirbase"
 
-# A WRITABLE NON-REGULAR PATH IS REFUSED BEFORE COPILOT IS ASKED. `/dev/null` takes
-# both writes and reads back EMPTY — which is the legitimate "no earlier Copilot
-# review" — so the equality check passed and the phase opened against a path no watch
-# can use. `pr-watch.sh` rejects the same path, but only after the revocation and the
-# request have gone out. The `-f` question is asked on the BOUND DESCRIPTOR here, so
-# it is about the file that was actually read.
-if [ -c /dev/null ]; then
+# THE CALLER-SIDE READ-BACK THIS SECTION COVERED IS GONE, AND SO IS ITS CASE. It bounded a
+# SECOND open the stage made on the baseline path after writing it, and the case staged the
+# window by putting a directory there — which is the same state the case above already
+# proves, from the write's side rather than the read's. #271 removed all three caller-side
+# read-backs: `rb_write_handoff` reads its own work back before returning, with an open that
+# can neither block nor follow a link, so there is no second window to bound and nothing
+# here to stage. `test-writelib.sh` covers that read.
+
+# A CHARACTER DEVICE AT THE BASELINE PATH IS REFUSED BY TYPE, BEFORE THE REVOCATION. The
+# readiness write is `rb_write_handoff`, which refuses a target that is not a regular file
+# before it creates anything — and it has to, because the exact rename it performs would
+# otherwise put a regular file OVER the device. That is the whole reason this case exists.
+#
+# ON A DEVICE THE FIXTURE OWNS, NEVER `/dev/null`. This case is written to fail if the type
+# refusal regresses, and under root that failure MODE is the damage: the rename would
+# replace a process-wide device and derail whatever else in the runner reads from it. A case
+# whose failure breaks the machine is not self-contained, so it stages its own device with
+# `mknod` and skips by name where that needs privilege it has not got. Asserted on the inode
+# type as well as the status, because "refused" would hold just as well after the damage.
+_cp_dev="$TMP/nulldev"; rm -f "$_cp_dev"
+if command -v mknod >/dev/null 2>&1 && mknod "$_cp_dev" c 1 3 2>/dev/null && [ -c "$_cp_dev" ]; then
     world; : > "$W/review-id.out"
-    got="$(run open 7 "$HEAD40" /dev/null)"
+    got="$(run open 7 "$HEAD40" "$_cp_dev")"
     [ "${got%%|*}" = 1 ] \
-        && pass "a writable non-regular baseline path stops the phase before Copilot is asked" \
-        || die "a /dev/null baseline path gave '${got}'"
+        && pass "a character device at the baseline path stops the phase before Copilot is asked" \
+        || die "a device baseline path gave '${got}'"
+    [ -c "$_cp_dev" ] \
+        && pass "…and the device is still a device" \
+        || die "the readiness write replaced the device with a regular file"
+    grep -q 'gh pr comment' "$TMP/calls" \
+        && die "the previous signoff was revoked before the device path was refused" \
+        || pass "…with the previous signoff not revoked"
     grep -q -- '--add-reviewer' "$TMP/calls" \
         && die "Copilot was requested with a baseline path no watch can read" \
-        || pass "…with Copilot not requested"
+        || pass "…and with Copilot not requested"
+    rm -f "$_cp_dev"
 else
-    pass "no /dev/null on this platform, so the device-path state is skipped by name"
+    pass "(no mknod privilege here; the device baseline path is skipped by name)"
 fi
 
 # AND A READ THAT FAILS IS NOT A BASELINE. `printf "%s" "$(<…)"` exits 0 whatever the
@@ -1232,16 +1262,27 @@ fi
 # taking the status is not: a read that fails must not be able to look like any value a
 # writer produces.
 #
-# STAGED WITH A WRITE-ONLY FILE rather than by racing the window. `chmod 222` is the
-# same state a mid-window removal produces for the reader — both writes succeed and
-# the read cannot open — and it happens on every run instead of when the scheduler
-# allows. A timing case here passed against the unfixed helper, because the helper is
-# faster than any sleep the fixture can place.
-if [ "$(id -u)" != 0 ]; then
+# STAGED THROUGH THE `mv` HOOK SINCE #263, and the staging moved because the write did.
+# A write-only file at the path used to survive to the read-back; `rb_write_handoff`
+# renames a file it owns over that name, so the mode the caller's file had is gone and the
+# read-back can open it. What still produces the state is something changing the target
+# AFTER the rename — which is what the hook does, revoking permission at exactly the point
+# the real race would — and it happens on every run rather than when the scheduler allows.
+# A timing case here passed against the unfixed helper, because the helper is faster than
+# any sleep the fixture can place.
+if [ "$(id -u)" != 0 ] && command -v mv >/dev/null 2>&1; then
+    _mv_realw="$(command -v mv)"
     world; : > "$W/review-id.out"
     _rbw="$TMP/rbwin"; rm -rf "$_rbw"; mkdir -p "$_rbw"
-    printf 'seed\n' > "$_rbw/prior.txt"; chmod 222 "$_rbw/prior.txt"
-    got="$(run open 7 "$HEAD40" "$_rbw/prior.txt")"
+    printf 'seed\n' > "$_rbw/prior.txt"
+    { printf '#!/bin/sh\n'
+      printf '"$RB_MV_REAL" "$@" || exit $?\n'
+      printf '[ -n "$RB_CHMOD_TARGET" ] && chmod 000 "$RB_CHMOD_TARGET"\n'
+      printf 'exit 0\n'; } > "$TMP/bin/mv"
+    chmod +x "$TMP/bin/mv"
+    got="$(RB_MV_REAL="$_mv_realw" RB_CHMOD_TARGET="$_rbw/prior.txt" \
+        run open 7 "$HEAD40" "$_rbw/prior.txt")"
+    rm -f "$TMP/bin/mv"
     chmod 600 "$_rbw/prior.txt" 2>/dev/null
     [ "${got%%|*}" = 1 ] \
         && pass "…a baseline the read-back cannot open stops the phase, empty or not" \
@@ -1272,21 +1313,23 @@ fi
 # ignores that; this one only truncates a file the fixture itself made, so skipping it under
 # UID 0 recorded a pass for a scenario that had not run — and a self-check as root could
 # have reverted the child-side comparison with the suite green.
-if command -v timeout >/dev/null 2>&1; then
-    _rl_real="$(command -v timeout)"
-    world; : > "$W/review-id.out"          # an EMPTY baseline: the collision case
+if command -v mv >/dev/null 2>&1; then
+    _mv_realz="$(command -v mv)"
+    world; : > "$W/review-id.out"          # no earlier review: the `none` case
     _rbz="$TMP/rbzero"; rm -rf "$_rbz"; mkdir -p "$_rbz"
-    cat > "$TMP/bin/timeout" <<RLZ
-#!/usr/bin/env bash
-"$_rl_real" "\$@"; _rc=\$?
-# After the WRITE — the invocation carrying a printf — leave the target empty, so the
-# read-back that follows sees a file that is not what was written.
-case "\$*" in *printf*) : > "\$RB_ZERO_TARGET" 2>/dev/null ;; esac
-exit "\$_rc"
-RLZ
-    chmod +x "$TMP/bin/timeout"
-    got="$(RB_ZERO_TARGET="$_rbz/prior.txt" run open 7 "$HEAD40" "$_rbz/prior.txt")"
-    rm -f "$TMP/bin/timeout"
+    # THE HOOK IS `mv` SINCE #263. It was `timeout`, because the write ran under
+    # `run_limited` and that call stood between the bounded write and the bounded read.
+    # The write renames now, so its last act is `/usr/bin/env mv` — the same position, and
+    # a closer likeness of the race, which is something changing the file after the stage
+    # put its value there.
+    { printf '#!/bin/sh\n'
+      printf '"$RB_MV_REAL" "$@" || exit $?\n'
+      printf '[ -n "$RB_ZERO_TARGET" ] && : > "$RB_ZERO_TARGET"\n'
+      printf 'exit 0\n'; } > "$TMP/bin/mv"
+    chmod +x "$TMP/bin/mv"
+    got="$(RB_MV_REAL="$_mv_realz" RB_ZERO_TARGET="$_rbz/prior.txt" \
+        run open 7 "$HEAD40" "$_rbz/prior.txt")"
+    rm -f "$TMP/bin/mv"
     [ "${got%%|*}" = 1 ] \
         && pass "a baseline that is not what was written stops the phase, even when empty" \
         || die "an emptied baseline gave '${got}'"
@@ -1296,6 +1339,132 @@ RLZ
     rm -rf "$_rbz"
 else
     pass "no timeout on this platform, so the emptied-baseline state is skipped by name"
+fi
+
+# ── AN EMPTY `writelib.sh` DOES NOT HAND THE WRITE TO `PATH` ───────────────
+#
+# The bounded writes source the library in a child, and sourcing an EMPTY file succeeds —
+# leaving `rb_write_handoff` undefined, which is then a command lookup. An executable by that
+# name exiting 0 would make the readiness write "succeed" with nothing written, and the phase
+# would then revoke the previous signoff without the sentinel it relies on.
+#
+# THIS CASE PROVES THE OUTCOME, AND SAYS WHICH LINE OF DEFENCE PRODUCES IT. In this helper
+# `rb_load` verifies `writelib.sh` defined `rb_write_handoff` at bootstrap, so an empty
+# library is refused BEFORE `open` reaches any write and the forger is never reachable from
+# a fixture — the case below passes with or without the child's stub. The stub still matters:
+# it is what stands in the window between that load and the child's own source, and it is
+# what every direct-source child carries. So the MECHANISM is asserted on the source, which is
+# the half that fails if a stub is dropped.
+world; cp "$DIR/writelib.sh" "$TMP/writelib.keep"; : > "$DIR/writelib.sh"
+: > "$TMP/forger.log"
+{ printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$TMP/forger.log"; printf 'exit 0\n'; } > "$TMP/bin/rb_write_handoff"
+chmod +x "$TMP/bin/rb_write_handoff"
+got="$(run open 7 "$HEAD40" "$TMP/prior.txt")"
+rm -f "$TMP/bin/rb_write_handoff"; cp "$TMP/writelib.keep" "$DIR/writelib.sh"
+[ "${got%%|*}" = 1 ] \
+    && pass "an empty writelib.sh stops open at the readiness write" \
+    || die "an empty writelib.sh gave '${got}'"
+[ ! -s "$TMP/forger.log" ] \
+    && pass "…and the PATH executable by the library's name was never run" \
+    || die "the readiness write fell through to a PATH executable named rb_write_handoff"
+[ -z "$(posted)" ] \
+    && pass "…with the previous signoff not revoked" \
+    || die "the signoff was revoked after a forged readiness write"
+_cp_src="$(grep -v '^[[:space:]]*#' "$DIR/pr-copilot-phase.sh")" || _cp_src=""
+_cp_stubs="$(grep -c 'rb_write_handoff() { return 127; }; \. "\$1"/writelib.sh' <<<"$_cp_src")" || _cp_stubs=0
+[ "$_cp_stubs" -eq 3 ] \
+    && pass "…and all three direct-source children define the refusing stub before they source" \
+    || die "$_cp_stubs of the three direct-source children carry the refusing stub; an empty library would hand the name to PATH"
+
+# ── A `mv` THAT NEVER RETURNS IS WHAT THE THREE WATCHDOGS ARE FOR ──────────
+#
+# THE BOUNDS HAD NO CASE UNTIL NOW, which is how they came to be removed for a round.
+# `writelib.sh` creates its temporary exclusively, and O_CREAT|O_EXCL cannot wait — so the
+# FIFO cases above, which used to be what exercised these watchdogs, now return from the
+# TYPE CHECK before any open happens. Nothing left in the suite blocked, and all three
+# `run_limited` wrappers could have been deleted with the suite green.
+#
+# WHAT CAN STILL BLOCK IS EVERYTHING ELSE THE WRITE DOES: pathname resolution, the write
+# itself, and the rename, any of which stalls on an unresponsive mount. The `mv` is the
+# last of those and the one a fixture can own, so it is where the stall is staged.
+#
+# THE TWO BOUNDS ARE TOLD APART BY THE STATUS, not by a clock. The helper's own is 10s and
+# the harness's `run` is 25s, so a working watchdog refuses with the stage's own `1` and a
+# missing one is killed by the harness with `124`. Asserting the status rather than the
+# elapsed time is what keeps this from racing a loaded runner: both numbers are in the
+# suite already, and only their ORDER matters.
+#
+# ONE CALL BLOCKS AT A TIME, selected by count, because the three sites are on different
+# sides of the two mutations and that is the whole point of bounding each: `open`'s first
+# write stands before the revocation, its second after it and before the request, and
+# `record`'s before the signoff is posted.
+if command -v mv >/dev/null 2>&1; then
+    _mv_realb="$(command -v mv)"
+    # THE SLEEP TAKES ITS OWN STDOUT, and that is not tidiness. The helper's write is a
+    # command substitution, which reads until the pipe closes — an orphaned sleeper holding
+    # the inherited descriptor would keep the substitution blocked for its whole duration
+    # even after the watchdog killed the shell between them, and the case would then be
+    # measuring the harness rather than the helper.
+    { printf '#!/bin/sh\n'
+      printf '_n=$(cat "$RB_MV_COUNT" 2>/dev/null || echo 0); _n=$((_n+1))\n'
+      printf 'echo "$_n" > "$RB_MV_COUNT"\n'
+      printf '[ "$_n" = "$RB_MV_BLOCK_AT" ] && exec sleep 120 >/dev/null 2>&1\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/bin/mv"
+    chmod +x "$TMP/bin/mv"
+
+    # (1) THE READINESS WRITE, which stands before either mutation.
+    world; _rbb="$TMP/rbblock"; rm -rf "$_rbb"; mkdir -p "$_rbb"
+    printf 'seed\n' > "$_rbb/prior.txt"; : > "$TMP/mvn"
+    got="$(RB_MV_REAL="$_mv_realb" RB_MV_COUNT="$TMP/mvn" RB_MV_BLOCK_AT=1 \
+        run open 7 "$HEAD40" "$_rbb/prior.txt")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a stalled rename in the readiness write is refused by the helper's own bound" \
+        || die "a stalled readiness write gave '${got}' — 124 is the harness watchdog, which means the helper's bound is gone"
+    case "${got#*|}" in
+        *"could not write the baseline file"*) pass "…naming the write that stalled" ;;
+        *) die "the stalled readiness write refused for another reason: '${got#*|}'" ;;
+    esac
+    [ -z "$(posted)" ] \
+        && pass "…before the revocation, so the PR is untouched" \
+        || die "the revocation was posted despite the readiness write stalling"
+
+    # (2) THE BASELINE WRITE, which stands AFTER the revocation and before the request.
+    # This is the one whose hang leaves the phase half-open, so its bound is the one that
+    # matters most and the reason all three were restored.
+    world; : > "$W/review-id.out"; : > "$TMP/mvn"
+    got="$(RB_MV_REAL="$_mv_realb" RB_MV_COUNT="$TMP/mvn" RB_MV_BLOCK_AT=2 \
+        run open 7 "$HEAD40" "$_rbb/prior.txt")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a stalled rename in the post-revocation baseline write is refused by the helper's own bound" \
+        || die "a stalled baseline write gave '${got}' — 124 is the harness watchdog, which means the helper's bound is gone"
+    case "${got#*|}" in
+        *"could not write the review baseline"*) pass "…naming the write that stalled" ;;
+        *) die "the stalled baseline write refused for another reason: '${got#*|}'" ;;
+    esac
+    _cap cat "$TMP/calls"
+    case "$_CAP" in
+        *--add-reviewer*) die "Copilot was requested after the baseline write stalled" ;;
+        *) pass "…with Copilot not requested, so the phase is left closed rather than half-open" ;;
+    esac
+
+    # (3) `record`'S SHA WRITE, which stands immediately before the signoff is posted.
+    world; : > "$TMP/mvn"; rm -f "$TMP/sha.txt"; : > "$TMP/sha.txt"
+    got="$(RB_MV_REAL="$_mv_realb" RB_MV_COUNT="$TMP/mvn" RB_MV_BLOCK_AT=1 \
+        run record 7 "$TMP/body.md")"
+    [ "${got%%|*}" = 1 ] \
+        && pass "a stalled rename in the signed-off sha write is refused by the helper's own bound" \
+        || die "a stalled sha write gave '${got}' — 124 is the harness watchdog, which means the helper's bound is gone"
+    case "${got#*|}" in
+        *"could not write the signed-off sha"*) pass "…naming the write that stalled" ;;
+        *) die "the stalled sha write refused for another reason: '${got#*|}'" ;;
+    esac
+    [ -z "$(posted)" ] \
+        && pass "…with no signoff posted" \
+        || die "a signoff was posted after the sha write stalled"
+
+    rm -f "$TMP/bin/mv"; rm -rf "$_rbb"
+else
+    pass "no mv on this platform, so the stalled-rename cases are skipped by name"
 fi
 
 # AND AN `open` THAT CANNOT BOOTSTRAP LEAVES THE FILE ALONE TOO. This is the refusal only

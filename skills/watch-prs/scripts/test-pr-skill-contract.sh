@@ -1638,7 +1638,21 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # differ, which is what a symlink in a scratch directory produces. The executed cases
 # below cover the same ground; this keeps the ORDERING assertion honest about what it is
 # anchored to.
-_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then$' "$SKILL" | head -1 | cut -d: -f1)" || true
+# AND THE CONTENT COMES FROM ONE DESCRIPTOR, which is the half a pathname test cannot do.
+# `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS with no watchdog
+# and no non-blocking read in this shell — so a FIFO left at that name hangs the driver
+# instead of refusing. `gate` cannot prevent it: its clearing skips a non-regular path and
+# `rb_empty_handoff` refuses one and leaves it. A `[[ -f ]]` in front of the substitution is
+# a test and then a SEPARATE open of the same name, so it narrows the window rather than
+# closing it; `rb_handoff_is_sha` opens once with `O_NOFOLLOW|O_NONBLOCK` and answers from
+# that handle.
+_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\] \\$' "$SKILL" | head -1 | cut -d: -f1)" || true
+grep -q 'rb_handoff_is_sha "\$2"' "$SKILL" \
+    && pass "…and the head content is read through the library's one-descriptor reader" \
+    || die "the driver reads \$HEAD_FILE itself; a test then a substitution is a check-before-open"
+grep -q 'case "\$(<"\$HEAD_FILE")" in' "$SKILL" \
+    && die "the driver still opens \$HEAD_FILE with a substitution; a FIFO there blocks it forever" \
+    || pass "…and no longer opens it with a substitution of its own"
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
     && pass "…and the head is proven, identity first, after the gate and before the replies" \
@@ -1654,7 +1668,7 @@ _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)
 # the file once for its LENGTH and again for its ALPHABET, so a value that was forty
 # characters on the first read and something else on the second satisfied both. One read
 # is the invariant; requiring exactly one occurrence is what states it.
-_hf_dup="$(grep -c 'case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
+_hf_dup="$(grep -c 'rb_handoff_is_sha "\$2"' "$SKILL")" || _hf_dup=0
 [ "$_hf_dup" -eq 1 ] \
     && pass "…and the head file is read exactly once, with the post fence not repeating it" \
     || die "the head file is read in $_hf_dup place(s); it must be read once, before the replies"
@@ -1668,7 +1682,7 @@ _hf_dup="$(grep -c 'case "\$(<"\$HEAD_FILE")" in' "$SKILL")" || _hf_dup=0
 # gated head, after which the threads are resolved claiming a head nobody wrote.
 _hp_dir="$TMP_CL/hp"; mkdir -p "$_hp_dir" || die "the head-proof scratch directory could not be made"
 awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_dir/hp.sh"
-{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'case "$(<"$HEAD_FILE")" in' "$_hp_dir/hp.sh"; } \
+{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'rb_handoff_is_sha "$2"' "$_hp_dir/hp.sh"; } \
     && pass "the head proof lifts, so the cases below reach the code they name" \
     || die "the head proof did not lift; the cases prove nothing"
 
@@ -1677,12 +1691,75 @@ awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_d
 # after the `.` runs whatever the fence did, and asserting on it proves only that `exit`
 # was shadowed. Each refusal arm ends in `[[ -n "" ]]`, so a refusal reports non-zero
 # even with `exit` returning, and the success arm ends in `[[ -n x ]]`.
+# `RB_SCRIPTS` IS SUPPLIED, because the block now reaches `writelib.sh` through it. A case
+# that left it unset would exercise the child's own refusal rather than the read.
 _hp_run() {   # _hp_run <head-file> <summary-file> ; prints "S:<status> <output>"
-    HEAD_FILE="$1" SUMMARY_FILE="$2" bash -c '
+    HEAD_FILE="$1" SUMMARY_FILE="$2" RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         exit() { return 0; }
         . "$1" 2>/dev/null; _s=$?
         printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null
 }
+
+# A FIFO AT THE HEAD FILE, WITH `exit` RETURNING — THE STATE THAT USED TO HANG.
+#
+# `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS until a writer
+# arrives. This shell has no watchdog and no non-blocking read, so the loop stopped with the
+# round's threads unresolved and nothing said — no wrong answer, no answer at all.
+#
+# IT NEEDS NO RACE. `gate`'s pre-bootstrap clearing is guarded by `[[ -f ]]` and skips a
+# non-regular path; `rb_empty_handoff` further down refuses one by TYPE and leaves it exactly
+# as it was, which is the handoff library's promise. So a FIFO put there before `gate` runs
+# survives the whole stage, and a driver whose `exit` returns then opens it.
+#
+# BOUNDED, AND THAT IS THE ASSERTION: against the unguarded read this never returns, so a
+# timeout here is the defect rather than a slow machine.
+if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_hp_dir/head-fifo" 2>/dev/null; then
+    _hp_fifo="$(run_limited 10 env HEAD_FILE="$_hp_dir/head-fifo" SUMMARY_FILE="$_hp_dir/summary" RB_SCRIPTS="$SCRIPT_DIR" \
+        bash -c '
+            exit() { return 0; }
+            . "$1" 2>/dev/null; _s=$?
+            printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"; _hp_frc=$?
+    case "$_hp_frc" in
+        124|125) die "the driver BLOCKED reading a FIFO at \$HEAD_FILE; it must prove the file regular before opening it" ;;
+        *)       pass "a FIFO at \$HEAD_FILE does not block the walked-past read" ;;
+    esac
+    case "${_hp_fifo##*S:}" in
+        0*) die "a FIFO at \$HEAD_FILE was accepted as a gated head: $_hp_fifo" ;;
+        *)  pass "…and it is refused, so no thread is resolved on it" ;;
+    esac
+    grep -q 'not a plain regular file' <<<"$_hp_fifo" \
+        && pass "…naming the type rather than the aliasing, which is a different recovery" \
+        || die "the FIFO refusal does not name the type: $_hp_fifo"
+    rm -f "$_hp_dir/head-fifo"
+else
+    pass "(the FIFO head-file case is skipped: no mkfifo, or this filesystem refused one)"
+fi
+
+# AN EMPTY `writelib.sh` DOES NOT HAND THE HEAD CHECK TO `PATH`. The driver's child sources
+# the library and calls `rb_handoff_is_sha`; sourcing an empty file succeeds and leaves the
+# name undefined, so it became a command lookup — and an executable by that name exiting 0
+# accepted a stale head and sent the driver on to resolve threads. The child defines a
+# refusing stub before it sources. Staged with `RB_SCRIPTS` pointing at a directory whose
+# `writelib.sh` is empty, a valid-looking head, `exit` returning, and the forger on `PATH`.
+_hp_forge="$_hp_dir/forge"; mkdir -p "$_hp_forge/bin"; : > "$_hp_forge/writelib.sh"
+printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/stale"
+printf '%s\n' 'the summary' > "$_hp_dir/summary"
+: > "$_hp_forge/forger.log"
+{ printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$_hp_forge/forger.log"; printf 'exit 0\n'; } > "$_hp_forge/bin/rb_handoff_is_sha"
+chmod +x "$_hp_forge/bin/rb_handoff_is_sha"
+_hp_fg="$(HEAD_FILE="$_hp_dir/stale" SUMMARY_FILE="$_hp_dir/summary" RB_SCRIPTS="$_hp_forge" \
+    PATH="$_hp_forge/bin:$PATH" bash -c '
+        exit() { return 0; }
+        . "$1" 2>/dev/null; _s=$?
+        printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"
+case "${_hp_fg##*S:}" in
+    0*) die "an empty writelib.sh plus a PATH forger accepted a stale head: $_hp_fg" ;;
+    *)  pass "an empty writelib.sh refuses the head check rather than handing it to PATH" ;;
+esac
+[ ! -s "$_hp_forge/forger.log" ] \
+    && pass "…and the PATH executable by the library's name was never run" \
+    || die "the head check fell through to a PATH executable named rb_handoff_is_sha"
+rm -rf "$_hp_forge"
 
 # THE ALIAS, with a summary that is a valid-looking OID and `exit` returning.
 printf '%s' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/summary"
@@ -1823,9 +1900,17 @@ grep -q 'prior-review=' "$SKILL" \
 # AND THE THREE WRITERS ALL NAME THE SAME FILE. A stage that wrote somewhere else
 # would leave the watch reading the PREVIOUS round's id — which is the exact failure
 # `--after-review` exists to prevent, arriving by a new route.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
+# AND IT HANDS THE PATH OVER RATHER THAN REDIRECTING ONTO IT. `> "$PRIOR_FILE"` here is
+# opened by the DRIVING shell before the helper starts, and it follows a symlink — so a
+# path a same-UID process had replaced cost the operator the file it pointed at, with
+# nothing the helper could check in time. Given the path, the helper renames onto the name
+# through `writelib.sh`. #263.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "…the opening request writes the baseline into \$PRIOR_FILE" \
-    || die "the opening request does not redirect its answer into \$PRIOR_FILE"
+    || die "the opening request does not hand \$PRIOR_FILE to the helper"
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW".*> "$PRIOR_FILE"' "$SKILL" \
+    && die "the opening request redirects onto \$PRIOR_FILE again; that open follows a symlink" \
+    || pass "…by argument rather than by a redirection this shell opens"
 grep -q 'pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"' "$SKILL" \
     && pass "…the round close is given it too" \
     || die "the round close is not given \$PRIOR_FILE"
@@ -2080,7 +2165,7 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
 # AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in
@@ -2777,7 +2862,7 @@ _rb_forged="$(env -u SHELLOPTS RB_SKILL_PATH="$SKILL" bash -c '
 # unrecognised value is refused by name, which `test-pr-request-review.sh`
 # executes. Asserted as the argument rather than as the branch, because the
 # branch is somewhere the suite can run it.
-grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" <' "$SKILL" \
+grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" --baseline-file' "$SKILL" \
     && pass "…and the initial request is given it" \
     || die "the initial request does not branch on the review mode"
 

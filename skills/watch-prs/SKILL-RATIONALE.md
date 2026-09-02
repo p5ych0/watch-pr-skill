@@ -1148,10 +1148,14 @@ checks both ids it compares — and `CLAUDE.md` records what a second copy of a 
 costs: every field check in `recordlib.sh` was written out two or three times and
 every one was found missing from at least one copy.
 
-The value has ONE consumer. So it is redirected into `$PRIOR_FILE` and read where it
-is used, by a privileged helper that already knows what a review id looks like. That
-is `prefer removing the dependency over guarding it` applied to three guards at once,
+The value has ONE consumer. So it goes into `$PRIOR_FILE` and is read where it is
+used, by a privileged helper that already knows what a review id looks like. That is
+`prefer removing the dependency over guarding it` applied to three guards at once,
 and it is the same answer `pr-origin.sh` gives: a path rather than a name. #243.
+
+It was a REDIRECTION until #263 — `> "$PRIOR_FILE"` on this shell's side. The path is
+handed over as `--baseline-file` now and the helper renames onto it; the next claim is
+about that half.
 
 ## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
 
@@ -1164,6 +1168,28 @@ which is where a name could still have defeated the handoff. Since #243 there is
 assignment to prove, because the value never lands here at all.
 
 `pr-origin.sh` settled the same question the same way, and for the same reason.
+
+## AND THE HELPER RENAMES ONTO THAT PATH, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
+
+A separate invariant from the one above, and separately load-bearing: a path can be
+handed over in two ways, and only one of them is safe. `> "$PRIOR_FILE"` also carries
+a path rather than a name, so it satisfies the claim above completely — and it was
+the defect. #263.
+
+`>` follows a symlink, so a same-UID process that had replaced that path cost the
+operator the file it pointed at. Worse than the other nine sites: the redirection is
+opened by THIS shell BEFORE the helper starts, so nothing the helper could check would
+have caught it in time. Given the path as an argument instead, the helper writes it
+through `writelib.sh`, which never opens the caller's path to write it at all: the
+value goes into a temporary and is RENAMED onto the name, so the link is what goes and
+never the file at the other end. That is the whole property, and it is why the claim
+says renames rather than opens — a helper-side writing open would follow the link
+exactly as this shell's redirection did.
+
+It is an OPTION and not a third positional argument. The body used to be one, and a
+caller still passing that form would have had their body file overwritten with the
+baseline — worse than the silent drop the arity refusal exists to prevent. Spelled
+out, the old form still lands on that refusal.
 
 ## THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 
@@ -1332,6 +1358,42 @@ content read sits inside the arm where the answer was no.
 
 Both tests, not one. `-ef` compares the files and answers nothing when the path does not
 exist; `=` compares the names and catches that case.
+
+## AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
+
+`$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS until a writer
+arrives. This shell has no watchdog and no non-blocking read, so a FIFO at that name does
+not produce a wrong answer — it produces no answer at all, and the loop stops with the
+round's threads still unresolved and nothing said.
+
+It is reachable without a race. `gate`'s pre-bootstrap clearing is guarded by `[[ -f ${6} ]]`
+and skips a path that is not a regular file; `rb_empty_handoff` further down then refuses
+that path by TYPE and leaves it exactly as it was, which is the promise the handoff library
+makes. So a same-UID process that replaces the head file with a FIFO before `gate` runs
+leaves it there through the whole stage — and a driver whose `exit` returns walks past the
+refusal and opens it.
+
+A `[[ -f ]]` in front of the substitution was the first answer and it is not enough: that is
+a test and then a SEPARATE open of the same name, so a racer between them is answered about
+one inode and the shell then opens another. No additional pathname test closes that window —
+only asking the question of the descriptor that was opened does.
+
+So the read is `rb_handoff_is_sha`, in a child that sources `writelib.sh` directly: one
+`sysopen` with `O_NOFOLLOW` and `O_NONBLOCK`, the type from `fstat` on that handle, and the
+bytes read by a `sysread` loop to a clean EOF — a slurp returns what arrived before an I/O
+error — and matched against exactly forty lowercase hexadecimal characters and the
+newline the writer emits. A symlink is refused at the open, a FIFO returns at once instead of
+waiting, and every answer comes from the inode that was actually read.
+
+NOTHING CROSSES BACK, and that is why this shape is available at all. The driver does not
+need the sha — it needs to know a gate proved one — so the helper answers with a STATUS and
+this `if` uses it as the condition. A value would have to land in a name, and a name a
+startup file has made readonly loses it silently, which is the defect `THE ANSWER GOES TO A
+FILE` above is about.
+
+The `else` arm covers the alias and everything else, because they have the same instruction:
+no gate wrote a head there, so resolve nothing. It re-asks the identity to say which, since
+`[[` opens nothing and the two send an operator to different places.
 
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
@@ -1528,12 +1590,14 @@ is what a reader can trust, and this section is why.
 
 The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
 status 2, at the call and before any network read — and the driver stops rather than
-accepting a pass that never happened. The proof is unchanged: still a truncating open on
-the path, still bounded, still ahead of the revocation, so an unusable baseline is found
-before anything is posted — meaning a path that CANNOT TAKE THAT WRITE. `/dev/null` and a
-write-only file accept it and are caught by the read-back instead, which is after the
-revocation, so they are outside what this ordering buys. The refusal that used to fail open
-now fails closed, and there is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
+accepting a pass that never happened. The proof is still bounded and still ahead of the
+revocation, so an unusable baseline is found before anything is posted — but it is no longer
+a truncating open. Since #263 the readiness write is `rb_write_handoff`: it refuses the
+target by TYPE before creating anything, writes into an exclusively created temporary and
+renames. That settles MORE than the truncation did rather than the same amount — `/dev/null`,
+a socket and a FIFO used to pass this probe and be caught only by a read-back on the far side
+of the revocation, and they are refused here now. The refusal that used to fail open now fails
+closed, and there is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
 the phase fixture asserts the exact string left behind, so the two halves cannot drift.
 
 THE HELPER MAKES NO PROMISE ABOUT THIS FILE'S CONTENTS AFTER A REFUSAL, and that
@@ -1546,12 +1610,18 @@ whatever the last successful operation left there, which may be the previous rou
 nothing, this round's captured id, or another process's bytes. NONE of it is this round's
 baseline, and the only thing that makes a value one is `open` returning 0.
 
-THE SYMLINK IS NOT CLOSED BY #245 AND WAS NEVER GOING TO BE. The surviving clearing opens
-`$PRIOR_FILE` with `>`, so a symlink a same-UID process leaves at that name has its target
-truncated — and removing the clearing would not change that, because the WRITE beside it is
-`printf … > "$1"` on the same name. Truncating through a caller-named path is what this
-handoff IS, here and in `gate`'s head file and `record`'s sha file. What #245 removed is
-narrower and real: an open that was UNBOUNDED and stood where nothing could bound it. #245.
+THE SYMLINK WAS NOT CLOSED BY #245 AND WAS NEVER GOING TO BE, AND #263 CLOSED IT. When this
+section was written the clearing opened `$PRIOR_FILE` with `>` and the write beside it was
+`printf … > "$1"` on the same name, so a symlink a same-UID process left there had its target
+truncated — and removing the clearing would not have changed that, because truncating through
+a caller-named path was what the handoff WAS, here and in `gate`'s head file and `record`'s
+sha file. What #245 removed was narrower and real: an open that was UNBOUNDED and stood where
+nothing could bound it.
+
+Both are `rb_write_handoff` now. Nothing opens the caller's path to write it: the value goes
+into an exclusively created temporary and is RENAMED onto the name, so a symlink there loses
+the LINK and never the file at the other end. Do not read the paragraph above as a live
+description — it is why #245 stopped where it did, and #263 is where it went. #245, #263.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 

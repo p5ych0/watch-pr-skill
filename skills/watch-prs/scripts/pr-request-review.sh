@@ -1,17 +1,27 @@
 #!/usr/bin/env -S bash -p
 # Request the OPENING Codex review, and report the baseline the watch needs.
 #
-#   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
+#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> < <body>
 #
 #   stdin   the account of what to look at; prose, one paragraph
-#   stdout  the review-id baseline, ALONE — the `none` token where there is no prior
+#   the file  the review-id baseline — the `none` token where there is no prior
 #           review to wait past, which is always the case on the automatic path, and
 #           `comment:<id>` where the reviewer's newest verdict came through the
-#           comment channel rather than as a submitted review. NEVER empty: the
-#           watch refuses an empty baseline, because a failed write produces one
+#           comment channel rather than as a submitted review. NEVER empty: the watch
+#           refuses an empty baseline. That refusal was written when a failed write
+#           produced one — every writer truncated before it wrote — and the rename
+#           stopped that: a write that fails now leaves the previous contents. It stays
+#           because `gate`'s explicit clearing and a file left by an older version both
+#           still produce an empty file, and neither is an answer.
+#           WRITTEN BY RENAME through `writelib.sh` rather than sent to stdout for the
+#           driver to redirect: `>` in the driving shell follows a symlink, so a path a
+#           same-UID process had replaced cost the operator the file it pointed at, and
+#           the redirection is opened BEFORE this helper starts, so nothing here could
+#           refuse it. #263
+#   stdout  nothing
 #   stderr  every reason
 #
-#   0  posted — the baseline is on stdout
+#   0  posted — the baseline is in the file `--baseline-file` names
 #   1  stopped — nothing was posted
 #
 # WHY THIS EXISTS AS A SCRIPT
@@ -84,10 +94,11 @@ rb_load() { return 127; }
 # THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
 # say: an empty `loadlib.sh` leaves the stub, the stub returns 127, and without
 # this arm the only trace is a bare exit status.
-# NO `2>&1` ON THESE, unlike the helpers whose contract is stdout. `rb_load`
-# reports on stderr, and so does everything this script says — stdout carries the
-# baseline or nothing. Redirecting here would put a load failure on the one stream
-# the caller reads as a value.
+# NO `2>&1` ON THESE, unlike the helpers whose contract is stdout. `rb_load` reports on
+# stderr, and so does everything this script says. Nothing at all goes to stdout since
+# #263 — the baseline crosses in the file `--baseline-file` names — so redirecting here
+# would only mix a load failure into a stream the caller has no use for, while hiding it
+# from the one it reads.
 rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty" >&2
@@ -99,6 +110,7 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_trigger "ABORT:" || exit 1
 # this baseline is about.
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" || exit 1
+rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON" >&2; exit 1; }
 
 # AN EXTRA ARGUMENT IS REFUSED RATHER THAN IGNORED. The body used to be a third
@@ -106,8 +118,15 @@ rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON" >&2; exit 1; }
 # dropped while the body was taken from whatever stdin happened to be — a
 # terminal, or the previous command's output. A shape that changed is worth
 # saying so about; an argument nothing reads is not.
-[ "$#" -le 2 ] || { echo "ABORT: this takes two arguments and the body on stdin (got $# — the body is no longer a file)" >&2; exit 1; }
-PR="${1:-}"; AUTO_REVIEW="${2:-}"
+#
+# AND THE BASELINE PATH IS AN OPTION RATHER THAN A THIRD POSITIONAL, for exactly that
+# reason: a caller still passing the old body-file form would have that file OVERWRITTEN
+# with the baseline, which is worse than the silent drop the refusal above exists for.
+# Spelled out, the old form still lands on the refusal above and the new one cannot be
+# confused with it.
+{ [ "$#" -le 2 ] || { [ "$#" -eq 4 ] && [ "$3" = --baseline-file ]; }; } \
+    || { echo "ABORT: this takes <pr> <auto-review> --baseline-file <path> and the body on stdin (got $# — a third positional was the body file, and the body is no longer a file)" >&2; exit 1; }
+PR="${1:-}"; AUTO_REVIEW="${2:-}"; BASELINE_FILE="${4:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')" >&2; exit 1 ;;
 esac
@@ -116,6 +135,13 @@ esac
 # nobody asked for — so an unrecognised value is refused by name rather than
 # falling into either branch. It cannot be probed from `gh`: Codex automatic
 # review is an account/repository setting, not repository state.
+# AND THE BASELINE PATH IS REQUIRED, CHECKED AFTER THE TWO POSITIONALS. Its own refusal
+# is separate from the arity one above so that a caller who omitted everything is told what
+# a PR number is before being told about an option — and so that the OLD three-argument
+# form, whose third argument named the BODY, still lands on the arity refusal rather than
+# having that file overwritten with the baseline.
+[ -n "$BASELINE_FILE" ] \
+    || { echo "ABORT: --baseline-file <path> is required: the review baseline is written into it, and pr-watch.sh --after-review-file reads it back" >&2; exit 1; }
 case "$AUTO_REVIEW" in
     yes|no) ;;
     "") echo "ABORT: the auto-review mode is required: 'yes' if Codex automatic review is on for this repository, 'no' if it is not" >&2; exit 1 ;;
@@ -199,15 +225,17 @@ if [ "$AUTO_REVIEW" = "no" ]; then
         || { echo "ABORT: could not read the current review id; do not request a review blind." >&2; exit 1; }
 fi
 
-# THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN. `printf` can
-# FAIL — a full filesystem under the caller's transport file — and an `exit 0`
-# after it masks that. When this was written that meant the driver read an empty or
-# truncated value as the baseline and `pr-watch.sh` accepted the PREVIOUS review as
-# the answer to a request just posted.
+# THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN. The write can FAIL — a
+# full filesystem under the caller's transport file — and an `exit 0` after it masks that.
+# When this was written that meant the driver read an empty or truncated value as the
+# baseline and `pr-watch.sh` accepted the PREVIOUS review as the answer to a request just
+# posted.
 #
-# SINCE #264 THE WATCH REFUSES BOTH of those — an empty file, and one whose last byte is
-# not this `printf`'s newline — so the consequence has moved rather than gone. What taking
-# the status prevents now is posting a request whose baseline was never produced: the
+# SINCE #264 THE WATCH REFUSES BOTH of those — an empty file, and one whose last byte is not
+# the writer's newline — and since #263 the write RENAMES, so a failure leaves the previous
+# contents rather than a truncated value and cannot produce either shape by accident. The
+# consequence has moved rather than gone. What taking the status prevents now is posting a
+# request whose baseline was never produced: the
 # request would be in flight, and the driver's watch would stop with
 # `empty_after_review_file` or `unterminated_after_review_file` on a round that cannot be
 # re-armed without re-requesting. Taking the status only works if there is something left
@@ -219,10 +247,19 @@ fi
 # posted, which is the order the two failures should be in.
 # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY. #264: an empty file used to mean
 # "no prior review", which made absence indistinguishable from failure — every writer
-# truncates before it writes, so any failure in between produced the legal value. The state
+# TRUNCATED before it wrote, so any failure in between produced the legal value. The state
 # is real and still has to be expressible, so it is expressed by a value a writer produces
-# on purpose. A truncation cannot fake it, and `pr-watch.sh` refuses an empty file.
-printf '%s\n' "${PRIOR:-none}" || { echo "ABORT: the review baseline could not be written; nothing has been posted." >&2; exit 1; }
+# on purpose. Since #263 the write RENAMES, so a failure leaves the previous contents rather
+# than an empty file and that particular route is gone — the token stays because `gate`'s
+# explicit clearing and a file left by an older version both still produce one, and
+# `pr-watch.sh` refuses an empty file for that reason.
+# AND IT CROSSES BY RENAME, ONTO A PATH THIS HELPER NEVER OPENS TO WRITE. It went to stdout
+# and the driver
+# redirected — `> "$PRIOR_FILE"` — which follows a symlink and is opened by the driving
+# shell BEFORE this process starts, so a path a same-UID process had replaced cost the
+# operator the file it pointed at and nothing here could refuse it. #263.
+_rb_wh="$(rb_write_handoff "$BASELINE_FILE" "${PRIOR:-none}")" \
+    || { echo "ABORT: the review baseline could not be written; nothing has been posted: $_rb_wh" >&2; exit 1; }
 
 # THE POST IS BRANCHED ON, because a failed one means no review was ever queued —
 # and the wait step would then poll for one until it timed out, reporting "no

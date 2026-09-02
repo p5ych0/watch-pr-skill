@@ -383,12 +383,17 @@ then
     # THE REQUEST IS INSIDE THIS ARM, not a fence after it.
     # WHY:
 
-#   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
+#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> < <body>
 #
-#     0  posted — the baseline is on stdout, and it is the `none` token on the
-#        automatic path, where the trigger preceded us and there is nothing to
-#        capture. `none` means "no prior review to wait past"; an EMPTY value is
-#        refused by the watch, since a failed write produces one
+#     0  posted — the baseline is in the FILE the option names, and it is the `none`
+#        token on the automatic path, where the trigger preceded us and there is
+#        nothing to capture. `none` means "no prior review to wait past"; an EMPTY
+#        value is refused by the watch — not because a failed write still produces one,
+#        which the rename stopped, but because an explicit clearing and a file left by
+#        an older version both can, and neither is an answer. Nothing
+#        is written to stdout: the helper RENAMES onto that path — it never opens the
+#        path you name in order to write it — where a `> "$PRIOR_FILE"` here would be
+#        opened by this shell before the helper starts and would follow a symlink
 #     1  stopped — nothing was posted
 #
 # Write the account into `$REQUEST_FILE` with your file-writing tool — not from
@@ -412,9 +417,11 @@ then
 # WHY:
 # THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
 # WHY:
+# AND THE HELPER RENAMES ONTO THAT PATH, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
+# WHY:
 # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 # WHY:
-    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"; then
         [[ -n x ]]
     else
         echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
@@ -844,20 +851,22 @@ fi
 # WHY:
 # AND ITS IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past.
 # WHY:
-if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
-    case "$(<"$HEAD_FILE")" in
-        *[!0-9a-f]*|"")
-            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-            exit 1
-            [[ -n "" ]] ;;
-        ????????????????????????????????????????)
-            [[ -n x ]] ;;
-        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-            exit 1
-            [[ -n "" ]] ;;
-    esac
+# AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
+# WHY:
+if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]] \
+   && /usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' \
+      _ "$RB_SCRIPTS" "$HEAD_FILE"; then
+    [[ -n x ]]
 else
-    echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
+    # THE TWO REASONS ARE NAMED APART, because they send the operator to different places:
+    # an alias means the gate refused before it could write, and anything else means the
+    # file does not hold a head this round proved. Re-asking the identity costs nothing —
+    # `[[` opens nothing — and a merged message would tell them neither.
+    if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+        echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
+    else
+        echo "ABORT: $HEAD_FILE does not hold a commit id, is not a plain regular file, or could not be read. No gate has proven a head. Do not resolve any thread."
+    fi
     exit 1
     [[ -n "" ]]
 fi

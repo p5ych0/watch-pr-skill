@@ -193,6 +193,12 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
+# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
+# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
+# named there and nowhere else. Putting this one ahead of it made that report come
+# from a bare `|| exit 1`, so the helper refused in silence and
+# `test-pr-identity.sh` caught it.
+rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted as
@@ -259,7 +265,7 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # THIS CLEARING STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
+    # THIS READINESS WRITE STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
     # truncating open above the bootstrap, where `run_limited` does not exist yet: its
     # `[[ -f ]]` guard refused a FIFO already at the path, so what could block it was a
     # same-UID process replacing the path between the test and the open — while the symlink
@@ -278,12 +284,13 @@ if [[ $STAGE = open ]]; then
     # revoked the previous Copilot signoff: the stage then reports that the phase did not
     # open while having mutated the PR.
     #
-    # AND NOTHING WEAKER PROVES IT. Measured: `>>` opens for append, so an append-only file
-    # passes the probe and fails the write; `<>` opens read-write, which REJECTS a
-    # write-only (mode 222) file the real write handles, and its only gain needs `chattr +a`
-    # and therefore root, so it would ship untestable. No shell redirection expresses the
-    # write's own mode — O_WRONLY without truncate or append — so the operation that proves
-    # it IS the truncation.
+    # AND NOTHING WEAKER PROVES IT, WHICH IS WHY IT IS THE REAL WRITE. The proof has to be
+    # the operation the later write performs, or it answers a different question: since #263
+    # that operation is `rb_write_handoff` — a type refusal, an exclusive create in the
+    # target's directory, and an exact rename — so this runs it. A path that cannot take
+    # that, for whatever reason, is found HERE. This settles more than the truncation it
+    # replaced did: the type refusal reaches `/dev/null`, a socket and a FIFO, which the old
+    # probe accepted and left to a read-back on the far side of the revocation.
     #
     # IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is what stopped the readiness
     # proof from being a fail-open. Emptying looked free because an empty baseline WAS legal
@@ -300,26 +307,50 @@ if [[ $STAGE = open ]]; then
     #
     # A SENTINEL IS NOT A REVIEW ID, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
     # status 2 — and the driver stops instead of accepting a pass that never happened. The
-    # same refusal that used to fail open now fails closed, and the readiness proof is
-    # unchanged: this is still a truncating open on the path, still bounded, still ahead of
-    # the revocation, so a path that CANNOT TAKE THIS WRITE is found before anything is
-    # posted. Not every unusable path: `/dev/null` and a write-only file accept it and are
-    # caught by the read-back further down, which is after the revocation. Those are the
-    # cases this ordering does not cover, and the read-back is what covers them.
+    # same refusal that used to fail open now fails closed, and the readiness proof still
+    # stands ahead of the revocation, so a path that cannot take this write is found before
+    # anything is posted. What is NO LONGER an exception is the class that used to be one:
+    # `/dev/null`, a socket and a FIFO passed a truncating probe and were caught only by the
+    # read-back on the far side of the revocation. `rb_write_handoff` refuses them here, by
+    # type, before anything is created. The read-back keeps its own job — proving the bytes
+    # that crossed are the bytes asked for — rather than standing in for this one.
     #
     # IT MUST NOT BE EMPTY AND MUST NOT PARSE AS AN ID. Empty is the legal "no floor" value
     # above; digits, or `comment:` and digits, are the two shapes the watch accepts. Anything
     # else is refused, and this is spelled so a reader of the file sees why it is there.
     #
-    # AND IT NARROWS THE WINDOW RATHER THAN CLOSING IT. This write truncates before it
-    # writes, so a failure between the two — ENOSPC, a quota — still leaves the file empty,
-    # which the watch still accepts as "no floor". No shell redirection truncates and writes
-    # atomically, so no writer can close that alone: the fix is that an EMPTY file stops
-    # being legal and "no prior review" gets an explicit token, which is a change to
-    # `pr-watch.sh`'s contract with three writers and is #264. Until then this is strictly
-    # narrower than emptying, which failed open on EVERY refusal in this span.
-    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" refused-no-baseline > "$1"' _ "$PRIOR_FILE" \
-        || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'; it is a directory, is unwritable or append-only, or opening it blocked. Nothing has been posted."; exit 1; }
+    # AND THE WINDOW IT ONCE NARROWED IS CLOSED FROM BOTH ENDS NOW. This write truncated
+    # before it wrote, so a failure between the two — ENOSPC, a quota — left the file empty,
+    # which the watch then accepted as "no floor"; the sentinel narrowed that and could not
+    # close it, because no shell redirection truncates and writes atomically. #264 made an
+    # EMPTY file a refusal rather than a no-floor value, and #263 made the write a RENAME:
+    # the value is complete in a temporary before the caller's name refers to it at all, so
+    # a failure part-way leaves the previous contents and never a half-written value.
+    # WRITTEN THROUGH `rb_write_handoff`, WHICH RENAMES RATHER THAN TRUNCATING — #263. A
+    # plain `>` on this path follows a symlink, so a same-UID process that replaced it had
+    # the file it pointed at truncated instead.
+    # BOUNDED, AND THE BOUND IS NOT ABOUT FIFOs ANY MORE. The temporary is created with
+    # `perl`'s `sysopen` and `O_CREAT|O_EXCL`, so an entry already at that name fails
+    # instead of being waited on — `set -C` did NOT do that, since bash's noclobber exempts
+    # everything but a regular file — but pathname resolution, the write and the rename can
+    # all still stall on an unresponsive filesystem, so the watchdog stays, around the
+    # library rather than around a raw redirection.
+    #
+    # THIS ONE IS THE READINESS WRITE AND STANDS BEFORE BOTH MUTATIONS, which is what its
+    # bound is for: a hang here costs a stage that did nothing, and the whole point of
+    # proving the path this early is that a path which cannot take the write is found before
+    # the revocation. The half-open consequence belongs to the BASELINE write further down,
+    # which stands after the revocation and before the request — saying it here misplaces
+    # the risk and would make this bound look like the important one to keep.
+    #
+    # RUN IN A CHILD BECAUSE `run_limited` BOUNDS A COMMAND, not a shell function. The
+    # child sources the library by absolute path from `$_RB_SELF_DIR`; an emptied library
+    # leaves `rb_write_handoff` undefined, the child exits non-zero, and this refuses —
+    # which is the same direction `rb_load` fails in, reached without it.
+    _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
+        'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+        _ "$_RB_SELF_DIR" "$PRIOR_FILE" refused-no-baseline)" \
+        || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'. Nothing has been posted: $_rb_wh"; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase
@@ -430,12 +461,13 @@ if [[ $STAGE = open ]]; then
     PRIOR_REVIEW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
 
-    # WRITTEN BEFORE THE REQUEST, WITH ITS STATUS TAKEN AND THE VALUE READ BACK.
-    # `printf` can report success and the write fail at the flush when the
-    # redirection closes, and after the request there is nothing left to refuse
-    # with — the phase would be irreversibly half-opened, with Copilot asked and the
-    # caller reading a truncated id as the baseline. Writing first costs nothing,
-    # because the driver reads the file only when this stage succeeds.
+    # WRITTEN BEFORE THE REQUEST, WITH ITS STATUS TAKEN. The write is `rb_write_handoff`,
+    # which creates a temporary exclusively, writes into that handle, renames it onto this
+    # path and reads the raw bytes back before returning — so a `0` means the value crossed
+    # and a non-zero one means this handoff did not happen. After the request there is
+    # nothing left to refuse with: the phase would be irreversibly half-opened, with Copilot
+    # asked and the caller reading whatever is at that path as the baseline. Writing first
+    # costs nothing, because the driver reads the file only when this stage succeeds.
     # BOUNDED FOR THE SAME REASON, and it matters more here: the revocation is already
     # posted, so a hang leaves the phase half-advanced with nothing said about it.
     # THE NO-FLOOR VALUE IS SPELLED `none` — #264, for the reason `pr-request-review.sh`
@@ -443,53 +475,29 @@ if [[ $STAGE = open ]]; then
     # failed produced it by accident. Copilot has usually not reviewed this head when the
     # phase opens, so this is the ordinary case rather than an edge one.
     PRIOR_REVIEW="${PRIOR_REVIEW:-none}"
-    run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$PRIOR_FILE" "$PRIOR_REVIEW" \
-        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested."; exit 1; }
-    # BOUNDED TOO, because the write finishing does not make the next open safe: the
-    # path is named in argv, and a same-UID process can put a FIFO there between the
-    # two. This read is on the same side of the revocation as the write, so a hang
-    # here leaves the phase half advanced exactly as one there would.
+    _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
+        'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+        _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$PRIOR_REVIEW")" \
+        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested: $_rb_wh"; exit 1; }
+    # THIS IS THE WRITE THE HALF-OPEN RISK BELONGS TO. It stands after the revocation and
+    # before the request, so a hang here leaves the phase reopened with no pass asked for
+    # and no diagnostic — which is why this bound is the one that matters most of the three.
     #
-    # AND THE READ'S OWN STATUS IS TAKEN, INSIDE THE CHILD. `printf "%s" "$(<"$1")"`
-    # exits 0 whatever the substitution did, so a path removed or made unreadable
-    # after the write came back as SUCCESS with empty output — and where there is
-    # legitimately no earlier Copilot review the baseline WAS empty when this was written,
-    # so the comparison below passed and Copilot was requested against a file nothing can
-    # read. The watch then refuses, after the revocation and the request have gone out.
-    # Since #264 that value is the `none` token rather than empty, which narrows the
-    # coincidence without removing the reason for taking the status: a read that fails must
-    # not be able to look like any legitimate value.
+    # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
+    # re-prove the baseline itself, in a bounded child, on a descriptor — because the write
+    # above it was a `printf` that proved nothing. Since #263 the write IS the proof:
+    # `rb_write_handoff` reads the target back before it returns and compares the raw bytes
+    # INCLUDING the terminator, which is the property #246 built this for — a read failing
+    # at the FIFTH byte still returns `none`, and only a comparison on the whole bytes sees
+    # it. The library's read is the stronger one besides: `O_NOFOLLOW` refuses a symlink at
+    # the open, `O_NONBLOCK` and `fstat` on the handle refuse a FIFO rather than waiting.
     #
-    # AND THE DESCRIPTOR IS PROVED REGULAR. A writable non-regular path — `/dev/null`
-    # is the reachable one — takes both writes, reads back empty, and passes that same
-    # comparison; `pr-watch.sh` rejects the identical path as `not_regular`, but only
-    # once the phase is half open. The `-f` question is asked HERE, on the bound
-    # descriptor rather than on the name, so it is the file that was read.
-    # AND THE COMPARISON HAPPENS IN THE CHILD, ON THE RAW BYTES. `read` reports ordinary
-    # EOF and a read that failed part-way with the SAME status — bash exposes no way to
-    # ask a descriptor whether it ended cleanly — so a child that hands its bytes back and
-    # leaves the comparison here cannot tell the two apart. That did not matter for a
-    # forty-character sha, which a truncated read can never equal, and it mattered exactly
-    # here: an EMPTY baseline was legitimate when this was written, so a read that failed at
-    # the first byte returned the empty string and compared equal to the empty value that
-    # was written. Since #264 the legitimate value is `none\n`, which a read failing at the
-    # first byte cannot equal — but a read failing at the FIFTH still returns `none`, and
-    # the comparison here is on the raw bytes INCLUDING the terminator, so it does not.
-    #
-    # PASSING THE EXPECTED BYTES IN CLOSES IT WITHOUT ANSWERING THE QUESTION. The child
-    # compares what it read against what was written, INCLUDING the trailing newline and
-    # before any stripping — so a read that lost even one byte differs, whatever its
-    # status said. Nothing crosses back, which is also why there is no value here to
-    # compare a second time. #246.
-    run_limited 10 /usr/bin/env bash -p -c '
-        { [ -f /dev/fd/9 ] || exit 6
-          IFS= read -r -d "" _r <&9
-          _s=$?
-        } 9<"$1" || exit 4
-        [ "$_s" -eq 0 ] && exit 5
-        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$PRIOR_REVIEW
-" \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written; Copilot has NOT been requested."; exit 1; }
+    # AND A SECOND PROOF HERE COULD ONLY MAKE THINGS WORSE. This point is past the
+    # revocation, so a racer who swaps the path after the library returns turns a proven
+    # handoff into a refusal with the phase already reopened — a cost with nothing bought,
+    # since the question was answered before the swap. #246's finding was that two
+    # read-backs in two shapes let one of them be weaker; one read-back, in the library,
+    # is that finding taken to its end.
 
     # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
     # for, so entering the phase would poll for a review nobody asked for and then
@@ -941,29 +949,24 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # read back. `printf` can report success and fail at the flush, and taking the status only
 # works while there is something left to refuse WITH: after the comment is posted the
 # signoff is on the PR and this stage cannot be un-run.
-# BOUNDED, LIKE `open`'S WRITES. Opening a path for writing can BLOCK — a FIFO at that
-# name waits for a reader that never arrives — and this write is the one immediately before
-# the signoff is posted, so a hang here stalls the stage with the phase half decided. `open`
-# has bounded both of its writes since #230; this was the copy left plain, which is the
-# same way its read-back ended up the weaker of the two. #246.
-run_limited 10 /usr/bin/env bash -p -c 'printf "%s\n" "$2" > "$1"' _ "$SHA_FILE" "$CODEX_SHA" \
+# BOUNDED, LIKE `open`'S WRITES, AND NO LONGER BECAUSE OF FIFOs. The write opens nothing at
+# this path: `rb_write_handoff` creates a temporary with `O_CREAT|O_EXCL` — which refuses a
+# FIFO rather than waiting on it — and renames. What can still stall is pathname resolution,
+# the write and the rename, on an unresponsive filesystem, and this write is the one
+# immediately before the signoff is posted, so a hang here stalls the stage with the phase
+# half decided. `open` has bounded both of its writes since #230; this was the copy left
+# plain, which is the same way its read-back ended up the weaker of the two. #246.
+_rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
+    'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+    _ "$_RB_SELF_DIR" "$SHA_FILE" "$CODEX_SHA")" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
-# READ BACK THE SAME WAY `open` DOES, and for the reasons it states: bounded, because
-# opening a path can block; with its own status, because `$(<…)` reports the substitution's
-# and not the read's; and COMPARED IN THE CHILD on the raw bytes, because `read` cannot
-# tell ordinary EOF from a read that failed part-way. A truncated read can never equal a
-# forty-character sha, so this one was not exposed the way the baseline was — but two
-# read-backs proving the same kind of thing in two different shapes is how one of them
-# ends up weaker, which is what happened here. #246.
-run_limited 10 /usr/bin/env bash -p -c '
-    { [ -f /dev/fd/9 ] || exit 6
-      IFS= read -r -d "" _r <&9
-      _s=$?
-    } 9<"$1" || exit 4
-    [ "$_s" -eq 0 ] && exit 5
-    [ "$_r" = "$2" ] || exit 7' _ "$SHA_FILE" "$CODEX_SHA
-" \
-    || { echo "ABORT: the signed-off sha did not survive being written to '$SHA_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written; nothing has been posted."; exit 1; }
+# AND NOT READ BACK AGAIN HERE, for the reason `open` gives at its own write: since #263
+# `rb_write_handoff` proves the raw bytes before it returns, with a no-follow non-blocking
+# open and the type from `fstat` on the handle. This stage's copy was the weaker of the two
+# even when both existed — a truncated read can never equal a forty-character sha, so it was
+# never exposed the way the baseline was — and #246's finding was precisely that two
+# read-backs proving the same kind of thing in two shapes let one of them rot. One, in the
+# library, is that finding taken to its end.
 
 gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
     || { echo "ABORT: could not post the phase summary — the signoff is not recorded; do not request Copilot."; exit 1; }

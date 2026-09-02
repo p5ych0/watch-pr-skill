@@ -118,61 +118,99 @@ fi
 
 set -uo pipefail
 
-# ── THE STALE HEAD IS CLEARED BEFORE THE BOOTSTRAP, not after the arguments are
-# parsed. Everything below this — the library loads, the identity, the argument
-# validation — can refuse, and a refusal that happens before the file is emptied
-# leaves the PREVIOUS round's OID in it. The driver proves the head before it
-# resolves any thread, so a stale OID passing that proof is a resolve on a round
-# that never gated. Measured: emptying an inline `recordlib.sh` makes this stage
-# exit at `reason=recordlib_empty`, which is above every line that parses `$5`.
+# THE LIBRARY DIRECTORY IS DERIVED BY EXPANSION, BECAUSE THE CLEARING BELOW NEEDS IT AND
+# NOTHING FALLIBLE MAY COME FIRST. It was `$(cd -- "$(dirname -- …)" && pwd)`, which is two
+# commands and a substitution: `dirname` missing from `PATH` — or `cd` refusing, or the
+# substitution failing — refused ABOVE the clearing, leaving a stale 40-hex head for a
+# driving shell whose `exit` returns to accept. `${BASH_SOURCE[0]%/*}` is a parameter
+# expansion the parser performs: there is no command to be missing and no status to take.
 #
-# WITH NOTHING BUT RESERVED WORDS AND A REDIRECTION, because no library has been
-# loaded yet and none is needed. It is deliberately BEFORE `shift`, so `$1` is the
-# stage and `$6` is the head file.
+# A SOURCE WITH NO `/` IS THIS DIRECTORY. `%/*` leaves the string unchanged when it holds no
+# slash, which is the case where the script was found on `PATH` — the driver never does that
+# (`test-pr-identity.sh` fails if any caller invokes a helper bare) but a person can.
+_RB_LIB_DIR="${BASH_SOURCE[0]%/*}"
+[[ $_RB_LIB_DIR = "${BASH_SOURCE[0]}" ]] && _RB_LIB_DIR=.
+# ── THE STALE HEAD AND BASELINE ARE CLEARED BEFORE ANYTHING ELSE, and that ordering is
+# a finding rather than a preference. The driver's head-file check is NOT inside the gate's
+# success arm — it is the next statement after it, and its own comment says why: `AND ITS
+# IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past`. A shadowed
+# `exit` in the driving shell walks past a failed `gate`, the content check then accepts a
+# previous round's 40-hex OID, and the operator reaches the irreversible reply-and-resolve
+# step with nothing pushed and nothing gated. So every refusal this stage can make has to
+# happen AFTER the clearing.
 #
-# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test
-# here would be a second copy of the rule `recordlib.sh` owns — `sha_reason` is not
-# loaded yet, so there would be no way to ask it — and the pre-#202 form puts the
-# head ITSELF in that position. A commit id contains no `/`, and every head file
-# this loop names is a path under the session's working directory, so the slash
-# tells the two apart without knowing what an OID looks like. Without it, a file
-# named after a sha in the current directory would be truncated by a call that is
-# about to be refused for passing the old form.
+# IT USED TO BE A RAW `>` FOR THAT REASON, and that is the defect #263 removes. Nothing was
+# loaded here, so there was nothing to rename with — and `>` FOLLOWS A SYMLINK, as does the
+# `[[ -f ]]` in front of it, so a link at either path had the operator's file at the other
+# end truncated on every `gate` call that got this far, not only on a refusal.
 #
-# AND NOT THE SUMMARY, because truncating a head file that IS the summary destroys
-# the account this stage is about to post. That refusal is below too, and this must
-# not commit the damage it exists to prevent.
+# SO THE RULE IS REACHED IN A CHILD THAT SOURCES `writelib.sh` DIRECTLY, which is how both
+# orderings hold at once. `rb_load` is not used and is not needed: an emptied `loadlib.sh`
+# leaves the stub, the stub refuses, and every load below would fail — but none of that is
+# above the clearing any more, because this reaches the library without the loader.
 #
-# AND THE TRUNCATION'S STATUS IS TAKEN. A head file that cannot be truncated — its
-# permissions changed, its filesystem gone read-only — keeps the PREVIOUS round's
-# OID, and a bootstrap refusal after that leaves exactly the state this block
-# exists to prevent. Refusing here is safe in a way it is not further down: nothing
-# has been loaded, nothing pushed, nothing posted.
+# AND THE CHILD DEFINES A REFUSING STUB BEFORE IT SOURCES, for the reason `rb_load`'s own
+# bootstrap does. Sourcing an EMPTY `writelib.sh` succeeds — there is nothing in it to fail
+# — and leaves the name undefined, and an undefined name is then looked up on `PATH`: an
+# executable called `rb_empty_handoff` that exits 0 reported the clearing done with the
+# stale head untouched, and a later refusal was then walked past onto that head. With the
+# stub in place an empty library leaves the stub, the stub returns 127, and this refuses
+# at the clearing rather than somewhere later — the direction `rb_load` fails in, reached
+# without it. Every child that sources this library directly carries the same stub.
+#
+# WHAT REMAINS ABOVE IS THE INSTALLATION ITSELF: a `writelib.sh` that is unreadable or
+# defines nothing. Neither can be defended from inside
+# this stage — clearing without the rule is what forced the raw `>`, and an inline rename is
+# the duplicated rule `CLAUDE.md` forbids — and both are the same class as this file itself
+# being empty.
+#
+# UNBOUNDED, LIKE THE `>` IT REPLACES. `run_limited` lives in `testlib.sh` and there is no
+# loader yet; the exclusive create cannot block on a FIFO, and what remains is the pathname
+# resolution an unresponsive mount can stall, which the redirection here could stall on too.
+#
+# BEFORE `shift`, so `$1` is the stage and `$6` and `$7` are the two files.
+#
+# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test here
+# would be a second copy of the rule `recordlib.sh` owns, and the pre-#202 form puts the
+# head ITSELF in that position. A commit id contains no `/`, and every head file this loop
+# names is a path under the session's working directory, so the slash tells the two apart
+# without knowing what an OID looks like.
+#
+# AND NOT THE SUMMARY, because emptying a head file that IS the summary destroys the
+# account this stage is about to post. That refusal is below too, and this must not commit
+# the damage it exists to prevent.
 if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
-    > "${6}" || {
-        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept."
+    _rb_eh="$(/usr/bin/env bash -p -c \
+        'rb_empty_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
+        _ "$_RB_LIB_DIR" "${6}")" || {
+        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept: $_rb_eh"
         exit 1
     }
 fi
-# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A
-# bootstrap refusal above the truncation further down leaves the PREVIOUS round's
-# baseline in place, and the driver's watch takes what it finds: a review that
-# predates this round, accepted as the answer to a request this round never made.
-# The exceptions are the summary — truncating it destroys the account — and the head
-# file, which the arm above has already emptied and whose emptiness must not be
-# mistaken for this one's. Both are refused properly further down; this only
-# declines to do damage before that refusal can be reached. #234.
+# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A refusal
+# above the write further down leaves the PREVIOUS round's baseline in place, and the
+# driver's watch takes what it finds: a review that predates this round, accepted as the
+# answer to a request this round never made. The exceptions are the summary — emptying it
+# destroys the account — and the head file, which the arm above has already emptied and
+# whose emptiness must not be mistaken for this one's. Both are refused properly further
+# down; this only declines to do damage before that refusal can be reached. #234.
 if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
    && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
-    > "${7}" || {
-        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept."
+    _rb_eh="$(/usr/bin/env bash -p -c \
+        'rb_empty_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
+        _ "$_RB_LIB_DIR" "${7}")" || {
+        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept: $_rb_eh"
         exit 1
     }
 fi
 
-_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
+# CANONICALISED ONLY NOW, below the clearing. Everything after this point loads libraries
+# and runs helpers by absolute path, and a relative one would break if anything later
+# changed directory — but the canonicalisation can FAIL, so it must not stand ahead of the
+# clearing, which is what put it there in the first place.
+_RB_SELF_DIR="$(cd -- "$_RB_LIB_DIR" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
 # NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
@@ -204,6 +242,15 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
+# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
+# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
+# named there and nowhere else. Putting this one ahead of it made that report come
+# from a bare `|| exit 1`, so the helper refused in silence and
+# `test-pr-identity.sh` caught it. The CLEARING above the bootstrap needs neither, and
+# reaches `rb_empty_handoff` without `rb_load` for exactly that reason.
+rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || exit 1
+
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
@@ -324,8 +371,13 @@ fi
 # nothing. Do not "fix" this by writing the `none` token here: the token means there was
 # no prior review, which this gate has not established and must not claim.
 if [ "$STAGE" = gate ]; then
-    > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
-    > "$PRIOR_FILE" || { echo "ABORT: could not empty the prior file '$PRIOR_FILE'."; exit 1; }
+    # EMPTIED BY WRITING AN EMPTY VALUE AND RENAMING IT OVER, not by truncating the name.
+    # `>` follows a symlink, so a same-UID process that replaced either of these paths had
+    # the file it pointed at emptied instead. #263.
+    _rb_wh="$(rb_empty_handoff "$HEAD_FILE")" \
+        || { echo "ABORT: could not empty the head file '$HEAD_FILE': $_rb_wh"; exit 1; }
+    _rb_wh="$(rb_empty_handoff "$PRIOR_FILE")" \
+        || { echo "ABORT: could not empty the prior file '$PRIOR_FILE': $_rb_wh"; exit 1; }
 fi
 
 case "$PR" in
@@ -546,13 +598,17 @@ report_gated() {   # report_gated <head> ; writes the head to $HEAD_FILE, then r
     # the round was gated. Reporting only after the write means the record and the
     # file agree or neither exists.
     #
-    # IT IS NOT READ BACK HERE, and that is deliberate. `post` reads this file and
-    # validates what it finds with `sha_reason` before anything is posted, so a
-    # write that succeeded on a file that holds something else is caught there —
-    # by the stage that depends on it, at no cost, and on the read that matters. A
-    # second check here would be a branch no fixture can stage.
-    printf '%s\n' "$1" > "$HEAD_FILE" \
-        || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read."; return 1; }
+    # THE WRITER PROVES THE BYTES AND `post` PROVES THE MEANING, which are two questions and
+    # not one. `rb_write_handoff` now reads the target back itself before returning — no
+    # follow, non-blocking, type from `fstat` on the handle — so "the value that crossed is
+    # the value asked for" is answered here, and a `0` from it is that guarantee. What it
+    # cannot answer is whether a well-formed sha is the RIGHT one, which is `post`'s job:
+    # it reads this file and validates what it finds with `sha_reason` before anything is
+    # posted. Do not read this as licence to drop the library's postcondition — it is the
+    # only thing standing between a substituted temporary and a driver that resolves threads
+    # on a head this round never gated.
+    _rb_wh="$(rb_write_handoff "$HEAD_FILE" "$1")" \
+        || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read: $_rb_wh"; return 1; }
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$1 mode=$_MODE"
     return 0
 }
@@ -565,49 +621,39 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     local prior _back
     prior=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; return 1; }
-    # AND IT IS HANDED OVER BEFORE THE REQUEST, with the write's status taken and the
-    # value read back. `printf` can report success and the write fail at the flush when
-    # the redirection closes, and a driver reading a truncated baseline watches against
-    # a value no request was made with. Taking the status only works while there is
-    # something left to refuse WITH: after the request there is not, and the round is
-    # irreversibly half-closed. So the file is written here — the read above is still
-    # immediately before the request, which is what that ordering is for — and a failure
-    # stops the stage with nothing posted and nothing queued.
+    # AND IT IS HANDED OVER BEFORE THE REQUEST, with the write's status taken. The write is
+    # `rb_write_handoff`, which creates a temporary exclusively, writes into that handle,
+    # renames it onto this path and reads the raw bytes back before returning — so a `0`
+    # from it means the value crossed, and a non-zero one means this handoff did not happen.
+    # Taking that status only works while there is something left to refuse WITH: after the
+    # request there is not, and the round is irreversibly half-closed. So the file is written
+    # here — the read above is still immediately before the request, which is what that
+    # ordering is for — and a failure stops the stage with nothing posted and nothing queued.
     # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY — #264. An empty file used to
-    # mean "no prior review", so a failure between this truncation and this write produced
-    # the legal value, and a driver whose `exit` returns then armed its watch with no floor
-    # at all. `gate` still EMPTIES this file, and that is now a refusal rather than a
+    # mean "no prior review", and every writer TRUNCATED before it wrote, so a failure in
+    # between produced the legal value and a driver whose `exit` returns then armed its
+    # watch with no floor at all. The rename removed that failure mode — a write that fails
+    # leaves the previous contents — and the token stays, because `gate`'s explicit
+    # clearing still produces an empty file on purpose and that is not an answer either. `gate` still EMPTIES this file, and that is now a refusal rather than a
     # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
     # direction that stops a round instead of announcing a pass nobody requested.
     prior="${prior:-none}"
-    printf '%s\n' "$prior" > "$PRIOR_FILE" \
-        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted."; return 1; }
-    # THE READ-BACK COMPARES RAW BYTES, TERMINATOR INCLUDED, IN THE CHILD. `$(<…)` strips
-    # trailing newlines, so it cannot see the delimiter the watch now requires: a path
-    # replaced between the write and the read with the SAME id and no newline compared
-    # equal, this stage posted the request, and the watch then refused the file as
-    # `unterminated_after_review_file` — with the round irreversibly half-closed, since the
-    # summary is up and the next pass is queued.
+    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$prior")" \
+        || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
+    # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
+    # re-prove the bytes itself, in a child, on a descriptor — `9<"$PRIOR_FILE"` — because
+    # the write above it was a `printf` that proved nothing. Since #263 the write IS the
+    # proof: `rb_write_handoff` reads the target back before it returns, comparing the raw
+    # bytes including the terminator, with `O_NOFOLLOW` so a swapped-in symlink is refused
+    # at the open and `O_NONBLOCK` and `fstat` on the handle so a swapped-in FIFO is refused
+    # rather than waited on. Every question this repeated is answered there and answered
+    # better.
     #
-    # AND THE COMPARISON HAPPENS IN THE CHILD, for the reason `pr-copilot-phase.sh` gives
-    # at its own read-back: `read` reports ordinary EOF and a read that failed part-way with
-    # the same status, so a child that hands its bytes back leaves the caller unable to tell
-    # them apart. `_r` is compared against the value plus its newline, and only the verdict
-    # crosses.
-    #
-    # NOT BOUNDED, AND THAT IS CONSISTENT RATHER THAN AN OVERSIGHT. `run_limited` is not
-    # loaded in this file, and bounding the read alone would buy nothing: the WRITE above it
-    # is a plain redirection, so a path that blocks on open has already blocked there. A
-    # watchdog here would need one there too, which is a different change from this one.
-    /usr/bin/env bash -p -c '
-        { [ -f /dev/fd/9 ] || exit 6
-          IFS= read -r -d "" _r <&9
-          _s=$?
-        } 9<"$1" || exit 4
-        [ "$_s" -eq 0 ] && exit 5
-        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$prior
-" \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written including its terminating newline; nothing has been posted."; return 1; }
+    # AND REPEATING IT WAS NOT MERELY REDUNDANT. `9<"$PRIOR_FILE"` is a plain redirection in
+    # a shell with no watchdog: a same-UID process that put a FIFO there AFTER the library
+    # returned had this open BLOCK FOREVER — and this point is past the thread replies, so
+    # the round is half-closed while it hangs. The library's own read cannot block. Removing
+    # the dependency is the fix; bounding it would have been the guard.
     # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
     # never triggered by a mention and never by a push — only by `--add-reviewer` —
     # so a Copilot round that posted the Codex mention requested nothing at all,

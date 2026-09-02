@@ -1,5 +1,141 @@
 # Changelog
 
+## [2.1.0] — 2026-09-02
+
+- **The file handoffs rename instead of truncating, so a symlink at one of those paths no
+  longer costs you the file it points at.** Three values cross from a helper to the driver
+  in a file whose path the driver chose — the gated head, the review baseline, and the
+  signed-off sha — and every site that wrote them spelled it `printf … > "$THE_PATH"`.
+  Others EMPTIED those files with a bare `>`, which is the same open with nothing to write.
+  Counted from the tree, the rule now has **ten call sites in three helpers**: six in
+  `pr-close-round.sh` (two pre-bootstrap emptyings, two `gate` emptyings, the head write,
+  the baseline write), three in `pr-copilot-phase.sh`, one in `pr-request-review.sh`.
+
+  **The failure.** `>` follows a symlink. A same-UID process that replaced one of those
+  paths had the symlink's **target** truncated: an arbitrary file of the operator's,
+  outside the session's working directory entirely, and on **every invocation that got that
+  far** rather than only on a refusal. Removing the clearings in 2.0.97 did not help,
+  because the write beside them opened the same name the same way.
+
+  **And the last one found was the driver's own redirection.** `SKILL.md` ran the opening request as
+  `pr-request-review.sh N "$AUTO_REVIEW" … > "$PRIOR_FILE"`, which is the same `>` — opened
+  by the driving shell *before* the helper starts, so nothing the helper could check would
+  have caught a link there. The path is handed over as `--baseline-file` now and the helper
+  renames onto it. It is an option rather than a third positional because the body used to
+  be one, and a caller still passing that form would have had their body file overwritten
+  with the baseline.
+
+  **The last two were above the bootstrap, and that is why they were the last two.**
+  `pr-close-round.sh gate` clears the head and baseline files before it loads anything, so
+  that no library load can refuse while a previous round's values are still readable — and
+  with no library loaded there was nothing to rename with, so those two arms stayed raw
+  `>` redirections behind a `[[ -f ]]` that follows a link exactly as the redirection does.
+  They reach `rb_empty_handoff` in a **child that sources `writelib.sh` directly**, above
+  the loader entirely, so no library load can refuse ahead of them and the rename is still
+  what does the clearing. That ordering is load-bearing rather than tidy: the driver reads
+  the head file in the statement AFTER the gate's `if`, not inside its success arm, because
+  a refusal can be walked past — so a previous round's OID left in that file would be
+  accepted as a proven head, and the operator would reach the irreversible resolve with
+  nothing pushed and nothing gated.
+
+  **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
+  beside the target, writes the value into it, and moves it over — so where the target is a
+  symlink it is the link that goes and never the file it points at. The target IS inspected
+  first, and that refusal is load-bearing; what never happens is an open of it **to write
+  it**, so the write's safety does not rest on the answer that inspection gave. The value
+  postcondition does open it, to read, past the rename and with its own no-follow,
+  non-blocking, fstat-on-the-handle answer. Measured both ways: a
+  plain redirection on a symlink truncates the victim, and the rename leaves the victim's
+  bytes untouched.
+
+  **It is not another check-then-open**, which is the shape #245 already convicted. The
+  target IS inspected — that refusal is load-bearing — and the value postcondition opens it
+  to verify what arrived. What never happens is an open of the target **to write it**: the
+  value goes into a temporary and is renamed onto the name, so the write's safety does not
+  rest on the answer the inspection gave. #245's shape was a test whose answer licensed a
+  *writing* open of the thing tested. The temporary is created exclusively with `O_CREAT|O_EXCL` **in the same open that writes
+  it** — creating it and then opening it again by name would be that shape reappearing
+  inside the fix, with the second open free to follow a symlink or block on a FIFO.
+
+  **The three watchdogs stay, and the reason for them has changed.** They were there
+  because a plain `>` on a caller-named path blocks on a FIFO waiting for a reader, and
+  the exclusive create does make the temporary's open fail rather than wait. But `O_EXCL` only settles
+  that one case: pathname resolution, the write and the `mv` can all still stall on an
+  unresponsive filesystem, and the baseline write stands **after** the Copilot-signoff
+  revocation, where a hang leaves the phase half-open with no diagnostic. So the bound is
+  kept and moved around the library call.
+
+  **The target's TYPE is refused before anything is created**, and that is what keeps the
+  outcomes an operator already knew. A target that is not a regular file is refused outright
+  and left as it was: a directory, a FIFO, a device, a socket, or a symlink to any of them.
+  A symlink to a **regular file** is accepted, and the link is what the rename replaces.
+
+  What the test is doing differs by case, and the distinction matters if anyone is tempted to
+  drop it or to drop the exact rename. An **actual directory** the exact rename refuses on
+  its own, so the test only arrives earlier and with a better message. A **FIFO, device or
+  socket** the rename would happily replace — `rename(2)` takes any non-directory
+  destination — so the test is what keeps `/dev/null` a device. A **symlink to a directory**
+  the rename would replace as a link, leaving the directory untouched: safe, but not what the
+  caller meant, and only the test refuses it.
+
+  **`perl` runs with its environment cleared.** `PERL5OPT` and `PERL5LIB` are read before
+  the program is, so an inherited value could stop every handoff in the loop — the same
+  class as a poisoned `PATH`, except that this one can be **removed**. `env -i` keeping only
+  `PATH` is a removal rather than a denylist, so there is no list of perl variables to keep
+  in step.
+
+  **Every question about the target comes from one opened descriptor.** `[ ! -L ]`, `[ -f ]`
+  and a size or content test are separate resolutions of the same name, so a racer between any
+  two is answered about a different inode. The value read-back, the emptying's size check and
+  the driver's own head check all `sysopen` with `O_NOFOLLOW|O_NONBLOCK` and answer from that
+  handle — which is also why `SKILL.md` no longer reads `$HEAD_FILE` with a substitution: a
+  test and then an open is a window a FIFO can arrive in, and that shell has no watchdog.
+
+  **And the postcondition proves the VALUE, because the SOURCE is raceable too.** The
+  temporary's name is published in its directory the moment it exists, so a racer can
+  replace *that* path and the exact rename then moves their inode onto the handoff path
+  faithfully — a type check is satisfied by exactly what arrives. The target must be a
+  non-symlink regular file whose raw bytes are what the call asked for, and that read
+  **opens non-blocking and takes the type from the handle**: `[ -f ]` before an open is a
+  cheap early answer and not the protection, since a FIFO swapped in between the two had
+  the read waiting for a writer that never comes. The read is a `sysread` loop that ends only
+  on a zero-length read — a slurp returns what arrived *before* an I/O error, so a matching
+  prefix followed by a failure read as a complete head — and it gathers the whole file, so a
+  forgery spelled "the requested value, then a NUL, then anything" comes back whole and
+  compares unequal. With a reader that stopped at the NUL it compared *equal*, and the
+  driver's `$(<…)` would then drop the NUL and accept the 40-hex prefix.
+
+  **The directory swap is refused by the rename, not caught afterwards.** A directory
+  installed after the type test makes both `mv -T` and `perl`'s `rename` refuse, so nothing
+  is moved inside it — neither the postcondition nor the temporary's randomness is what
+  protects that, and treating either as a second line of defence is how the exact rename
+  gets weakened. The randomness bounds an accidental collision and a name pre-placed before
+  it exists; the postcondition validates what actually arrived at the target.
+
+  **And the rename asks for the exact-destination form first**, because the two-operand `mv`
+  is not a rename: it stats the destination and, where that resolves to a **directory**,
+  moves the source inside it — following a symlink to get there. `rename(2)` never follows a
+  symlink in the final component, so the directory behaviour belongs to the utility. Without
+  the exact form the unguessable name buys less than it looks: a racer can **read** it out of
+  the directory once it exists, point the target at a directory of their own, and put a file
+  worth keeping there under that name for `mv -f` to overwrite. `-T` is the GNU spelling and
+  `perl`'s `rename` **is** `rename(2)`, so it is what covers the case where `mv -T` is not
+  there — and if neither runs the write **refuses**, with no plain-`mv` fallback: keeping one
+  turned every way `perl` can fail into the unsafe path, including an inherited `PERL5OPT`
+  that aborts it before it reaches `rename`. The cost is that a platform with neither cannot
+  run this loop, loudly and with the reason named. BSD `mv -h` is not: its contract is only "if the target is a symbolic link to a
+  directory, do not follow it", so an **actual** directory swapped in takes the ordinary
+  two-operand path and the file inside it is overwritten just the same. Each is attempted as
+  the real operation rather than probed — a `mv` that does not know an option fails on the
+  option, having moved nothing — and if neither runs, the write refuses. There is no plain
+  `mv` behind them: keeping one turned every way `perl` can fail into the unsafe path.
+
+  **Nothing is removed, including the temporary a failed write leaves behind.**
+  `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the removal class, and
+  `test-writelib.sh` asserts the library contains no removal at all — so the residue is one
+  file in the session's own working directory, which is the litter
+  `docs/decisions/2026-09-01-origin-cleanup-races.md` already accepts.
+
 ## [2.0.99] — 2026-09-01
 
 - **An empty baseline file is refused, and "no prior review" is spelled `none`.** The

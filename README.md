@@ -181,8 +181,14 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 
 ## Platform support
 
-Portable: the plugin shells out to `git`, `gh` and `jq` only. v1's Linux-only
-caveat is gone with the daemons it was about.
+Portable: the plugin shells out to `git`, `gh`, `jq` and — since 2.1.0 — `perl`.
+v1's Linux-only caveat is gone with the daemons it was about.
+
+`perl` is a hard requirement rather than a convenience, and the reason is below
+under **Running a helper by hand**: the file handoffs need an `O_CREAT|O_EXCL`
+create and an exact-destination rename, and a shell has a safe spelling of
+neither. macOS ships it and so does every Linux distribution this loop has run
+on; without it, every handoff refuses and says so.
 
 **The helpers run in a privileged shell**, started that way by the skill itself —
 `/usr/bin/env bash -p …`. That is what stops a `BASH_ENV` startup file, an
@@ -197,6 +203,18 @@ rather than starting unprotected.
 `pr-origin.sh` is the exception, and cannot be run by hand at all: it is not
 executable, because the shell reading it has to be privileged from its first line
 and only the caller can arrange that.
+
+**`perl` must be present**, and since 2.1.0 it is a hard requirement rather than a
+convenience. The file handoffs — the gated head, the review baseline, the signed-off
+sha — are written by creating a temporary with `O_CREAT|O_EXCL` and renaming it onto
+the caller's path, and the shell has no spelling of either that is safe. `set -C`
+fails a redirection only where the existing file is **regular**, so a FIFO left at the
+temporary's name is opened and the write blocks; and `mv SRC DEST` moves the source
+*inside* `DEST` where that resolves to a directory, following a symlink to get there.
+`perl`'s `sysopen` and `rename` are the syscalls, without the exemptions. macOS ships
+`perl`, and so does every Linux distribution this loop has run on; where `mv -T` is
+available the rename uses it and saves a process. If neither exact rename can run, the
+write refuses and says so rather than falling back to something weaker.
 
 **Contributors need that `env`, users do not.** The plugin never depends on the
 shebang: the skill supplies `-p` on every call, and so does every call a helper
@@ -312,8 +330,10 @@ Then:
    see **Watching without prompts**. An unreadable state is a stop, never
    "no findings" — and so is an unreadable baseline file. "There is no earlier
    review to wait past" is a real answer and is spelled `none`; an EMPTY file is a
-   refusal, because every writer truncates before it writes and so a failed write
-   produces one. A failed read that quietly became the `none` token would let the
+   refusal, because that is what a failed write used to leave — every writer truncated
+   before it wrote. Since 2.1.0 they rename instead, so a failed write leaves the
+   previous contents rather than an empty file, and the refusal stays because the
+   token is what a reader can trust either way. A failed read that quietly became the `none` token would let the
    watch report the review the round just answered as the next one — which is why
    the read is refused rather than degraded, and why empty is refused rather than
    read as no floor.
@@ -433,13 +453,29 @@ Then:
      file's contents: depending on where the run stopped it may hold the previous
      round's value, a refusal sentinel, or the id this run captured. Once past the
      bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
-     whatever is there — that write is also how it checks the path, so a path that
-     **cannot take that write** (a directory, a FIFO, an unwritable or append-only
-     file) stops the stage before the PR is touched. That is the only guarantee it
-     gives: it proves that write at that moment and not the whole handoff, so
-     `/dev/null` and a write-only file accept it, pass the revocation, and are refused
-     only by the later regular-file and read-back checks. Do not read a path-related
-     refusal as meaning the PR was left unmodified. Where the sentinel survives, a refusal cannot hand the watch a
+     whatever is there — and since 2.1.0 that write **renames rather than truncating**,
+     so it never opens the path you named in order to write it. A target that is not a regular file — a
+     directory, a FIFO, a device, a socket, or a symlink to any of those — stops the
+     stage before the PR is touched, and is **left exactly as it was**: nothing is
+     replaced and nothing is written through. Where the platform's `mv` takes `-T` or
+     `perl` — which covers Linux and macOS both — the rename is the exact-destination form,
+     and the two late-swap cases differ. A path swapped for an **actual directory** after
+     that check is **refused**: `rename(2)` will not put a file over a directory, so the
+     write stops and the directory is untouched. A path swapped for a **symlink to a
+     directory** is accepted, and it costs the **link** — `rename(2)` never follows a final
+     symlink, so it replaces the link and leaves the directory alone. Neither loses you
+     anything inside that directory, which is the property; only one of them is a refusal.
+     `/dev/null` named here is refused, and it is worth being exact about what that
+     saves you from: the **old** truncating write opened the device and wrote into it,
+     which is harmless. The replacement risk arrived with the rename — `rename(2)` will
+     put a regular file over any non-directory inode — and it is the type refusal, not
+     the rename, that keeps the device a device.
+     A symlink to a regular file is accepted, and the **link** is what gets replaced —
+     never the file it points at, which was the whole of the change.
+
+     What still stops the stage later rather than before the revocation is a target
+     that was fine at that moment and is not by the time the value crosses, so **do not
+     read a path-related refusal as meaning the PR was left unmodified.** Where the sentinel survives, a refusal cannot hand the watch a
      value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
      and stops.
 
