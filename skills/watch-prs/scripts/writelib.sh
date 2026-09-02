@@ -14,8 +14,11 @@
 # So a same-UID process that replaced one of those paths with a symlink had the symlink's
 # TARGET truncated — an arbitrary file of the operator's, outside the session's working
 # directory entirely, on every invocation that got that far rather than only on a refusal.
-# That is #263, and it was seven sites across two helpers, which is why the rule lives here
-# rather than in each of them.
+# That is #263. It was seven sites across two helpers when the rule was written, plus two
+# more emptying the same files with a bare `>` — and then an EIGHTH kind found later: the
+# driver's own `> "$PRIOR_FILE"` around `pr-request-review.sh`, which now takes the path and
+# writes it here. THREE runtime callers, and the third is the one the first inventory
+# missed, which is the argument for the rule living here rather than in each of them.
 #
 # WHAT THIS DOES INSTEAD: WRITE, THEN RENAME.
 #
@@ -84,11 +87,19 @@
 #
 # rb_write_handoff <target> <content>
 #   0  the target now holds <content> followed by one newline
-#   1  refused; the reason is on stdout, and the target's CONTENT is unchanged
+#   1  refused; the reason is on stdout
 #
 # rb_empty_handoff <target>
 #   0  the target is now a zero-byte regular file
-#   1  refused; the reason is on stdout, and the target's CONTENT is unchanged
+#   1  refused; the reason is on stdout
+#
+# A REFUSAL IS NOT A PROMISE THAT THE TARGET IS UNTOUCHED, and it used to say it was. Every
+# refusal BEFORE the rename leaves it exactly as it was — the type test, the exclusive
+# create, the write — and those are the ordinary ones. But the POSTCONDITION refuses after
+# the rename has happened: where a racer replaced the published temporary, the substituted
+# inode is at the target and the refusal is the caller being told the value did not cross,
+# not that nothing did. A caller must read a non-zero status as "this handoff did not
+# happen", never as "the previous handoff is still readable".
 #
 # The caller supplies its own abort prose: these are three stages with three consequences,
 # and a shared message would name none of them.
@@ -128,13 +139,14 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # at the target. The caller's own directory is the one place guaranteed to be on the
     # same filesystem as the caller's own file.
     #
-    # AND ITS NAME IS UNPREDICTABLE, which bounds the one residue this library can leave.
-    # A racer that turns the target into a directory between the test above and the rename
-    # has the temporary land INSIDE that directory under its own basename — so a name built
-    # only from the caller's path and this pid could be pre-placed there by the racer as a
-    # file worth keeping, and `mv -f` would overwrite it. Two `$RANDOM` draws make the name
-    # unguessable at the moment it matters, which turns that from a loss into litter: a
-    # file with a name nobody chose, in a directory the racer picked themselves.
+    # AND ITS NAME IS UNPREDICTABLE, WHICH BOUNDS RESIDUE AND COLLISIONS — AND NOT THE
+    # DIRECTORY SWAP. It stops an accidental collision between two runs, and it stops a
+    # racer PRE-PLACING an entry at a name they have not yet seen. It does NOT stop the
+    # directory swap, and crediting it with that was wrong: a racer who WAITS for the
+    # temporary to appear reads the basename out of the directory and can seed exactly it
+    # before the rename, because the name is unguessable and not unobservable. What
+    # prevents that loss is the EXACT-DESTINATION rename below, which refuses a directory
+    # destination outright rather than moving the source inside it.
     _rb_wh_tmp="$1.rb-write.$$.${RANDOM}${RANDOM}"
     # ONE EXCLUSIVE OPEN, AND THE WRITE GOES INTO IT. Creating the temporary and then
     # opening it AGAIN by name to write would be a check-then-open of its own: a same-UID

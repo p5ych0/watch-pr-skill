@@ -186,24 +186,30 @@ done
     && pass "…leaving no temporary beside the directory" \
     || die "a temporary was left beside the refused directory: $_wl_stray2"
 
-# ── THE TEMPORARY'S NAME IS UNGUESSABLE, WHICH BOUNDS THE ONE RESIDUE ──────
+# ── THE TEMPORARY'S NAME IS UNGUESSABLE, WHICH BOUNDS RESIDUE AND COLLISIONS ──
 #
-# THIS IS ASSERTED ON THE SOURCE, and the reason is the property itself: a behavioural case
-# would have to PREDICT the name to squat it, and the whole point is that it cannot. What
-# the randomness is for is the one interleaving the type test above cannot close — a racer
-# turning the target into a directory after the test and before the rename, which lands the
-# temporary inside a directory of their choosing. With a name built only from the caller's
-# path and this pid they could pre-place a file worth keeping under it and have `mv -f`
-# overwrite it; with two `$RANDOM` draws they cannot, so the residue is litter rather than
-# loss.
+# AND NOT THE DIRECTORY SWAP, which this used to claim. A racer who WAITS for the temporary
+# to appear reads its basename out of the directory and can seed exactly that name before
+# the rename: the name is unguessable, not unobservable. What prevents the loss there is the
+# EXACT-DESTINATION rename, which refuses a directory destination outright — the four
+# swapped-target cases above are what prove that, and this assertion must not be read as a
+# second line of defence for the same thing.
+#
+# WHAT IT DOES BUY is the case the racer has NOT seen: an accidental collision between two
+# runs, and a name pre-placed before it exists. Both would be refused by the exclusive
+# create anyway, so this bounds how often that refusal happens rather than whether it is
+# safe.
+#
+# THIS IS ASSERTED ON THE SOURCE, because a behavioural case would have to PREDICT the name
+# and the whole point is that it cannot be predicted from outside the process.
 #
 # `$RANDOM` IS A BASH BUILTIN, so no `PATH` entry can answer for it — which is why the name
 # is built from it rather than from `mktemp`, a command a caller's environment could shadow.
 _wl_src="$(grep -v '^[[:space:]]*#' "$SELF_DIR/writelib.sh")" || _wl_src=""
 case "$_wl_src" in
     *'_rb_wh_tmp="$1.rb-write.$$.${RANDOM}${RANDOM}"'*)
-        pass "the temporary's name carries two \$RANDOM draws, so it cannot be pre-placed" ;;
-    *) die "the temporary's name is not built from \$RANDOM; a racer could pre-place it" ;;
+        pass "the temporary's name carries two \$RANDOM draws, so it cannot be predicted before it exists" ;;
+    *) die "the temporary's name is not built from \$RANDOM; a racer could predict it" ;;
 esac
 # AND THE CREATE IS `O_CREAT|O_EXCL` RATHER THAN NOCLOBBER, which is the difference between
 # refusing a collision and refusing SOME collisions. Bash's `set -C` does what POSIX says —

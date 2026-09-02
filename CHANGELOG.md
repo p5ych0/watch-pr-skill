@@ -38,7 +38,9 @@
 
   **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
   beside the target, writes the value into it, and moves it over — so where the target is a
-  symlink it is the link that goes and never the file it points at. Measured both ways: a
+  symlink it is the link that goes and never the file it points at. The target IS inspected
+  first, and that refusal is load-bearing; what never happens is an OPEN of it, so the
+  write's safety does not rest on the answer that inspection gave. Measured both ways: a
   plain redirection on a symlink truncates the victim, and the rename leaves the victim's
   bytes untouched.
 

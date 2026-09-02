@@ -539,7 +539,11 @@ rediscovering them.
   value crosses in a file the caller named; `loadlib.sh` holds how a library is loaded
   at all. Each exists because the rule was written out three or four times and then
   found missing from at least one copy — `writelib.sh` is the extreme of that, at seven
-  sites across two helpers, none of which had it.
+  sites across two helpers plus two bare emptyings, none of which had it, and a THIRD
+  caller found only in review: `pr-request-review.sh`, whose baseline the DRIVER was
+  redirecting onto. That one escaped the first inventory precisely because the unsafe open
+  was in `SKILL.md` rather than in a helper, so an audit that reads the helpers finds
+  eight sites and misses the ninth.
 
   Every field check in `recordlib.sh` was originally written out in two or three
   scripts, and every one of them was found missing from at least one — the known

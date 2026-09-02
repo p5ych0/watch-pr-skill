@@ -329,9 +329,11 @@ if [[ $STAGE = open ]]; then
     # WRITTEN THROUGH `rb_write_handoff`, WHICH RENAMES RATHER THAN TRUNCATING — #263. A
     # plain `>` on this path follows a symlink, so a same-UID process that replaced it had
     # the file it pointed at truncated instead.
-    # BOUNDED, AND THE BOUND IS NOT ABOUT FIFOs ANY MORE. `set -C` makes the temporary's
-    # open O_CREAT|O_EXCL, so an entry already at that name fails instead of being waited
-    # on — but pathname resolution, the write and the `mv` can all still stall on an
+    # BOUNDED, AND THE BOUND IS NOT ABOUT FIFOs ANY MORE. The temporary is created with
+    # `perl`'s `sysopen` and `O_CREAT|O_EXCL`, so an entry already at that name fails
+    # instead of being waited on — `set -C` did NOT do that, since bash's noclobber exempts
+    # everything but a regular file — but pathname resolution, the write and the rename can
+    # all still stall on an
     # unresponsive filesystem, and this call stands AFTER the revocation, where a hang
     # leaves the phase half-open with no diagnostic. So the watchdog stays, around the
     # library rather than around a raw redirection.
