@@ -459,8 +459,13 @@ Then:
      stage before the PR is touched, and is **left exactly as it was**: nothing is
      replaced and nothing is written through. Where the platform's `mv` takes `-T` or
      `perl` — which covers Linux and macOS both — the rename is the exact-destination form,
-     so a path swapped for a directory after that check, or for a symlink to one, costs the
-     link and nothing inside that directory. `/dev/null` named here is refused rather
+     and the two late-swap cases differ. A path swapped for an **actual directory** after
+     that check is **refused**: `rename(2)` will not put a file over a directory, so the
+     write stops and the directory is untouched. A path swapped for a **symlink to a
+     directory** is accepted, and it costs the **link** — `rename(2)` never follows a final
+     symlink, so it replaces the link and leaves the directory alone. Neither loses you
+     anything inside that directory, which is the property; only one of them is a refusal.
+     `/dev/null` named here is refused rather
      than turned into a regular file, which is what the old truncating write did to it.
      A symlink to a regular file is accepted, and the **link** is what gets replaced —
      never the file it points at, which was the whole of the change.

@@ -493,31 +493,21 @@ if [[ $STAGE = open ]]; then
     # comparison; `pr-watch.sh` rejects the identical path as `not_regular`, but only
     # once the phase is half open. The `-f` question is asked HERE, on the bound
     # descriptor rather than on the name, so it is the file that was read.
-    # AND THE COMPARISON HAPPENS IN THE CHILD, ON THE RAW BYTES. `read` reports ordinary
-    # EOF and a read that failed part-way with the SAME status — bash exposes no way to
-    # ask a descriptor whether it ended cleanly — so a child that hands its bytes back and
-    # leaves the comparison here cannot tell the two apart. That did not matter for a
-    # forty-character sha, which a truncated read can never equal, and it mattered exactly
-    # here: an EMPTY baseline was legitimate when this was written, so a read that failed at
-    # the first byte returned the empty string and compared equal to the empty value that
-    # was written. Since #264 the legitimate value is `none\n`, which a read failing at the
-    # first byte cannot equal — but a read failing at the FIFTH still returns `none`, and
-    # the comparison here is on the raw bytes INCLUDING the terminator, so it does not.
+    # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
+    # re-prove the baseline itself, in a bounded child, on a descriptor — because the write
+    # above it was a `printf` that proved nothing. Since #263 the write IS the proof:
+    # `rb_write_handoff` reads the target back before it returns and compares the raw bytes
+    # INCLUDING the terminator, which is the property #246 built this for — a read failing
+    # at the FIFTH byte still returns `none`, and only a comparison on the whole bytes sees
+    # it. The library's read is the stronger one besides: `O_NOFOLLOW` refuses a symlink at
+    # the open, `O_NONBLOCK` and `fstat` on the handle refuse a FIFO rather than waiting.
     #
-    # PASSING THE EXPECTED BYTES IN CLOSES IT WITHOUT ANSWERING THE QUESTION. The child
-    # compares what it read against what was written, INCLUDING the trailing newline and
-    # before any stripping — so a read that lost even one byte differs, whatever its
-    # status said. Nothing crosses back, which is also why there is no value here to
-    # compare a second time. #246.
-    run_limited 10 /usr/bin/env bash -p -c '
-        { [ -f /dev/fd/9 ] || exit 6
-          IFS= read -r -d "" _r <&9
-          _s=$?
-        } 9<"$1" || exit 4
-        [ "$_s" -eq 0 ] && exit 5
-        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$PRIOR_REVIEW
-" \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written; Copilot has NOT been requested."; exit 1; }
+    # AND A SECOND PROOF HERE COULD ONLY MAKE THINGS WORSE. This point is past the
+    # revocation, so a racer who swaps the path after the library returns turns a proven
+    # handoff into a refusal with the phase already reopened — a cost with nothing bought,
+    # since the question was answered before the swap. #246's finding was that two
+    # read-backs in two shapes let one of them be weaker; one read-back, in the library,
+    # is that finding taken to its end.
 
     # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
     # for, so entering the phase would poll for a review nobody asked for and then
@@ -978,22 +968,13 @@ _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
     '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
     _ "$_RB_SELF_DIR" "$SHA_FILE" "$CODEX_SHA")" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
-# READ BACK THE SAME WAY `open` DOES, and for the reasons it states: bounded, because
-# opening a path can block; with its own status, because `$(<…)` reports the substitution's
-# and not the read's; and COMPARED IN THE CHILD on the raw bytes, because `read` cannot
-# tell ordinary EOF from a read that failed part-way. A truncated read can never equal a
-# forty-character sha, so this one was not exposed the way the baseline was — but two
-# read-backs proving the same kind of thing in two different shapes is how one of them
-# ends up weaker, which is what happened here. #246.
-run_limited 10 /usr/bin/env bash -p -c '
-    { [ -f /dev/fd/9 ] || exit 6
-      IFS= read -r -d "" _r <&9
-      _s=$?
-    } 9<"$1" || exit 4
-    [ "$_s" -eq 0 ] && exit 5
-    [ "$_r" = "$2" ] || exit 7' _ "$SHA_FILE" "$CODEX_SHA
-" \
-    || { echo "ABORT: the signed-off sha did not survive being written to '$SHA_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written; nothing has been posted."; exit 1; }
+# AND NOT READ BACK AGAIN HERE, for the reason `open` gives at its own write: since #263
+# `rb_write_handoff` proves the raw bytes before it returns, with a no-follow non-blocking
+# open and the type from `fstat` on the handle. This stage's copy was the weaker of the two
+# even when both existed — a truncated read can never equal a forty-character sha, so it was
+# never exposed the way the baseline was — and #246's finding was precisely that two
+# read-backs proving the same kind of thing in two shapes let one of them rot. One, in the
+# library, is that finding taken to its end.
 
 gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
     || { echo "ABORT: could not post the phase summary — the signoff is not recorded; do not request Copilot."; exit 1; }

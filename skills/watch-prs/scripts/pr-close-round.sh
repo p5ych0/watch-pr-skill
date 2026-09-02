@@ -631,34 +631,20 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     prior="${prior:-none}"
     _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$prior")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
-    # THE READ-BACK COMPARES RAW BYTES, TERMINATOR INCLUDED, IN THE CHILD. `$(<…)` strips
-    # trailing newlines, so it cannot see the delimiter the watch now requires: a path
-    # replaced between the write and the read with the SAME id and no newline compared
-    # equal, this stage posted the request, and the watch then refused the file as
-    # `unterminated_after_review_file` — with the round irreversibly half-closed, since the
-    # summary is up and the next pass is queued.
+    # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
+    # re-prove the bytes itself, in a child, on a descriptor — `9<"$PRIOR_FILE"` — because
+    # the write above it was a `printf` that proved nothing. Since #263 the write IS the
+    # proof: `rb_write_handoff` reads the target back before it returns, comparing the raw
+    # bytes including the terminator, with `O_NOFOLLOW` so a swapped-in symlink is refused
+    # at the open and `O_NONBLOCK` and `fstat` on the handle so a swapped-in FIFO is refused
+    # rather than waited on. Every question this repeated is answered there and answered
+    # better.
     #
-    # AND THE COMPARISON HAPPENS IN THE CHILD, for the reason `pr-copilot-phase.sh` gives
-    # at its own read-back: `read` reports ordinary EOF and a read that failed part-way with
-    # the same status, so a child that hands its bytes back leaves the caller unable to tell
-    # them apart. `_r` is compared against the value plus its newline, and only the verdict
-    # crosses.
-    #
-    # NOT BOUNDED, AND THAT IS CONSISTENT RATHER THAN AN OVERSIGHT. `run_limited` is not
-    # loaded in this file, and bounding the read alone would buy little: since #263 the
-    # WRITE above it creates its temporary exclusively, which cannot wait on a FIFO — but it
-    # can still stall on an unresponsive mount during pathname resolution or the rename, so
-    # a path that hangs has already hung there. A watchdog here would need one there too,
-    # which is a different change from this one.
-    /usr/bin/env bash -p -c '
-        { [ -f /dev/fd/9 ] || exit 6
-          IFS= read -r -d "" _r <&9
-          _s=$?
-        } 9<"$1" || exit 4
-        [ "$_s" -eq 0 ] && exit 5
-        [ "$_r" = "$2" ] || exit 7' _ "$PRIOR_FILE" "$prior
-" \
-        || { echo "ABORT: the review baseline did not survive being written to '$PRIOR_FILE' — it is unreadable, not a regular file, holds a NUL byte, or does not match what was written including its terminating newline; nothing has been posted."; return 1; }
+    # AND REPEATING IT WAS NOT MERELY REDUNDANT. `9<"$PRIOR_FILE"` is a plain redirection in
+    # a shell with no watchdog: a same-UID process that put a FIFO there AFTER the library
+    # returned had this open BLOCK FOREVER — and this point is past the thread replies, so
+    # the round is half-closed while it hangs. The library's own read cannot block. Removing
+    # the dependency is the fix; bounding it would have been the guard.
     # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
     # never triggered by a mention and never by a push — only by `--add-reviewer` —
     # so a Copilot round that posted the Codex mention requested nothing at all,

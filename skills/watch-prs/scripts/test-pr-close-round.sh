@@ -1186,31 +1186,37 @@ got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 raw_is "$TMP/prior.txt" 'none
 ' "post's none baseline"
 
-# ── THE READ-BACK COMPARES THE TERMINATOR, AND WHY THAT IS ASSERTED ON THE SOURCE ─
+# ── THE STAGE DOES NOT RE-PROVE THE BASELINE, AND MUST NOT START AGAIN ─────
 #
-# The read-back used `$(<…)`, which STRIPS trailing newlines, so it could not see the
-# delimiter `pr-watch.sh` now requires. A path replaced between the write and the read with
-# the SAME id and no newline compared equal, this stage posted the request, and the watch
-# then refused the file as `unterminated_after_review_file` — with the round IRREVERSIBLY
-# half-closed, since the summary is up and the next pass is queued.
+# IT USED TO, and the case here asserted the shape of that proof: that the child compared
+# against the value WITH its terminator, because `$(<…)` strips trailing newlines and a path
+# replaced with the same id and no newline compared equal — after which the watch refused the
+# file as `unterminated_after_review_file`, with the round irreversibly half-closed.
 #
-# THE WINDOW CANNOT BE STAGED, and that is a fact about its shape rather than a gap left
-# open. The write and the read-back are ADJACENT: no external command runs between them, so
-# there is nothing on `PATH` a shim can attach to, and a racer would be aiming at an
-# interval of two shell operations — a case that tries would pass on scheduling. This was
-# built and did not land: a `gh` shim fires only at the post, which is after both.
+# THE PROOF MOVED INTO `writelib.sh`, which is where the write is. `rb_write_handoff` reads
+# the target back before it returns and compares the raw bytes including the terminator —
+# `test-writelib.sh` asserts that byte-for-byte — with a no-follow, non-blocking open and the
+# type taken from `fstat` on the handle. Every question the caller-side copy asked is answered
+# there, earlier, and by a read that cannot be made to block.
 #
-# SO WHAT IS ASSERTED IS THE COMPARISON'S SHAPE: that the child compares against the value
-# WITH its newline, and that the caller no longer reads the file into a stripping
-# substitution. That is weaker than a behavioural case and it is the strongest thing
-# available here — and it is exact enough to fail: restoring `$(<…)` or dropping the
-# newline from the expected value both break it.
-_rb_body="$(awk '/# THE READ-BACK COMPARES RAW BYTES/,/nothing has been posted."; return 1; }/' "$SCRIPT")" || _rb_body=""
-case "$_rb_body" in
-    *'_ "$PRIOR_FILE" "$prior
-"'*) pass "the baseline read-back compares against the value INCLUDING its terminator" ;;
-    *) die "the read-back does not compare the terminator; a replacement stripping it would pass: '$_rb_body'" ;;
-esac
+# SO WHAT IS ASSERTED HERE IS THE ABSENCE. A second read-back at this point is not merely
+# redundant: `9<"$PRIOR_FILE"` is a plain redirection in a shell with no watchdog, and this
+# point is PAST the thread replies — a FIFO swapped in after the library returned would hang
+# the stage with the round half-closed. Restoring one is the regression, so the check is that
+# the stage opens this path at all.
+# COMMENTS ARE STRIPPED FIRST, because the paragraph explaining the removal necessarily
+# spells the shape it removed — and a scan that cannot tell the account from the code
+# reports the explanation as the defect, which is what the first version of this did.
+_rb_code="$(grep -v '^[[:space:]]*#' "$SCRIPT")" || _rb_code=""
+_rb_body="$(grep -n '9<"\$PRIOR_FILE"\|9<"\$HEAD_FILE"' <<<"$_rb_code")" || _rb_body=""
+[ -z "$_rb_body" ] \
+    && pass "the stage does not re-open the handoff files it just wrote" \
+    || die "a caller-side read-back is back; the library already proved the bytes and this one can block: $_rb_body"
+# AND THE WRITE IS STILL THE THING THAT PROVES THEM, so the absence above is a removal
+# rather than a gap: every handoff here goes through the library that reads its own work back.
+grep -q 'rb_write_handoff "$PRIOR_FILE"' "$SCRIPT" \
+    && pass "…because the baseline is written by the library that proves its own bytes" \
+    || die "the baseline is no longer written through rb_write_handoff"
 case "$_rb_body" in
     *'$(<"$PRIOR_FILE")'*) die "the read-back still reads through a substitution, which strips the terminator" ;;
     *) pass "…and does not read it through a substitution, which would strip that byte" ;;

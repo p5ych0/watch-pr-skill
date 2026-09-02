@@ -80,8 +80,13 @@
 # diagnostic. The read-backs beside them keep theirs for a reason of their own: they open
 # the target by name, where a FIFO can still be waiting.
 #
-# NOTHING IS REMOVED, INCLUDING ON FAILURE. A write or a rename that fails leaves the
-# temporary behind, and this library does not unlink it — `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
+# NOTHING IS REMOVED, INCLUDING ON FAILURE. This library never unlinks — not the temporary,
+# not anything — and a failure BEFORE the rename therefore leaves the temporary behind. A
+# failure REPORTED BY the rename is not a promise of that: `mv -T` can complete the syscall
+# and still exit non-zero, after which `perl` finds the source gone and the refusal arrives
+# with the target replaced and no temporary anywhere. The rule is about what this code does,
+# which is nothing; it is not a guarantee about what is left. The reason it removes nothing
+# is that `docs/decisions/2026-08-29-setup-leaf-cleanup.md`
 # convicts the whole class, because a removal resolves a name a same-UID process may have
 # substituted since. The residue is one file in the session's own working directory, which
 # is the litter `docs/decisions/2026-09-01-origin-cleanup-races.md` already accepts, and it
