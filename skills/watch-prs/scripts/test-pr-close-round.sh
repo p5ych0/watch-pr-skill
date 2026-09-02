@@ -1004,6 +1004,43 @@ for _st_lib in loadlib recordlib identitylib; do
         && pass "…so the driver's head check refuses even when the gate's refusal is walked past" \
         || die "the driver's head check ACCEPTED what an empty $_st_lib.sh left, which is a resolve on a round that never gated"
 done
+# AND WITH `dirname` GONE FROM `PATH`, WHICH USED TO REFUSE ABOVE THE CLEARING. The library
+# directory was `$(cd -- "$(dirname -- …)" && pwd)` — two commands and a substitution, all
+# of them ahead of the emptying — so a `PATH` without `dirname` left the stale head for a
+# walked-past driver to accept. It is a parameter expansion now, which the parser performs.
+#
+# THE STAGING IS A `PATH` CARRYING WHAT THE CLEARING GENUINELY NEEDS AND NOT `dirname`:
+# `bash` and `env` to start the child, `perl` for the exclusive create and `mv` for the
+# rename. Removing more than the subject would make the case pass for the wrong reason — the
+# first version of it left `perl` out and the clearing refused for that instead, which is a
+# refusal above the emptying by another route.
+world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+printf '%s\n' 'STALE-BASELINE' > "$TMP/prior.txt"
+_nd="$TMP/nodirname"; rm -rf "$_nd"; mkdir -p "$_nd"
+for _ndc in bash env perl mv; do
+    _ndp="$(command -v "$_ndc" 2>/dev/null)" && ln -sf "$_ndp" "$_nd/$_ndc"
+done
+if PATH="$_nd" command -v dirname >/dev/null 2>&1; then
+    pass "(the missing-dirname case is skipped: dirname is reachable without PATH)"
+else
+    _nd_out="$(cd "$TMP" && run_limited 25 env PATH="$_nd" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _nd_rc=$?
+    { [ "$_nd_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
+        && pass "…and a gate that cannot find dirname leaves no stale head either" \
+        || die "a PATH without dirname left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_nd_rc out='$_nd_out')"
+    # THROUGH THE DRIVER'S OWN CHECK, as the library cases above do.
+    case "$(<"$HEADF")" in
+        *[!0-9a-f]*|"")                            _nd_driver=refused ;;
+        ????????????????????????????????????????) _nd_driver=accepted ;;
+        *)                                         _nd_driver=refused ;;
+    esac
+    [ "$_nd_driver" = refused ] \
+        && pass "…so the driver's head check refuses that refusal too" \
+        || die "the driver's head check ACCEPTED what a missing dirname left"
+fi
+rm -rf "$_nd"
+
 # AND A SYMLINKED HEAD FILE SURVIVES THAT PATH TOO, which is the pair of invariants meeting:
 # the clearing is above every load AND it renames, so a bootstrap refusal neither leaves a
 # stale head nor truncates whatever the path pointed at.

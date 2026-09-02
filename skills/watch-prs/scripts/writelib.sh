@@ -40,8 +40,10 @@
 # opened — the type test below asks exactly what is at the target and is load-bearing, and
 # the value postcondition OPENS the target to verify it. It is that nothing opens the target
 # TO WRITE IT: the value goes into a temporary and is RENAMED onto the name, so the answer
-# the type test gave is not what the write's safety rests on, and a racer who changes the
-# answer afterwards costs a refusal rather than an operator's file. #245's shape was a test
+# the type test gave is not what the write's safety rests on. A racer who changes the answer
+# afterwards costs the RACER their inode, not the operator a file: the rename replaces
+# whatever non-directory thing they installed, the value arrives, and the call returns 0.
+# That is the documented limit below, not a refusal — do not read this paragraph as one. #245's shape was a test
 # whose answer licensed a WRITING open of the thing tested. The verifying open is on the
 # other side of the rename and carries its own no-follow, non-blocking, fstat-on-the-handle
 # answer, so it licenses nothing either.
@@ -122,12 +124,17 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # open — `O_NOFOLLOW`, `O_NONBLOCK`, and the type from `fstat` on the handle. What this refuses is a
     # caller naming something that is not a handoff file, early and with nothing written:
     #
-    #   * a DIRECTORY, or a symlink to one. The EXACT RENAME below refuses this on its own —
-    #     `rename(2)` will not put a file over a directory — so what this buys is an earlier
+    #   * an ACTUAL DIRECTORY. The EXACT RENAME below refuses this on its own — `rename(2)`
+    #     will not put a file over a directory — so what the test buys here is an earlier
     #     refusal with no temporary created, and a message about the caller's argument rather
-    #     than about a rename that failed. It is a convenience over the rename, NOT a
-    #     substitute for it: the two-operand `mv` would move the source INSIDE the directory
-    #     and report success, which is why the rename must stay exact.
+    #     than about a rename that failed. A convenience over the rename, NOT a substitute
+    #     for it: the two-operand `mv` would move the source INSIDE and report success, which
+    #     is why the rename must stay exact.
+    #   * a SYMLINK TO A DIRECTORY, which the rename does NOT refuse and this test does.
+    #     `rename(2)` never follows a final symlink, so it would REPLACE the link and
+    #     succeed, leaving the directory untouched — safe, but not what a caller naming that
+    #     path meant, and the caller loses a link they may have wanted. Grouping this with
+    #     the case above was wrong: only one of the two reaches the rename's own refusal.
     #   * a DEVICE or a SOCKET. `mv -f` replaces every non-directory inode it can rename
     #     over, so a run with permission — root in a container, with `/dev/null` named as
     #     the handoff path — would replace the character device with a regular file.
@@ -264,6 +271,14 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # neither cannot run this loop — loudly, with the reason named — and neither platform
     # this project builds and tests on is that platform. `README.md` states the requirement.
     #
+    # AND THE FAILURE MESSAGE PROMISES NOTHING ABOUT EITHER PATH. It used to say the target
+    # is unchanged and the temporary is left behind, and neither is certain: `mv -T` can
+    # complete the rename and still report non-zero — killed after the syscall, or a wrapper
+    # that renames and exits 1 — after which `perl` finds the source gone, fails, and this
+    # arm runs with the target ALREADY REPLACED and no temporary left. The contract at the
+    # top of this file says a refusal means "this handoff did not happen" and nothing more;
+    # the message has to say the same.
+    #
     # AND `--` BEFORE THE OPERANDS, ON BOTH. A handoff path is the CALLER'S, and a relative
     # one may begin with `-`: the temporary derived from it does too, so `mv` reads the
     # source as an option bundle and `perl` reads it as a switch. Both attempts then fail on
@@ -271,7 +286,7 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # down. `--` is where each of them stops parsing.
     /usr/bin/env mv -T -f -- "$_rb_wh_tmp" "$1" 2>/dev/null \
         || /usr/bin/env -i PATH="$PATH" perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "$_rb_wh_tmp" "$1" 2>/dev/null \
-        || { echo "could not rename '$_rb_wh_tmp' onto '$1' — it is unchanged and the temporary is left behind. An exact-destination rename is required: 'mv -T' or a working 'perl'"; return 1; }
+        || { echo "the rename of '$_rb_wh_tmp' onto '$1' did not report success; neither is in a known state and this call did not hand a value over. An exact-destination rename is required: 'mv -T' or a working 'perl'"; return 1; }
     # AND THE POSTCONDITION ASKS WHAT IS AT THE TARGET, NOT MERELY WHAT KIND OF THING IT IS.
     # It is the ONE place this library opens the target, and it does so only to READ: the
     # write never opens it, which is the whole of #263.

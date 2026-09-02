@@ -143,10 +143,11 @@ else
     pass "(no mknod privilege here; the device target is skipped by name)"
 fi
 
-# A SYMLINK TO A DIRECTORY, which is the shape `mv` redirects INTO rather than over: the
-# two-operand directory form moves the source inside, so without this refusal the temporary
-# would land in a directory the caller never named — and, with a guessable name, could
-# overwrite an entry already there. Refused by type, since `-f` follows the link.
+# A SYMLINK TO A DIRECTORY, WHICH ONLY THE TYPE TEST REFUSES. `rename(2)` never follows a
+# final symlink, so the exact rename would REPLACE the link and succeed — safe for the
+# directory, but not what a caller naming that path meant, and it costs them a link. This is
+# the one shape where the test is doing the work rather than arriving earlier: an actual
+# directory the rename refuses on its own. Refused by type here, since `-f` follows the link.
 rm -rf "$TMP/realdir" "$TMP/dirlink"; mkdir -p "$TMP/realdir"
 printf 'KEEPME\n' > "$TMP/realdir/occupied"
 ln -s "$TMP/realdir" "$TMP/dirlink"

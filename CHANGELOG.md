@@ -66,13 +66,17 @@
   kept and moved around the library call.
 
   **The target's TYPE is refused before anything is created**, and that is what keeps the
-  outcomes an operator already knew. `mv -f` renames over every non-directory inode it may,
-  so a device or a socket at one of these paths would be replaced by a regular file —
-  `/dev/null`, in a container with permission — and `mv` onto a *directory* moves the source
-  inside it and reports success, which the rename's status cannot see. So a target that is
-  not a regular file is refused outright and left as it was: a directory, a FIFO, a device,
-  a socket, or a symlink to any of them. A symlink to a **regular file** is accepted, and
-  the link is what the rename replaces.
+  outcomes an operator already knew. A target that is not a regular file is refused outright
+  and left as it was: a directory, a FIFO, a device, a socket, or a symlink to any of them.
+  A symlink to a **regular file** is accepted, and the link is what the rename replaces.
+
+  What the test is doing differs by case, and the distinction matters if anyone is tempted to
+  drop it or to drop the exact rename. An **actual directory** the exact rename refuses on
+  its own, so the test only arrives earlier and with a better message. A **FIFO, device or
+  socket** the rename would happily replace — `rename(2)` takes any non-directory
+  destination — so the test is what keeps `/dev/null` a device. A **symlink to a directory**
+  the rename would replace as a link, leaving the directory untouched: safe, but not what the
+  caller meant, and only the test refuses it.
 
   **`perl` runs with its environment cleared.** `PERL5OPT` and `PERL5LIB` are read before
   the program is, so an inherited value could stop every handoff in the loop — the same

@@ -248,7 +248,8 @@ fi
 # truncates before it writes, so any failure in between produced the legal value. The state
 # is real and still has to be expressible, so it is expressed by a value a writer produces
 # on purpose. A truncation cannot fake it, and `pr-watch.sh` refuses an empty file.
-# AND IT CROSSES BY RENAME, IN A FILE THIS HELPER OPENS. It went to stdout and the driver
+# AND IT CROSSES BY RENAME, ONTO A PATH THIS HELPER NEVER OPENS TO WRITE. It went to stdout
+# and the driver
 # redirected — `> "$PRIOR_FILE"` — which follows a symlink and is opened by the driving
 # shell BEFORE this process starts, so a path a same-UID process had replaced cost the
 # operator the file it pointed at and nothing here could refuse it. #263.

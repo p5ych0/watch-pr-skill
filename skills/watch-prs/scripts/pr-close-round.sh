@@ -118,8 +118,18 @@ fi
 
 set -uo pipefail
 
-_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
-    echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
+# THE LIBRARY DIRECTORY IS DERIVED BY EXPANSION, BECAUSE THE CLEARING BELOW NEEDS IT AND
+# NOTHING FALLIBLE MAY COME FIRST. It was `$(cd -- "$(dirname -- …)" && pwd)`, which is two
+# commands and a substitution: `dirname` missing from `PATH` — or `cd` refusing, or the
+# substitution failing — refused ABOVE the clearing, leaving a stale 40-hex head for a
+# driving shell whose `exit` returns to accept. `${BASH_SOURCE[0]%/*}` is a parameter
+# expansion the parser performs: there is no command to be missing and no status to take.
+#
+# A SOURCE WITH NO `/` IS THIS DIRECTORY. `%/*` leaves the string unchanged when it holds no
+# slash, which is the case where the script was found on `PATH` — the driver never does that
+# (`test-pr-identity.sh` fails if any caller invokes a helper bare) but a person can.
+_RB_LIB_DIR="${BASH_SOURCE[0]%/*}"
+[[ $_RB_LIB_DIR = "${BASH_SOURCE[0]}" ]] && _RB_LIB_DIR=.
 # ── THE STALE HEAD AND BASELINE ARE CLEARED BEFORE ANYTHING ELSE, and that ordering is
 # a finding rather than a preference. The driver's head-file check is NOT inside the gate's
 # success arm — it is the next statement after it, and its own comment says why: `AND ITS
@@ -141,8 +151,8 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # emptied library leaves `rb_empty_handoff` undefined, the child exits non-zero, and this
 # refuses, which is the direction `rb_load` fails in, reached without it.
 #
-# WHAT REMAINS ABOVE IS THE INSTALLATION ITSELF: `_RB_SELF_DIR` unresolvable, or a
-# `writelib.sh` that is unreadable or defines nothing. Neither can be defended from inside
+# WHAT REMAINS ABOVE IS THE INSTALLATION ITSELF: a `writelib.sh` that is unreadable or
+# defines nothing. Neither can be defended from inside
 # this stage — clearing without the rule is what forced the raw `>`, and an inline rename is
 # the duplicated rule `CLAUDE.md` forbids — and both are the same class as this file itself
 # being empty.
@@ -166,7 +176,7 @@ if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
     _rb_eh="$(/usr/bin/env bash -p -c \
         '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
-        _ "$_RB_SELF_DIR" "${6}")" || {
+        _ "$_RB_LIB_DIR" "${6}")" || {
         echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept: $_rb_eh"
         exit 1
     }
@@ -183,12 +193,18 @@ if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
    && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
     _rb_eh="$(/usr/bin/env bash -p -c \
         '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
-        _ "$_RB_SELF_DIR" "${7}")" || {
+        _ "$_RB_LIB_DIR" "${7}")" || {
         echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept: $_rb_eh"
         exit 1
     }
 fi
 
+# CANONICALISED ONLY NOW, below the clearing. Everything after this point loads libraries
+# and runs helpers by absolute path, and a relative one would break if anything later
+# changed directory — but the canonicalisation can FAIL, so it must not stand ahead of the
+# clearing, which is what put it there in the first place.
+_RB_SELF_DIR="$(cd -- "$_RB_LIB_DIR" && pwd)" || {
+    echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
 # NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
 # is a NAME — and while a privileged interpreter means no function by that name
@@ -575,11 +591,15 @@ report_gated() {   # report_gated <head> ; writes the head to $HEAD_FILE, then r
     # the round was gated. Reporting only after the write means the record and the
     # file agree or neither exists.
     #
-    # IT IS NOT READ BACK HERE, and that is deliberate. `post` reads this file and
-    # validates what it finds with `sha_reason` before anything is posted, so a
-    # write that succeeded on a file that holds something else is caught there —
-    # by the stage that depends on it, at no cost, and on the read that matters. A
-    # second check here would be a branch no fixture can stage.
+    # THE WRITER PROVES THE BYTES AND `post` PROVES THE MEANING, which are two questions and
+    # not one. `rb_write_handoff` now reads the target back itself before returning — no
+    # follow, non-blocking, type from `fstat` on the handle — so "the value that crossed is
+    # the value asked for" is answered here, and a `0` from it is that guarantee. What it
+    # cannot answer is whether a well-formed sha is the RIGHT one, which is `post`'s job:
+    # it reads this file and validates what it finds with `sha_reason` before anything is
+    # posted. Do not read this as licence to drop the library's postcondition — it is the
+    # only thing standing between a substituted temporary and a driver that resolves threads
+    # on a head this round never gated.
     _rb_wh="$(rb_write_handoff "$HEAD_FILE" "$1")" \
         || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read: $_rb_wh"; return 1; }
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$1 mode=$_MODE"
