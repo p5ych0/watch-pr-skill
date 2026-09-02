@@ -186,25 +186,57 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # THE PLAIN FORM IS THE LAST RESORT AND NOT THE FIRST, kept so that a platform with
     # neither `mv -T` nor `perl` still works, with the postcondition below as its only cover.
     # Neither platform this project builds and tests on is that platform.
+    #
+    # AND `--` BEFORE THE OPERANDS, ON ALL THREE. A handoff path is the CALLER'S, and a
+    # relative one may begin with `-`: the temporary derived from it does too, so `mv` reads
+    # the source as an option bundle and `perl` reads it as a switch. Every attempt then
+    # fails on the option, the write refuses, and a path that was perfectly writable takes
+    # the stage down. `--` is where each of them stops parsing.
     _rb_wh_mv=0
-    /usr/bin/env mv -T -f "$_rb_wh_tmp" "$1" 2>/dev/null || {
-        /usr/bin/env perl -e 'rename($ARGV[0], $ARGV[1]) or exit 3' "$_rb_wh_tmp" "$1" 2>/dev/null
+    /usr/bin/env mv -T -f -- "$_rb_wh_tmp" "$1" 2>/dev/null || {
+        /usr/bin/env perl -e 'rename($ARGV[0], $ARGV[1]) or exit 3' -- "$_rb_wh_tmp" "$1" 2>/dev/null
         _rb_wh_mv=$?
         if [ "$_rb_wh_mv" -eq 3 ]; then
             echo "could not rename '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"
             return 1
         fi
-        [ "$_rb_wh_mv" -eq 0 ] || /usr/bin/env mv -f "$_rb_wh_tmp" "$1" \
+        [ "$_rb_wh_mv" -eq 0 ] || /usr/bin/env mv -f -- "$_rb_wh_tmp" "$1" \
             || { echo "could not move '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"; return 1; }
     }
-    # AND THE TARGET IS A REGULAR FILE AFTERWARDS, WHICH IS A POSTCONDITION AND NOT A GUARD.
-    # It asks what actually happened rather than what was true a moment ago, so a racer that
-    # made the target a directory after the test above — the one interleaving that test
-    # cannot close — is caught here rather than reported as a successful handoff.
+    # AND THE POSTCONDITION ASKS WHAT IS AT THE TARGET, NOT MERELY WHAT KIND OF THING IT IS.
+    # It runs after the rename rather than before it, so it asks what actually happened —
+    # which catches the interleaving the type test cannot, a racer making the target a
+    # directory after that test. The temporary is inside that directory in that case, under
+    # its unguessable name, and is left there: nothing here removes.
     #
-    # The temporary is inside that directory in that case, under its unguessable name, and
-    # is left there: nothing in this library removes, for the reason at the top.
-    [ -f "$1" ] \
-        || { echo "'$1' is not a regular file after the write; it was replaced while the value was crossing, and the value did not cross"; return 1; }
+    # THE SOURCE IS RACEABLE TOO, and a type check alone cannot see it. The temporary's name
+    # is published in the directory the moment it exists, so a same-UID process can replace
+    # THAT path — with a symlink, or with a regular file of its own carrying another 40-hex
+    # OID — and the exact rename then moves the substituted inode onto the handoff path,
+    # faithfully. `[ -f ]` is satisfied, the helper returns 0, and the driver reads a head
+    # this run never gated as though it had.
+    #
+    # SO THE VALUE IS PROVEN, AND A SYMLINK AT THE TARGET IS REFUSED OUTRIGHT. An exact
+    # rename leaves a regular file at that name; a link there means what arrived is not what
+    # this call put there.
+    { [ ! -L "$1" ] && [ -f "$1" ]; } \
+        || { echo "'$1' is not a plain regular file after the write; it was replaced while the value was crossing, and the value did not cross"; return 1; }
+    if [ "$2" = value ]; then
+        # THE RAW BYTES, TERMINATOR INCLUDED, READ WITH A BUILTIN. `$(<…)` strips trailing
+        # newlines, so it cannot see the delimiter every reader of these files requires, and
+        # `cat` is a name. `read -d ''` reads to the first NUL — which is end of file here —
+        # and reports 1 at EOF whether or not it read anything, so the STATUS is not the
+        # answer and the comparison is.
+        _rb_wh_back=
+        IFS= read -r -d '' _rb_wh_back < "$1"
+        [ "$_rb_wh_back" = "$3
+" ] || { echo "'$1' does not hold what this call wrote; the temporary was replaced before the rename, or the target was, and the value did not cross"; return 1; }
+    else
+        # ZERO BYTES, ASKED WITHOUT AN OPEN. An emptying has no value to compare, and `-s`
+        # answers it from the inode — so this path never opens the target at all, which
+        # matters because the pre-bootstrap clearing in `pr-close-round.sh` is unbounded.
+        [ ! -s "$1" ] \
+            || { echo "'$1' is not empty after the emptying; it was replaced while the claim was being removed"; return 1; }
+    fi
     return 0
 }

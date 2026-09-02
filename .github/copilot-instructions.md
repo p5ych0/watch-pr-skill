@@ -246,6 +246,22 @@ When reviewing a change here:
   their `run_limited`, wrapped around a child that sources the library — the
   baseline write stands *after* the Copilot-signoff revocation, where a hang leaves
   the phase half-open with no diagnostic.
+- **the postcondition proves the VALUE, not the file's type.** The temporary's name is
+  published in the directory the moment it exists, so a racer can replace the SOURCE — with
+  a symlink, or a regular file of their own carrying another 40-hex OID — and the exact
+  rename then moves that inode onto the handoff path faithfully. `[ -f ]` is satisfied and
+  the caller reads a head this run never gated. The target must be a non-symlink regular
+  file whose raw bytes are what the call asked for; an emptying is zero bytes, asked from
+  the inode with `-s` so that path never opens the target at all.
+- **`--` before the operands, on every attempt.** A handoff path is the caller's and a
+  relative one may begin with `-`, so the temporary derived from it does too: without it
+  `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable
+  path takes the stage down.
+- **a fixture must not stage a special target the system owns.** The device case exists to
+  fail if the type refusal regresses, and under root that failure IS the damage — a rename
+  over `/dev/null` replaces a process-wide device and takes out whatever else is running.
+  Stage a device of the fixture's own with `mknod`, and skip by name where that needs
+  privilege it has not got.
 - **nothing in the library is removed, including the temporary a failed write
   leaves.** `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the class.
 - **the clearing in `gate` runs above the bootstrap, and that ordering is

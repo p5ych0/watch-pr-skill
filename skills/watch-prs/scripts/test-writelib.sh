@@ -113,18 +113,29 @@ fi
 
 # A CHARACTER DEVICE, which is the case that made this a refusal rather than a replacement.
 # `mv -f` renames over any non-directory inode the caller may rename, so a run with
-# permission — root in a container, with `/dev/null` named as the handoff path — replaced
-# the device with a regular file. The assertion is on the INODE TYPE, because a status
-# saying "refused" would hold just as well after the damage.
-if [ -c /dev/null ]; then
-    out="$(rb_write_handoff /dev/null "nope")" \
+# permission — root in a container — replaced the device with a regular file. The assertion
+# is on the INODE TYPE, because a status saying "refused" would hold just as well after the
+# damage.
+#
+# ON A DEVICE OF ITS OWN, NEVER `/dev/null`. This case is written to fail if the refusal
+# regresses, and under root that failure MODE is the damage: the rename would replace a
+# process-wide device with a regular file, taking out concurrently running fixtures and
+# whatever else in the container reads from it. A fixture whose failure breaks the machine
+# is not self-contained, and this is the one place where the distinction is not academic —
+# the suite runs as root in containers. `mknod` needs privilege that a developer machine
+# does not have, so the case skips by name where it cannot stage its own device rather than
+# reaching for the system's.
+_wl_dev="$TMP/nulldev"; rm -f "$_wl_dev"
+if command -v mknod >/dev/null 2>&1 && mknod "$_wl_dev" c 1 3 2>/dev/null && [ -c "$_wl_dev" ]; then
+    out="$(rb_write_handoff "$_wl_dev" "nope")" \
         && die "a character device target was accepted" \
         || pass "a character device at the target is refused"
-    [ -c /dev/null ] \
-        && pass "…and /dev/null is still a character device" \
-        || die "/dev/null was replaced by the handoff write"
+    [ -c "$_wl_dev" ] \
+        && pass "…and the device is still a character device" \
+        || die "the device target was replaced by the handoff write"
+    rm -f "$_wl_dev"
 else
-    pass "(/dev/null is not a character device here; the device target is skipped by name)"
+    pass "(no mknod privilege here; the device target is skipped by name)"
 fi
 
 # A SYMLINK TO A DIRECTORY, which is the shape `mv` redirects INTO rather than over: the
@@ -321,6 +332,67 @@ if command -v mv >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
 else
     pass "…(the swapped-target cases are skipped: this platform has no mv or no perl)"
 fi
+
+# ── A RACER THAT REPLACES THE SOURCE, NOT THE TARGET ───────────────────────
+#
+# THE TEMPORARY'S NAME IS PUBLISHED THE MOMENT IT EXISTS, and everything above is about the
+# TARGET being swapped. The other end is raceable in the same window: a same-UID process can
+# replace the temporary's own path with a regular file of its own, and the exact rename then
+# moves that inode onto the handoff path faithfully. A type-only postcondition is satisfied —
+# a regular file is exactly what arrives — so the helper reports success and the driver reads
+# a head this run never gated as though it had.
+#
+# STAGED THROUGH THE SAME `mv` SHIM, which receives the temporary's real path and can replace
+# it before the real rename runs.
+if command -v mv >/dev/null 2>&1; then
+    mkdir -p "$TMP/sbin"
+    { printf '#!/bin/sh\n'
+      printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
+      printf 'rm -f "$_s"; printf "%%s\\n" "$RB_FORGED" > "$_s"\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/sbin/mv"
+    chmod +x "$TMP/sbin/mv"
+    _ws="$TMP/srcrace"; rm -rf "$_ws"; mkdir -p "$_ws"
+    : > "$_ws/handoff"
+    _wl_pathsave="$PATH"
+    RB_MV_REAL="$(command -v mv)" RB_FORGED=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+        PATH="$TMP/sbin:$PATH" \
+        rb_write_handoff "$_ws/handoff" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+        >/dev/null 2>&1 && _wl_rc=0 || _wl_rc=$?
+    PATH="$_wl_pathsave"
+    [ "$_wl_rc" != 0 ] \
+        && pass "a temporary replaced before the rename is refused rather than handed over" \
+        || die "a forged source was reported as a successful handoff"
+    # AND THE CALLER IS NOT LEFT READING THE FORGERY AS A SUCCESS. The refusal is what the
+    # caller branches on, so the assertion above is the contract — this one names what would
+    # otherwise reach the driver.
+    [ "$(cat "$_ws/handoff")" != aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ] \
+        && pass "…the value this call asked for having demonstrably not crossed" \
+        || die "the forging shim did not actually replace the source, so the case proves nothing"
+    rm -rf "$_ws" "$TMP/sbin"
+else
+    pass "…(the swapped-source case is skipped: no mv on this platform)"
+fi
+
+# ── A HANDOFF PATH THAT BEGINS WITH A DASH ─────────────────────────────────
+#
+# THE PATH IS THE CALLER'S AND A RELATIVE ONE MAY START WITH `-`. The temporary derived from
+# it does too, so without `--` the source reads as an option bundle to `mv` and as a switch
+# to `perl`: every attempt fails on the option and a perfectly writable path takes the stage
+# down. Run from inside the directory, because that is the only way a path can begin with a
+# dash at all.
+# THE NAME IS PASSED BARE AND READ BACK AS `./-dashed`, which is the same file by two
+# spellings. Passing `./-dashed` to the helper would prove nothing — the leading `.` is what
+# stops any of this — and reading it back bare would break the fixture's own commands rather
+# than the subject's.
+(
+    cd "$TMP" || exit 1
+    : > ./-dashed
+    out="$(rb_write_handoff -dashed "a value")" || { printf 'FAIL - a dash-leading path was refused: %s\n' "$out"; exit 1; }
+    [ "$(cat ./-dashed)" = "a value" ] || { printf 'FAIL - a dash-leading path did not receive the value\n'; exit 1; }
+    out="$(rb_empty_handoff -dashed)" || { printf 'FAIL - a dash-leading path could not be emptied: %s\n' "$out"; exit 1; }
+    [ ! -s ./-dashed ] || { printf 'FAIL - a dash-leading path was not emptied\n'; exit 1; }
+) && pass "a handoff path beginning with a dash is a path, not an option" \
+  || die "the dash-leading path case failed"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

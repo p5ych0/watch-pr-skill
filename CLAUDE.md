@@ -567,6 +567,20 @@ rediscovering them.
   other load look clean. #88. `test-pr-identity.sh` fails if a `pr-*.sh` script
   loads a library by hand.
 
+  **A HANDOFF CHILD SOURCES `writelib.sh` DIRECTLY, and that is the second exception.**
+  Two places reach `rb_write_handoff`/`rb_empty_handoff` in a `bash -p -c` child with a
+  bare `.` rather than through the loader, and neither can use it. `pr-close-round.sh`'s
+  pre-bootstrap clearing runs ABOVE `rb_load` on purpose — the driver reads the head file
+  in the statement AFTER the gate's `if`, not inside its success arm, because a refusal can
+  be walked past, so a load that refused ahead of the clearing would leave a previous
+  round's OID to be accepted as a proven head. And `pr-copilot-phase.sh`'s three bounded
+  writes run in a child because `run_limited` bounds a COMMAND and not a shell function;
+  the loader is a function in the PARENT, so there is nothing for the child to call. Both
+  get the loader's guarantee by a different route: an emptied library leaves the symbol
+  undefined, the child exits non-zero, and the caller refuses — which is the direction
+  `rb_load` fails in, reached without it. `test-pr-identity.sh`'s by-hand-load check keys
+  on the scripts' own loads, so neither is a violation of it.
+
   **`SKILL.md` is the exception, and it is deliberate.** Its bash runs in the
   driving session's own shell and aborts with prose rather than a
   `PR_X status=error` line, so it does not share the callers' contract — and

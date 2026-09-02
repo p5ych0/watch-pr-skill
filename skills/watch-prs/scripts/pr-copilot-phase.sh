@@ -265,7 +265,7 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
-    # THIS CLEARING STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
+    # THIS READINESS WRITE STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
     # truncating open above the bootstrap, where `run_limited` does not exist yet: its
     # `[[ -f ]]` guard refused a FIFO already at the path, so what could block it was a
     # same-UID process replacing the path between the test and the open — while the symlink
@@ -284,12 +284,13 @@ if [[ $STAGE = open ]]; then
     # revoked the previous Copilot signoff: the stage then reports that the phase did not
     # open while having mutated the PR.
     #
-    # AND NOTHING WEAKER PROVES IT. Measured: `>>` opens for append, so an append-only file
-    # passes the probe and fails the write; `<>` opens read-write, which REJECTS a
-    # write-only (mode 222) file the real write handles, and its only gain needs `chattr +a`
-    # and therefore root, so it would ship untestable. No shell redirection expresses the
-    # write's own mode — O_WRONLY without truncate or append — so the operation that proves
-    # it IS the truncation.
+    # AND NOTHING WEAKER PROVES IT, WHICH IS WHY IT IS THE REAL WRITE. The proof has to be
+    # the operation the later write performs, or it answers a different question: since #263
+    # that operation is `rb_write_handoff` — a type refusal, an exclusive create in the
+    # target's directory, and an exact rename — so this runs it. A path that cannot take
+    # that, for whatever reason, is found HERE. This settles more than the truncation it
+    # replaced did: the type refusal reaches `/dev/null`, a socket and a FIFO, which the old
+    # probe accepted and left to a read-back on the far side of the revocation.
     #
     # IT WRITES A SENTINEL RATHER THAN EMPTYING, and that is what stopped the readiness
     # proof from being a fail-open. Emptying looked free because an empty baseline WAS legal
@@ -306,24 +307,25 @@ if [[ $STAGE = open ]]; then
     #
     # A SENTINEL IS NOT A REVIEW ID, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
     # status 2 — and the driver stops instead of accepting a pass that never happened. The
-    # same refusal that used to fail open now fails closed, and the readiness proof is
-    # unchanged: this is still a truncating open on the path, still bounded, still ahead of
-    # the revocation, so a path that CANNOT TAKE THIS WRITE is found before anything is
-    # posted. Not every unusable path: `/dev/null` and a write-only file accept it and are
-    # caught by the read-back further down, which is after the revocation. Those are the
-    # cases this ordering does not cover, and the read-back is what covers them.
+    # same refusal that used to fail open now fails closed, and the readiness proof still
+    # stands ahead of the revocation, so a path that cannot take this write is found before
+    # anything is posted. What is NO LONGER an exception is the class that used to be one:
+    # `/dev/null`, a socket and a FIFO passed a truncating probe and were caught only by the
+    # read-back on the far side of the revocation. `rb_write_handoff` refuses them here, by
+    # type, before anything is created. The read-back keeps its own job — proving the bytes
+    # that crossed are the bytes asked for — rather than standing in for this one.
     #
     # IT MUST NOT BE EMPTY AND MUST NOT PARSE AS AN ID. Empty is the legal "no floor" value
     # above; digits, or `comment:` and digits, are the two shapes the watch accepts. Anything
     # else is refused, and this is spelled so a reader of the file sees why it is there.
     #
-    # AND IT NARROWS THE WINDOW RATHER THAN CLOSING IT. This write truncates before it
-    # writes, so a failure between the two — ENOSPC, a quota — still leaves the file empty,
-    # which the watch still accepts as "no floor". No shell redirection truncates and writes
-    # atomically, so no writer can close that alone: the fix is that an EMPTY file stops
-    # being legal and "no prior review" gets an explicit token, which is a change to
-    # `pr-watch.sh`'s contract with three writers and is #264. Until then this is strictly
-    # narrower than emptying, which failed open on EVERY refusal in this span.
+    # AND THE WINDOW IT ONCE NARROWED IS CLOSED FROM BOTH ENDS NOW. This write truncated
+    # before it wrote, so a failure between the two — ENOSPC, a quota — left the file empty,
+    # which the watch then accepted as "no floor"; the sentinel narrowed that and could not
+    # close it, because no shell redirection truncates and writes atomically. #264 made an
+    # EMPTY file a refusal rather than a no-floor value, and #263 made the write a RENAME:
+    # the value is complete in a temporary before the caller's name refers to it at all, so
+    # a failure part-way leaves the previous contents and never a half-written value.
     # WRITTEN THROUGH `rb_write_handoff`, WHICH RENAMES RATHER THAN TRUNCATING — #263. A
     # plain `>` on this path follows a symlink, so a same-UID process that replaced it had
     # the file it pointed at truncated instead.
