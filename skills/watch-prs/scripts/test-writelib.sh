@@ -236,14 +236,21 @@ esac
 # mechanism is what is asserted — `O_NONBLOCK` so the open of a FIFO returns instead of
 # waiting, and `stat($h)` with `-f _` so the type comes from the inode that was opened
 # rather than from a test that preceded it.
-case "$_wl_src" in
-    *'O_RDONLY|O_NONBLOCK'*) pass "…and the read-back opens non-blocking, so a FIFO cannot hang it" ;;
-    *) die "the read-back is not a non-blocking open; a FIFO swapped in after the type test would block it" ;;
-esac
-case "$_wl_src" in
-    *'stat($h)'*) pass "…with the type taken from the handle rather than from a preceding test" ;;
-    *) die "the read-back does not fstat the handle it opened" ;;
-esac
+# ALL THREE READERS ARE COUNTED, NOT MATCHED ONCE. A substring match on the whole source is
+# satisfied by any one reader, so stripping `O_NONBLOCK`, `O_NOFOLLOW` or the handle `stat`
+# from the EMPTYING reader alone left the check green — and the behavioural emptying case
+# swaps its FIFO before the cheap pathname tests, so it could not see that either. A FIFO
+# arriving between those tests and the emptying's open would then block a pre-bootstrap
+# clearing that has no watchdog. Three readers: the value read-back, the emptying's size
+# check, and `rb_handoff_is_sha`.
+_wl_opens="$(grep -c 'O_RDONLY|O_NONBLOCK|O_NOFOLLOW' <<<"$_wl_src")" || _wl_opens=0
+[ "$_wl_opens" -eq 3 ] \
+    && pass "…and all three readers open non-blocking and no-follow, so a FIFO or a link cannot hang or redirect them" \
+    || die "$_wl_opens of the three readers open with O_RDONLY|O_NONBLOCK|O_NOFOLLOW; the others resolve the name unsafely"
+_wl_fstats="$(grep -c 'stat(\$h)' <<<"$_wl_src")" || _wl_fstats=0
+[ "$_wl_fstats" -eq 3 ] \
+    && pass "…with all three taking the type from the handle rather than from a preceding test" \
+    || die "$_wl_fstats of the three readers fstat the handle they opened"
 # AND THE EMPTYING ASKS THE SAME WAY. `[ ! -s "$1" ]` resolves the name a THIRD time after
 # `[ ! -L ]` and `[ -f ]`, so a symlink to an empty file or a FIFO swapped in before it was
 # measured instead of the file the rename put there — and the call returned 0 with the target
