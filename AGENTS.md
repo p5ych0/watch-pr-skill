@@ -266,7 +266,8 @@ When reviewing a change here:
   trailing NUL and accepts the 40-hex prefix — and that version needed the read's STATUS read
   backwards, since it returns 0 only when it found the delimiter. Reading to EOF removes the
   need to interpret a status at all; a change back to a stopping reader reintroduces it, and
-  a change to a slurp accepts a matching prefix before an I/O error (next rule but one).
+  a change to a slurp accepts a matching prefix before an I/O error — see the rule below
+  headed *both perl readers use a `sysread` loop ending on a zero-length read, not a slurp*.
 - **the driver must not redirect onto a handoff path.** `helper … > "$PRIOR_FILE"` is opened
   by the driving shell before the helper starts, so nothing the helper checks can catch a
   link there. The path is handed over as an argument and the helper renames onto it.
