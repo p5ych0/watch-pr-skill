@@ -15,6 +15,14 @@
   far** rather than only on a refusal. Removing the clearings in 2.0.97 did not help,
   because the write beside them opened the same name the same way.
 
+  **And the ninth was the driver's own redirection.** `SKILL.md` ran the opening request as
+  `pr-request-review.sh N "$AUTO_REVIEW" … > "$PRIOR_FILE"`, which is the same `>` — opened
+  by the driving shell *before* the helper starts, so nothing the helper could check would
+  have caught a link there. The path is handed over as `--baseline-file` now and the helper
+  renames onto it. It is an option rather than a third positional because the body used to
+  be one, and a caller still passing that form would have had their body file overwritten
+  with the baseline.
+
   **The last two were above the bootstrap, and that is why they were the last two.**
   `pr-close-round.sh gate` clears the head and baseline files before it loads anything, so
   that no library load can refuse while a previous round's values are still readable — and
@@ -56,6 +64,15 @@
   not a regular file is refused outright and left as it was: a directory, a FIFO, a device,
   a socket, or a symlink to any of them. A symlink to a **regular file** is accepted, and
   the link is what the rename replaces.
+
+  **And the postcondition proves the VALUE, because the SOURCE is raceable too.** The
+  temporary's name is published in its directory the moment it exists, so a racer can
+  replace *that* path and the exact rename then moves their inode onto the handoff path
+  faithfully — a type check is satisfied by exactly what arrives. The target must be a
+  non-symlink regular file whose raw bytes are what the call asked for. A NUL in it is a
+  refusal on its own: `read -d ''` stops at one, so a forgery spelled "the requested value,
+  then a NUL, then anything" compares equal, and the driver's `$(<…)` would drop the NUL and
+  accept the 40-hex prefix.
 
   A **postcondition** covers the one interleaving the type test cannot: a racer turning the
   target into a directory after the test and before the rename. The temporary's name carries

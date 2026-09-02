@@ -1823,9 +1823,17 @@ grep -q 'prior-review=' "$SKILL" \
 # AND THE THREE WRITERS ALL NAME THE SAME FILE. A stage that wrote somewhere else
 # would leave the watch reading the PREVIOUS round's id — which is the exact failure
 # `--after-review` exists to prevent, arriving by a new route.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
+# AND IT HANDS THE PATH OVER RATHER THAN REDIRECTING ONTO IT. `> "$PRIOR_FILE"` here is
+# opened by the DRIVING shell before the helper starts, and it follows a symlink — so a
+# path a same-UID process had replaced cost the operator the file it pointed at, with
+# nothing the helper could check in time. Given the path, the helper renames onto the name
+# through `writelib.sh`. #263.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "…the opening request writes the baseline into \$PRIOR_FILE" \
-    || die "the opening request does not redirect its answer into \$PRIOR_FILE"
+    || die "the opening request does not hand \$PRIOR_FILE to the helper"
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW".*> "$PRIOR_FILE"' "$SKILL" \
+    && die "the opening request redirects onto \$PRIOR_FILE again; that open follows a symlink" \
+    || pass "…by argument rather than by a redirection this shell opens"
 grep -q 'pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"' "$SKILL" \
     && pass "…the round close is given it too" \
     || die "the round close is not given \$PRIOR_FILE"
@@ -2080,7 +2088,7 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
 # AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in
@@ -2777,7 +2785,7 @@ _rb_forged="$(env -u SHELLOPTS RB_SKILL_PATH="$SKILL" bash -c '
 # unrecognised value is refused by name, which `test-pr-request-review.sh`
 # executes. Asserted as the argument rather than as the branch, because the
 # branch is somewhere the suite can run it.
-grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" <' "$SKILL" \
+grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" --baseline-file' "$SKILL" \
     && pass "…and the initial request is given it" \
     || die "the initial request does not branch on the review mode"
 

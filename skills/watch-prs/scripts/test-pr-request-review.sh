@@ -27,7 +27,8 @@ CODEXBOT='chatgpt-codex-connector[bot]'
 
 # ── the harness ────────────────────────────────────────────────────────────
 DIR="$TMP/s"; mkdir -p "$DIR" "$TMP/bin"
-cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" "$DIR/" \
+cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" \
+   "$SELF_DIR/writelib.sh" "$DIR/" \
     || { die "the subject could not be staged"; echo "RESULT: FAIL"; exit 1; }
 
 # THE BASELINE PROBE. Keyed on the subcommand, so a call asking something else is
@@ -63,13 +64,21 @@ world() {   # world ; auto-review off, a readable baseline, a working post
 # contract: stdout carries the baseline or nothing, so a reason leaking onto it
 # is read by the driver as a review id.
 OUT="$TMP/out"; ERR="$TMP/err"
+# THE BASELINE IS A FILE THE CALLER NAMES SINCE #263, not this helper's stdout. The driver
+# used to redirect — `> "$PRIOR_FILE"` — and that open follows a symlink and happens in the
+# driving shell before the helper starts, so nothing here could refuse it.
+BASEF="$TMP/prior.txt"
 # THE BODY ARRIVES ON STDIN, which is why the third argument is gone. The driver
 # redirects a file its own tool wrote, so `SKILL.md` needs no `cat` to write it
 # and no heredoc to carry it — a heredoc would splice the account into shell
 # source, where a line equal to the delimiter ends it. `$BODY_IN` is what this
 # harness feeds through that redirection.
-run() {   # run [args…] ; prints "<rc>", with stdout in $OUT and stderr in $ERR
+run() {   # run [args…] ; prints "<rc>", with the baseline in $BASEF and stderr in $ERR
     local rc=0
+    : > "$BASEF"
+    # THE OPTION IS SUPPLIED FOR THE ORDINARY TWO-ARGUMENT CALL, which is what the driver
+    # makes. A case about the ARITY passes its own count and this does nothing to it.
+    if [ "$#" -eq 2 ]; then set -- "$@" --baseline-file "$BASEF"; fi
     (cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         /usr/bin/env bash -p "$DIR/pr-request-review.sh" "$@" <"$BODY_IN" >"$OUT" 2>"$ERR") || rc=$?
@@ -89,6 +98,10 @@ raw_is() {   # raw_is <file> <expected-content-including-newlines> <label>
         || die "$3 is not byte-for-byte '$2': $(od -c "$1" 2>/dev/null | head -2)"
 }
 stdout()  { cat "$OUT"; }
+# THE BASELINE IS READ FROM THE FILE THE CALL NAMED, not from stdout. Since #263 the
+# helper opens that file itself and renames onto it, because the driver's `> "$PRIOR_FILE"`
+# followed a symlink and was opened before this process started.
+baseline() { cat "$BASEF"; }
 stderr()  { cat "$ERR"; }
 posted()  { grep -q '^gh ' "$TMP/calls"; }
 nothing_posted() { ! grep -q '^gh ' "$TMP/calls"; }
@@ -117,9 +130,9 @@ _ef=$?
 
 # ── THE ORDINARY MANUAL PATH ───────────────────────────────────────────────
 world; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(stdout)" = 4242 ]; } \
-    && pass "the manual path posts and returns the baseline on stdout, alone" \
-    || die "the manual path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
+{ [ "$rc" = 0 ] && [ "$(baseline)" = 4242 ]; } \
+    && pass "the manual path posts and writes the baseline into the file it was given" \
+    || die "the manual path gave rc=$rc baseline='$(baseline)' stderr='$(stderr)'"
 _cap bodies
 grep -qF '@codex review' <<<"$_CAP" \
     && pass "…in one comment carrying the mention that IS the request" \
@@ -144,10 +157,10 @@ grep -qF 'A one-paragraph account' <<<"$_CAP" \
 # purpose. So the assertion is the exact string rather than "not a failure": emitting
 # empty here would restore the old ambiguity and pass a laxer check.
 world; : > "$W/prior.out"; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(stdout)" = none ] && posted; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = none ] && posted; } \
     && pass "…and no prior review on the manual path reports the none token, not an empty value" \
-    || die "a first request with no prior review gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
-raw_is "$OUT" 'none
+    || die "a first request with no prior review gave rc=$rc baseline='$(baseline)' stderr='$(stderr)'"
+raw_is "$BASEF" 'none
 ' "the manual path's none baseline"
 
 # AND A COMMENT-BACKED BASELINE COMES THROUGH AS IT IS. A reviewer's newest
@@ -156,9 +169,9 @@ raw_is "$OUT" 'none
 # `pr-watch.sh` accepts. Rewriting or refusing it here would abort after the
 # request had been posted.
 world; printf 'comment:998877\n' > "$W/prior.out"; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(stdout)" = comment:998877 ] && posted; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = comment:998877 ] && posted; } \
     && pass "…and a comment-backed baseline is reported unchanged" \
-    || die "a comment-backed baseline gave rc=$rc stdout='$(stdout)'"
+    || die "a comment-backed baseline gave rc=$rc baseline='$(baseline)'"
 
 # ── THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN ────────
 # `printf` can fail — a full filesystem under the caller's transport file — and
@@ -193,10 +206,10 @@ world; rc=0
 # above gives — and the assertion is the exact string, since an empty value here would be
 # the ambiguity that change removed.
 world; rc="$(run 7 yes)"
-{ [ "$rc" = 0 ] && [ "$(stdout)" = none ]; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = none ]; } \
     && pass "the automatic path posts and reports the none token as its baseline" \
-    || die "the automatic path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
-raw_is "$OUT" 'none
+    || die "the automatic path gave rc=$rc baseline='$(baseline)' stderr='$(stderr)'"
+raw_is "$BASEF" 'none
 ' "the automatic path's none baseline"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \
@@ -380,9 +393,33 @@ world; printf '1\n' > "$W/prior.rc"; rc="$(run 7 no)"
 # review id — which its shape check would then refuse, turning a posted request
 # into an abort.
 world; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(stdout)" = 4242 ]; } \
-    && pass "…and a success carries the baseline and nothing else, not gh's own output" \
+{ [ "$rc" = 0 ] && [ -z "$(stdout)" ] && [ "$(baseline)" = 4242 ]; } \
+    && pass "…and a success says nothing there either, not even gh's own output" \
     || die "a success put '$(stdout)' on stdout"
+
+# ── A SYMLINKED BASELINE PATH COSTS THE LINK, NOT ITS TARGET ───────────────
+#
+# THIS WAS THE LAST HANDOFF WRITE THE DRIVER STILL OPENED ITSELF. `> "$PRIOR_FILE"` in
+# `SKILL.md` is opened by the DRIVING shell before this helper starts, and `>` follows a
+# symlink — so a same-UID process that replaced that path had the operator's file at the
+# other end truncated and the baseline written through it, with nothing this helper could
+# check in time. The path is handed over as `--baseline-file` now and renamed onto here.
+#
+# THE VICTIM IS OUTSIDE THE SESSION, which is what made this worth a change: the handoff
+# path lives under the session's working directory, and the file it can be pointed at does
+# not.
+world
+_sl="$TMP/reqlink"; rm -rf "$_sl"; mkdir -p "$_sl"
+printf 'the operator file, which must survive\n' > "$_sl/victim"
+ln -s "$_sl/victim" "$_sl/link"
+rc="$(run 7 no --baseline-file "$_sl/link")"
+[ "$(cat "$_sl/victim")" = 'the operator file, which must survive' ] \
+    && pass "a symlinked baseline path leaves the operator's file at the other end intact" \
+    || die "the baseline write truncated the symlink's target (rc=$rc)"
+{ [ "$rc" = 0 ] && [ ! -L "$_sl/link" ] && [ "$(cat "$_sl/link")" = 4242 ]; } \
+    && pass "…the link being what the rename replaced, with the baseline across" \
+    || die "the symlinked baseline gave rc=$rc and '$(cat "$_sl/link" 2>/dev/null)'"
+rm -rf "$_sl"
 
 # ── IT REFUSES TO RUN UNPRIVILEGED ─────────────────────────────────────────
 # `$-` proves less than it looks and is a last-resort refusal, but the honest

@@ -227,8 +227,20 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         # `cat` is a name. `read -d ''` reads to the first NUL — which is end of file here —
         # and reports 1 at EOF whether or not it read anything, so the STATUS is not the
         # answer and the comparison is.
+        #
+        # AND A SUCCESSFUL READ IS A REFUSAL, WHICH IS THE OPPOSITE OF HOW IT LOOKS.
+        # `read -d ''` returns 0 only when it FOUND the delimiter, and the delimiter is
+        # NUL — so success here means the file carries one. Without this a racer's file
+        # holding the requested value followed by a NUL and anything at all compares EQUAL,
+        # because the read stopped at the NUL: the value looks like it crossed, the driver's
+        # `$(<…)` drops the trailing NUL and accepts the 40-hex prefix, and the round is
+        # resolved on a head this call did not hand over. The downstream raw-byte read-backs
+        # already treat a delimiter this way.
         _rb_wh_back=
-        IFS= read -r -d '' _rb_wh_back < "$1"
+        if IFS= read -r -d '' _rb_wh_back < "$1"; then
+            echo "'$1' contains a NUL, so it is not a value this call wrote; the temporary was replaced before the rename, or the target was"
+            return 1
+        fi
         [ "$_rb_wh_back" = "$3
 " ] || { echo "'$1' does not hold what this call wrote; the temporary was replaced before the rename, or the target was, and the value did not cross"; return 1; }
     else

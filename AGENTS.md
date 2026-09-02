@@ -225,6 +225,13 @@ When reviewing a change here:
   the caller reads a head this run never gated. The target must be a non-symlink regular
   file whose raw bytes are what the call asked for; an emptying is zero bytes, asked from
   the inode with `-s` so that path never opens the target at all.
+- **a NUL in the read-back is a refusal on its own.** `read -d ''` stops AT the delimiter,
+  so a forgery spelled "the requested value, then a NUL, then anything" compares EQUAL —
+  and the driver's `$(<…)` drops the trailing NUL and accepts the 40-hex prefix. The read's
+  status means the opposite of how it looks: it returns 0 only when it FOUND the delimiter.
+- **the driver must not redirect onto a handoff path.** `helper … > "$PRIOR_FILE"` is opened
+  by the driving shell before the helper starts, so nothing the helper checks can catch a
+  link there. The path is handed over as an argument and the helper renames onto it.
 - **`--` before the operands, on every attempt.** A handoff path is the caller's and a
   relative one may begin with `-`, so the temporary derived from it does too: without it
   `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable

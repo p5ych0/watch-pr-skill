@@ -410,11 +410,11 @@ then
 # WHY:
 # AND THE BASELINE NEVER BECOMES AN ASSIGNMENT EITHER.
 # WHY:
-# THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
+# THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME — AND THE HELPER OPENS IT.
 # WHY:
 # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 # WHY:
-    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"; then
         [[ -n x ]]
     else
         echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."

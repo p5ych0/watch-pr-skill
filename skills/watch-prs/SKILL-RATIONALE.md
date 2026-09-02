@@ -1153,7 +1153,7 @@ is used, by a privileged helper that already knows what a review id looks like. 
 is `prefer removing the dependency over guarding it` applied to three guards at once,
 and it is the same answer `pr-origin.sh` gives: a path rather than a name. #243.
 
-## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
+## THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME — AND THE HELPER OPENS IT.
 
 A name can be made readonly or transforming by a startup file, and both failures
 are invisible at the point of use. A path is neither: the helper writes the file,
@@ -1162,6 +1162,19 @@ and `pr-watch.sh` opens it — this shell only carries the path from one to the 
 It used to read the file back and prove the assignment against a second read of it,
 which is where a name could still have defeated the handoff. Since #243 there is no
 assignment to prove, because the value never lands here at all.
+
+The path is handed over as `--baseline-file` rather than as a REDIRECTION, and that
+is #263. `> "$PRIOR_FILE"` here follows a symlink, so a same-UID process that had
+replaced that path cost the operator the file it pointed at — and the redirection is
+opened by THIS shell before the helper starts, so nothing the helper could check
+would have stopped it. Given the path instead, the helper writes it through
+`writelib.sh`, which renames onto the name rather than opening it: the link is what
+goes, never the file at the other end.
+
+It is an OPTION and not a third positional argument. The body used to be one, and a
+caller still passing that form would have had their body file overwritten with the
+baseline — worse than the silent drop the arity refusal exists to prevent. Spelled
+out, the old form still lands on that refusal.
 
 `pr-origin.sh` settled the same question the same way, and for the same reason.
 

@@ -373,6 +373,42 @@ else
     pass "…(the swapped-source case is skipped: no mv on this platform)"
 fi
 
+# AND A FORGERY THAT IS THE REQUESTED VALUE FOLLOWED BY A NUL. This is the one shape the
+# byte comparison alone cannot see: `read -d ''` stops AT the NUL, so the variable holds
+# exactly the expected bytes and the comparison passes. The driver's `$(<…)` then drops the
+# trailing NUL and accepts the 40-hex prefix, so the gate reports success and the threads
+# are resolved on a head this call never handed over. What catches it is the READ'S STATUS
+# meaning the opposite of how it looks: `read -d ''` returns 0 only when it FOUND the
+# delimiter, so a successful read is a file with a NUL in it.
+if command -v mv >/dev/null 2>&1; then
+    mkdir -p "$TMP/nbin"
+    { printf '#!/bin/sh\n'
+      printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
+      printf 'rm -f "$_s"; printf "%%s\\n\\000trailing" "$RB_WANTED" > "$_s"\n'
+      printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/nbin/mv"
+    chmod +x "$TMP/nbin/mv"
+    _wn="$TMP/nulrace"; rm -rf "$_wn"; mkdir -p "$_wn"; : > "$_wn/handoff"
+    _wl_pathsave="$PATH"
+    RB_MV_REAL="$(command -v mv)" RB_WANTED=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+        PATH="$TMP/nbin:$PATH" \
+        rb_write_handoff "$_wn/handoff" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+        >/dev/null 2>&1 && _wl_rc=0 || _wl_rc=$?
+    PATH="$_wl_pathsave"
+    [ "$_wl_rc" != 0 ] \
+        && pass "a source carrying the requested value and then a NUL is refused" \
+        || die "a NUL-suffixed forgery passed the byte comparison"
+    # THE SHIM REALLY DID WRITE THE PREFIX, or the case above passes for the wrong reason.
+    # A 40-hex prefix is what the driver's shape check would accept.
+    case "$(cat "$_wn/handoff" 2>/dev/null)" in
+        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*)
+            pass "…and the forgery it refused would have satisfied the driver's shape check" ;;
+        *)  die "the NUL shim did not write the expected prefix, so the case proves nothing" ;;
+    esac
+    rm -rf "$_wn" "$TMP/nbin"
+else
+    pass "…(the NUL-suffixed source case is skipped: no mv on this platform)"
+fi
+
 # ── A HANDOFF PATH THAT BEGINS WITH A DASH ─────────────────────────────────
 #
 # THE PATH IS THE CALLER'S AND A RELATIVE ONE MAY START WITH `-`. The temporary derived from
