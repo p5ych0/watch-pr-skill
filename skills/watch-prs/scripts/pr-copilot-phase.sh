@@ -333,10 +333,15 @@ if [[ $STAGE = open ]]; then
     # `perl`'s `sysopen` and `O_CREAT|O_EXCL`, so an entry already at that name fails
     # instead of being waited on — `set -C` did NOT do that, since bash's noclobber exempts
     # everything but a regular file — but pathname resolution, the write and the rename can
-    # all still stall on an
-    # unresponsive filesystem, and this call stands AFTER the revocation, where a hang
-    # leaves the phase half-open with no diagnostic. So the watchdog stays, around the
+    # all still stall on an unresponsive filesystem, so the watchdog stays, around the
     # library rather than around a raw redirection.
+    #
+    # THIS ONE IS THE READINESS WRITE AND STANDS BEFORE BOTH MUTATIONS, which is what its
+    # bound is for: a hang here costs a stage that did nothing, and the whole point of
+    # proving the path this early is that a path which cannot take the write is found before
+    # the revocation. The half-open consequence belongs to the BASELINE write further down,
+    # which stands after the revocation and before the request — saying it here misplaces
+    # the risk and would make this bound look like the important one to keep.
     #
     # RUN IN A CHILD BECAUSE `run_limited` BOUNDS A COMMAND, not a shell function. The
     # child sources the library by absolute path from `$_RB_SELF_DIR`; an emptied library
@@ -473,26 +478,10 @@ if [[ $STAGE = open ]]; then
         '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
         _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$PRIOR_REVIEW")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested: $_rb_wh"; exit 1; }
-    # BOUNDED TOO, because the write finishing does not make the next open safe: the
-    # path is named in argv, and a same-UID process can put a FIFO there between the
-    # two. This read is on the same side of the revocation as the write, so a hang
-    # here leaves the phase half advanced exactly as one there would.
+    # THIS IS THE WRITE THE HALF-OPEN RISK BELONGS TO. It stands after the revocation and
+    # before the request, so a hang here leaves the phase reopened with no pass asked for
+    # and no diagnostic — which is why this bound is the one that matters most of the three.
     #
-    # AND THE READ'S OWN STATUS IS TAKEN, INSIDE THE CHILD. `printf "%s" "$(<"$1")"`
-    # exits 0 whatever the substitution did, so a path removed or made unreadable
-    # after the write came back as SUCCESS with empty output — and where there is
-    # legitimately no earlier Copilot review the baseline WAS empty when this was written,
-    # so the comparison below passed and Copilot was requested against a file nothing can
-    # read. The watch then refuses, after the revocation and the request have gone out.
-    # Since #264 that value is the `none` token rather than empty, which narrows the
-    # coincidence without removing the reason for taking the status: a read that fails must
-    # not be able to look like any legitimate value.
-    #
-    # AND THE DESCRIPTOR IS PROVED REGULAR. A writable non-regular path — `/dev/null`
-    # is the reachable one — takes both writes, reads back empty, and passes that same
-    # comparison; `pr-watch.sh` rejects the identical path as `not_regular`, but only
-    # once the phase is half open. The `-f` question is asked HERE, on the bound
-    # descriptor rather than on the name, so it is the file that was read.
     # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
     # re-prove the baseline itself, in a bounded child, on a descriptor — because the write
     # above it was a `printf` that proved nothing. Since #263 the write IS the proof:
@@ -959,11 +948,13 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # read back. `printf` can report success and fail at the flush, and taking the status only
 # works while there is something left to refuse WITH: after the comment is posted the
 # signoff is on the PR and this stage cannot be un-run.
-# BOUNDED, LIKE `open`'S WRITES. Opening a path for writing can BLOCK — a FIFO at that
-# name waits for a reader that never arrives — and this write is the one immediately before
-# the signoff is posted, so a hang here stalls the stage with the phase half decided. `open`
-# has bounded both of its writes since #230; this was the copy left plain, which is the
-# same way its read-back ended up the weaker of the two. #246.
+# BOUNDED, LIKE `open`'S WRITES, AND NO LONGER BECAUSE OF FIFOs. The write opens nothing at
+# this path: `rb_write_handoff` creates a temporary with `O_CREAT|O_EXCL` — which refuses a
+# FIFO rather than waiting on it — and renames. What can still stall is pathname resolution,
+# the write and the rename, on an unresponsive filesystem, and this write is the one
+# immediately before the signoff is posted, so a hang here stalls the stage with the phase
+# half decided. `open` has bounded both of its writes since #230; this was the copy left
+# plain, which is the same way its read-back ended up the weaker of the two. #246.
 _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
     '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
     _ "$_RB_SELF_DIR" "$SHA_FILE" "$CODEX_SHA")" \

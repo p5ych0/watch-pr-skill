@@ -77,8 +77,10 @@
 # bounded still are, with `run_limited` moved around a CHILD that sources this library —
 # `pr-copilot-phase.sh`'s readiness, baseline and sha writes, the second of which stands
 # after the Copilot-signoff revocation, where a hang leaves the phase half-open with no
-# diagnostic. The read-backs beside them keep theirs for a reason of their own: they open
-# the target by name, where a FIFO can still be waiting.
+# diagnostic. THERE ARE NO READ-BACKS BESIDE THEM ANY MORE: those callers each re-proved the
+# bytes on a descriptor of their own, and #271 removed all three — this library's own
+# postcondition answers the same question earlier and with an open that cannot block or
+# follow a link. A caller-side read-back is a regression, not an extra layer.
 #
 # NOTHING IS REMOVED, INCLUDING ON FAILURE. This library never unlinks — not the temporary,
 # not anything — and a failure BEFORE the rename therefore leaves the temporary behind. A
@@ -159,7 +161,13 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # conditional on the destination's type, and a re-check is the same race one instruction
     # later — and `test-writelib.sh` pins the outcome so a change here fails rather than
     # widening it quietly. A caller must not expect a refusal for a late special inode.
-    if [ -e "$1" ] && [ ! -f "$1" ]; then
+    # `-L` IS ASKED AS WELL AS `-e`, BECAUSE `-e` FOLLOWS THE LINK. A DANGLING symlink — one
+    # whose referent has gone — makes `-e` false, so the test read it as an ABSENT path and
+    # the rename then replaced the link and reported success. That is a caller-provided link
+    # destroyed by a call the contract says accepts only an absent path, a regular file, or a
+    # symlink resolving to one. `-L` is true for a link whatever its referent, so the pair
+    # answers "is there an entry at this name" rather than "does this name resolve".
+    if { [ -e "$1" ] || [ -L "$1" ]; } && [ ! -f "$1" ]; then
         echo "'$1' is not a regular file; a handoff target must be a regular file or absent"
         return 1
     fi

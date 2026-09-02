@@ -614,18 +614,20 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     local prior _back
     prior=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; return 1; }
-    # AND IT IS HANDED OVER BEFORE THE REQUEST, with the write's status taken and the
-    # value read back. `printf` can report success and the write fail at the flush when
-    # the redirection closes, and a driver reading a truncated baseline watches against
-    # a value no request was made with. Taking the status only works while there is
-    # something left to refuse WITH: after the request there is not, and the round is
-    # irreversibly half-closed. So the file is written here — the read above is still
-    # immediately before the request, which is what that ordering is for — and a failure
-    # stops the stage with nothing posted and nothing queued.
+    # AND IT IS HANDED OVER BEFORE THE REQUEST, with the write's status taken. The write is
+    # `rb_write_handoff`, which creates a temporary exclusively, writes into that handle,
+    # renames it onto this path and reads the raw bytes back before returning — so a `0`
+    # from it means the value crossed, and a non-zero one means this handoff did not happen.
+    # Taking that status only works while there is something left to refuse WITH: after the
+    # request there is not, and the round is irreversibly half-closed. So the file is written
+    # here — the read above is still immediately before the request, which is what that
+    # ordering is for — and a failure stops the stage with nothing posted and nothing queued.
     # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY — #264. An empty file used to
-    # mean "no prior review", so a failure between this truncation and this write produced
-    # the legal value, and a driver whose `exit` returns then armed its watch with no floor
-    # at all. `gate` still EMPTIES this file, and that is now a refusal rather than a
+    # mean "no prior review", and every writer TRUNCATED before it wrote, so a failure in
+    # between produced the legal value and a driver whose `exit` returns then armed its
+    # watch with no floor at all. The rename removed that failure mode — a write that fails
+    # leaves the previous contents — and the token stays, because `gate`'s explicit
+    # clearing still produces an empty file on purpose and that is not an answer either. `gate` still EMPTIES this file, and that is now a refusal rather than a
     # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
     # direction that stops a round instead of announcing a pass nobody requested.
     prior="${prior:-none}"

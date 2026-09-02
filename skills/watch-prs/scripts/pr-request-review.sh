@@ -245,9 +245,12 @@ fi
 # posted, which is the order the two failures should be in.
 # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY. #264: an empty file used to mean
 # "no prior review", which made absence indistinguishable from failure — every writer
-# truncates before it writes, so any failure in between produced the legal value. The state
+# TRUNCATED before it wrote, so any failure in between produced the legal value. The state
 # is real and still has to be expressible, so it is expressed by a value a writer produces
-# on purpose. A truncation cannot fake it, and `pr-watch.sh` refuses an empty file.
+# on purpose. Since #263 the write RENAMES, so a failure leaves the previous contents rather
+# than an empty file and that particular route is gone — the token stays because `gate`'s
+# explicit clearing and a file left by an older version both still produce one, and
+# `pr-watch.sh` refuses an empty file for that reason.
 # AND IT CROSSES BY RENAME, ONTO A PATH THIS HELPER NEVER OPENS TO WRITE. It went to stdout
 # and the driver
 # redirected — `> "$PRIOR_FILE"` — which follows a symlink and is opened by the driving

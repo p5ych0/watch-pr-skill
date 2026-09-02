@@ -558,6 +558,28 @@ else
     pass "…(the no-follow case is skipped: no perl on this platform)"
 fi
 
+# ── A DANGLING SYMLINK IS AN ENTRY, NOT AN ABSENCE ─────────────────────────
+#
+# `-e` FOLLOWS THE LINK, so a symlink whose referent has gone answers FALSE and the type test
+# read it as an absent path — after which the rename replaced the link and reported success.
+# The contract accepts an absent path, a regular file, or a symlink resolving to one; a
+# dangling link is none of those, and destroying it is destroying something the caller made.
+# `-L` is true for a link whatever its referent, so the pair asks "is there an entry here"
+# rather than "does this name resolve".
+_wd="$TMP/dangling"; rm -rf "$_wd"; mkdir -p "$_wd"
+ln -s "$_wd/gone" "$_wd/link"
+out="$(rb_write_handoff "$_wd/link" "a value")" \
+    && die "a dangling symlink was accepted and replaced" \
+    || pass "a dangling symlink at the target is refused"
+[ -L "$_wd/link" ] \
+    && pass "…and the link is still there" \
+    || die "the dangling symlink was replaced by the handoff write"
+# AND THE REFERENT WAS NOT CREATED EITHER, which a write through the link would have done.
+[ ! -e "$_wd/gone" ] \
+    && pass "…with nothing written through it" \
+    || die "the handoff write created the dangling link's referent"
+rm -rf "$_wd"
+
 # ── A RACER THAT REPLACES THE SOURCE, NOT THE TARGET ───────────────────────
 #
 # THE TEMPORARY'S NAME IS PUBLISHED THE MOMENT IT EXISTS, and everything above is about the

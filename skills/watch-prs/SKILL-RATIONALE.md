@@ -1554,12 +1554,14 @@ is what a reader can trust, and this section is why.
 
 The sentinel is not a review id, so `pr-watch.sh` refuses it — `reason=malformed_review_id`,
 status 2, at the call and before any network read — and the driver stops rather than
-accepting a pass that never happened. The proof is unchanged: still a truncating open on
-the path, still bounded, still ahead of the revocation, so an unusable baseline is found
-before anything is posted — meaning a path that CANNOT TAKE THAT WRITE. `/dev/null` and a
-write-only file accept it and are caught by the read-back instead, which is after the
-revocation, so they are outside what this ordering buys. The refusal that used to fail open
-now fails closed, and there is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
+accepting a pass that never happened. The proof is still bounded and still ahead of the
+revocation, so an unusable baseline is found before anything is posted — but it is no longer
+a truncating open. Since #263 the readiness write is `rb_write_handoff`: it refuses the
+target by TYPE before creating anything, writes into an exclusively created temporary and
+renames. That settles MORE than the truncation did rather than the same amount — `/dev/null`,
+a socket and a FIFO used to pass this probe and be caught only by a read-back on the far side
+of the revocation, and they are refused here now. The refusal that used to fail open now fails
+closed, and there is no longer a trade here to weigh. `test-pr-watch.sh` asserts the sentinel is refused and
 the phase fixture asserts the exact string left behind, so the two halves cannot drift.
 
 THE HELPER MAKES NO PROMISE ABOUT THIS FILE'S CONTENTS AFTER A REFUSAL, and that
