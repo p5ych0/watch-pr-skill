@@ -247,7 +247,9 @@ When reviewing a change here:
   recreates an unbounded hang.
 - **the read-back opens non-blocking and takes the type from the HANDLE.** `[ -f ]` before
   the open is a cheap early answer, not the protection: a FIFO swapped in between the two
-  had the read waiting for a writer, and five of the call sites have no watchdog. `fstat`
+  had the read waiting for a writer. Of the SIX value calls — the only ones that reach this
+  open, since the four emptyings never open the target — THREE have no watchdog: the two in
+  `pr-close-round.sh` and the one in `pr-request-review.sh`. `fstat`
   on the descriptor that was actually opened is what removes the window; a change back to
   `read < "$path"` leaves every behavioural case green.
 - **`perl` runs with its environment cleared — `env -i`, keeping only `PATH`.** `PERL5OPT`
