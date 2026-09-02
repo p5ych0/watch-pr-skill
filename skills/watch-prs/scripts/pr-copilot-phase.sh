@@ -326,11 +326,21 @@ if [[ $STAGE = open ]]; then
     # narrower than emptying, which failed open on EVERY refusal in this span.
     # WRITTEN THROUGH `rb_write_handoff`, WHICH RENAMES RATHER THAN TRUNCATING — #263. A
     # plain `>` on this path follows a symlink, so a same-UID process that replaced it had
-    # the file it pointed at truncated instead. And the WATCHDOG IS GONE with the shape that
-    # needed it: it was here because a `>` on a caller-named path can block on a FIFO, and
-    # an exclusive create cannot block — if anything is at the temporary's name the open
-    # fails rather than waiting.
-    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" refused-no-baseline)" \
+    # the file it pointed at truncated instead.
+    # BOUNDED, AND THE BOUND IS NOT ABOUT FIFOs ANY MORE. `set -C` makes the temporary's
+    # open O_CREAT|O_EXCL, so an entry already at that name fails instead of being waited
+    # on — but pathname resolution, the write and the `mv` can all still stall on an
+    # unresponsive filesystem, and this call stands AFTER the revocation, where a hang
+    # leaves the phase half-open with no diagnostic. So the watchdog stays, around the
+    # library rather than around a raw redirection.
+    #
+    # RUN IN A CHILD BECAUSE `run_limited` BOUNDS A COMMAND, not a shell function. The
+    # child sources the library by absolute path from `$_RB_SELF_DIR`; an emptied library
+    # leaves `rb_write_handoff` undefined, the child exits non-zero, and this refuses —
+    # which is the same direction `rb_load` fails in, reached without it.
+    _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
+        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+        _ "$_RB_SELF_DIR" "$PRIOR_FILE" refused-no-baseline)" \
         || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'. Nothing has been posted: $_rb_wh"; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
@@ -455,7 +465,9 @@ if [[ $STAGE = open ]]; then
     # failed produced it by accident. Copilot has usually not reviewed this head when the
     # phase opens, so this is the ordinary case rather than an edge one.
     PRIOR_REVIEW="${PRIOR_REVIEW:-none}"
-    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$PRIOR_REVIEW")" \
+    _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
+        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+        _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$PRIOR_REVIEW")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested: $_rb_wh"; exit 1; }
     # BOUNDED TOO, because the write finishing does not make the next open safe: the
     # path is named in argv, and a same-UID process can put a FIFO there between the
@@ -958,7 +970,9 @@ SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\
 # the signoff is posted, so a hang here stalls the stage with the phase half decided. `open`
 # has bounded both of its writes since #230; this was the copy left plain, which is the
 # same way its read-back ended up the weaker of the two. #246.
-_rb_wh="$(rb_write_handoff "$SHA_FILE" "$CODEX_SHA")" \
+_rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
+    '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
+    _ "$_RB_SELF_DIR" "$SHA_FILE" "$CODEX_SHA")" \
     || { echo "ABORT: could not write the signed-off sha to '$SHA_FILE'; nothing has been posted."; exit 1; }
 # READ BACK THE SAME WAY `open` DOES, and for the reasons it states: bounded, because
 # opening a path can block; with its own status, because `$(<…)` reports the substitution's

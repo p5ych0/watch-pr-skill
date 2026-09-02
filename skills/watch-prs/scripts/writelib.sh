@@ -74,11 +74,46 @@ rb_write_handoff() { _rb_handoff "$1" value "$2"; }
 rb_empty_handoff() { _rb_handoff "$1" empty; }
 
 _rb_handoff() {   # _rb_handoff <target> value|empty [content]
+    # THE TARGET MUST BE ABSENT OR A REGULAR FILE, AND THIS IS NOT THE CONVICTED SHAPE.
+    # #245 convicted a check that PRECEDES AN OPEN OF THE SAME NAME, where the race changes
+    # what the open hits. Nothing here ever opens the target — not before this test and not
+    # after it — so the rename's safety does not rest on the answer. What this refuses is a
+    # caller naming something that is not a handoff file, early and with nothing written:
+    #
+    #   * a DIRECTORY, or a symlink to one. `mv` onto a directory moves the source INSIDE it
+    #     and reports success, so without this the temporary lands in a directory the caller
+    #     did not mean and only the postcondition below notices.
+    #   * a DEVICE or a SOCKET. `mv -f` replaces every non-directory inode it can rename
+    #     over, so a run with permission — root in a container, with `/dev/null` named as
+    #     the handoff path — would replace the character device with a regular file.
+    #   * a FIFO, which is refused rather than replaced. Replacing it is safe and was
+    #     briefly the behaviour; refusing keeps the promise `README.md` already makes and
+    #     leaves one fewer thing about this handoff that changed.
+    #
+    # A SYMLINK TO A REGULAR FILE PASSES, and must: `-f` follows the link, and that case is
+    # the whole of #263 — the rename then replaces the LINK and leaves the file it pointed
+    # at untouched, which is what a plain `>` did not do.
+    #
+    # WHERE A RACER CHANGES THE ANSWER AFTERWARDS, the postcondition is what catches it and
+    # the residue is bounded below. That is the case this test does not close, and does not
+    # claim to.
+    if [ -e "$1" ] && [ ! -f "$1" ]; then
+        echo "'$1' is not a regular file; a handoff target must be a regular file or absent"
+        return 1
+    fi
     # THE TEMPORARY IS BESIDE THE TARGET, because `mv` must not cross a filesystem: a
     # rename that becomes a copy is no longer atomic, and a reader could see a partial file
     # at the target. The caller's own directory is the one place guaranteed to be on the
     # same filesystem as the caller's own file.
-    _rb_wh_tmp="$1.rb-write.$$"
+    #
+    # AND ITS NAME IS UNPREDICTABLE, which bounds the one residue this library can leave.
+    # A racer that turns the target into a directory between the test above and the rename
+    # has the temporary land INSIDE that directory under its own basename — so a name built
+    # only from the caller's path and this pid could be pre-placed there by the racer as a
+    # file worth keeping, and `mv -f` would overwrite it. Two `$RANDOM` draws make the name
+    # unguessable at the moment it matters, which turns that from a loss into litter: a
+    # file with a name nobody chose, in a directory the racer picked themselves.
+    _rb_wh_tmp="$1.rb-write.$$.${RANDOM}${RANDOM}"
     # ONE EXCLUSIVE OPEN, AND THE WRITE GOES INTO IT. Creating the temporary and then
     # opening it AGAIN by name to write would be a check-then-open of its own: a same-UID
     # process can replace it between the two, and the second open — a plain `>` — would
@@ -89,11 +124,11 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # clobber deliberately elsewhere, and turning noclobber on for the rest of the run would
     # be a change nobody asked for.
     #
-    # AND THAT OPEN CANNOT BLOCK, which is why none of this needs a watchdog. `set -C`
-    # makes it O_CREAT|O_EXCL: where the name is free it creates a regular file, and where
-    # anything is there at all — a FIFO waiting for a reader included — it fails instead of
-    # waiting. Three of these call sites used to run under `run_limited` for exactly that
-    # risk, and the risk is gone with the shape that carried it.
+    # `set -C` MAKES IT O_CREAT|O_EXCL, so an entry already at that name — a regular file, a
+    # symlink to something precious, a FIFO — fails the open instead of being written
+    # through or waited on. THAT IS NOT THE SAME AS "CANNOT BLOCK": pathname resolution and
+    # the write itself can still stall on an unresponsive filesystem, which is why the
+    # callers that were bounded before still are.
     if [ "$2" = value ]; then
         ( set -C; printf '%s\n' "$3" > "$_rb_wh_tmp" ) 2>/dev/null \
             || { echo "could not create '$_rb_wh_tmp' exclusively and write it; the name is taken, its directory is unwritable, or the storage refused the bytes"; return 1; }
@@ -103,19 +138,22 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     fi
     # `mv` RATHER THAN `cp`: the point is the rename, and a copy would open the target for
     # writing and be exactly the truncation this exists to remove.
+    #
+    # NOT `mv -T`, WHICH WOULD SETTLE THE DIRECTORY CASE OUTRIGHT. It is a GNU extension
+    # and this suite runs against stock BSD tools on the mac-shaped job, where it is a
+    # usage error — so a helper written around it would refuse every write on that
+    # platform. The test above is what stands in for it, and the postcondition below is
+    # what covers the race the test cannot.
     /usr/bin/env mv -f "$_rb_wh_tmp" "$1" \
         || { echo "could not move '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"; return 1; }
     # AND THE TARGET IS A REGULAR FILE AFTERWARDS, WHICH IS A POSTCONDITION AND NOT A GUARD.
-    # `mv` onto an existing DIRECTORY moves the source INSIDE it and reports success, so a
-    # caller that named a directory would be told its value had crossed when it had not.
-    # Asking BEFORE the rename would be the check-then-open shape #245 convicted; asking
-    # after is a question about what actually happened, which no race can make stale in the
-    # direction that matters — a target that is a regular file now is one the rename put
-    # there, and anything else is a refusal.
+    # It asks what actually happened rather than what was true a moment ago, so a racer that
+    # made the target a directory after the test above — the one interleaving that test
+    # cannot close — is caught here rather than reported as a successful handoff.
     #
-    # The temporary is inside that directory in this case, and is left there: nothing in
-    # this library removes, for the reason at the top.
+    # The temporary is inside that directory in that case, under its unguessable name, and
+    # is left there: nothing in this library removes, for the reason at the top.
     [ -f "$1" ] \
-        || { echo "'$1' is not a regular file after the write; it was a directory or was replaced, and the value did not cross"; return 1; }
+        || { echo "'$1' is not a regular file after the write; it was replaced while the value was crossing, and the value did not cross"; return 1; }
     return 0
 }

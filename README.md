@@ -433,13 +433,18 @@ Then:
      file's contents: depending on where the run stopped it may hold the previous
      round's value, a refusal sentinel, or the id this run captured. Once past the
      bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
-     whatever is there — that write is also how it checks the path, so a path that
-     **cannot take that write** (a directory, a FIFO, an unwritable or append-only
-     file) stops the stage before the PR is touched. That is the only guarantee it
-     gives: it proves that write at that moment and not the whole handoff, so
-     `/dev/null` and a write-only file accept it, pass the revocation, and are refused
-     only by the later regular-file and read-back checks. Do not read a path-related
-     refusal as meaning the PR was left unmodified. Where the sentinel survives, a refusal cannot hand the watch a
+     whatever is there — and since 2.1.0 that write **renames rather than truncating**,
+     so it never opens the path you named. A target that is not a regular file — a
+     directory, a FIFO, a device, a socket, or a symlink to any of those — stops the
+     stage before the PR is touched, and is **left exactly as it was**: nothing is
+     replaced and nothing is written through. `/dev/null` named here is refused rather
+     than turned into a regular file, which is what the old truncating write did to it.
+     A symlink to a regular file is accepted, and the **link** is what gets replaced —
+     never the file it points at, which was the whole of the change.
+
+     What still stops the stage later rather than before the revocation is a target
+     that was fine at that moment and is not by the time the value crosses, so **do not
+     read a path-related refusal as meaning the PR was left unmodified.** Where the sentinel survives, a refusal cannot hand the watch a
      value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
      and stops.
 

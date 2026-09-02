@@ -342,33 +342,31 @@ _bs_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$
     && pass "…and so does one that cannot bootstrap at all" \
     || die "a bootstrap refusal did something other than leave the sha file alone (rc=$_bs_rc out='$_bs_out')"
 
-# AND A FIFO AT THE SHA PATH IS REPLACED RATHER THAN OPENED — #263, and this is a CHANGE
-# of outcome rather than of wording. The write used to open the caller's path, so a FIFO
-# there blocked for a reader that never came and the case's job was to prove the bound
-# stopped it. `rb_write_handoff` never opens the target at all: it creates a temporary
-# beside it and renames over the name, so a FIFO is simply replaced by the regular file
-# holding the sha, and the stage carries on.
+# AND A FIFO AT THE SHA PATH STOPS THE STAGE RATHER THAN HANGING IT — the same outcome as
+# before #263, reached a different way. The write used to OPEN this path, so a FIFO blocked
+# for a reader that never came and only the watchdog ended it. `rb_write_handoff` never
+# opens the target: it refuses one that is not a regular file, before anything is created.
 #
-# THAT IS THE BETTER OUTCOME AND IT IS WORTH SAYING WHY. A FIFO at this path is a racer's
-# artefact on a name that belongs to the session; refusing the round over it was a denial
-# of service the racer got for free, and hanging on it was worse. Replacing it destroys
-# nothing — the same rename is what stops a SYMLINK there having its target truncated.
+# SO THE FIFO IS LEFT WHERE IT WAS, which is asserted as well as the status. Replacing it
+# would also have been safe — the rename would have put a regular file at the name — and it
+# was briefly the behaviour here. Refusing keeps the promise `README.md` already makes and
+# leaves one fewer thing about this handoff that changed.
 #
-# THE ASSERTION KEEPS THE ORIGINAL CONCERN: 124 and 125 are still a failure, because they
-# are the harness saying the stage hung, which is the thing the FIFO used to cause.
+# 124 AND 125 ARE STILL A FAILURE, because they are the harness saying the stage hung,
+# which is the thing the FIFO used to cause and the reason this case exists.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/shafifo"
     mkfifo "$TMP/shafifo" 2>/dev/null && {
         _sf_got="$(run record 7 "$TMP/body.md" "$TMP/shafifo")"
         case "${_sf_got%%|*}" in
-            0) pass "…and a FIFO at the sha path is replaced rather than blocked on" ;;
+            1) pass "…and a FIFO at the sha path stops record instead of hanging it" ;;
             124|125) die "record hung on the FIFO and the harness watchdog stopped it: '${_sf_got}'" ;;
             *) die "a FIFO sha path gave '${_sf_got}'" ;;
         esac
-        { [ -f "$TMP/shafifo" ] && [ ! -p "$TMP/shafifo" ] \
-          && [ "$(cat "$TMP/shafifo")" = "$HEAD40" ]; } \
-            && pass "…leaving a regular file there holding the sha" \
-            || die "the FIFO sha path is not a regular file holding the sha: $(od -c "$TMP/shafifo" 2>/dev/null | head -1)"
+        [ -p "$TMP/shafifo" ] \
+            && pass "…leaving the FIFO where it was rather than replacing it" \
+            || die "the FIFO sha path is no longer a FIFO"
+        nothing_posted "the sha path was a FIFO"
     }
     rm -f "$TMP/shafifo"
 else
@@ -1157,32 +1155,36 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "Copilot was requested by a refused open" \
     || pass "…with Copilot not requested, so nothing new is coming for the watch to find"
 
-# A FIFO AT THAT PATH IS REPLACED, AND THE PHASE OPENS — #263, and a change of outcome.
-# Opening a path for WRITING blocks waiting for a reader, which is what a FIFO here used to
-# cause and what the readiness write existed to catch before the revocation.
-# `rb_write_handoff` never opens the target: it creates a temporary beside it and renames
-# over the name, so the FIFO is replaced by the regular file holding the baseline.
+# A FIFO AT THAT PATH STOPS THE PHASE RATHER THAN HANGING IT, which is the outcome from
+# before #263 reached a different way. Opening a path for WRITING blocks waiting for a
+# reader, and that is what the readiness write existed to catch before the revocation.
+# `rb_write_handoff` never opens the target: it refuses one that is not a regular file.
 #
-# SO THE READINESS WRITE'S JOB HAS NARROWED, and it still has one. It no longer proves the
-# path is USABLE, because every path this stage can rename onto is; it proves the DIRECTORY
-# takes a file and the rename works, still before the revocation. What is left that can
-# stop it there is a directory at the name, or an unwritable containing directory.
+# THE READINESS WRITE STILL HAS ITS JOB, and it is the same one — proving the path is
+# usable before the revocation. What it refuses is now stated by TYPE rather than
+# discovered by blocking on it: a directory, a device, a socket or a FIFO at the name, or a
+# containing directory that will not take a file.
 #
-# AND THE ORIGINAL CONCERN IS STILL ASSERTED, in the shape that survives: the stage must
-# not HANG, and it must not report failure after mutating the PR. Both hold here, and the
-# second is now trivially true because the stage does not fail at all.
+# AND THE ORIGINAL CONCERNS ARE BOTH ASSERTED: the stage must not HANG, and it must not
+# report failure after mutating the PR.
 if command -v mkfifo >/dev/null 2>&1; then
     world; rm -f "$TMP/fifo.txt"
     mkfifo "$TMP/fifo.txt" 2>/dev/null && {
         got="$(run open 7 "$HEAD40" "$TMP/fifo.txt")"
         case "${got%%|*}" in
-            0) pass "a FIFO baseline path is replaced and the phase opens" ;;
+            1) pass "a FIFO baseline path stops the phase instead of hanging it" ;;
             124|125) die "open hung on the FIFO and the harness watchdog stopped it: '${got}'" ;;
             *) die "a FIFO baseline path gave '${got}'" ;;
         esac
-        { [ -f "$TMP/fifo.txt" ] && [ ! -p "$TMP/fifo.txt" ]; } \
-            && pass "…leaving a regular file at the name rather than the FIFO" \
-            || die "the FIFO baseline path is still a FIFO after the write"
+        [ -p "$TMP/fifo.txt" ] \
+            && pass "…leaving the FIFO where it was rather than replacing it" \
+            || die "the FIFO baseline path is no longer a FIFO"
+        grep -q -- '--add-reviewer' "$TMP/calls" \
+            && die "Copilot was requested despite the unusable baseline path" \
+            || pass "…with Copilot not requested"
+        grep -q 'gh pr comment' "$TMP/calls" \
+            && die "the previous Copilot signoff was revoked before the unusable baseline path was found" \
+            || pass "…and with the previous signoff not revoked, so the PR is untouched"
     }
     rm -f "$TMP/fifo.txt"
 else

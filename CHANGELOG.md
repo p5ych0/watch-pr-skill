@@ -26,18 +26,28 @@
   it** — creating it and then opening it again by name would be that shape reappearing
   inside the fix, with the second open free to follow a symlink or block on a FIFO.
 
-  **Three watchdogs went with the shape that needed them.** Those writes ran under
-  `run_limited` because a plain `>` on a caller-named path blocks on a FIFO waiting for a
-  reader. An exclusive create cannot block — if anything is at the name, a FIFO included,
-  the open fails instead of waiting — so the reason is gone. The read-backs beside them
-  keep theirs, and must: they open the target by name.
+  **The three watchdogs stay, and the reason for them has changed.** They were there
+  because a plain `>` on a caller-named path blocks on a FIFO waiting for a reader, and
+  `set -C` does make the temporary's open fail rather than wait. But `O_EXCL` only settles
+  that one case: pathname resolution, the write and the `mv` can all still stall on an
+  unresponsive filesystem, and the baseline write stands **after** the Copilot-signoff
+  revocation, where a hang leaves the phase half-open with no diagnostic. So the bound is
+  kept and moved around the library call.
 
-  **Two behaviours change, both in the safe direction.** A FIFO at one of these paths is now
-  **replaced** by the regular file holding the value instead of stopping the round — it was
-  a racer's artefact on a name that belongs to the session, and refusing over it was a
-  denial of service the racer got for free. And a directory at the path is caught by a
-  **postcondition**: `mv` onto one moves the source inside it and reports success, so the
-  rename's status cannot see it.
+  **The target's TYPE is refused before anything is created**, and that is what keeps the
+  outcomes an operator already knew. `mv -f` renames over every non-directory inode it may,
+  so a device or a socket at one of these paths would be replaced by a regular file —
+  `/dev/null`, in a container with permission — and `mv` onto a *directory* moves the source
+  inside it and reports success, which the rename's status cannot see. So a target that is
+  not a regular file is refused outright and left as it was: a directory, a FIFO, a device,
+  a socket, or a symlink to any of them. A symlink to a **regular file** is accepted, and
+  the link is what the rename replaces.
+
+  A **postcondition** covers the one interleaving the type test cannot: a racer turning the
+  target into a directory after the test and before the rename. The temporary's name carries
+  two `$RANDOM` draws precisely for that case — with a name built only from the path and the
+  pid, the racer could pre-place a file worth keeping under it and have `mv -f` overwrite it,
+  so the residue is litter rather than loss.
 
   **Nothing is removed, including the temporary a failed write leaves behind.**
   `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the removal class, and
