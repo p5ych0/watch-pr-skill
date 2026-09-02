@@ -505,6 +505,52 @@ else
     pass "…(the late-swapped FIFO case is skipped: no mv or no mkfifo here)"
 fi
 
+# ── A SYMLINK INSTALLED BETWEEN THE TYPE TEST AND THE READ-BACK ────────────
+#
+# `[ ! -L "$1" ]` IS A TEST AND THE READ-BACK IS AN OPEN, so a racer between the two can
+# point the handoff path at a regular file of their own holding exactly the requested bytes:
+# `fstat` on the referent says regular, the comparison says equal, and the call returns 0
+# with a LINK at the handoff path — after which the driver reads through a path the racer
+# controls. `O_NOFOLLOW` refuses the symlink at the open itself.
+#
+# THE HOOK IS `perl`, NOT `mv`, AND THAT IS WHAT MAKES THE CASE REAL. An `mv` shim swaps
+# before the shell tests, so `[ ! -L ]` catches it and the case passes whether or not the
+# open follows links — it was written that way first and proved nothing. The read-back'S OWN
+# process is the one thing that starts after those tests, so a `perl` shim runs at exactly
+# the instant the racer would.
+#
+# IT SELECTS THE READ-BACK BY ITS PROGRAM. `perl` is invoked twice here — the exclusive
+# create and this — and only the read-back's program names `O_RDONLY`, which is true with
+# and without `O_NOFOLLOW` so the staging does not depend on the fix being present.
+#
+# AND THE SHIM CARRIES ITS PATHS INLINE, because `env -i` strips the environment it would
+# otherwise read them from — which is the same clearing that makes `PERL5OPT` harmless.
+if command -v perl >/dev/null 2>&1; then
+    _wn2="$TMP/nofollow"; rm -rf "$_wn2"; mkdir -p "$_wn2"; : > "$_wn2/handoff"
+    mkdir -p "$TMP/nfbin"
+    { printf '#!/bin/sh\n'
+      printf 'case "$*" in\n'
+      printf '  *O_RDONLY*)\n'
+      printf '    printf "%%s\\n" "a value" > "%s"\n' "$_wn2/decoy"
+      printf '    rm -f "%s"; ln -s "%s" "%s" ;;\n' "$_wn2/handoff" "$_wn2/decoy" "$_wn2/handoff"
+      printf 'esac\n'
+      printf 'exec "%s" "$@"\n' "$(command -v perl)"; } > "$TMP/nfbin/perl"
+    chmod +x "$TMP/nfbin/perl"
+    rc=0
+    out="$(run_limited 10 env PATH="$TMP/nfbin:$PATH" \
+        bash -c '. "$1"; rb_write_handoff "$2" "a value"' \
+        _ "$SELF_DIR/writelib.sh" "$_wn2/handoff")" || rc=$?
+    { [ "$rc" != 0 ] && [ "$rc" != 124 ] && [ "$rc" != 125 ]; } \
+        && pass "a symlink installed between the type test and the read-back is refused, even holding the right bytes" \
+        || die "a symlinked handoff path with the requested content was accepted (rc=$rc): '$out'"
+    [ -L "$_wn2/handoff" ] \
+        && pass "…and the shim really did install one, so the case proves what it says" \
+        || die "the no-follow shim did not leave a symlink; the refusal came from something else"
+    rm -rf "$_wn2" "$TMP/nfbin"
+else
+    pass "…(the no-follow case is skipped: no perl on this platform)"
+fi
+
 # ── A RACER THAT REPLACES THE SOURCE, NOT THE TARGET ───────────────────────
 #
 # THE TEMPORARY'S NAME IS PUBLISHED THE MOMENT IT EXISTS, and everything above is about the

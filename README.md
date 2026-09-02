@@ -454,7 +454,7 @@ Then:
      round's value, a refusal sentinel, or the id this run captured. Once past the
      bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
      whatever is there — and since 2.1.0 that write **renames rather than truncating**,
-     so it never opens the path you named. A target that is not a regular file — a
+     so it never opens the path you named in order to write it. A target that is not a regular file — a
      directory, a FIFO, a device, a socket, or a symlink to any of those — stops the
      stage before the PR is touched, and is **left exactly as it was**: nothing is
      replaced and nothing is written through. Where the platform's `mv` takes `-T` or

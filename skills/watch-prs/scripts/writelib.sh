@@ -14,11 +14,15 @@
 # So a same-UID process that replaced one of those paths with a symlink had the symlink's
 # TARGET truncated — an arbitrary file of the operator's, outside the session's working
 # directory entirely, on every invocation that got that far rather than only on a refusal.
-# That is #263. It was seven sites across two helpers when the rule was written, plus two
-# more emptying the same files with a bare `>` — and then an EIGHTH kind found later: the
-# driver's own `> "$PRIOR_FILE"` around `pr-request-review.sh`, which now takes the path and
-# writes it here. THREE runtime callers, and the third is the one the first inventory
-# missed, which is the argument for the rule living here rather than in each of them.
+# That is #263. COUNTED FROM THE TREE, there are TEN call sites in THREE helpers today: six
+# in `pr-close-round.sh` — the two pre-bootstrap emptyings, the two `gate` emptyings, the
+# head write and the baseline write — three in `pr-copilot-phase.sh`, and one in
+# `pr-request-review.sh`. The issue was opened over the handoff WRITES in two helpers; the
+# bare `>` emptyings were found next, and the last one only in review — the driver's own
+# `> "$PRIOR_FILE"` around `pr-request-review.sh`, which now takes the path and writes it
+# here. That last one is the argument for counting from the tree rather than from the
+# issue: its unsafe open was in `SKILL.md`, so an audit reading the helpers would not have
+# found it at all.
 #
 # WHAT THIS DOES INSTEAD: WRITE, THEN RENAME.
 #
@@ -32,12 +36,15 @@
 # leaves the victim's bytes untouched and puts a regular file at the name.
 #
 # AND IT IS NOT A CHECK-THEN-OPEN GUARD, which #245 already convicted and which this must
-# not reintroduce. The distinction is not that nothing is asked — the type test below asks
-# exactly what is at the target, and it is load-bearing. It is that nothing OPENS the
-# target: the value is written into a temporary and RENAMED onto the name, so the answer the
-# test gave is not what the write's safety rests on, and a racer who changes the answer
-# afterwards costs a refusal rather than an operator's file. #245's shape was a test whose
-# answer licensed an open of the thing tested.
+# not reintroduce. The distinction is NOT that nothing is asked and NOT that nothing is ever
+# opened — the type test below asks exactly what is at the target and is load-bearing, and
+# the value postcondition OPENS the target to verify it. It is that nothing opens the target
+# TO WRITE IT: the value goes into a temporary and is RENAMED onto the name, so the answer
+# the type test gave is not what the write's safety rests on, and a racer who changes the
+# answer afterwards costs a refusal rather than an operator's file. #245's shape was a test
+# whose answer licensed a WRITING open of the thing tested. The verifying open is on the
+# other side of the rename and carries its own no-follow, non-blocking, fstat-on-the-handle
+# answer, so it licenses nothing either.
 #
 # IT ANSWERS WHAT THE CALLER NAMED, AND IT IS ASKED ONCE. A special inode a RACER installs
 # after this test is REPLACED by the rename rather than refused: `rename(2)` takes any
@@ -248,6 +255,8 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         || /usr/bin/env -i PATH="$PATH" perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' -- "$_rb_wh_tmp" "$1" 2>/dev/null \
         || { echo "could not rename '$_rb_wh_tmp' onto '$1' — it is unchanged and the temporary is left behind. An exact-destination rename is required: 'mv -T' or a working 'perl'"; return 1; }
     # AND THE POSTCONDITION ASKS WHAT IS AT THE TARGET, NOT MERELY WHAT KIND OF THING IT IS.
+    # It is the ONE place this library opens the target, and it does so only to READ: the
+    # write never opens it, which is the whole of #263.
     # It runs after the rename rather than before it, so it asks what actually happened —
     # which catches the interleaving the type test cannot, a racer making the target a
     # directory after that test. The temporary is inside that directory in that case, under
@@ -289,9 +298,21 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
         # spelled "the requested value, then a NUL, then anything" no longer compares equal
         # by being truncated at the delimiter — it compares unequal, which is the same
         # answer reached without depending on a reader's stopping rule.
+        # AND `O_NOFOLLOW`, BECAUSE `[ ! -L ]` ABOVE IS A TEST AND THIS IS THE OPEN. A racer
+        # who replaces the target with a SYMLINK between the two, pointing at a regular file
+        # holding the requested bytes, satisfies `fstat` on the referent and the byte
+        # comparison both — so the call returned 0 with a link at the handoff path, and the
+        # driver then read through a path the racer controls. `O_NOFOLLOW` refuses a symlink
+        # in the final component at the open itself, which is the same move as taking the
+        # type from the handle: the question and the answer are one operation.
+        #
+        # REQUIRED, NOT PROBED. POSIX.1-2008 has it and so do both platforms this runs on; a
+        # perl whose `Fcntl` lacks it fails to compile the program, which exits non-zero and
+        # refuses. That is the direction to fail in — a fallback that dropped the flag would
+        # be silently weaker exactly where a fixture cannot see it.
         /usr/bin/env -i PATH="$PATH" perl -e '
-            use Fcntl qw(O_RDONLY O_NONBLOCK);
-            sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK) or exit 2;
+            use Fcntl qw(O_RDONLY O_NONBLOCK O_NOFOLLOW);
+            sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
             stat($h) or exit 3;
             exit 4 unless -f _;
             local $/;

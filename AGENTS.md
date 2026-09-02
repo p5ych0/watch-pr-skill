@@ -232,8 +232,11 @@ When reviewing a change here:
   a symlink, or a regular file of their own carrying another 40-hex OID — and the exact
   rename then moves that inode onto the handoff path faithfully. `[ -f ]` is satisfied and
   the caller reads a head this run never gated. The target must be a non-symlink regular
-  file whose raw bytes are what the call asked for; an emptying is zero bytes, asked from
-  the inode with `-s` so that path never opens the target at all.
+  file whose raw bytes are what the call asked for. That read is the ONE place the library
+  opens the target, and it opens `O_NOFOLLOW`: `[ ! -L ]` before it is a test and this is
+  the open, so a racer swapping in a symlink to a file holding the right bytes between the
+  two satisfied `fstat` and the comparison both. An emptying is zero bytes, asked from the
+  inode with `-s`, so that path opens nothing at all.
 - **the create is `O_CREAT|O_EXCL`, and `set -C` is not that.** Bash's noclobber fails a
   redirection only where the existing file is REGULAR, so a FIFO pre-placed at the
   temporary's name is OPENED and the write BLOCKS. `perl`'s `sysopen` has no such

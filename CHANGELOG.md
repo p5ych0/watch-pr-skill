@@ -5,9 +5,11 @@
 - **The file handoffs rename instead of truncating, so a symlink at one of those paths no
   longer costs you the file it points at.** Three values cross from a helper to the driver
   in a file whose path the driver chose — the gated head, the review baseline, and the
-  signed-off sha — and every one of the seven sites that wrote them spelled it
-  `printf … > "$THE_PATH"`. Two more sites EMPTIED those files with a bare `>`, which is
-  the same open with nothing to write.
+  signed-off sha — and every site that wrote them spelled it `printf … > "$THE_PATH"`.
+  Others EMPTIED those files with a bare `>`, which is the same open with nothing to write.
+  Counted from the tree, the rule now has **ten call sites in three helpers**: six in
+  `pr-close-round.sh` (two pre-bootstrap emptyings, two `gate` emptyings, the head write,
+  the baseline write), three in `pr-copilot-phase.sh`, one in `pr-request-review.sh`.
 
   **The failure.** `>` follows a symlink. A same-UID process that replaced one of those
   paths had the symlink's **target** truncated: an arbitrary file of the operator's,
@@ -44,9 +46,12 @@
   plain redirection on a symlink truncates the victim, and the rename leaves the victim's
   bytes untouched.
 
-  **It is not another check-then-open**, which is the shape #245 already convicted.
-  Nothing asks what is at the target before writing to it; the target is never opened at
-  all. The temporary is created exclusively with `O_CREAT|O_EXCL` **in the same open that writes
+  **It is not another check-then-open**, which is the shape #245 already convicted. The
+  target IS inspected — that refusal is load-bearing — and the value postcondition opens it
+  to verify what arrived. What never happens is an open of the target **to write it**: the
+  value goes into a temporary and is renamed onto the name, so the write's safety does not
+  rest on the answer the inspection gave. #245's shape was a test whose answer licensed a
+  *writing* open of the thing tested. The temporary is created exclusively with `O_CREAT|O_EXCL` **in the same open that writes
   it** — creating it and then opening it again by name would be that shape reappearing
   inside the fix, with the second open free to follow a symlink or block on a FIFO.
 
