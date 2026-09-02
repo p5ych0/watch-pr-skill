@@ -248,48 +248,78 @@ grep -qE '(^|[^a-z_])(rm|rmdir|unlink)([[:space:]]|$)' <<<"$_wl_code" \
 # path as its source operand, so it can seed the racer's directory under exactly the right
 # basename and swap the target — which is the race, run deterministically rather than hoped
 # for.
-_wl_exact=""
-if command -v mv >/dev/null 2>&1; then
-    : > "$TMP/probe-a"
-    mv -T -f "$TMP/probe-a" "$TMP/probe-b" 2>/dev/null && _wl_exact=-T
-    if [ -z "$_wl_exact" ]; then
-        : > "$TMP/probe-a"
-        mv -h -f "$TMP/probe-a" "$TMP/probe-b" 2>/dev/null && _wl_exact=-h
-    fi
-fi
-if [ -n "$_wl_exact" ]; then
-    _wr="$TMP/racer"; rm -rf "$_wr"; mkdir -p "$_wr/session" "$_wr/attacker"
-    printf 'the file the racer wants destroyed\n' > "$_wr/keep"
-    : > "$_wr/session/handoff"
-    _wl_pathsave="$PATH"; mkdir -p "$TMP/rbin"
+# BOTH SWAPS AND BOTH RENAME PATHS, which is four cases and not one. A SYMLINK to a
+# directory and an ACTUAL directory are different destinations to `mv`, and BSD `mv -h`
+# covers only the first — its contract is "if the target is a symbolic link to a directory,
+# do not follow it", so a real directory takes the ordinary two-operand path and the loss
+# happens behind a flag that reads as if it had been covered. `rename(2)` refuses both, and
+# `perl`'s `rename` is that call.
+#
+# THE BSD PATH IS STAGED BY REJECTING `-T` IN THE SHIM, exactly as a `mv` that does not know
+# the option does. Without that this fixture only ever exercises the GNU branch, and the
+# `perl` fallback — which is what every non-GNU platform actually runs — would be uncovered.
+if command -v mv >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
+    mkdir -p "$TMP/rbin"
     { printf '#!/bin/sh\n'
       # The source operand is the last-but-one argument; the target is the last.
       printf 'for a in "$@"; do _s="$_t"; _t="$a"; done\n'
-      printf 'if [ ! -L "$_t" ]; then\n'
-      # SEED FIRST, THEN SWAP: the racer's directory has to hold the victim under the
-      # temporary's own basename before the rename can be misdirected onto it.
-      printf '  ln "$RB_KEEP" "$RB_ATTACK/${_s##*/}" 2>/dev/null || cp "$RB_KEEP" "$RB_ATTACK/${_s##*/}"\n'
-      printf '  rm -f "$_t" && ln -s "$RB_ATTACK" "$_t"\n'
+      printf 'if [ ! -e "$RB_SWAPPED" ]; then\n'
+      printf '  : > "$RB_SWAPPED"\n'
+      printf '  if [ "$RB_SWAP" = dir ]; then\n'
+      printf '    rm -f "$_t"; mkdir -p "$_t"; _seed="$_t/${_s##*/}"\n'
+      printf '  else\n'
+      printf '    mkdir -p "$RB_ATTACK"; _seed="$RB_ATTACK/${_s##*/}"\n'
+      printf '  fi\n'
+      printf '  cp "$RB_KEEP" "$_seed"\n'
+      printf '  [ "$RB_SWAP" = dir ] || { rm -f "$_t" && ln -s "$RB_ATTACK" "$_t"; }\n'
       printf 'fi\n'
+      # A `mv` THAT DOES NOT KNOW `-T` FAILS ON THE OPTION, having moved nothing.
+      printf '[ -n "$RB_NO_T" ] && [ "$1" = -T ] && { echo "mv: illegal option -- T" >&2; exit 1; }\n'
       printf 'exec "$RB_MV_REAL" "$@"\n'; } > "$TMP/rbin/mv"
     chmod +x "$TMP/rbin/mv"
-    RB_MV_REAL="$(command -v mv)" RB_KEEP="$_wr/keep" RB_ATTACK="$_wr/attacker" \
-        PATH="$TMP/rbin:$PATH" rb_write_handoff "$_wr/session/handoff" "a value" >/dev/null 2>&1 \
-        && _wl_rc=0 || _wl_rc=$?
-    PATH="$_wl_pathsave"
-    [ "$(cat "$_wr/attacker/"* 2>/dev/null)" = 'the file the racer wants destroyed' ] \
-        && pass "a target swapped for a symlink to the racer's directory does not cost the file inside it" \
-        || die "the racer's file was overwritten by the rename: '$(cat "$_wr/attacker/"* 2>/dev/null)'"
-    # AND THE VALUE STILL CROSSED, because an exact rename replaces the LINK: the swap costs
-    # the racer their symlink and nothing else. Asserting only the survival would pass just
-    # as well against a refusal that left the handoff empty.
-    { [ "$_wl_rc" = 0 ] && [ ! -L "$_wr/session/handoff" ] \
-        && [ "$(cat "$_wr/session/handoff")" = "a value" ]; } \
-        && pass "…the link being what the rename replaced, with the value across" \
-        || die "the swapped target gave rc=$_wl_rc and '$(cat "$_wr/session/handoff" 2>/dev/null)'"
-    rm -rf "$_wr" "$TMP/rbin"
+    for _wl_mode in native no-T; do
+        for _wl_swap in link dir; do
+            _wr="$TMP/racer"; rm -rf "$_wr"; mkdir -p "$_wr/session"
+            printf 'the file the racer wants destroyed\n' > "$_wr/keep"
+            : > "$_wr/session/handoff"
+            _wl_noT=""; [ "$_wl_mode" = no-T ] && _wl_noT=1
+            _wl_pathsave="$PATH"
+            RB_MV_REAL="$(command -v mv)" RB_KEEP="$_wr/keep" RB_ATTACK="$_wr/attacker" \
+                RB_SWAP="$_wl_swap" RB_SWAPPED="$_wr/done" RB_NO_T="$_wl_noT" \
+                PATH="$TMP/rbin:$PATH" \
+                rb_write_handoff "$_wr/session/handoff" "a value" >/dev/null 2>&1 \
+                && _wl_rc=0 || _wl_rc=$?
+            PATH="$_wl_pathsave"
+            # THE SEEDED FILE SURVIVES IN EVERY COMBINATION, which is the invariant. Where it
+            # was seeded differs — inside the racer's own directory for the symlink swap, and
+            # inside the directory that replaced the target for the real one — so the search
+            # is over both rather than over the one this platform happened to take.
+            _wl_seen=""
+            for _wl_c in "$_wr/attacker/"* "$_wr/session/handoff/"*; do
+                [ -f "$_wl_c" ] && _wl_seen="$_wl_seen$(cat "$_wl_c")"
+            done
+            [ "$_wl_seen" = 'the file the racer wants destroyed' ] \
+                && pass "a $_wl_swap swapped in under $_wl_mode mv does not cost the file the racer seeded" \
+                || die "the $_wl_swap swap under $_wl_mode mv left '$_wl_seen' where the racer's file was"
+            # AND THE OUTCOME DIFFERS BY SWAP, which asserting survival alone would not see: a
+            # symlink to a directory is replaced by the rename and the value crosses, while an
+            # actual directory is a destination `rename(2)` refuses, so the write refuses too.
+            if [ "$_wl_swap" = link ]; then
+                { [ "$_wl_rc" = 0 ] && [ ! -L "$_wr/session/handoff" ] \
+                    && [ "$(cat "$_wr/session/handoff")" = "a value" ]; } \
+                    && pass "…the link being what the rename replaced, with the value across" \
+                    || die "the link swap under $_wl_mode mv gave rc=$_wl_rc"
+            else
+                { [ "$_wl_rc" != 0 ] && [ -d "$_wr/session/handoff" ]; } \
+                    && pass "…and a real directory is refused rather than written into" \
+                    || die "the dir swap under $_wl_mode mv gave rc=$_wl_rc"
+            fi
+            rm -rf "$_wr"
+        done
+    done
+    rm -rf "$TMP/rbin"
 else
-    pass "…(the swapped-target case is skipped: this mv has neither -T nor -h)"
+    pass "…(the swapped-target cases are skipped: this platform has no mv or no perl)"
 fi
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi

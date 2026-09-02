@@ -197,6 +197,69 @@ there. So do not raise "this should move into a script" against what is left,
 and do not treat the residue as a reason to add another guard: two were built for it
 and both were removed for costing more than they closed.
 
+## A handoff file is written by RENAME, never by truncation
+
+Three values cross from a helper to the driver in a file the **caller** named — the
+gated head, the review baseline, and the signed-off sha — plus the two clearings
+`pr-close-round.sh gate` makes before it does anything. Every one of them used to be
+a `printf … > "$THE_PATH"`, and `>` **follows a symlink**: a same-UID process that
+replaced one of those paths had the symlink's *target* truncated, an operator file
+outside the session entirely, on every invocation that got that far. `writelib.sh`
+owns the rule now — `rb_write_handoff` and `rb_empty_handoff` — and every one of
+those sites goes through it. #263.
+
+When reviewing a change here:
+
+- **a raw redirection onto a caller-named path is the defect back.** `> "$FILE"`,
+  `printf … > "$FILE"`, `: > "$FILE"` — all three follow a link. So does the
+  `[[ -f ]]` usually written in front of one, which is why the guard never helped.
+- **the target's TYPE is refused before anything is created, and that is not a
+  check-then-open.** Nothing in the library ever opens the target, so the rename's
+  safety does not rest on the answer; what the test refuses is a caller naming
+  something that is not a handoff file. A directory (`mv` moves the source *inside*
+  it and reports success), a FIFO, a device or a socket (`mv -f` renames over every
+  non-directory inode it may, so `/dev/null` named here became a regular file), or a
+  symlink to any of those. **A symlink to a regular file passes and must** — that is
+  the whole point of the change, and refusing it would be a different helper.
+- **the rename must be EXACT-DESTINATION, and `mv SRC DEST` is not.** It stats the
+  destination and, where that resolves to a **directory**, moves the source inside
+  it — following a symlink to get there. `rename(2)` does neither. So the library
+  asks for `mv -T` first and falls back to `perl`'s `rename`, which *is* that call.
+  **BSD `mv -h` is not the other half of `-T`**: its contract is only "if the target
+  is a symbolic link to a directory, do not follow it", so an **actual** directory
+  swapped in takes the ordinary two-operand path and the file inside it is
+  overwritten. A change that reintroduces `-h` as the non-GNU spelling is a defect.
+- **a genuine refusal from the exact form must not fall through to the plain one.**
+  `rename` failing because the destination is a directory is the answer the write
+  wants; dropping through to `mv -f` there performs the move it just refused. The
+  exit code is what separates "the rename was made and refused" from "`perl` did not
+  run".
+- **the temporary is created ONCE, exclusively, by the same open that writes it.**
+  Creating it and opening it again by name is a check-then-open inside the fix. Its
+  name carries two `$RANDOM` draws — a builtin, so no `PATH` entry answers for it —
+  and that bounds a residue rather than preventing an attack: a racer **reads** the
+  name out of the directory once it exists, so randomness is not what stops the
+  directory swap. The exact rename is.
+- **`set -C` settles the FIFO and nothing else.** It is not a reason to remove a
+  watchdog. Pathname resolution, the write and the rename can each stall on an
+  unresponsive mount, so the three bounded call sites in `pr-copilot-phase.sh` keep
+  their `run_limited`, wrapped around a child that sources the library — the
+  baseline write stands *after* the Copilot-signoff revocation, where a hang leaves
+  the phase half-open with no diagnostic.
+- **nothing in the library is removed, including the temporary a failed write
+  leaves.** `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the class.
+- **the clearing in `gate` runs above the bootstrap, and that ordering is
+  load-bearing.** The driver reads the head file in the statement *after* the gate's
+  `if`, not inside its success arm, because a refusal can be walked past — so a
+  previous round's 40-hex OID left there is accepted as a proven head and the
+  operator reaches the irreversible reply-and-resolve step. The clearing therefore
+  reaches `rb_empty_handoff` in a child that sources `writelib.sh` **directly**,
+  above `rb_load`, so no library load can refuse ahead of it. Moving it below the
+  loads is a regression, and so is turning it back into a `>` to keep it there.
+- **a fixture that installs the symlink before the stage starts proves nothing about
+  the later writes.** The clearing replaces it, so the write never meets it. Plant it
+  at the point a racer could — after the CI gate returns, after the summary is posted.
+
 ## Claims and their arguments in `SKILL.md`
 
 `SKILL.md`'s bash fences keep a one-line CLAIM beside the code and carry the

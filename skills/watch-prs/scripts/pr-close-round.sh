@@ -120,6 +120,75 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
+# ── THE STALE HEAD AND BASELINE ARE CLEARED BEFORE ANYTHING ELSE, and that ordering is
+# a finding rather than a preference. The driver's head-file check is NOT inside the gate's
+# success arm — it is the next statement after it, and its own comment says why: `AND ITS
+# IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past`. A shadowed
+# `exit` in the driving shell walks past a failed `gate`, the content check then accepts a
+# previous round's 40-hex OID, and the operator reaches the irreversible reply-and-resolve
+# step with nothing pushed and nothing gated. So every refusal this stage can make has to
+# happen AFTER the clearing.
+#
+# IT USED TO BE A RAW `>` FOR THAT REASON, and that is the defect #263 removes. Nothing was
+# loaded here, so there was nothing to rename with — and `>` FOLLOWS A SYMLINK, as does the
+# `[[ -f ]]` in front of it, so a link at either path had the operator's file at the other
+# end truncated on every `gate` call that got this far, not only on a refusal.
+#
+# SO THE RULE IS REACHED IN A CHILD THAT SOURCES `writelib.sh` DIRECTLY, which is how both
+# orderings hold at once. `rb_load` is not used and is not needed: an emptied `loadlib.sh`
+# leaves the stub, the stub refuses, and every load below would fail — but none of that is
+# above the clearing any more, because this reaches the library without the loader. An
+# emptied library leaves `rb_empty_handoff` undefined, the child exits non-zero, and this
+# refuses, which is the direction `rb_load` fails in, reached without it.
+#
+# WHAT REMAINS ABOVE IS THE INSTALLATION ITSELF: `_RB_SELF_DIR` unresolvable, or a
+# `writelib.sh` that is unreadable or defines nothing. Neither can be defended from inside
+# this stage — clearing without the rule is what forced the raw `>`, and an inline rename is
+# the duplicated rule `CLAUDE.md` forbids — and both are the same class as this file itself
+# being empty.
+#
+# UNBOUNDED, LIKE THE `>` IT REPLACES. `run_limited` lives in `testlib.sh` and there is no
+# loader yet; the exclusive create cannot block on a FIFO, and what remains is the pathname
+# resolution an unresponsive mount can stall, which the redirection here could stall on too.
+#
+# BEFORE `shift`, so `$1` is the stage and `$6` and `$7` are the two files.
+#
+# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test here
+# would be a second copy of the rule `recordlib.sh` owns, and the pre-#202 form puts the
+# head ITSELF in that position. A commit id contains no `/`, and every head file this loop
+# names is a path under the session's working directory, so the slash tells the two apart
+# without knowing what an OID looks like.
+#
+# AND NOT THE SUMMARY, because emptying a head file that IS the summary destroys the
+# account this stage is about to post. That refusal is below too, and this must not commit
+# the damage it exists to prevent.
+if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
+    _rb_eh="$(/usr/bin/env bash -p -c \
+        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
+        _ "$_RB_SELF_DIR" "${6}")" || {
+        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept: $_rb_eh"
+        exit 1
+    }
+fi
+# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A refusal
+# above the write further down leaves the PREVIOUS round's baseline in place, and the
+# driver's watch takes what it finds: a review that predates this round, accepted as the
+# answer to a request this round never made. The exceptions are the summary — emptying it
+# destroys the account — and the head file, which the arm above has already emptied and
+# whose emptiness must not be mistaken for this one's. Both are refused properly further
+# down; this only declines to do damage before that refusal can be reached. #234.
+if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
+   && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
+    _rb_eh="$(/usr/bin/env bash -p -c \
+        '. "$1"/writelib.sh 2>/dev/null || exit 9; rb_empty_handoff "$2"' \
+        _ "$_RB_SELF_DIR" "${7}")" || {
+        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept: $_rb_eh"
+        exit 1
+    }
+fi
+
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
 # NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
 # is a NAME — and while a privileged interpreter means no function by that name
@@ -146,90 +215,18 @@ rb_load() { return 127; }
 # this arm the only trace is a bare exit status — the ordinary-looking empty
 # answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
 # own refusals report their own reason and their own status.
-# `writelib.sh` IS THE FIRST LOAD, AND IT IS FIRST BECAUSE OF THE ARMS BELOW IT. The
-# stale head and baseline have to be cleared before anything that can REFUSE, and since
-# #263 the clearing renames — so the library that owns the rule has to be loaded before
-# they run, and every other load has to come after them. `recordlib.sh` was first while
-# the clearing was a raw `>` above the bootstrap.
-#
-# SO IT CARRIES THE `loadlib_empty` DIAGNOSTIC, which belongs to whichever load is first:
-# an empty `loadlib.sh` leaves the refusing stub, the stub returns 127, and without this
-# arm the only trace is a bare exit status — the ordinary-looking empty answer `CLAUDE.md`
-# forbids. 127 is the stub's and nothing else's. Moving the diagnostic is what
-# `test-pr-identity.sh` checks, and moving a load without it is what that fixture caught.
-rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || {
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
+# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
+# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
+# named there and nowhere else. Putting this one ahead of it made that report come
+# from a bare `|| exit 1`, so the helper refused in silence and
+# `test-pr-identity.sh` caught it. The CLEARING above the bootstrap needs neither, and
+# reaches `rb_empty_handoff` without `rb_load` for exactly that reason.
 rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
-# ── THE STALE HEAD AND BASELINE ARE CLEARED AS EARLY AS THEY CAN BE SAFELY CLEARED,
-# which since #263 is HERE rather than above the bootstrap. Everything below this can
-# refuse, and a refusal that happens before the files are emptied leaves the PREVIOUS
-# round's OID and baseline in them.
-#
-# THEY USED TO RUN ABOVE THE BOOTSTRAP, with nothing but reserved words and a redirection,
-# so that no library load could refuse ahead of them. That ordering is what made them the
-# LAST two `>` truncations in this file, and `>` FOLLOWS A SYMLINK: `[[ -f ]]` follows one
-# too, so a link at either path was accepted and the operator's file at the other end was
-# truncated — the exact defect #263 exists to remove, on the earliest path into this stage.
-# A `[[ -L ]]` in front of the redirection is the check-then-use shape #245 convicted, and
-# an inline rename is the duplicated rule `CLAUDE.md` forbids, so the arms moved to where
-# the library that owns the rule is loaded.
-#
-# SO EVERY OTHER LOAD IS BELOW THEM, and that ordering is the finding rather than a
-# preference. The driver's head-file check is NOT inside the gate's success arm — it is the
-# next statement after it, and its own comment says why: `AND ITS IDENTITY IS PROVEN BEFORE
-# ITS CONTENT, because a refusal can be walked past`. A shadowed `exit` in the driving shell
-# walks past the failed `gate`, the content check then accepts a previous round's 40-hex
-# OID, and the operator reaches the irreversible reply-and-resolve step with nothing pushed
-# and nothing gated. A refusal that leaves the stale bytes is therefore not safe, and the
-# round-2 claim that it was is withdrawn.
-#
-# WHAT REMAINS ABOVE THEM is `_RB_SELF_DIR` and the two states in which the rule itself
-# cannot be loaded: `loadlib.sh` unreadable or empty, and a `writelib.sh` that defines
-# nothing. Those cannot be closed from here — clearing before the library is loaded is what
-# forced the raw `>` in the first place, and an inline rename is the duplicated rule
-# `CLAUDE.md` forbids. Every refusal this stage makes for a reason of its own is below.
-#
-# STILL BEFORE `shift`, so `$1` is the stage and `$6` and `$7` are the two files.
-#
-# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test here
-# would be a second copy of the rule `recordlib.sh` owns, and the pre-#202 form puts the
-# head ITSELF in that position. A commit id contains no `/`, and every head file this loop
-# names is a path under the session's working directory, so the slash tells the two apart
-# without knowing what an OID looks like.
-#
-# AND NOT THE SUMMARY, because emptying a head file that IS the summary destroys the
-# account this stage is about to post. That refusal is below too, and this must not commit
-# the damage it exists to prevent.
-#
-# AND THE EMPTYING'S STATUS IS TAKEN. A head file that cannot be emptied — its permissions
-# changed, its filesystem gone read-only, something that is not a regular file at the name
-# — keeps the PREVIOUS round's OID. Refusing here is safe in a way it is not further down:
-# nothing has been pushed and nothing posted.
-if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
-   && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
-    _rb_eh="$(rb_empty_handoff "${6}")" || {
-        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept: $_rb_eh"
-        exit 1
-    }
-fi
-# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A refusal
-# above the write further down leaves the PREVIOUS round's baseline in place, and the
-# driver's watch takes what it finds: a review that predates this round, accepted as the
-# answer to a request this round never made. The exceptions are the summary — emptying it
-# destroys the account — and the head file, which the arm above has already emptied and
-# whose emptiness must not be mistaken for this one's. Both are refused properly further
-# down; this only declines to do damage before that refusal can be reached. #234.
-if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
-   && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
-   && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
-    _rb_eh="$(rb_empty_handoff "${7}")" || {
-        echo "ABORT: the prior file '${7}' exists and cannot be emptied; a stale baseline would be left for the driver to accept: $_rb_eh"
-        exit 1
-    }
-fi
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || exit 1
 
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the

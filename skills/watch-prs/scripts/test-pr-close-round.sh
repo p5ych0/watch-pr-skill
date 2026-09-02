@@ -71,6 +71,13 @@ for h in pr-round-count.sh pr-ci-gate.sh pr-review-state.sh; do
 #!/usr/bin/env bash
 printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$CALLS"
 _n="\$(basename "\$0" .sh)"
+# THE SAME HOOK AS THE \`gh\` STUB'S, for the other later write: \`gate\` calls
+# \`report_gated\` immediately after this one returns, so a link planted here is what
+# that write meets.
+if [ "\$_n" = pr-ci-gate ] && [ -f "\$W/plant" ]; then
+    read -r _pp _pt < "\$W/plant"; rm -f "\$W/plant"
+    rm -f "\$_pp" && ln -s "\$_pt" "\$_pp"
+fi
 # A SECOND ANSWER, WHEN A CASE NEEDS THE WORLD TO CHANGE MID-RUN. The
 # push-triggered pass can FINISH while the CI gate is still settling, and the
 # whole question is which side of that the baseline was read on — so the stub can
@@ -104,7 +111,16 @@ case " $* " in
                       then cat "$W/head.before.out"
                       else cat "$W/head.out" 2>/dev/null; fi
                       exit "$(cat "$W/head.rc" 2>/dev/null || echo 0)" ;;
-    *" pr comment "*) exit "$(cat "$W/comment.rc" 2>/dev/null || echo 0)" ;;
+    *" pr comment "*) # A RACER'S SYMLINK, PLANTED AT EXACTLY THE POINT ONE COULD APPEAR.
+                      # `post` writes the baseline immediately after this call, so a link
+                      # installed here is the state the write actually meets — a case that
+                      # installs it before the stage starts is emptied by `gate` and never
+                      # reaches the write at all.
+                      if [ -f "$W/plant" ]; then
+                          read -r _pp _pt < "$W/plant"; rm -f "$W/plant"
+                          rm -f "$_pp" && ln -s "$_pt" "$_pp"
+                      fi
+                      exit "$(cat "$W/comment.rc" 2>/dev/null || echo 0)" ;;
     *" pr edit "*)    exit "$(cat "$W/edit.rc" 2>/dev/null || echo 0)" ;;
 esac
 exit 0
@@ -944,9 +960,10 @@ for _st_bad in "PR:x:$CODEXBOT" "reviewer:7:some-other-bot[bot]"; do
         || die "a bad $_st_what left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
 done
 # AND A BOOTSTRAP REFUSAL STILL LEAVES NO STALE HEAD, which is the invariant #234 set and
-# #263 had to keep while moving the clearing below the bootstrap. The clearing renames now,
-# so `writelib.sh` is loaded FIRST and every other load comes after the two arms — this
-# case stages an emptied `recordlib.sh`, which is a load that now happens below them.
+# #263 had to keep while making the clearing rename. The clearing runs in a CHILD that
+# sources `writelib.sh` directly, above the loader entirely, so an emptied `loadlib.sh` and
+# an emptied `recordlib.sh` are both below it — EVERY library this stage loads is, and the
+# loop below stages each in turn rather than trusting that one stands for the others.
 #
 # AND IT IS THE DRIVER'S SECOND LINE OF DEFENCE THAT MAKES IT MATTER, not the helper's
 # status. `SKILL.md` reads the head file in the statement AFTER the gate's `if`, not inside
@@ -958,32 +975,51 @@ world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
 # THE REFUSAL IS STAGED BY EMPTYING A LIBRARY IN A COPY OF THE TREE, which is a
 # real bootstrap failure — `rb_load` refuses and the stage exits at the top of the
 # file, long before any argument is looked at.
-rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
+for _st_lib in loadlib recordlib identitylib; do
+    world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+    rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
+    : > "$TMP/broken/$_st_lib.sh"
+    printf '%s\n' 'STALE-BASELINE' > "$TMP/prior.txt"
+    _st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _st_rc=$?
+    { [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
+        && pass "…and a gate that cannot load $_st_lib.sh leaves no stale head either" \
+        || die "an empty $_st_lib.sh left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
+    # AND NO STALE BASELINE, for the same reason and by the same means. #234.
+    [ ! -s "$TMP/prior.txt" ] \
+        && pass "…and no stale baseline either" \
+        || die "an empty $_st_lib.sh left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
+    # AND THE DRIVER'S OWN CHECK IS RUN OVER WHAT WAS LEFT, rather than the fixture asserting
+    # emptiness and calling that equivalent. This is `SKILL.md`'s content case, verbatim in
+    # shape: it is what stands between a walked-past refusal and the irreversible resolve, and
+    # what a stale 40-hex OID would satisfy. Reading the file the helper actually left is the
+    # only way this case can see the difference.
+    case "$(<"$HEADF")" in
+        *[!0-9a-f]*|"")          _st_driver=refused ;;
+        ????????????????????????????????????????) _st_driver=accepted ;;
+        *)                       _st_driver=refused ;;
+    esac
+    [ "$_st_driver" = refused ] \
+        && pass "…so the driver's head check refuses even when the gate's refusal is walked past" \
+        || die "the driver's head check ACCEPTED what an empty $_st_lib.sh left, which is a resolve on a round that never gated"
+done
+# AND A SYMLINKED HEAD FILE SURVIVES THAT PATH TOO, which is the pair of invariants meeting:
+# the clearing is above every load AND it renames, so a bootstrap refusal neither leaves a
+# stale head nor truncates whatever the path pointed at.
+world
+_stl="$TMP/bootlink"; rm -rf "$_stl"; mkdir -p "$_stl"
+printf 'the operator file, which must survive\n' > "$_stl/victim"
+ln -s "$_stl/victim" "$_stl/link"
+rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap symlink case"
 : > "$TMP/broken/recordlib.sh"
-printf '%s\n' 'STALE-BASELINE' > "$TMP/prior.txt"
-_st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 2>&1)"; _st_rc=$?
-{ [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
-    && pass "…and a gate that cannot bootstrap leaves no stale head either" \
-    || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
-# AND NO STALE BASELINE, for the same reason and by the same means. #234.
-[ ! -s "$TMP/prior.txt" ] \
-    && pass "…and no stale baseline either" \
-    || die "a bootstrap refusal left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
-# AND THE DRIVER'S OWN CHECK IS RUN OVER WHAT WAS LEFT, rather than the fixture asserting
-# emptiness and calling that equivalent. This is `SKILL.md`'s content case, verbatim in
-# shape: it is what stands between a walked-past refusal and the irreversible resolve, and
-# what a stale 40-hex OID would satisfy. Reading the file the helper actually left is the
-# only way this case can see the difference.
-case "$(<"$HEADF")" in
-    *[!0-9a-f]*|"")          _st_driver=refused ;;
-    ????????????????????????????????????????) _st_driver=accepted ;;
-    *)                       _st_driver=refused ;;
-esac
-[ "$_st_driver" = refused ] \
-    && pass "…so the driver's head check refuses even when the gate's refusal is walked past" \
-    || die "the driver's head check ACCEPTED what a bootstrap refusal left, which is a resolve on a round that never gated"
+    "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$_stl/link" "$TMP/prior.txt" >/dev/null 2>&1)
+[ "$(cat "$_stl/victim" 2>/dev/null)" = 'the operator file, which must survive' ] \
+    && pass "…and a symlinked head file keeps its target through a bootstrap refusal" \
+    || die "the clearing above the bootstrap truncated the symlink's target"
+rm -rf "$_stl"
 
 # AND A SYMLINKED HEAD FILE KEEPS ITS TARGET, WHICH IS THE WHOLE OF #263 ON THIS PATH.
 # `[[ -f ]]` follows a link, so the old truncation accepted one and emptied the operator's
@@ -1174,6 +1210,41 @@ got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 grep -q 'git push' "$TMP/calls" \
     && die "it pushed at a round boundary" \
     || pass "…with nothing pushed and nothing resolved"
+
+# ── THE TWO LATER HANDOFF WRITES, EACH MET BY A LINK PLANTED JUST BEFORE IT ────
+#
+# THE EARLY CLEARING HIDES THESE, WHICH IS WHY THEY NEED THEIR OWN CASES. A symlink
+# installed before `gate` starts is replaced by the clearing above the bootstrap, so it is
+# gone long before `report_gated` writes the head — and the symlink case up the file, which
+# does exactly that, would stay green with either later write reverted to `printf … > "$…"`.
+# The link therefore has to be planted at the point a racer could actually install one:
+# after the CI gate returns, and after the summary is posted.
+#
+# `post` IS NOT REACHED BY THE `run` HELPER WHEN THE GATE REFUSES, so the baseline case
+# drives a whole clean round rather than a single stage.
+for _lw_which in head prior; do
+    world
+    _lwd="$TMP/latewrite-$_lw_which"; rm -rf "$_lwd"; mkdir -p "$_lwd"
+    printf 'the operator file, which must survive\n' > "$_lwd/victim"
+    printf 'the round summary\n' > "$TMP/summary.md"
+    : > "$HEADF"; : > "$TMP/prior.txt"
+    if [ "$_lw_which" = head ]; then
+        # PLANTED BY THE CI-GATE STUB, which returns immediately before `report_gated`.
+        printf '%s %s\n' "$HEADF" "$_lwd/victim" > "$W/plant"
+    else
+        # PLANTED BY THE `gh pr comment` STUB, which returns immediately before the
+        # baseline write in `request_review`.
+        printf '%s %s\n' "$TMP/prior.txt" "$_lwd/victim" > "$W/plant"
+    fi
+    _lw_g="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt")"
+    if [ "${_lw_g%%|*}" = 0 ] && [ "$_lw_which" = prior ]; then
+        stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" >/dev/null
+    fi
+    [ "$(cat "$_lwd/victim" 2>/dev/null)" = 'the operator file, which must survive' ] \
+        && pass "a link planted immediately before the $_lw_which write keeps its target" \
+        || die "the later $_lw_which write truncated the link's target (gate='${_lw_g}')"
+    rm -f "$W/plant"; rm -rf "$_lwd"
+done
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

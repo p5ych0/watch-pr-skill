@@ -20,12 +20,13 @@
   that no library load can refuse while a previous round's values are still readable — and
   with no library loaded there was nothing to rename with, so those two arms stayed raw
   `>` redirections behind a `[[ -f ]]` that follows a link exactly as the redirection does.
-  `writelib.sh` is now the FIRST library the stage loads and the arms sit directly under it,
-  with every other load below them, so the clearing still happens before any refusal the
-  stage makes for a reason of its own. That ordering is load-bearing rather than tidy: the
-  driver reads the head file in the statement AFTER the gate's `if`, not inside its success
-  arm, because a refusal can be walked past — so a previous round's OID left in that file
-  would be accepted as a proven head.
+  They reach `rb_empty_handoff` in a **child that sources `writelib.sh` directly**, above
+  the loader entirely, so no library load can refuse ahead of them and the rename is still
+  what does the clearing. That ordering is load-bearing rather than tidy: the driver reads
+  the head file in the statement AFTER the gate's `if`, not inside its success arm, because
+  a refusal can be walked past — so a previous round's OID left in that file would be
+  accepted as a proven head, and the operator would reach the irreversible resolve with
+  nothing pushed and nothing gated.
 
   **The fix is `rename(2)`, which replaces the NAME.** `writelib.sh` creates a temporary
   beside the target, writes the value into it, and moves it over — so where the target is a
@@ -67,9 +68,14 @@
   the exact form the unguessable name buys less than it looks: a racer can **read** it out of
   the directory once it exists, point the target at a directory of their own, and put a file
   worth keeping there under that name for `mv -f` to overwrite. `-T` is the GNU spelling and
-  `-h` the BSD one, each attempted as the real operation — a `mv` that does not know an
-  option fails on the option, having moved nothing — with the plain form kept last so a
-  platform with neither still works.
+  `perl`'s `rename` **is** `rename(2)`, so it is what covers the case where `mv -T` is not
+  there. BSD `mv -h` is not: its contract is only "if the target is a symbolic link to a
+  directory, do not follow it", so an **actual** directory swapped in takes the ordinary
+  two-operand path and the file inside it is overwritten just the same. Each is attempted as
+  the real operation rather than probed — a `mv` that does not know an option fails on the
+  option, having moved nothing — and a genuine refusal from the exact form stops there
+  rather than falling through to the plain one, which would perform the move it just
+  refused. The plain form is kept last so a platform with neither still works.
 
   **Nothing is removed, including the temporary a failed write leaves behind.**
   `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the removal class, and

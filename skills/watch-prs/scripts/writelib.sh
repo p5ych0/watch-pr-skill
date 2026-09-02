@@ -157,23 +157,46 @@ _rb_handoff() {   # _rb_handoff <target> value|empty [content]
     # and puts a file worth keeping there under that name for `mv -f` to overwrite. The
     # postcondition sees it afterwards, which is after the loss.
     #
-    # SO THE EXACT FORM IS ASKED FOR FIRST, AND EACH ATTEMPT IS THE REAL OPERATION. `-T` is
-    # the GNU spelling and `-h` the BSD one — `-h` is precisely this case, "if the target is
-    # a symbolic link to a directory, do not follow it" — and a `mv` that does not know an
-    # option fails on the option, having moved nothing, so the next attempt is safe to make.
-    # Probing with `--version` would ask a different question and answer it wrongly, which
-    # is #269; probing with a scratch directory would need that directory REMOVED, which is
-    # the class `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts.
+    # SO AN EXACT-DESTINATION RENAME IS ASKED FOR FIRST. `-T` is the GNU spelling, and it is
+    # attempted as THE REAL OPERATION rather than probed: a `mv` that does not know an option
+    # fails on the option, having moved nothing, so the next attempt is safe to make. Probing
+    # with `--version` would ask a different question and answer it wrongly, which is #269;
+    # probing with a scratch directory would need that directory REMOVED, which is the class
+    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts.
     #
-    # THE PLAIN FORM IS THE LAST RESORT AND NOT THE FIRST, and it is kept so that a platform
-    # whose `mv` has neither spelling still works, with the postcondition below as its only
-    # cover. Neither platform this project builds and tests on is that platform; making it a
-    # refusal instead would take the loop down on any platform that is, to close a window
-    # that needs a same-UID racer already holding the file it wants destroyed.
-    { /usr/bin/env mv -T -f "$_rb_wh_tmp" "$1" 2>/dev/null \
-      || /usr/bin/env mv -h -f "$_rb_wh_tmp" "$1" 2>/dev/null \
-      || /usr/bin/env mv -f "$_rb_wh_tmp" "$1"; } \
-        || { echo "could not move '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"; return 1; }
+    # BSD `mv -h` IS NOT THE OTHER HALF OF THAT, and it was written here as if it were. Its
+    # contract is narrower than `-T`: "if the target is a symbolic link to a directory, do
+    # not follow it". A racer who swaps in an ACTUAL DIRECTORY is not a symlink, so `-h`
+    # takes the ordinary two-operand path and moves the source inside it — which is the same
+    # loss by the other route, behind a flag that reads as if it had been covered.
+    #
+    # `perl`'s `rename` IS rename(2), and that is the one primitive that covers both: it
+    # never follows a symlink in a final component, and it refuses a directory destination
+    # outright. Measured both ways. It is second rather than first because `mv` is already a
+    # dependency of this loop and `perl` is one more process to justify — and it is reached
+    # on every platform whose `mv` lacks `-T`, macOS included, where the CI job already keeps
+    # `perl` on its mac-shaped PATH because macOS ships it.
+    #
+    # A GENUINE REFUSAL IS NOT A REASON TO FALL BACK, which is the whole point of the exit
+    # code below. `rename` failing because the destination is a directory is the exact answer
+    # this wants, and dropping through to the plain form there would perform the very move
+    # the exact form just refused. So `3` means "the rename was made and refused" and stops;
+    # anything else means `perl` itself did not run.
+    #
+    # THE PLAIN FORM IS THE LAST RESORT AND NOT THE FIRST, kept so that a platform with
+    # neither `mv -T` nor `perl` still works, with the postcondition below as its only cover.
+    # Neither platform this project builds and tests on is that platform.
+    _rb_wh_mv=0
+    /usr/bin/env mv -T -f "$_rb_wh_tmp" "$1" 2>/dev/null || {
+        /usr/bin/env perl -e 'rename($ARGV[0], $ARGV[1]) or exit 3' "$_rb_wh_tmp" "$1" 2>/dev/null
+        _rb_wh_mv=$?
+        if [ "$_rb_wh_mv" -eq 3 ]; then
+            echo "could not rename '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"
+            return 1
+        fi
+        [ "$_rb_wh_mv" -eq 0 ] || /usr/bin/env mv -f "$_rb_wh_tmp" "$1" \
+            || { echo "could not move '$_rb_wh_tmp' onto '$1'; '$1' is unchanged and the temporary is left behind"; return 1; }
+    }
     # AND THE TARGET IS A REGULAR FILE AFTERWARDS, WHICH IS A POSTCONDITION AND NOT A GUARD.
     # It asks what actually happened rather than what was true a moment ago, so a racer that
     # made the target a directory after the test above — the one interleaving that test
