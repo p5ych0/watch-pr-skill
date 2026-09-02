@@ -1221,23 +1221,36 @@ rm -rf "$TMP/dirbase"
 # can neither block nor follow a link, so there is no second window to bound and nothing
 # here to stage. `test-writelib.sh` covers that read.
 
-# A WRITABLE NON-REGULAR PATH IS REFUSED BEFORE COPILOT IS ASKED. `/dev/null` takes
-# both writes and reads back EMPTY — which is the legitimate "no earlier Copilot
-# review" — so the equality check passed and the phase opened against a path no watch
-# can use. `pr-watch.sh` rejects the same path, but only after the revocation and the
-# request have gone out. The `-f` question is asked on the BOUND DESCRIPTOR here, so
-# it is about the file that was actually read.
-if [ -c /dev/null ]; then
+# A CHARACTER DEVICE AT THE BASELINE PATH IS REFUSED BY TYPE, BEFORE THE REVOCATION. The
+# readiness write is `rb_write_handoff`, which refuses a target that is not a regular file
+# before it creates anything — and it has to, because the exact rename it performs would
+# otherwise put a regular file OVER the device. That is the whole reason this case exists.
+#
+# ON A DEVICE THE FIXTURE OWNS, NEVER `/dev/null`. This case is written to fail if the type
+# refusal regresses, and under root that failure MODE is the damage: the rename would
+# replace a process-wide device and derail whatever else in the runner reads from it. A case
+# whose failure breaks the machine is not self-contained, so it stages its own device with
+# `mknod` and skips by name where that needs privilege it has not got. Asserted on the inode
+# type as well as the status, because "refused" would hold just as well after the damage.
+_cp_dev="$TMP/nulldev"; rm -f "$_cp_dev"
+if command -v mknod >/dev/null 2>&1 && mknod "$_cp_dev" c 1 3 2>/dev/null && [ -c "$_cp_dev" ]; then
     world; : > "$W/review-id.out"
-    got="$(run open 7 "$HEAD40" /dev/null)"
+    got="$(run open 7 "$HEAD40" "$_cp_dev")"
     [ "${got%%|*}" = 1 ] \
-        && pass "a writable non-regular baseline path stops the phase before Copilot is asked" \
-        || die "a /dev/null baseline path gave '${got}'"
+        && pass "a character device at the baseline path stops the phase before Copilot is asked" \
+        || die "a device baseline path gave '${got}'"
+    [ -c "$_cp_dev" ] \
+        && pass "…and the device is still a device" \
+        || die "the readiness write replaced the device with a regular file"
+    grep -q 'gh pr comment' "$TMP/calls" \
+        && die "the previous signoff was revoked before the device path was refused" \
+        || pass "…with the previous signoff not revoked"
     grep -q -- '--add-reviewer' "$TMP/calls" \
         && die "Copilot was requested with a baseline path no watch can read" \
-        || pass "…with Copilot not requested"
+        || pass "…and with Copilot not requested"
+    rm -f "$_cp_dev"
 else
-    pass "no /dev/null on this platform, so the device-path state is skipped by name"
+    pass "(no mknod privilege here; the device baseline path is skipped by name)"
 fi
 
 # AND A READ THAT FAILS IS NOT A BASELINE. `printf "%s" "$(<…)"` exits 0 whatever the
