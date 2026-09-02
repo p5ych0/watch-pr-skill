@@ -259,13 +259,14 @@ When reviewing a change here:
   and `PERL5LIB` are read before the program is, so an inherited value could stop every
   handoff in the loop. Clearing is a removal; a denylist of perl variables would be one
   behind the next one.
-- **a NUL in the read-back is refused by the COMPARISON, because the read is a slurp.** The
-  perl read-back reads the whole file, so a forgery spelled "the requested value, then a NUL,
-  then anything" comes back whole and compares UNEQUAL. It was `read -d ''`, which stops AT
-  the NUL and made that forgery compare equal — the driver's `$(<…)` then drops the trailing
-  NUL and accepts the 40-hex prefix — and that version needed the read's STATUS read
-  backwards, since it returns 0 only when it found the delimiter. Slurping removes the need
-  to interpret a status at all; a change back to a stopping reader reintroduces it.
+- **a NUL in the read-back is refused by the COMPARISON, because the read runs to EOF.** The
+  `sysread` loop gathers the whole file, so a forgery spelled "the requested value, then a
+  NUL, then anything" comes back whole and compares UNEQUAL. It was `read -d ''`, which stops
+  AT the NUL and made that forgery compare equal — the driver's `$(<…)` then drops the
+  trailing NUL and accepts the 40-hex prefix — and that version needed the read's STATUS read
+  backwards, since it returns 0 only when it found the delimiter. Reading to EOF removes the
+  need to interpret a status at all; a change back to a stopping reader reintroduces it, and
+  a change to a slurp accepts a matching prefix before an I/O error (next rule but one).
 - **the driver must not redirect onto a handoff path.** `helper … > "$PRIOR_FILE"` is opened
   by the driving shell before the helper starts, so nothing the helper checks can catch a
   link there. The path is handed over as an argument and the helper renames onto it.

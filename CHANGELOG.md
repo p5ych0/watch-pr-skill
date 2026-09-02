@@ -98,10 +98,12 @@
   non-symlink regular file whose raw bytes are what the call asked for, and that read
   **opens non-blocking and takes the type from the handle**: `[ -f ]` before an open is a
   cheap early answer and not the protection, since a FIFO swapped in between the two had
-  the read waiting for a writer that never comes. The read **slurps**, so a forgery spelled
-  "the requested value, then a NUL, then anything" comes back whole and compares unequal —
-  with a reader that stopped at the NUL it compared *equal*, and the driver's `$(<…)` would
-  then drop the NUL and accept the 40-hex prefix.
+  the read waiting for a writer that never comes. The read is a `sysread` loop that ends only
+  on a zero-length read — a slurp returns what arrived *before* an I/O error, so a matching
+  prefix followed by a failure read as a complete head — and it gathers the whole file, so a
+  forgery spelled "the requested value, then a NUL, then anything" comes back whole and
+  compares unequal. With a reader that stopped at the NUL it compared *equal*, and the
+  driver's `$(<…)` would then drop the NUL and accept the 40-hex prefix.
 
   **The directory swap is refused by the rename, not caught afterwards.** A directory
   installed after the type test makes both `mv -T` and `perl`'s `rename` refuse, so nothing
