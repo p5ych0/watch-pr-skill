@@ -189,13 +189,31 @@ world; printf 'comment:998877\n' > "$W/prior.out"; rc="$(run 7 no)"
 #
 # WHAT IS GIVEN UP is the time bound, and the subject cannot spend it: it is one
 # `printf` and one stubbed `gh` call, with no loop between them.
-world; rc=0
-(cd "$TMP" && env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
-    BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    /usr/bin/env bash -p "$DIR/pr-request-review.sh" 7 no <"$BODY_IN" >&- 2>"$ERR") || rc=$?
-{ [ "$rc" != 0 ] && nothing_posted; } \
-    && pass "a baseline that cannot be written stops with NOTHING posted" \
-    || die "an unwritable baseline gave rc=$rc, posted=$(cat "$TMP/calls")"
+#
+# AND THE FAILURE IS STAGED ON THE TARGET, NOT ON A CLOSED DESCRIPTOR. Since #263 the
+# baseline is written by RENAME into a path the call names, so stdout has nothing to do
+# with it — closing fd 1 leaves the write perfectly able to succeed. Worse, omitting the
+# option to provoke a failure makes the helper exit in argument validation, long before this
+# write, so the case would stay green if this path ever posted without a usable baseline.
+# The path is valid and its CONTAINING DIRECTORY is not writable, which is what stops an
+# exclusive create.
+#
+# THE PRECONDITION IS ESTABLISHED RATHER THAN ASSUMED, because `chmod` does not bite for
+# uid 0 and containers run this suite as root: the case probes the mode first and skips
+# itself by name where it cannot stage the failure.
+world
+_uw="$TMP/unwritable"; rm -rf "$_uw"; mkdir -p "$_uw"; chmod 500 "$_uw"
+if ( : > "$_uw/probe" ) 2>/dev/null; then
+    chmod 700 "$_uw"; rm -rf "$_uw"
+    pass "(the unwritable-baseline case is skipped: this uid can create through mode 500)"
+else
+    rc="$(run 7 no --baseline-file "$_uw/prior.txt")"
+    chmod 700 "$_uw"
+    { [ "$rc" != 0 ] && nothing_posted; } \
+        && pass "a baseline that cannot be written stops with NOTHING posted" \
+        || die "an unwritable baseline gave rc=$rc, posted=$(cat "$TMP/calls")"
+    rm -rf "$_uw"
+fi
 
 # ── THE AUTOMATIC PATH HAS NO BASELINE, AND ASKS FOR NONE ──────────────────
 # `--after-review` on the initial automatic pass can capture the very review

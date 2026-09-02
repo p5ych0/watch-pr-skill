@@ -17,7 +17,7 @@
 #   stdout  nothing
 #   stderr  every reason
 #
-#   0  posted — the baseline is on stdout
+#   0  posted — the baseline is in the file `--baseline-file` names
 #   1  stopped — nothing was posted
 #
 # WHY THIS EXISTS AS A SCRIPT
