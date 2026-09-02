@@ -461,12 +461,13 @@ if [[ $STAGE = open ]]; then
     PRIOR_REVIEW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
 
-    # WRITTEN BEFORE THE REQUEST, WITH ITS STATUS TAKEN AND THE VALUE READ BACK.
-    # `printf` can report success and the write fail at the flush when the
-    # redirection closes, and after the request there is nothing left to refuse
-    # with — the phase would be irreversibly half-opened, with Copilot asked and the
-    # caller reading a truncated id as the baseline. Writing first costs nothing,
-    # because the driver reads the file only when this stage succeeds.
+    # WRITTEN BEFORE THE REQUEST, WITH ITS STATUS TAKEN. The write is `rb_write_handoff`,
+    # which creates a temporary exclusively, writes into that handle, renames it onto this
+    # path and reads the raw bytes back before returning — so a `0` means the value crossed
+    # and a non-zero one means this handoff did not happen. After the request there is
+    # nothing left to refuse with: the phase would be irreversibly half-opened, with Copilot
+    # asked and the caller reading whatever is at that path as the baseline. Writing first
+    # costs nothing, because the driver reads the file only when this stage succeeds.
     # BOUNDED FOR THE SAME REASON, and it matters more here: the revocation is already
     # posted, so a hang leaves the phase half-advanced with nothing said about it.
     # THE NO-FLOOR VALUE IS SPELLED `none` — #264, for the reason `pr-request-review.sh`

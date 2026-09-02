@@ -1119,8 +1119,10 @@ raw_is "$TMP/prior.txt" 'none
 # readiness proof for the exact operation the write performs — standing before
 # EITHER PR MUTATION — the revocation comment and the reviewer request — so a path that
 # CANNOT TAKE THAT WRITE is found before the signoff is revoked rather than after.
-# Not every unusable path: `/dev/null` and a write-only file accept it and are caught by the
-# read-back, which is after the revocation.
+# EVERY unusable path, since #263: the write refuses the target by TYPE before creating
+# anything, so `/dev/null`, a socket and a FIFO are caught HERE. They used to pass this
+# probe and be caught only by a caller-side read-back on the far side of the revocation —
+# and that read-back is gone, its work now done inside `rb_write_handoff`.
 #
 # AND IT LEAVES A SENTINEL, NOT AN EMPTY FILE, which is what makes this refusal fail
 # CLOSED. Emptying looked free because an empty baseline WAS legal — it meant "no prior
@@ -1192,12 +1194,12 @@ else
     pass "no mkfifo on this platform, so the FIFO state is skipped by name"
 fi
 
-# AND A DIRECTORY AT THAT PATH STILL STOPS IT BEFORE THE REVOCATION, which is what the
-# readiness write proves now that a FIFO no longer reaches it. `mv` onto a directory moves
-# the source INSIDE it and reports success, so this is caught by the postcondition in
-# `rb_write_handoff` rather than by the rename's status — and it must be caught before
-# `gh pr comment`, or the stage reports that the phase did not open while having revoked
-# the previous signoff.
+# AND A DIRECTORY AT THAT PATH STILL STOPS IT BEFORE THE REVOCATION. It is caught by the
+# TYPE TEST in `rb_write_handoff`, before a temporary is created — and the exact rename
+# would refuse it anyway, since `rename(2)` will not put a file over a directory, so this is
+# refused twice over and neither refusal is the postcondition. What matters to this case is
+# only WHEN: before `gh pr comment`, or the stage reports that the phase did not open while
+# having revoked the previous signoff.
 world; rm -rf "$TMP/dirbase"; mkdir -p "$TMP/dirbase"
 got="$(run open 7 "$HEAD40" "$TMP/dirbase")"
 [ "${got%%|*}" = 1 ] \
@@ -1211,30 +1213,13 @@ grep -q 'gh pr comment' "$TMP/calls" \
     || pass "…and with the previous signoff not revoked, so the PR is untouched"
 rm -rf "$TMP/dirbase"
 
-# AND THE READ-BACK IS BOUNDED TOO, which is a SEPARATE window from the write. The
-# write finishing does not make the next open safe: the path is named in argv, and a
-# same-UID process can put a FIFO there between the two. Staged by substituting the
-# path after the write, through a `mkfifo` shim on PATH that runs when the helper's
-# own bounded writer exits — the closest a self-contained case gets to that window
-# without a second process. Both opens are on the same side of the revocation, so a
-# hang at either leaves the phase half advanced.
-if command -v mkfifo >/dev/null 2>&1; then
-    world; rm -rf "$TMP/rbdir"; mkdir -p "$TMP/rbdir"
-    _rb_path="$TMP/rbdir/prior.txt"
-    # A DIRECTORY WHERE THE READ EXPECTS A FILE is the substitution this can stage
-    # deterministically: the write creates the file, and the read then meets something
-    # it cannot read. What is asserted is that the stage REFUSES rather than continuing.
-    got="$(run open 7 "$HEAD40" "$TMP/rbdir")"
-    [ "${got%%|*}" = 1 ] \
-        && pass "a baseline path that cannot be written or read back stops the phase" \
-        || die "a directory baseline path gave '${got}'"
-    grep -q -- '--add-reviewer' "$TMP/calls" \
-        && die "Copilot was requested despite the unusable baseline path" \
-        || pass "…with Copilot not requested"
-    rm -rf "$TMP/rbdir"
-else
-    pass "no mkfifo on this platform, so the read-back substitution is skipped by name"
-fi
+# THE CALLER-SIDE READ-BACK THIS SECTION COVERED IS GONE, AND SO IS ITS CASE. It bounded a
+# SECOND open the stage made on the baseline path after writing it, and the case staged the
+# window by putting a directory there — which is the same state the case above already
+# proves, from the write's side rather than the read's. #271 removed all three caller-side
+# read-backs: `rb_write_handoff` reads its own work back before returning, with an open that
+# can neither block nor follow a link, so there is no second window to bound and nothing
+# here to stage. `test-writelib.sh` covers that read.
 
 # A WRITABLE NON-REGULAR PATH IS REFUSED BEFORE COPILOT IS ASKED. `/dev/null` takes
 # both writes and reads back EMPTY — which is the legitimate "no earlier Copilot

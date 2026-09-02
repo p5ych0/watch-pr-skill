@@ -1359,6 +1359,29 @@ content read sits inside the arm where the answer was no.
 Both tests, not one. `-ef` compares the files and answers nothing when the path does not
 exist; `=` compares the names and catches that case.
 
+## AND IT IS PROVEN A REGULAR FILE BEFORE IT IS OPENED, or the read can never return.
+
+`$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS until a writer
+arrives. This shell has no watchdog and no non-blocking read, so a FIFO at that name does
+not produce a wrong answer — it produces no answer at all, and the loop stops with the
+round's threads still unresolved and nothing said.
+
+It is reachable without a race. `gate`'s pre-bootstrap clearing is guarded by `[[ -f ${6} ]]`
+and skips a path that is not a regular file; `rb_empty_handoff` further down then refuses
+that path by TYPE and leaves it exactly as it was, which is the promise the handoff library
+makes. So a same-UID process that replaces the head file with a FIFO before `gate` runs
+leaves it there through the whole stage — and a driver whose `exit` returns walks past the
+refusal and opens it.
+
+`[[ -f ]]` is a reserved word and asks about the resolved file, so a FIFO, a device, a
+socket, a directory and a dangling symlink all take the refusal arm. It is a test before an
+open and a racer can still change the answer between them; that is a hang rather than a
+wrong answer, and there is nothing in this shell that closes it — the point is that the
+UNRACED case, which is the reachable one, no longer hangs.
+
+The `else` arm now covers both reasons, because they have the same consequence and the same
+instruction: no gate wrote a head there, so resolve nothing.
+
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
 Twenty-four lines of this block were the two invocations, the exit statuses and the
@@ -1574,12 +1597,18 @@ whatever the last successful operation left there, which may be the previous rou
 nothing, this round's captured id, or another process's bytes. NONE of it is this round's
 baseline, and the only thing that makes a value one is `open` returning 0.
 
-THE SYMLINK IS NOT CLOSED BY #245 AND WAS NEVER GOING TO BE. The surviving clearing opens
-`$PRIOR_FILE` with `>`, so a symlink a same-UID process leaves at that name has its target
-truncated — and removing the clearing would not change that, because the WRITE beside it is
-`printf … > "$1"` on the same name. Truncating through a caller-named path is what this
-handoff IS, here and in `gate`'s head file and `record`'s sha file. What #245 removed is
-narrower and real: an open that was UNBOUNDED and stood where nothing could bound it. #245.
+THE SYMLINK WAS NOT CLOSED BY #245 AND WAS NEVER GOING TO BE, AND #263 CLOSED IT. When this
+section was written the clearing opened `$PRIOR_FILE` with `>` and the write beside it was
+`printf … > "$1"` on the same name, so a symlink a same-UID process left there had its target
+truncated — and removing the clearing would not have changed that, because truncating through
+a caller-named path was what the handoff WAS, here and in `gate`'s head file and `record`'s
+sha file. What #245 removed was narrower and real: an open that was UNBOUNDED and stood where
+nothing could bound it.
+
+Both are `rb_write_handoff` now. Nothing opens the caller's path to write it: the value goes
+into an exclusively created temporary and is RENAMED onto the name, so a symlink there loses
+the LINK and never the file at the other end. Do not read the paragraph above as a live
+description — it is why #245 stopped where it did, and #263 is where it went. #245, #263.
 
 ## AND NOTHING HERE PARSES IT OUT OF THE RECORD.
 

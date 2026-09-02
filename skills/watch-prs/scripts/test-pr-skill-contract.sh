@@ -1638,7 +1638,15 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # differ, which is what a symlink in a scratch directory produces. The executed cases
 # below cover the same ground; this keeps the ORDERING assertion honest about what it is
 # anchored to.
-_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then$' "$SKILL" | head -1 | cut -d: -f1)" || true
+# THE `-f` HALF IS MATCHED TOO, and it is a third line rather than a third clause on the
+# first: `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS with no
+# watchdog and no non-blocking read in this shell — so a FIFO left at that name by a
+# same-UID process hangs the driver instead of refusing. `gate` cannot prevent it: its
+# clearing skips a non-regular path and `rb_empty_handoff` refuses one and leaves it.
+_hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\] \\$' "$SKILL" | head -1 | cut -d: -f1)" || true
+grep -q '^   && \[\[ -f \$HEAD_FILE \]\]; then$' "$SKILL" \
+    && pass "…and the head file is proven a regular file before it is opened" \
+    || die "the driver opens \$HEAD_FILE without proving it regular; a FIFO there blocks the read forever"
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
     && pass "…and the head is proven, identity first, after the gate and before the replies" \
@@ -1683,6 +1691,41 @@ _hp_run() {   # _hp_run <head-file> <summary-file> ; prints "S:<status> <output>
         . "$1" 2>/dev/null; _s=$?
         printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null
 }
+
+# A FIFO AT THE HEAD FILE, WITH `exit` RETURNING — THE STATE THAT USED TO HANG.
+#
+# `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS until a writer
+# arrives. This shell has no watchdog and no non-blocking read, so the loop stopped with the
+# round's threads unresolved and nothing said — no wrong answer, no answer at all.
+#
+# IT NEEDS NO RACE. `gate`'s pre-bootstrap clearing is guarded by `[[ -f ]]` and skips a
+# non-regular path; `rb_empty_handoff` further down refuses one by TYPE and leaves it exactly
+# as it was, which is the handoff library's promise. So a FIFO put there before `gate` runs
+# survives the whole stage, and a driver whose `exit` returns then opens it.
+#
+# BOUNDED, AND THAT IS THE ASSERTION: against the unguarded read this never returns, so a
+# timeout here is the defect rather than a slow machine.
+if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_hp_dir/head-fifo" 2>/dev/null; then
+    _hp_fifo="$(run_limited 10 env HEAD_FILE="$_hp_dir/head-fifo" SUMMARY_FILE="$_hp_dir/summary" \
+        bash -c '
+            exit() { return 0; }
+            . "$1" 2>/dev/null; _s=$?
+            printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"; _hp_frc=$?
+    case "$_hp_frc" in
+        124|125) die "the driver BLOCKED reading a FIFO at \$HEAD_FILE; it must prove the file regular before opening it" ;;
+        *)       pass "a FIFO at \$HEAD_FILE does not block the walked-past read" ;;
+    esac
+    case "${_hp_fifo##*S:}" in
+        0*) die "a FIFO at \$HEAD_FILE was accepted as a gated head: $_hp_fifo" ;;
+        *)  pass "…and it is refused, so no thread is resolved on it" ;;
+    esac
+    grep -q 'not a plain regular file' <<<"$_hp_fifo" \
+        && pass "…naming the type rather than the aliasing, which is a different recovery" \
+        || die "the FIFO refusal does not name the type: $_hp_fifo"
+    rm -f "$_hp_dir/head-fifo"
+else
+    pass "(the FIFO head-file case is skipped: no mkfifo, or this filesystem refused one)"
+fi
 
 # THE ALIAS, with a summary that is a valid-looking OID and `exit` returning.
 printf '%s' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/summary"

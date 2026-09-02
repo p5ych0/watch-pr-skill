@@ -225,15 +225,17 @@ if [ "$AUTO_REVIEW" = "no" ]; then
         || { echo "ABORT: could not read the current review id; do not request a review blind." >&2; exit 1; }
 fi
 
-# THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN. `printf` can
-# FAIL — a full filesystem under the caller's transport file — and an `exit 0`
-# after it masks that. When this was written that meant the driver read an empty or
-# truncated value as the baseline and `pr-watch.sh` accepted the PREVIOUS review as
-# the answer to a request just posted.
+# THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN. The write can FAIL — a
+# full filesystem under the caller's transport file — and an `exit 0` after it masks that.
+# When this was written that meant the driver read an empty or truncated value as the
+# baseline and `pr-watch.sh` accepted the PREVIOUS review as the answer to a request just
+# posted.
 #
-# SINCE #264 THE WATCH REFUSES BOTH of those — an empty file, and one whose last byte is
-# not this `printf`'s newline — so the consequence has moved rather than gone. What taking
-# the status prevents now is posting a request whose baseline was never produced: the
+# SINCE #264 THE WATCH REFUSES BOTH of those — an empty file, and one whose last byte is not
+# the writer's newline — and since #263 the write RENAMES, so a failure leaves the previous
+# contents rather than a truncated value and cannot produce either shape by accident. The
+# consequence has moved rather than gone. What taking the status prevents now is posting a
+# request whose baseline was never produced: the
 # request would be in flight, and the driver's watch would stop with
 # `empty_after_review_file` or `unterminated_after_review_file` on a round that cannot be
 # re-armed without re-requesting. Taking the status only works if there is something left
