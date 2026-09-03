@@ -1935,46 +1935,54 @@ _nc_gen="$(grep -cF 'RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e' "$SKILL")
 grep -q 'RB_NONCE="RbProbe' "$SKILL" \
     && pass "…and RB_NONCE is probed at setup like every other name the driver assigns" \
     || die "RB_NONCE is not probed at setup; a readonly one would leave every round on one nonce"
-grep -q 'RB_NONCE_PREV="RbProbe' "$SKILL" \
-    && pass "…and so is RB_NONCE_PREV, which the freshness refusal compares against" \
-    || die "RB_NONCE_PREV is not probed at setup; a readonly one would make the freshness refusal compare against a constant"
-# AND AN INJECTED CONSTANT IS REFUSED ON THE SECOND REQUEST. A frozen `$RANDOM` is one way
-# the source stops being fresh; a REPLACED substitution is the other. Under `set -T`,
-# `extdebug` and an inherited `DEBUG` trap that prints a constant and returns non-zero for
-# the `perl` command, bash skips the command and the substitution captures the trap's output
-# — `5` on every request, which passes the digit test. The whole generation BLOCK is lifted
-# from the document — previous-nonce save, generation, digit test, freshness test, `:?` — and
-# run twice under that trap. The first request accepts the constant (nothing to compare
-# against); the second must REFUSE, because a stale `5 <id>` can only be waited past by a
-# second request carrying `5`. Refusal is the `:?` ending the child: non-zero, no second value.
-_nc_blk="$(awk '/^    RB_NONCE_PREV="\$\{RB_NONCE-\}"$/,/^    RB_NONCE="\$\{RB_NONCE:\?/' "$SKILL" | head -20)"
-{ [ -n "$_nc_blk" ] && grep -q 'RB_NONCE_PREV' <<<"$_nc_blk" && grep -q ':?' <<<"$_nc_blk"; } \
+grep -q 'RB_NONCE_SEQ="RbProbe' "$SKILL" \
+    && pass "…and so is RB_NONCE_SEQ, the per-session counter appended to every nonce" \
+    || die "RB_NONCE_SEQ is not probed at setup; a readonly one would repeat a nonce on every request"
+# AND EVERY NONCE IN A SESSION IS DISTINCT WHATEVER THE SOURCE PRINTS. A frozen `$RANDOM`
+# is one way the source stops being fresh; a REPLACED substitution is the other. Under
+# `set -T`, `extdebug` and an inherited `DEBUG` trap that prints a value and returns
+# non-zero for the `perl` command, bash skips the command and the substitution captures the
+# trap's output. Remembering the previous nonce caught a constant and missed an alternation
+# (`5`, `6`, `5`: the third repeats the first, two requests later). So the nonce is a
+# fixed-width external prefix plus a per-session counter, and this stages the worst source —
+# a CONSTANT of the right width, injected on every request — and asserts three consecutive
+# generations are three DIFFERENT accepted nonces. The whole block is lifted from the document
+# — counter increment, generation, width and digit test, append — and run in a child that
+# starts the counter at zero as setup does.
+_nc_blk="$(awk '/^    RB_NONCE_SEQ=\$\(\(RB_NONCE_SEQ\+1\)\)$/,/^    RB_NONCE="\$\{RB_NONCE:\?/' "$SKILL" | head -20)"
+{ [ -n "$_nc_blk" ] && grep -q 'RB_NONCE_SEQ' <<<"$_nc_blk" && grep -q ':?' <<<"$_nc_blk" && grep -q -- '-ne 23' <<<"$_nc_blk"; } \
     || die "the nonce generation block did not lift from the document; the injection case proves nothing"
-# THE CHILD IS A FILE, NOT A `-c` STRING. The lifted block carries single quotes of its own
-# — the perl program, the `:?` message — and splicing it into a quoted `-c` argument
-# re-balances them at random, which changed the message text and could change the syntax.
-# Written to a file, the block runs verbatim.
-# THE STATUS IS TAKEN WITH `||`, because the REFUSAL is the child exiting non-zero at the
-# `:?` — the outcome this case wants — and under `set -e` a bare capture of an expected
-# failure ends this file instead of asserting on it.
 _nc_dir="$TMP_CL/nonce-inj"; mkdir -p "$_nc_dir" || die "the injection scratch directory could not be made"
+_nc_const=12345678901234567890123   # twenty-three digits, the width the block requires
 {
-    printf '%s\n' 'set -T; shopt -s extdebug' \
-        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf 5; return 1;; esac'"'"' DEBUG'
-    printf '%s\n' "$_nc_blk"
-    printf '%s\n' 'printf "FIRST:[%s]\n" "$RB_NONCE"'
-    printf '%s\n' "$_nc_blk"
-    printf '%s\n' 'printf "SECOND:[%s]\n" "$RB_NONCE"'
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; esac'"'"' DEBUG'
+    for _nc_i in 1 2 3; do
+        printf '%s\n' "$_nc_blk"
+        printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+    done
 } > "$_nc_dir/inj.sh" || die "the injection child could not be written"
 _nc_irc=0
 _nc_inj="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/inj.sh" 2>/dev/null)" || _nc_irc=$?
-case "$_nc_inj" in
-    *"FIRST:[5]"*"SECOND:"*) die "an injected constant nonce was accepted on a SECOND request; a stale baseline would match it ('$_nc_inj')" ;;
-    *"FIRST:[5]"*) [ "$_nc_irc" -ne 0 ] \
-                       && pass "…and a DEBUG trap injecting a constant is accepted once and REFUSED on the second request" \
-                       || die "the second injected-constant generation did not stop the shell (rc=$_nc_irc out='$_nc_inj')" ;;
-    *) die "the injection case did not reproduce: expected the first generation to capture the trap's constant ('$_nc_inj' rc=$_nc_irc)" ;;
-esac
+_nc_n1="$(sed -n '1s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_inj")"
+_nc_n2="$(sed -n '2s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_inj")"
+_nc_n3="$(sed -n '3s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_inj")"
+{ [ "$_nc_irc" -eq 0 ] && [ "$_nc_n1" = "${_nc_const}1" ] && [ "$_nc_n2" = "${_nc_const}2" ] && [ "$_nc_n3" = "${_nc_const}3" ]; } \
+    && pass "…and three requests under a DEBUG trap injecting one constant get three DIFFERENT nonces, each the constant plus the counter" \
+    || die "an injected constant did not yield distinct counted nonces (rc=$_nc_irc out='$_nc_inj')"
+# AND A VALUE OF THE WRONG WIDTH IS REFUSED, which is what stops an injected `5` from
+# becoming `51`, `52`, … — the prefix width is what makes the concatenation unambiguous.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf 5; return 1;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/short.sh" || die "the short-injection child could not be written"
+_nc_src=0
+_nc_sout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/short.sh" 2>/dev/null)" || _nc_src=$?
+{ [ "$_nc_src" -ne 0 ] && ! grep -q '^N:' <<<"$_nc_sout"; } \
+    && pass "…while an injected value of the wrong width is refused at the :? rather than counted" \
+    || die "an injected '5' was accepted as a nonce (rc=$_nc_src out='$_nc_sout')"
 # AND THE SOURCE SURVIVES A FROZEN `$RANDOM`. `unset RANDOM; RANDOM=5` in a startup file
 # leaves `RANDOM` an ordinary variable — this file already records that unsetting it removes
 # its special behaviour — so a nonce drawn from it is the SAME on every request, a previous

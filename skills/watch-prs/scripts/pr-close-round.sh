@@ -371,10 +371,8 @@ if [ "$STAGE" = post ]; then
     case "$NONCE" in
         ""|*[!0-9]*) echo "ABORT: 'post' takes a seventh argument, the request nonce, as decimal digits (got '$NONCE'); the baseline is prefixed with it and pr-watch.sh --require-nonce refuses any other."; exit 1 ;;
     esac
-else
-    [ -z "$NONCE" ] \
-        || { echo "ABORT: 'gate' takes six arguments; the request nonce ('$NONCE') belongs to 'post', which writes the baseline. 'gate' only empties it."; exit 1; }
 fi
+# `gate`'s OWN refusal of a nonce is BELOW its emptyings, not here — see the gate block.
 if [ "$PRIOR_FILE" = "$HEAD_FILE" ] || [ "$PRIOR_FILE" -ef "$HEAD_FILE" ] 2>/dev/null; then
     echo "ABORT: the prior file and the head file are the same file ('$PRIOR_FILE'); the baseline would overwrite the head 'post' re-proves against."
     exit 1
@@ -399,6 +397,18 @@ if [ "$STAGE" = gate ]; then
         || { echo "ABORT: could not empty the head file '$HEAD_FILE': $_rb_wh"; exit 1; }
     _rb_wh="$(rb_empty_handoff "$PRIOR_FILE")" \
         || { echo "ABORT: could not empty the prior file '$PRIOR_FILE': $_rb_wh"; exit 1; }
+    # AND ONLY NOW DOES `gate` REFUSE A NONCE IT WAS NOT MEANT TO TAKE. The refusal stood
+    # ABOVE these emptyings, and that was the walked-past-guard shape this file exists to
+    # avoid: a `gate` accidentally given a seventh argument refused with the previous round's
+    # OID still in the head file, and a driver whose `exit` returns then read it back through
+    # `rb_handoff_is_sha` as a proven head — reaching the irreversible thread replies with no
+    # push and no CI proof for this round. Every refusal below the clearing leaves an EMPTY
+    # head, which that read refuses. The nonce belongs to `post`, which writes the baseline;
+    # `gate` writes none, so an argument here is a caller confusing the stages, refused rather
+    # than ignored — an ignored argument is how the old three-argument `pr-request-review.sh`
+    # form dropped a body in silence.
+    [ -z "$NONCE" ] \
+        || { echo "ABORT: 'gate' takes six arguments; the request nonce ('$NONCE') belongs to 'post', which writes the baseline. 'gate' only empties it, and it has: the head and prior files are empty."; exit 1; }
 fi
 
 case "$PR" in

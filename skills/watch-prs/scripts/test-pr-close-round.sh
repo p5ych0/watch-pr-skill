@@ -829,6 +829,25 @@ _gn_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$
 { [ "$_gn_rc" -eq 1 ] && grep -q "belongs to 'post'" <<<"$_gn_out"; } \
     && pass "gate given a request nonce refuses it rather than ignoring it" \
     || die "gate with a nonce gave rc=$_gn_rc out='$_gn_out'"
+# AND THAT REFUSAL COMES BELOW THE EMPTYINGS, so a walked-past `gate` leaves nothing a driver
+# can read as a proven head. It stood ABOVE them once, and a `gate` accidentally given a
+# seventh argument refused with the previous round's OID still in the head file — a driver
+# whose `exit` returns then read it through `rb_handoff_is_sha` as this round's gated head and
+# reached the irreversible thread replies with no push and no CI proof. Staged with a
+# PRE-POPULATED head file: after the refusal it must be EMPTY, and so must the prior file.
+world
+printf '%s\n' "$HEAD40" > "$TMP/head.txt"; printf '%s\n' '5551 42' > "$TMP/prior.txt"
+_gn_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/head.txt" "$TMP/prior.txt" 5551 2>&1)"; _gn_rc=$?
+{ [ "$_gn_rc" -eq 1 ] && grep -q "belongs to 'post'" <<<"$_gn_out"; } \
+    || die "gate with a nonce and a pre-populated head gave rc=$_gn_rc out='$_gn_out'"
+{ [ -f "$TMP/head.txt" ] && [ ! -s "$TMP/head.txt" ]; } \
+    && pass "…and it refuses BELOW its emptyings, so the pre-populated head is empty afterwards" \
+    || die "gate refused a nonce with '$(cat "$TMP/head.txt" 2>/dev/null)' still in the head file; a walked-past driver would read it as proven"
+{ [ -f "$TMP/prior.txt" ] && [ ! -s "$TMP/prior.txt" ]; } \
+    && pass "…and the prior file is empty too" \
+    || die "gate refused a nonce with '$(cat "$TMP/prior.txt" 2>/dev/null)' still in the prior file"
 
 # ── THE GATE EMPTIES THE PRIOR FILE, so a failed `post` cannot leave the LAST ──
 # round's baseline readable. The driver's watch would take it and accept a review

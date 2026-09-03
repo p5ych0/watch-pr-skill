@@ -1133,18 +1133,30 @@ rounds of one phase; a freshness rule because it compares clocks. The nonce is t
 the head file and `verdict-at=` already use — a value that says what it is about — applied
 to the round.
 
-AND A REPEATED NONCE IS REFUSED, because the source can be REPLACED as well as frozen. Under
-`set -T`, `extdebug` and an inherited `DEBUG` trap that prints a constant and returns
-non-zero for the `perl` command, bash skips the command and the substitution captures the
-trap's output — measured: `5` on every request, which passes the digit test. `RB_NONCE_PREV`
-holds the previous request's nonce, probed at setup like the others, and a value equal to it
-is emptied before the `:?`. A constant is accepted ONCE — the first request has nothing to
-compare against — and refused on the second, which is the request a stale match needs: the
-previous round's `5 <id>` can only be waited past by a second request carrying `5`, and that
-request stops the session instead. A trap that skips the comparison as well is the general
-hostile-shell case this document already does not defend — every statement can be skipped —
-and the two shapes it measurably takes, a frozen source and an injected constant, both stop
-here.
+AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because the source can be REPLACED
+as well as frozen. Under `set -T`, `extdebug` and an inherited `DEBUG` trap that prints a
+value and returns non-zero for the `perl` command, bash skips the command and the
+substitution captures the trap's output — measured: `5` on every request, which passes the
+digit test. Remembering the previous nonce and refusing a repeat was the first answer, and it
+remembers ONE value: a trap alternating `5`, `6`, `5` passed all three, and with the middle
+request refused before its write the third required `5` against a two-requests-old `5 <id>`.
+A memory of every nonce issued is a list, and a list is wrong by omission.
+
+So the nonce is made distinct rather than checked for repetition. `RB_NONCE_SEQ` is a
+per-session counter — set to zero with the other literals at setup, probed like every name
+this shell assigns, incremented before each request — and it is APPENDED to the external
+value. The external value is FIXED WIDTH: `perl` prints exactly twenty-three digits (ten of
+`time`, seven of its pid modulo ten million, six of `rand`), and this shell refuses anything
+that is not twenty-three digits before appending. With a fixed-width prefix and a strictly
+increasing suffix, two nonces from one session cannot be equal whatever the prefix holds:
+equal strings would need equal prefixes and then equal counters. An injected constant of the
+right width yields `<c>1`, `<c>2`, `<c>3`; an injected `5` fails the width test and is
+refused; the previous round's baseline carries a counter no later request will carry again.
+The counter is this shell's, so a trap that skips its increment repeats a nonce — but a trap
+that skips arbitrary statements is the general hostile-shell case this document already does
+not defend, and Codex's measured traps skip the external command only. The `perl` prefix is
+still there for what the counter cannot give: a nonce a PREVIOUS SESSION cannot have used,
+since every session's counter starts at zero.
 
 ## AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
 
