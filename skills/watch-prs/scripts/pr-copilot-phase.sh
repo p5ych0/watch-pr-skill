@@ -91,11 +91,7 @@ set -uo pipefail
 # from `record`, and it is why its clearings outlived `record`'s by one change.
 #
 # ONLY THE ONE ABOVE THE BOOTSTRAP IS GONE — the arm this comment used to introduce. The
-# bounded one below survives, and its argument is beside it rather than here: five review
-# rounds went into restating this in four files, and every round one of the copies had
-# drifted. `skills/watch-prs/SKILL-RATIONALE.md` carries the whole account under
-# **THE FILE WAS EMPTIED TWICE AND IS NOW WRITTEN ONCE BEFORE THE CAPTURE**; what is here is
-# THIS arm did.
+# bounded one below survives, and its argument is beside it rather than here.
 #
 # AND NOT THE SYMLINK. The surviving clearing opens this path with `>`, so a symlink a
 # same-UID process leaves at that name still has its target truncated — removing the

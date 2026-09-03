@@ -25,12 +25,6 @@ settings page.
 
 ## How to work this loop
 
-**A comment marked `# WHY:` is a CLAIM, and its argument is the identically-titled
-section of `$RB_SCRIPTS/../SKILL-RATIONALE.md`** — located by the title, character for
-character, which is what `test-pr-skill-contract.sh` matches. Claims are here and
-arguments are there because the arguments are long and read once, while the claims are
-read on every invocation.
-
 These rules bind you for every round. They are here because breaking them is what
 turns a three-round PR into a fifty-round one, and every line below was earned
 that way rather than assumed.
@@ -141,21 +135,16 @@ incident it came from.
 
 ## Derive identity
 
+The origin must be a GitHub network transport. A local path or a bare host
+reaches no GitHub server, and is refused rather than guessed at.
+
 ```bash
-# THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
-# WHY:
 if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi
-# THE REPOSITORY ROOT IS CAPTURED WITH ITS STATUS TAKEN, or a failed read becomes a path.
-# WHY:
 REPO_DIR="$(git rev-parse --show-toplevel)" \
     || { echo "ABORT: could not resolve the repository root"; exit 1; }
-# THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
-# WHY:
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
-# THE NEWEST INSTALLED COPY IS CHOSEN BY MTIME, not by `sort -V`, which is GNU-only.
-# WHY:
 if [ ! -d "$RB_SCRIPTS" ]; then
     RB_CANDIDATES="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null)" \
         || { echo "ABORT: could not enumerate installed plugin copies"; exit 1; }
@@ -170,20 +159,12 @@ fi
 [ -d "$RB_SCRIPTS" ] && [ -x "$RB_SCRIPTS/pr-review-state.sh" ] \
     || { echo "ABORT: could not locate the plugin helper scripts"; exit 1; }
 
-# THE IDENTITY COMES FROM THE SHARED PARSER, never from a copy written out here.
-# WHY:
 unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: a pre-existing rb_identity could not be cleared"; exit 1; }
 . "$RB_SCRIPTS/identitylib.sh" \
     || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
-# THE SETUP WORK RUNS IN A PROCESS, because nothing in this document executed it.
-# WHY:
-# AND WHAT COMES BACK IS ONE VALUE, because eleven of the twelve were never information.
-# WHY:
-# ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
-# WHY:
 if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
      && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
    && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
@@ -214,56 +195,32 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
      && [[ -z ${!RB_NONCE:-} ]] ) 2>/dev/null \
    && ( RB_NONCE_SEQ="RbProbe$$$RANDOM$RANDOM"; [[ $RB_NONCE_SEQ = RbProbe* ]] \
      && [[ -z ${!RB_NONCE_SEQ:-} ]] ) 2>/dev/null; then
-    # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
-    # WHY:
     RB_TMPPARENT=
     [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
         && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
     RB_TMPPARENT2=
     [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
         && [[ -x ${HOME:-} ]] && RB_TMPPARENT2="$HOME"
-    # THE SAME PARENT TWICE IS NOT DEDUPLICATED, because two random leaves are two usable names.
-    # WHY:
     [[ -n $RB_TMPPARENT ]] \
         || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
     RB_SETUP_DIR=
     RB_SETUP_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-setup.$$.$RANDOM$RANDOM$RANDOM"
-    # THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
-    # WHY:
-    # EVERYTHING AFTER THE CALL IS INSIDE ITS SUCCESS ARM, so nothing walks past a refusal.
-    # WHY:
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
        || { [[ $? -eq 2 ]] && [[ -n $RB_TMPPARENT2 ]] \
             && RB_SETUP_DIR="$RB_TMPPARENT2/watch-pr-setup-2.$$.$RANDOM$RANDOM$RANDOM" \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
             && { RB_TMPPARENT="$RB_TMPPARENT2"; }; }
     then
-        # NOTHING THE HELPER WROTE IS EXECUTED HERE, because `.` is a name in this shell.
-        # WHY:
-        # THE VALUE ARRIVES BY EXPANSION, which the parser performs with no command in it.
-        # WHY:
-        # THE FILE IS BOUND BEFORE IT IS READ, because a name can be replaced between the two.
-        # WHY:
         RB_REMOTE=
         if [[ -z $RB_REMOTE ]] \
            && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/origin"; then
-            # WHAT WAS READ IS PROVED HERE, because a file is not a promise.
-            # WHY:
             RB_REMOTE="${RB_REMOTE:?the file the setup helper wrote carries no origin; there is no repository to pin this session to}"
-            # ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
-            # WHY:
             [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
             RB_REMOTE="${RB_REMOTE:?the origin read back spans more than one line; something wrote to that file between the helper and this shell}"
-            # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
-            # WHY:
             REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
             RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
-            # THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
-            # WHY:
             export REVIEW_BUS_REMOTE="$RB_REMOTE"
-            # EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL.
-            # WHY:
             CODEX_BOT='chatgpt-codex-connector[bot]'
             COPILOT_BOT='copilot-pull-request-reviewer[bot]'
             SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"
@@ -271,8 +228,6 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"
             HEAD_FILE="$RB_SETUP_DIR/work/head.txt"
             RB_NONCE_SEQ=0
-            # THE ASSIGNMENTS ARE READ BACK, because a readonly name fails one in silence.
-            # WHY:
             if [[ $CODEX_BOT = 'chatgpt-codex-connector[bot]' ]] \
                && [[ $COPILOT_BOT = 'copilot-pull-request-reviewer[bot]' ]] \
                && [[ $SUMMARY_FILE = "$RB_SETUP_DIR"/work/summary.md ]] \
@@ -285,24 +240,12 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                && [[ -f $PRIOR_FILE ]] && [[ ! -s $PRIOR_FILE ]] \
                && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]]
             then
-                # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
-                # WHY:
-                # ONE NAME PER CALL, because `export` is a name this shell may have wrapped.
-                # WHY:
                 export PR_CI_INTERVAL
                 export PR_CI_TIMEOUT
                 export PR_CI_GRACE
                 export PR_CI_PROBE_TIMEOUT
                 export REVIEW_MERGE_STRICT
                 export RB_SUITE_JOBS
-                # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
-                # WHY:
-                # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
-                # WHY:
-                # AND THE PIN IS THIS CHECKOUT'S ORIGIN, or the stage refuses.
-                # WHY:
-                # A SQUATTED PIN NAME COSTS A SECOND NAME, NOT THE SESSION.
-                # WHY:
                 RB_PIN_SEEN=
                 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin"; then
                     { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
@@ -312,13 +255,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                     { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                         && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/pin2/pin"
                 fi
-                # THE TRANSPORTS ARE LEFT WHERE THEY ARE, because unlinking through a published name can hit what replaced it.
-                # WHY:
                 if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
                     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
                 else
-                    # A PIN FAILURE IS TERMINAL, because the work files are already on this parent.
-                    # WHY:
                     echo "ABORT: the repository pin did not take; every stage would route by the current directory. Re-run setup: this session's working files are already under this parent, so a retry has to start over rather than pin somewhere else"
                     exit 1
                     [[ -n "" ]]
@@ -380,20 +319,10 @@ duplicate pass or a review nobody requested.
 
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
-# THE REVIEWER NAME IS PROVED WHERE IT IS SET, at every site that sets it.
-# WHY:
 if ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
      && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
    && { WHO="$CODEX_BOT"; [[ $WHO = "$CODEX_BOT" ]]; }
 then
-    # THE REQUEST IS INSIDE THIS ARM, not a fence after it.
-    # WHY:
-    # THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
-    # WHY:
-    # AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because a memory of issued nonces is a list and a list is wrong by omission.
-    # WHY:
-    # AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
-    # WHY:
     RB_NONCE=
     RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
     [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
@@ -422,31 +351,11 @@ then
 # as a record, or an `@codex review` on the automatic path, is refused rather than
 # published. `$REQUEST_FILE` was created empty at setup and an empty body is
 # refused, so a write that does not happen stops the request.
-# THE REQUEST IS A SCRIPT.
-# WHY:
-# THE REQUEST RUNS AS A CONDITION.
-# WHY:
-# THE BODY NEVER BECOMES SHELL SOURCE, because an account can close a heredoc.
-# WHY:
-# AND THE FILE IS NOT WRITTEN FROM THIS SHELL, because `cat` and `printf` are names.
-# WHY:
-# NO NAME HOLDS THE STATUS, because a readonly one loses a refusal twice over.
-# WHY:
-# AND THE BASELINE NEVER BECOMES AN ASSIGNMENT EITHER.
-# WHY:
-# THE ANSWER GOES TO A FILE, A PATH RATHER THAN A NAME.
-# WHY:
-# AND THE HELPER RENAMES ONTO THAT PATH, RATHER THAN THIS SHELL REDIRECTING ONTO IT.
-# WHY:
-# THE CONTINUATION IS THE `then` BRANCH HERE TOO.
-# WHY:
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"; then
         [[ -n x ]]
     else
         echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
         exit 0
-        # THE LAST WORD IS A RESERVED ONE, or a failed request reads as a posted one.
-        # WHY:
         [[ -n "" ]]
     fi
 else
@@ -831,28 +740,6 @@ Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
 hard-coded answer — one recipe here, two orders there:
 
 ```bash
-# THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
-# WHY:
-# THE ROUND CLOSES THROUGH A SCRIPT, because both orderings were prose in `SKILL.md`.
-# WHY:
-# THE GATE RUNS BEFORE THE REPLIES, because a resolve cannot be taken back.
-# WHY:
-# IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED, and what it pushed was `main`.
-# WHY:
-# `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN.
-# WHY:
-# THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
-# WHY:
-# AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
-# WHY:
-# AND ITS CONTENT IS PROVEN A COMMIT ID.
-# WHY:
-# AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
-# WHY:
-# AND THE STAGE RUNS AS A CONDITION, so no name holds its OUTPUT.
-# WHY:
-# AND NO NAME HOLDS ITS STATUS EITHER.
-# WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
     [[ -n x ]]    # a reserved word, not `:`, and TRUE — under `errexit` a false
                   # one here would end the shell on the successful path
@@ -866,12 +753,6 @@ else
            [[ -n "" ]] ;;
     esac
 fi
-# THE FILE IS READ ONCE, because two reads are two different values.
-# WHY:
-# AND ITS IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past.
-# WHY:
-# AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
-# WHY:
 if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]] \
    && /usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' \
       _ "$RB_SCRIPTS" "$HEAD_FILE"; then
@@ -896,10 +777,6 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
-# WHY:
-# AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
-# WHY:
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
@@ -908,15 +785,7 @@ RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time
 RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
 [[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
-# THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
-# WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE" "$RB_NONCE"; then
-    # THE BASELINE STAYS IN THE FILE `post` WROTE.
-    # WHY:
-    # AND THE WATCH IS THE ONE THAT READS IT, where a failed read is not an empty baseline.
-    # WHY:
-    # THE RECORD IS STILL PRINTED, and it is what an operator reads.
-    # WHY:
     exit 0   # the script printed the head it closed on
     [[ -n "" ]]
 else
@@ -1021,8 +890,6 @@ loops with separate boundaries.
   # of a probe that failed. Permission is the one thing that must never be
   # inferred from unreadable output.
   #
-  # NOTHING REACHES THE POST EXCEPT THROUGH THE ARM THAT PROVED IT.
-  # WHY:
   ROUNDS_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
   if [[ $ROUNDS_RC == 3 ]]; then
       if ROUNDS="$(printf '%s\n' "$ROUNDS_OUT" \
@@ -1097,21 +964,9 @@ Ask Copilot:
 # `@codex review` is matched ANYWHERE in the body, case-insensitively, so
 # indenting, quoting or fencing it changes nothing: break the mention up, or
 # write it without the `@`.
-# THE ACCOUNT IS PROSE, AND MUST NOT BECOME A RECORD, A REQUEST, OR A FRAGMENT.
-# WHY:
 cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
-# WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here.
-# WHY:
-# THE SIGNED-OFF HEAD COMES OUT OF THE FILE `record` WROTE, not from a second lookup.
-# WHY:
-# THE STAGE RUNS AS A CONDITION, so no name holds its status.
-# WHY:
-# AND WHAT WAS READ IS PROVED A SHA, because an attribute can transform an assignment.
-# WHY:
-# AND THE PAUSE ARM READS IT TOO, the signoff being recorded either way.
-# WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" "$HEAD_FILE"; then
     if { [[ -f /dev/fd/9 ]] && CODEX_SHA="$(<"/dev/fd/9")" \
          && [[ ${#CODEX_SHA} -eq 40 ]] && [[ $CODEX_SHA != *[!0-9a-f]* ]]; } 9<"$HEAD_FILE"; then
@@ -1175,21 +1030,7 @@ RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time
 RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
 [[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
-# PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
-# WHY:
-# THE BASELINE GOES STRAIGHT INTO THE FILE THE WATCH READS.
-# WHY:
-# AND NOTHING HERE PARSES IT OUT OF THE RECORD.
-# WHY:
-# THE STAGE RUNS AS A CONDITION, so its output is not captured.
-# WHY:
-# AND ITS STATUS IS NOT HELD, because a round boundary is not a refusal.
-# WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE" "$RB_NONCE"; then
-    # THE REVIEWER SWITCH IS A CONDITION, because its refusal has somewhere to fall.
-    # WHY:
-    # AND THE NAME IS PROVED HERE, because setup's probe cannot reach forward.
-    # WHY:
     if ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
          && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
        && { WHO="$COPILOT_BOT"; [[ $WHO = "$COPILOT_BOT" ]]; }; then
@@ -1243,15 +1084,9 @@ end of the Codex phase, for the same reason.
 #
 # `$CODEX_SHA` is passed as well as the head being read, because whether the two
 # are EQUAL decides which question the stop asks.
-# THE MODE IS SET BEFORE ANYTHING IN STEP 8 RUNS, and `codex-only` is not a skip.
-# WHY:
 REVIEWERS=both   # or `codex-only`
-# THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL, and the gate below is another question.
-# WHY:
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
-# `[[`, A RESERVED WORD, NOT `[` — and the branch ends in one too.
-# WHY:
 if [[ $CLOSE_RC -ne 0 ]]; then
     echo "The Copilot phase did not close and no signoff was recorded. The reason is above; do not retry it blind."
     exit "$CLOSE_RC"
@@ -1298,26 +1133,12 @@ before continuing into the Copilot phase.
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
 #
-# THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS.
-# WHY:
-# READING IT IS A HELPER, because 112 lines here exited 0 on every refusal.
-# WHY:
-# THERE IS NO STATUS VARIABLE; THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
-# WHY:
-# THE CONTINUATION IS THE `then` BRANCH, and nothing follows it.
-# WHY:
-# THE HELPER RUNS AS A CONDITION, which is what exempts it from `errexit`.
-# WHY:
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
-    # THE SHA THE GATE IS PINNED TO, its status and its shape both checked.
-    # WHY:
     CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
     RX_SHA40='^[0-9a-f]{40}$'
     if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
         echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
         exit 0
-        # THE LAST WORD IS A RESERVED ONE, and this branch needs it as much as step 7's.
-        # WHY:
         [[ -n "" ]]
     fi
 else
@@ -1352,18 +1173,6 @@ fi
 #
 # REVIEWERS is `both` unless the operator chose otherwise at the stop that closed
 # the Codex phase.
-# THE GATE IS A SCRIPT.
-# WHY:
-# RUN FROM THE REPOSITORY THIS SESSION STARTED IN.
-# WHY:
-# AUTO_REVIEW IS PASSED AS AN ARGUMENT, not read from the environment.
-# WHY:
-# THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
-# WHY:
-# REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the Codex stop.
-# WHY:
-# `codex-only` IS NOT A WEAKER GATE, and requires the head to BE the signed commit.
-# WHY:
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
 case "$MERGE_RC" in
@@ -1372,8 +1181,6 @@ case "$MERGE_RC" in
     4) echo "NOT merged: the request was accepted but the PR is not MERGED — a merge queue takes the request without landing it. Do not close this out; confirm on the PR." ;;
     *) echo "Not merged. The reason is above; do not retry it blind." ;;
 esac
-# THE STATUS LEAVES THIS BLOCK, or a blocked merge reports success.
-# WHY:
 exit "$MERGE_RC"
 ```
 

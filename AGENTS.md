@@ -382,14 +382,10 @@ as a reviewer:
   message and PR body where it is not (tests, authoring documentation, these files). A
   missing argument beside working code is not a finding.
 
-`SKILL.md`'s fenced `# CLAIM` / `# WHY:` pairs and `skills/watch-prs/SKILL-RATIONALE.md`
-are the state of the tree, not the rule: that mechanism is being retired, no new claims
-are added, and its removal is its own change. Until then the bijection
-`test-pr-skill-contract.sh` proves still holds for what exists, and the EXISTING claims
-stay authoritative for as long as they are installed — a claim that has gone stale
-against the code beneath it is followed as an instruction, so flag it exactly as any other
-stale comment. What is not asked for is a NEW claim: a new or changed line with no `# WHY:`
-above it is not a finding.
+`SKILL.md` carries no `# CLAIM` / `# WHY:` pairs and there is no rationale document
+since 2.3.0: the mechanism was retired under the rule above, and the bijection that
+`test-pr-skill-contract.sh` used to prove went with it. A new or changed fenced line with
+no claim above it is the normal state, not a finding; do not ask for one.
 
 Do not ask for a check that decides which comments are non-obvious. A Markdown parser
 and then a set of `grep`s were both built for an adjacent question and both removed, and
