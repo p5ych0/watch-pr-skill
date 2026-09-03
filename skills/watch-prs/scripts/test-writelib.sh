@@ -771,8 +771,11 @@ rm -rf "$_wh"
 # ── A SUBSTITUTED PARENT DIRECTORY IS FOLLOWED, WHICH IS THE ACCEPTED LIMIT #272 ──
 #
 # The read resolves the parent of the head file by NAME. A same-UID process that renames
-# `work` away and puts a directory holding a FORGED head at the name has that forged head
-# read and accepted — a gate bypass, not a lost file. It is ACCEPTED rather than fixed:
+# `work` away and puts a directory holding a FORGED head at the name has that forged head read
+# and accepted — the driver's post-gate CONFIRMATION is corrupted, and `CODEX_SHA` (read from
+# the same file) carries the forged value forward. It is NOT a completed merge: the merge gate
+# reads the durable signoff and the reviewer's verdict, not the work directory, and refuses a
+# forged `CODEX_SHA` the reviewer never signed. It is ACCEPTED rather than fixed:
 # `docs/decisions/2026-09-03-workdir-parent-substitution.md` measures the bound and prices
 # the fix (a file-based `(dev, ino)` is substitutable and ABA-reusable, and a held descriptor
 # is not safely acquirable in the driver's bash), and the attacker is a same-UID process that
