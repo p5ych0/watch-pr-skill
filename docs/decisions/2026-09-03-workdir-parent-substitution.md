@@ -50,19 +50,29 @@ is strictly weaker than what they already hold, so closing this vector adds no r
 security against a realistic attacker. A different-UID process cannot reach the
 work directory at all — it is created mode 700 under a parent the session owns.
 
-This is the same threat model as the three adjacent accepted records
-(`docs/decisions/2026-08-26-transport-candidate-in-argv.md`,
-`docs/decisions/2026-08-29-setup-leaf-cleanup.md`,
-`docs/decisions/2026-09-01-origin-cleanup-races.md`), all same-UID races in the
-session's own working area. It differs only in consequence — a forged head rather
-than litter — and the bounding argument above is why that consequence is accepted.
+It is the same SAME-UID class as two of the adjacent records —
+`docs/decisions/2026-08-29-setup-leaf-cleanup.md` and
+`docs/decisions/2026-09-01-origin-cleanup-races.md`, both races in the session's own
+working area that only a same-UID process can reach — differing from them in
+CONSEQUENCE: a forged head rather than litter, which the bounding argument above is
+why it is nonetheless accepted. It is NOT the same as
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md`, which is a different
+threat model: the transport candidate is published in argv, so ANY local account can
+observe and squat it, and its measured consequence is a bounded setup denial of
+service, not a forged head. This record's race is reachable only by the same UID,
+because `work` is created mode 700 under a parent the session owns.
 
 ## The measurement
 
-`test-writelib.sh` stages the race against the real `rb_handoff_is_sha`: it writes a
-real head into `work/head.txt`, renames `work` away, and puts a directory holding a
-FORGED head at the name. The read follows the substituted parent and accepts the
-forged head. The case is written to PIN that outcome, so if a later change anchors
-the read to the directory's identity and the forgery stops working, the case fails
-and this record is revisited rather than silently outliving the limit it accepts —
-which is the standard this repository holds every accepted record to.
+`test-writelib.sh` stages the race against the real `rb_handoff_is_sha`, and the two
+heads are DELIBERATELY DISTINGUISHABLE by status. It writes an INVALID sentinel
+(`not-a-commit-id`) into the original `work/head.txt`, renames `work` away, and puts a
+directory holding a VALID forged 40-hex head at the name. The read follows the
+substituted parent, so it reads the valid forged head and returns 0 — the accepted
+limit. Because only the substituted file is a valid commit id, a status of 0 proves
+the substituted inode was read: an anchored read that reached the original inode would
+read the invalid sentinel and return non-zero. The case is written to PIN the status,
+so if a later change anchors the read to the directory's identity and the forgery
+stops working, the case fails and this record is revisited rather than silently
+outliving the limit it accepts — which is the standard this repository holds every
+accepted record to.
