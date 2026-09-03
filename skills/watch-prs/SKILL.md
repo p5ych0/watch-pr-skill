@@ -387,7 +387,7 @@ then
     # THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
     # WHY:
     RB_NONCE=
-    RB_NONCE="$RANDOM$RANDOM$RANDOM$RANDOM"
+    RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%d%d%06d\n", time, $$, int(rand 1e6)')"
     [[ $RB_NONCE = *[!0-9]* ]] && RB_NONCE=
     RB_NONCE="${RB_NONCE:?the request nonce did not take — a name this shell needs is readonly or transforming, and the watch could not tell this round's baseline from the last one's}"
 
@@ -891,7 +891,7 @@ Then, and only then:
 # WHY:
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
 RB_NONCE=
-RB_NONCE="$RANDOM$RANDOM$RANDOM$RANDOM"
+RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%d%d%06d\n", time, $$, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* ]] && RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
@@ -1155,7 +1155,7 @@ way — the signoff is on the PR, so a later session reads it back with
 # then.
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
 RB_NONCE=
-RB_NONCE="$RANDOM$RANDOM$RANDOM$RANDOM"
+RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%d%d%06d\n", time, $$, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* ]] && RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.

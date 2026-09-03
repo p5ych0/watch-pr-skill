@@ -1112,9 +1112,21 @@ answered the way every other value this shell holds is — `WHO`, `CODEX_SHA`, t
 paths: the name is PROBED at setup, so a startup file that made it readonly or
 transforming stops the session before any request, and the assignment is proved by
 reading it back as digits and expanded with `:?` so an assignment that did not take is a
-refusal rather than a stuck value. Four `$RANDOM`s is sixty bits; what has to hold is only
-that two consecutive rounds differ, and this shell advances its own generator on each
-draw — a subshell does not, on bash 3.2, which is why it is not generated in one.
+refusal rather than a stuck value.
+
+THE SOURCE IS A `perl` CHILD, NOT `$RANDOM`, because `$RANDOM` can be FROZEN from a startup
+file: `unset RANDOM; RANDOM=5` leaves it an ordinary variable, so four draws are `5555` on
+every request, a previous round's `5555 <id>` matches the nonce the watch is told to
+require, and the fail-open is back — and `RANDOM` is not a name this block assigns, so the
+setup probe never looks at it. The contract fixture already records that unsetting it
+removes its special behaviour. `$SECONDS`, `$EPOCHREALTIME` and `$BASHPID` are the same
+class of dynamic variable and freeze the same way. So the value comes from a process this
+shell cannot reach into: `/usr/bin/env -i PATH="$PATH" perl`, the spelling `writelib.sh`
+already uses, printing `time`, its own pid and `rand` as decimal digits. Two consecutive
+requests are two processes with two pids, so they differ whatever the clock and whatever
+the shell's variables hold; `env -i` means no `PERL5OPT` or seed reaches it. What has to
+hold is only that consecutive rounds differ, and a fixture runs two generations under the
+frozen-`RANDOM` startup and asserts exactly that.
 
 THE WRITES STAY BEFORE THE REQUESTS. Moving them after would close the other case the
 issue named — a request that fails AFTER the write leaves this round's nonce and id — but

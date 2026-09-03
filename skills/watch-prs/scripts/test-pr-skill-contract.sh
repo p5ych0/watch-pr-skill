@@ -1928,13 +1928,44 @@ grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce 
 # is a request the watch must be bound to; fewer means a request reuses a nonce and the
 # stale-baseline refusal does not fire for it. The probe is what stops a startup file that
 # made the name readonly from leaving every round on one nonce.
-_nc_gen="$(grep -c 'RB_NONCE="$RANDOM$RANDOM$RANDOM$RANDOM"' "$SKILL")" || _nc_gen=0
+_nc_gen="$(grep -cF 'RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e' "$SKILL")" || _nc_gen=0
 [ "$_nc_gen" -eq 3 ] \
     && pass "…and a fresh nonce is generated before each of the three requests" \
     || die "the nonce is generated in $_nc_gen place(s); the three requests each need their own"
 grep -q 'RB_NONCE="RbProbe' "$SKILL" \
     && pass "…and RB_NONCE is probed at setup like every other name the driver assigns" \
     || die "RB_NONCE is not probed at setup; a readonly one would leave every round on one nonce"
+# AND THE SOURCE SURVIVES A FROZEN `$RANDOM`. `unset RANDOM; RANDOM=5` in a startup file
+# leaves `RANDOM` an ordinary variable — this file already records that unsetting it removes
+# its special behaviour — so a nonce drawn from it is the SAME on every request, a previous
+# round's baseline matches the nonce the watch is told to require, and the fail-open this
+# change closes is back. `RANDOM` is not a name the driver assigns, so the setup probe never
+# looks at it. The generation is lifted from the document and run twice under that startup;
+# the two values must differ. Run in a clean `env` so the frozen value is the case's own.
+_nc_gen_line="$(grep -m1 -F 'RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e' "$SKILL")" || _nc_gen_line=""
+[ -n "$_nc_gen_line" ] || die "the nonce generation could not be lifted from the document"
+_nc_pair="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+    unset RANDOM; RANDOM=5
+    '"$_nc_gen_line"'; _a="$RB_NONCE"
+    '"$_nc_gen_line"'; _b="$RB_NONCE"
+    printf "%s|%s" "$_a" "$_b"' 2>/dev/null)" || _nc_pair="|"
+_nc_a="${_nc_pair%%|*}"; _nc_b="${_nc_pair#*|}"
+# EACH HALF IS SHAPE-CHECKED ON ITS OWN: tested joined, the `|` separator is itself a
+# non-digit and the case reported a defect the generation did not have.
+_nc_bad=""
+for _nc_v in "$_nc_a" "$_nc_b"; do
+    case "$_nc_v" in
+        "") _nc_bad="empty" ;;
+        *[!0-9]*) _nc_bad="non-digits" ;;
+    esac
+done
+if [ -n "$_nc_bad" ]; then
+    die "the nonce generation produced $_nc_bad under a frozen RANDOM ('$_nc_pair')"
+elif [ "$_nc_a" != "$_nc_b" ]; then
+    pass "…and two consecutive requests get different nonces with RANDOM frozen to a constant"
+else
+    die "two consecutive nonces were both '$_nc_a' with RANDOM frozen; a stale baseline would match"
+fi
 grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"' "$SKILL" \
     && pass "…and the watch is armed from the file, not from a name" \
     || die "the watch is not invoked with --after-review-file \$PRIOR_FILE"
