@@ -211,7 +211,9 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
    && ( RB_REMOTE="RbProbe$$$RANDOM$RANDOM"; [[ $RB_REMOTE = RbProbe* ]] \
      && [[ -z ${!RB_REMOTE:-} ]] ) 2>/dev/null \
    && ( RB_NONCE="RbProbe$$$RANDOM$RANDOM"; [[ $RB_NONCE = RbProbe* ]] \
-     && [[ -z ${!RB_NONCE:-} ]] ) 2>/dev/null; then
+     && [[ -z ${!RB_NONCE:-} ]] ) 2>/dev/null \
+   && ( RB_NONCE_PREV="RbProbe$$$RANDOM$RANDOM"; [[ $RB_NONCE_PREV = RbProbe* ]] \
+     && [[ -z ${!RB_NONCE_PREV:-} ]] ) 2>/dev/null; then
     # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
     # WHY:
     RB_TMPPARENT=
@@ -335,7 +337,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, RB_NONCE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
+    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, RB_NONCE, RB_NONCE_PREV, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi
@@ -386,9 +388,13 @@ then
     # WHY:
     # THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
     # WHY:
+    # AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
+    # WHY:
+    RB_NONCE_PREV="${RB_NONCE-}"
     RB_NONCE=
     RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%d%d%06d\n", time, $$, int(rand 1e6)')"
     [[ $RB_NONCE = *[!0-9]* ]] && RB_NONCE=
+    [[ -n $RB_NONCE_PREV && $RB_NONCE = "$RB_NONCE_PREV" ]] && RB_NONCE=
     RB_NONCE="${RB_NONCE:?the request nonce did not take — a name this shell needs is readonly or transforming, and the watch could not tell this round's baseline from the last one's}"
 
 #   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>
@@ -890,9 +896,11 @@ Then, and only then:
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY:
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
+RB_NONCE_PREV="${RB_NONCE-}"
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%d%d%06d\n", time, $$, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* ]] && RB_NONCE=
+[[ -n $RB_NONCE_PREV && $RB_NONCE = "$RB_NONCE_PREV" ]] && RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 # WHY:
@@ -1154,9 +1162,11 @@ way — the signoff is on the PR, so a later session reads it back with
 # Everything here runs when the operator has asked for the Copilot phase, and only
 # then.
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
+RB_NONCE_PREV="${RB_NONCE-}"
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%d%d%06d\n", time, $$, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* ]] && RB_NONCE=
+[[ -n $RB_NONCE_PREV && $RB_NONCE = "$RB_NONCE_PREV" ]] && RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 # WHY:

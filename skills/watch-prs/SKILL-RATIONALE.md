@@ -1128,16 +1128,41 @@ the shell's variables hold; `env -i` means no `PERL5OPT` or seed reaches it. Wha
 hold is only that consecutive rounds differ, and a fixture runs two generations under the
 frozen-`RANDOM` startup and asserts exactly that.
 
-THE WRITES STAY BEFORE THE REQUESTS. Moving them after would close the other case the
-issue named — a request that fails AFTER the write leaves this round's nonce and id — but
-that case is not a fail-open: a request that truly failed brings no review and the watch
-times out, and one `gh` reported failed but the remote took brings a pass that IS this
-round's answer. Moving the write would buy that non-defect at the price of a post-request
-write with nothing to refuse with, which is the ordering every writer already argues
-against. A head-bound value was rejected before this because the head does not change
-between rounds of one phase; a freshness rule because it compares clocks. The nonce is
-the shape the head file and `verdict-at=` already use — a value that says what it is
-about — applied to the round.
+A head-bound value was rejected before this because the head does not change between
+rounds of one phase; a freshness rule because it compares clocks. The nonce is the shape
+the head file and `verdict-at=` already use — a value that says what it is about — applied
+to the round.
+
+AND A REPEATED NONCE IS REFUSED, because the source can be REPLACED as well as frozen. Under
+`set -T`, `extdebug` and an inherited `DEBUG` trap that prints a constant and returns
+non-zero for the `perl` command, bash skips the command and the substitution captures the
+trap's output — measured: `5` on every request, which passes the digit test. `RB_NONCE_PREV`
+holds the previous request's nonce, probed at setup like the others, and a value equal to it
+is emptied before the `:?`. A constant is accepted ONCE — the first request has nothing to
+compare against — and refused on the second, which is the request a stale match needs: the
+previous round's `5 <id>` can only be waited past by a second request carrying `5`, and that
+request stops the session instead. A trap that skips the comparison as well is the general
+hostile-shell case this document already does not defend — every statement can be skipped —
+and the two shapes it measurably takes, a frozen source and an injected constant, both stop
+here.
+
+## AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
+
+The issue named a second case the nonce does not reach: a request that fails AFTER the
+baseline write leaves this round's nonce and this round's captured id in the file, and the
+watch accepts it. It is accepted deliberately, because it is not a fail-open. A request that
+truly failed brings no review, so the watch waits for one newer than the captured id and
+times out — the ordinary re-arm, not a verdict. One `gh` reported failed but the remote took
+brings a pass that IS this round's answer, on this head, which the watch reports correctly.
+Neither announces a pass nobody requested.
+
+Moving the write after the request would close that non-defect at a real price: a
+post-request write has nothing left to refuse with. If it fails, the request is already
+posted and the file holds the previous value — empty or the previous nonce, both refused —
+so the driver stops and a re-run posts a SECOND request over the same head, which is the
+duplicate the automatic path's branch exists to prevent. Every writer already argues this
+ordering in its own comment; this claim is here so the bijection sees it, because the
+rationale for the nonce above depends on it and a rationale is not a contract.
 
 ## THE REQUEST IS A SCRIPT.
 
