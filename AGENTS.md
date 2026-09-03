@@ -763,7 +763,12 @@ is a check-then-use, which is the shape `2026-08-29-setup-leaf-cleanup.md` convi
 `docs/decisions/2026-09-03-workdir-parent-substitution.md`: every handoff resolves
 `$RB_SETUP_DIR/work` by NAME, so a same-UID process that renames `work` away and puts a
 symlink or a fresh directory at the name redirects the read — the driver reads a FORGED head
-out of the attacker's directory and merges on it, a gate BYPASS rather than a lost file.
+out of the attacker's directory: the driver treats a head as gated, resolves the round's
+threads on it, and carries a forged `CODEX_SHA` (read from the same `work/head.txt`) forward.
+It is NOT demonstrated to complete a merge — `pr-merge-gate.sh` never reads the work directory,
+checking `CODEX_SHA` against the durable signoff and the reviewer's actual verdict on that sha,
+so a forged value the reviewer never signed clean is refused there, fail-closed. The measured
+impact is the corrupted confirmation, not a lost file and not a merge.
 It is the same SAME-UID class as the `setup-leaf-cleanup` and `origin-cleanup-races` records
 (litter in the session's own area), differing only in CONSEQUENCE — a forged head — and unlike
 the `transport-candidate-in-argv` record, which is a cross-account denial of service, not this

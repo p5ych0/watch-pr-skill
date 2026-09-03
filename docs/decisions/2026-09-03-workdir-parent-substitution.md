@@ -8,16 +8,32 @@
 Every handoff resolves `$RB_SETUP_DIR/work` by NAME at each step — the driver's
 head read, the writes, the emptyings, and the `gh --body-file` posts. A same-UID
 process that renames `work` away and puts a symlink, or a fresh directory, at that
-name redirects the operation. The worst consequence is that the driver reads a
-FORGED head out of the attacker's directory and merges on it: a gate bypass rather
-than a lost file. This is accepted rather than fixed, and this record is what a
-reviewer should be pointed at when it is raised again.
+name redirects the operation. This is accepted rather than fixed, and this record is
+what a reviewer should be pointed at when it is raised again.
+
+## What the impact actually is, and what it is not
+
+The measured impact is that the driver's post-gate head CONFIRMATION accepts a forged
+value from the substituted parent: `rb_handoff_is_sha` follows the substituted `work`
+and returns 0 for a forged 40-hex, so the driver treats a head as gated and resolves
+the round's threads, and `CODEX_SHA` — which the driver reads from the same
+`work/head.txt` (`SKILL.md` reads it at `9<"$HEAD_FILE"`) — carries a forged value
+forward. That is what the fixture demonstrates.
+
+It is NOT demonstrated that this completes a MERGE on a forged head, and the earlier
+"gate bypass" framing overstated it. `pr-merge-gate.sh` never reads the work directory:
+it checks `CODEX_SHA` against the durable signoff record and against the reviewer's
+actual VERDICT on that sha (`pr-review-state.sh verdict`), and pins the merge with
+`--match-head-commit`. A forged `CODEX_SHA` that is not a commit the reviewer actually
+signed clean is refused there, fail-closed. So the remaining barrier to a completed
+merge is independent of the work directory, and the accepted impact is the corrupted
+confirmation and the forged `CODEX_SHA`, not a merge.
 
 ## Why it is accepted rather than fixed
 
 A fix was attempted in PR #275 and closed. It recorded the directory's `(dev, ino)`
 in a `work.id` file, had the driver hold that pair, and made the head read verify
-it. Codex's review proved it does not close the bypass, on two independent grounds:
+it. Codex's review proved it does not close the forgery, on two independent grounds:
 
 - **A file-based identity is substitutable.** `work.id` is a regular file the same
   UID can replace in the setup→driver-read window with a prepared directory's
