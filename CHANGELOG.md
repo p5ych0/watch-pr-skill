@@ -15,7 +15,7 @@
   it. The one documentation sentence that test still asserts — that an origin reaching no
   GitHub server is refused rather than guessed at — moves into `SKILL.md`'s own prose under
   Derive identity, and the assertion points there. Nothing the driver executes changes:
-  the fences hold the same commands; `SKILL.md` drops from 1,389 lines to 1,196, and the
+  the fences hold the same commands; `SKILL.md` drops from 1,389 lines to 1,194, and the
   prose around the fences is the next change.
 
 
