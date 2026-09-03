@@ -819,6 +819,23 @@ stages the substitution against the real read and PINS that the forgery works, s
 the read later fails the case and revisits the record. Do not re-raise #272 as a fresh
 finding, and do not reintroduce the `work.id`/`(dev, ino)` mechanism the record prices out.
 
+**A sixth is accepted since 2026-09-03**, in
+`docs/decisions/2026-09-03-driver-state-between-fences.md`: a hook that runs in the
+driving shell BETWEEN two of `SKILL.md`'"'"'s fences — a startup-provided `PROMPT_COMMAND`, a
+`DEBUG` trap under `extdebug` — owns every value the driver holds across that boundary:
+`RB_NONCE` and `RB_NONCE_SEQ`, but equally `CODEX_SHA` before the merge gate, `WHO`,
+`PRIOR_FILE`. The driver defends startup-time state (the setup probe) and values that go
+wrong inside a fence (the read-backs: a frozen source, a replaced source, a stuck counter,
+each with a refusing fixture). It does not defend a hook that rewrites variables between
+steps, because the fence that would check is the hook'"'"'s to rewrite and every defence is one
+more name — the chain `CLAUDE.md` records. Removing the dependency means no value crossing a
+fence, which is a different driver. The bound is that such a hook is the operator'"'"'s own
+environment, already trusted for `PATH`, credentials and the checkout, and that no value is
+more exposed than the merge itself. `test-pr-skill-contract.sh` pins it: two generation
+blocks with the counter reset between them yield an EQUAL nonce. Do not raise a
+between-fences rewrite of a driver-held value as a fresh finding, and do not answer one
+with another in-fence guard.
+
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection, and the
