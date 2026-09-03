@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.2.0] — 2026-09-03
+
+- **The review baseline says which request wrote it, so a refusal the loop walked past can
+  no longer arm the watch with the previous round's floor.** #264 landed in two halves. The
+  first (2.0.99) made an EMPTY baseline a refusal and spelled "no prior review" `none`, so a
+  truncated write could not produce the legal no-floor value. That tells a value from no
+  value. It cannot tell **this** round's value from the **last** round's: both are complete,
+  well-formed review ids written on purpose by a real run, and no shape test distinguishes
+  them. The state that reached the watch with the wrong one was a refusal in a writer's
+  bootstrap — the opening request, the round close, or the Copilot open — that the driver's
+  shadowed `exit` returned from: the writer never reached its write, the file still held the
+  previous round's id, the watch accepted it, and a terminal review newer than that was
+  announced as this round's answer. A pass nobody requested, on a head that may have moved.
+
+  **The fix is a per-request nonce.** The driver generates one immediately before each
+  review request (`RB_NONCE`, probed at setup like every other name it assigns), hands it to
+  the writer, which prefixes the baseline with it — the file now holds `<nonce> <value>` —
+  and hands the same nonce to `pr-watch.sh --require-nonce`, which refuses a file carrying
+  any other as `state=error reason=stale_baseline_nonce`. A previous round's baseline carries
+  the previous nonce and stops the round instead of being waited past.
+
+  **Contract changes, all in the same release.** `pr-watch.sh --after-review-file` now
+  REQUIRES `--require-nonce <digits>`; the file form without it, an unnonced file, and a
+  nonce beside the `--after-review` VALUE form are each refused — accepting any would keep the
+  fail-open and add a spelling, exactly as accepting both empty and `none` would have.
+  `pr-request-review.sh` takes `--nonce <digits>` (the four-argument form is refused);
+  `pr-close-round.sh post` takes the nonce as a seventh argument and `gate` refuses one;
+  `pr-copilot-phase.sh open` takes it fourth and prefixes both its writes with it, the
+  readiness sentinel included. The `PR_ROUND_CLOSED` and `PR_COPILOT_PHASE_OPENED` records
+  still carry the bare `prior-review=` value; nothing parses them.
+
+  **What the nonce does not change, deliberately.** The writes stay before the requests. A
+  request that fails after the write leaves this round's nonce and id, which is not a
+  fail-open: a request that truly failed brings no review and the watch times out, and one
+  `gh` reported failed but the remote took brings a pass that IS this round's answer. Moving
+  the write after the request would have bought that non-defect at the price of a
+  post-request write with nothing to refuse with.
+
+
 ## [2.1.0] — 2026-09-02
 
 - **The file handoffs rename instead of truncating, so a symlink at one of those paths no

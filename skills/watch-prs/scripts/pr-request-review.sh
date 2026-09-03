@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bash -p
 # Request the OPENING Codex review, and report the baseline the watch needs.
 #
-#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> < <body>
+#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>
 #
 #   stdin   the account of what to look at; prose, one paragraph
 #   the file  the review-id baseline — the `none` token where there is no prior
@@ -124,9 +124,9 @@ rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON" >&2; exit 1; }
 # with the baseline, which is worse than the silent drop the refusal above exists for.
 # Spelled out, the old form still lands on the refusal above and the new one cannot be
 # confused with it.
-{ [ "$#" -le 2 ] || { [ "$#" -eq 4 ] && [ "$3" = --baseline-file ]; }; } \
-    || { echo "ABORT: this takes <pr> <auto-review> --baseline-file <path> and the body on stdin (got $# — a third positional was the body file, and the body is no longer a file)" >&2; exit 1; }
-PR="${1:-}"; AUTO_REVIEW="${2:-}"; BASELINE_FILE="${4:-}"
+{ [ "$#" -le 2 ] || { [ "$#" -eq 6 ] && [ "$3" = --baseline-file ] && [ "$5" = --nonce ]; }; } \
+    || { echo "ABORT: this takes <pr> <auto-review> --baseline-file <path> --nonce <digits> and the body on stdin (got $# — a third positional was the body file, and the body is no longer a file; the four-argument form without --nonce is #264's old contract)" >&2; exit 1; }
+PR="${1:-}"; AUTO_REVIEW="${2:-}"; BASELINE_FILE="${4:-}"; NONCE="${6:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')" >&2; exit 1 ;;
 esac
@@ -142,6 +142,15 @@ esac
 # having that file overwritten with the baseline.
 [ -n "$BASELINE_FILE" ] \
     || { echo "ABORT: --baseline-file <path> is required: the review baseline is written into it, and pr-watch.sh --after-review-file reads it back" >&2; exit 1; }
+# THE NONCE BINDS THE BASELINE TO THIS REQUEST — #264. The driver generates one per
+# request and passes the same value to `pr-watch.sh --require-nonce`; this prefixes the
+# baseline with it, so a file the watch finds carrying any other nonce was written by a
+# different run — a previous round's, reached past a refusal — and is refused there.
+# Digits only, for the same reason the watch requires them. Checked AFTER the positionals
+# and the path, so a caller missing those is told about them first.
+case "$NONCE" in
+    ""|*[!0-9]*) echo "ABORT: --nonce needs decimal digits (got '$NONCE'); the baseline is prefixed with it and pr-watch.sh --require-nonce refuses any other" >&2; exit 1 ;;
+esac
 case "$AUTO_REVIEW" in
     yes|no) ;;
     "") echo "ABORT: the auto-review mode is required: 'yes' if Codex automatic review is on for this repository, 'no' if it is not" >&2; exit 1 ;;
@@ -258,7 +267,10 @@ fi
 # redirected — `> "$PRIOR_FILE"` — which follows a symlink and is opened by the driving
 # shell BEFORE this process starts, so a path a same-UID process had replaced cost the
 # operator the file it pointed at and nothing here could refuse it. #263.
-_rb_wh="$(rb_write_handoff "$BASELINE_FILE" "${PRIOR:-none}")" \
+# PREFIXED WITH THE NONCE — #264 — so the watch can tell this request's baseline from a
+# previous round's. The value after the space is unchanged: `none`, digits, or `comment:`
+# and digits, which the watch validates after it has matched the nonce.
+_rb_wh="$(rb_write_handoff "$BASELINE_FILE" "$NONCE ${PRIOR:-none}")" \
     || { echo "ABORT: the review baseline could not be written; nothing has been posted: $_rb_wh" >&2; exit 1; }
 
 # THE POST IS BRANCHED ON, because a failed one means no review was ever queued —

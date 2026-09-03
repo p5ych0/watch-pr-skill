@@ -279,6 +279,23 @@ When reviewing a change here:
   head file through `rb_handoff_is_sha` instead of `[[ -f ]]` and then a substitution — that
   pair is a test and then a separate open, and a FIFO arriving between them blocks a shell
   with no watchdog.
+- **the baseline file says which request wrote it, and the watch requires that (#264,
+  second half).** `none` told a value from no value; it cannot tell THIS round's value from
+  the LAST round's, because both are well-formed ids written on purpose by a real run. A
+  refusal in a writer's bootstrap that the driver's `exit` returned from left the previous
+  round's baseline in place, and the watch announced a terminal review newer than it as
+  this round's answer — a pass nobody requested. So the driver generates a nonce
+  (`RB_NONCE`, probed at setup like every other name it assigns) immediately before each
+  request, the writer prefixes the value with it (`<nonce> <value>`), and the driver hands
+  the same nonce to `pr-watch.sh --require-nonce`, which refuses any other. The file form
+  without `--require-nonce`, an unnonced file, and a nonce beside the VALUE form are all
+  refused — accepting any would keep the fail-open and add a spelling, as accepting both
+  empty and `none` would have. The writes stay BEFORE the requests: a request that fails
+  after the write leaves this round's nonce and id, which is not a fail-open (the watch
+  waits for a review newer than the id or times out; a `gh` failure the remote took brings
+  a pass that IS this round's answer). A watch invoked on a baseline file without a nonce,
+  a writer that drops the prefix, or a "compatibility" arm accepting the old format is the
+  defect.
 - **`--` before the operands, on every attempt.** A handoff path is the caller's and a
   relative one may begin with `-`, so the temporary derived from it does too: without it
   `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable

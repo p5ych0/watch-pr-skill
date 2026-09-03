@@ -205,6 +205,11 @@ stage() {   # stage <stage> [args…] ; prints "<rc>|<output>" for ONE stage
     # refusal it is about still fires; a case about the prior file itself passes its
     # own sixth argument and this does nothing.
     if [ "$#" -eq 5 ]; then set -- "$@" "$TMP/prior.txt"; fi
+    # AND `post` GETS THE REQUEST NONCE, SEVENTH — #264. The driver generates one per
+    # request and passes the same value to the watch; `post` prefixes the baseline with it.
+    # `gate` takes none and refuses one, so only `post` is completed here, and a case about
+    # the nonce itself passes its own seventh argument.
+    if [ "$st" = post ] && [ "$#" -eq 6 ]; then set -- "$@" 5551; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
@@ -783,9 +788,47 @@ grep -q 'PR_ROUND_CLOSED .*prior-review=42' <<<"${got#*|}" \
 # script's stdout, `sed`-ed a line out of it, checked the line was there, checked it
 # carried the field, and cut the value out — twelve executable lines in the one
 # shell nothing can harden, for a value `gate` already knows how to hand over.
-[ "$(cat "$TMP/prior.txt" 2>/dev/null)" = 42 ] \
+[ "$(cat "$TMP/prior.txt" 2>/dev/null)" = "5551 42" ] \
     && pass "…and writes it into the prior file the caller named" \
     || die "the prior file holds '$(cat "$TMP/prior.txt" 2>/dev/null)', not the baseline"
+
+# ── THE NONCE IS `post`'s, AND `gate` REFUSES ONE — #264, second half ──────────
+# The baseline above reads `5551 42`: the nonce the driver generated for THIS request,
+# then the value. `pr-watch.sh --require-nonce 5551` refuses a file carrying any other,
+# which is how a previous round's well-formed id — left by a bootstrap refusal the driver's
+# `exit` returned from — stops being accepted as this round's floor. The exact prefix is
+# asserted rather than "starts with digits", because a stage emitting its own nonce would
+# pass a laxer check and defeat the watch. The RECORD still carries the bare value
+# (`prior-review=42`): nothing parses it, and the nonce is the file's to carry.
+#
+# `post` WITHOUT A NONCE IS REFUSED BEFORE ANYTHING IS POSTED. Called directly, so the
+# harness cannot complete the argument list.
+world
+_nn_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+    "$DIR/pr-close-round.sh" post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "$TMP/prior.txt" 2>&1)"; _nn_rc=$?
+{ [ "$_nn_rc" -eq 1 ] && grep -q 'seventh argument, the request nonce' <<<"$_nn_out" && ! grep -q '^gh ' "$TMP/calls"; } \
+    && pass "post without the request nonce is refused, with nothing posted" \
+    || die "post without a nonce gave rc=$_nn_rc posted=$(grep -c '^gh ' "$TMP/calls") out='$_nn_out'"
+for _nn in abc "12 34"; do
+    world
+    _nn_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        "$DIR/pr-close-round.sh" post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "$TMP/prior.txt" "$_nn" 2>&1)"; _nn_rc=$?
+    { [ "$_nn_rc" -eq 1 ] && grep -q 'decimal digits' <<<"$_nn_out" && ! grep -q '^gh ' "$TMP/calls"; } \
+        && pass "…and a nonce of '$_nn' is refused as not decimal digits, with nothing posted" \
+        || die "post with nonce '$_nn' gave rc=$_nn_rc out='$_nn_out'"
+done
+# AND `gate` GIVEN A NONCE IS REFUSED RATHER THAN IGNORING IT: it writes no baseline, so a
+# seventh argument is a caller confusing the stages — and an ignored argument is how the
+# old three-argument `pr-request-review.sh` form dropped a body in silence.
+world
+_gn_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/head.txt" "$TMP/prior.txt" 5551 2>&1)"; _gn_rc=$?
+{ [ "$_gn_rc" -eq 1 ] && grep -q "belongs to 'post'" <<<"$_gn_out"; } \
+    && pass "gate given a request nonce refuses it rather than ignoring it" \
+    || die "gate with a nonce gave rc=$_gn_rc out='$_gn_out'"
 
 # ── THE GATE EMPTIES THE PRIOR FILE, so a failed `post` cannot leave the LAST ──
 # round's baseline readable. The driver's watch would take it and accept a review
@@ -838,7 +881,7 @@ rm -f "$TMP/palias.txt"
 # the head file — and the pre-bootstrap truncation skips it, being guarded on `-f`.
 # So the first thing that can fail is the write itself.
 world; rm -rf "$TMP/priordir"; mkdir -p "$TMP/priordir"
-got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "$TMP/priordir")"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "$TMP/priordir" 5551)"
 { [ "${got%%|*}" = 1 ] && grep -qF 'could not write the review baseline' <<<"${got#*|}"; } \
     && pass "a baseline that cannot be written stops the stage" \
     || die "the unwritable prior file gave '$got'"
@@ -848,7 +891,7 @@ grep -qE 'gh pr comment|gh pr edit' "$TMP/calls" \
     && die "the stage requested a review before the baseline was handed over" \
     || pass "…before the summary was posted or any pass requested"
 rm -rf "$TMP/priordir"
-world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "")"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")" "" 5551)"
 { [ "${got%%|*}" = 1 ] && grep -qF 'a prior file is required' <<<"${got#*|}"; } \
     && pass "…and an absent one is a refusal rather than a silent skip" \
     || die "the missing prior file gave '$got'"
@@ -1208,7 +1251,7 @@ got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 # tidier — an emptied baseline reaching the watch is a refusal instead of a no-floor, so a
 # `post` that fails after `gate` stops the round rather than arming a watch against
 # nothing.
-raw_is "$TMP/prior.txt" 'none
+raw_is "$TMP/prior.txt" '5551 none
 ' "post's none baseline"
 
 # ── THE STAGE DOES NOT RE-PROVE THE BASELINE, AND MUST NOT START AGAIN ─────
@@ -1246,7 +1289,7 @@ case "$_rb_body" in
     *'$(<"$PRIOR_FILE")'*) die "the read-back still reads through a substitution, which strips the terminator" ;;
     *) pass "…and does not read it through a substitution, which would strip that byte" ;;
 esac
-{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = "5551 none" ]; } \
     && pass "…and the prior file reads back as the none token rather than empty or a previous round's value" \
     || die "a head with no review yet left '$(cat "$TMP/prior.txt" 2>/dev/null)' in the prior file"
 
@@ -1306,7 +1349,7 @@ for _lw_which in head prior; do
     fi
     _lw_g="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt")"
     if [ "${_lw_g%%|*}" = 0 ] && [ "$_lw_which" = prior ]; then
-        stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" >/dev/null
+        stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" "$TMP/prior.txt" 5551 >/dev/null
     fi
     [ "$(cat "$_lwd/victim" 2>/dev/null)" = 'the operator file, which must survive' ] \
         && pass "a link planted immediately before the $_lw_which write keeps its target" \

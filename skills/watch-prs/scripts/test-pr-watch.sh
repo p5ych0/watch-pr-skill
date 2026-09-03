@@ -801,9 +801,9 @@ done
 # of its own — `pr-close-round.sh` waiting on the pass its own push started. #243.
 _bl="$TMP/baseline"
 
-printf '99\n' > "$_bl"
+printf '5551 99\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 4 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 4 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -q 'state=awaiting_new_review' <<<"$out"; } \
     && pass "a baseline read from a file holds back the stale review, exactly as the value form does" \
     || die "the file form did not hold back a stale review (rc=$rc out='$out')"
@@ -815,7 +815,7 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
 # refusing everything — which is how a baseline check passes a stale-review case
 # while being broken.
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
     && pass "…while a new review on that head is still reported" \
     || die "the file form rejected a new review (rc=$rc out='$out')"
@@ -825,9 +825,9 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
 # so a baseline that kept its newline would never match, and the watch would report
 # the stale review as this round's answer. `$(<…)` strips it; this is the case that
 # says so.
-printf '99\n\n\n' > "$_bl"
+printf '5551 99\n\n\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 4 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 4 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -q 'state=awaiting_new_review' <<<"$out"; } \
     && pass "…and trailing newlines are not part of the id" \
     || die "a baseline with trailing newlines did not match (rc=$rc out='$out')"
@@ -843,9 +843,9 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 #
 # THE TWO HALVES ARE PINNED TOGETHER: the phase fixture asserts the exact string the stage
 # leaves, and this asserts the same string is refused here. Change one and the other fails.
-printf 'refused-no-baseline\n' > "$_bl"
+printf '5551 refused-no-baseline\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
     && pass "…and the phase's refusal sentinel is refused, not read as a baseline" \
     || die "the refusal sentinel was not refused (rc=$rc out='$out')"
@@ -860,9 +860,9 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
 # value, and with the driver's `exit` shadowed to return a refused stage armed this watch
 # with no floor at all. The state is real and still expressible, by a token a writer has to
 # produce on purpose.
-printf 'none\n' > "$_bl"
+printf '5551 none\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
     && pass "…the none token means 'nothing to wait past' and the review is reported" \
     || die "the none token was not treated as no baseline (rc=$rc out='$out')"
@@ -872,7 +872,7 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 # closes — so it must be an error rather than an answer, and it must not announce a verdict.
 : > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=empty_after_review_file' <<<"$out"; } \
     && pass "…while an EMPTY baseline file is refused, since a truncation produces it" \
     || die "an empty baseline file was not refused (rc=$rc out='$out')"
@@ -898,7 +898,7 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
 # so a file left by an older plugin or by a caller written against the old contract has it.
 printf '\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=empty_after_review_file' <<<"$out"; } \
     && pass "…and a file holding only the delimiter is refused as empty" \
     || die "a newline-only baseline file was not refused (rc=$rc out='$out')"
@@ -907,9 +907,9 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
     || pass "…with no verdict announced for it"
 
 for _un_v in none 4321; do
-    printf '%s' "$_un_v" > "$_bl"
+    printf '5551 %s' "$_un_v" > "$_bl"
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
     { [ "$rc" -eq 2 ] && grep -q 'reason=unterminated_after_review_file' <<<"$out"; } \
         && pass "…and a '$_un_v' written without its terminating newline is refused" \
         || die "an unterminated '$_un_v' baseline was not refused (rc=$rc out='$out')"
@@ -926,7 +926,7 @@ done
 # distinct status is unchanged, because an operator has to be told which recovery applies.
 rm -f "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
     && pass "…while a missing baseline file is state=error, not an empty baseline" \
     || die "a missing baseline file gave rc=$rc out='$out'"
@@ -935,9 +935,9 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
     || pass "…and announces no review"
 
 if [ "$(id -u)" != 0 ]; then
-    printf '99\n' > "$_bl"; chmod 000 "$_bl"
+    printf '5551 99\n' > "$_bl"; chmod 000 "$_bl"
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+           run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
     chmod 600 "$_bl"
     { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
         && pass "…and so is an unreadable one" \
@@ -959,7 +959,7 @@ if command -v mkfifo >/dev/null 2>&1; then
         # an ordinary timeout — which is the case below, and the two must not be the
         # same fixture or whichever answer the clock happens to produce passes.
         out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-               run_limited 60 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 40 2>&1)"; rc=$?
+               run_limited 60 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 40 2>&1)"; rc=$?
         { [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(blocked|not_regular)' <<<"$out"; } \
             && pass "…and a FIFO at the baseline path is state=error rather than a hang" \
             || die "a FIFO baseline path gave rc=$rc out='$out'"
@@ -981,7 +981,7 @@ fi
 if command -v mkfifo >/dev/null 2>&1; then
     rm -f "$_bl"; mkfifo "$_bl" 2>/dev/null && {
         out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-               run_limited 45 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 1 2>&1)"; rc=$?
+               run_limited 45 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 1 2>&1)"; rc=$?
         [ "$rc" -eq 1 ] \
             && pass "…and with a deadline shorter than the read's own limit it is the ordinary timeout" \
             || die "a short-deadline blocked baseline gave rc=$rc out='$out'"
@@ -1003,7 +1003,7 @@ fi
 # on the CONSEQUENCE as well as the reason: no READY line.
 printf '\000' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
     && pass "…and a NUL-only baseline file is refused, not read as an empty baseline" \
     || die "a NUL-only baseline file gave rc=$rc out='$out'"
@@ -1014,7 +1014,7 @@ grep -q 'PR_REVIEW_READY' <<<"$out" \
 # than about the value happening to come out empty.
 printf '99\000\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
     && pass "…including a NUL beside an otherwise valid id" \
     || die "a NUL beside an id gave rc=$rc out='$out'"
@@ -1022,7 +1022,7 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 # A DIRECTORY IS NOT A REGULAR FILE EITHER, and the reason says which.
 rm -f "$_bl"; mkdir -p "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -qE 'reason=after_review_file_(not_regular|unreadable)' <<<"$out"; } \
     && pass "…and a directory at the baseline path is state=error" \
     || die "a directory baseline path gave rc=$rc out='$out'"
@@ -1031,21 +1031,21 @@ rmdir "$_bl"
 # A MALFORMED BASELINE IS REFUSED AT THE CALL, not an hour later. The four-arm check
 # in the loop runs on the first TERMINAL state, which may be far away; a caller that
 # handed over junk can still act on it now.
-printf 'not-an-id\n' > "$_bl"
+printf '5551 not-an-id\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
     && pass "…and a malformed baseline is refused at the call, not on the first terminal state" \
     || die "a malformed baseline file gave rc=$rc out='$out'"
-printf 'comment:\n' > "$_bl"
+printf '5551 comment:\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
     && pass "…including the comment channel named with no id" \
     || die "a bare 'comment:' baseline gave rc=$rc out='$out'"
-printf 'comment:100\n' > "$_bl"
+printf '5551 comment:100\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 [ "$rc" -ne 2 ] \
     && pass "…while the comment-channel shape the round close writes is accepted" \
     || die "a comment:<id> baseline was refused: rc=$rc out='$out'"
@@ -1053,9 +1053,9 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
 # BOTH FORMS AT ONCE IS A REFUSAL, not a precedence rule. They are the same value by
 # two routes, and a caller passing both has two answers and no reason to think this
 # one picked the right half.
-printf '99\n' > "$_bl"
+printf '5551 99\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_both_forms' <<<"$out"; } \
     && pass "…and passing both forms is refused rather than silently resolved" \
     || die "both baseline forms together gave rc=$rc out='$out'"
@@ -1087,9 +1087,9 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 # for "not given" — a both-forms check reading the VALUE let this pair through, and
 # the explicit "there is nothing to wait past" was discarded in favour of a file that
 # can hold an id the watch then waits out its whole timeout for.
-printf '99\n' > "$_bl"
+printf '5551 99\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review "" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review "" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_both_forms' <<<"$out"; } \
     && pass "…and an EMPTY value form still counts as supplied, so both together are refused" \
     || die "an empty --after-review beside a file gave rc=$rc out='$out'"
@@ -1102,6 +1102,78 @@ out="$(run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file 2>&1)"; rc=$?
     && pass "…and a valueless --after-review-file is usage, not a hang" \
     || die "--after-review-file with no value gave rc=$rc out='$out'"
 
+# ── the baseline is bound to its request by a nonce — #264, the half the token missed ──
+#
+# THE TOKEN TELLS A VALUE FROM NO VALUE; IT CANNOT TELL THIS ROUND'S VALUE FROM THE LAST
+# ROUND'S. Both are well-formed ids written on purpose by a real run. With the driver's
+# `exit` shadowed to return, a refusal in a writer's bootstrap left the PREVIOUS round's
+# baseline in place, the watch accepted it, and a terminal review newer than that was
+# announced as this round's answer — a pass nobody requested this round. The nonce is what
+# changes between rounds: the driver generates one per request and hands it to the writer,
+# which prefixes the value, and to this watch, which refuses any other. Staged as the exact
+# state: a file written under one nonce reaching a watch required to see another.
+printf '5551 99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 7777 --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=stale_baseline_nonce' <<<"$out"; } \
+    && pass "a baseline written under a previous request's nonce is refused, not waited past" \
+    || die "a stale-nonce baseline was accepted (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a stale-nonce baseline let a newer review through as this round's: $out" \
+    || pass "…with no verdict announced against it"
+# AND THE PRE-NONCE FORMAT IS REFUSED, NOT READ AS AN ID WITH NO NONCE. A file with no
+# space is what every writer produced before this change and what an older plugin or a
+# caller on the old contract still produces; taking it as a bare id would keep the
+# fail-open and add a spelling, exactly as accepting both empty and `none` would have.
+printf '99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=baseline_without_nonce' <<<"$out"; } \
+    && pass "…and the old un-nonced format is refused rather than read as an id" \
+    || die "an un-nonced baseline was accepted (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "an un-nonced baseline let a review through: $out" \
+    || pass "…with no verdict announced against it"
+# AND THE FILE FORM WITHOUT `--require-nonce` IS A CALLER ERROR, not a file read with no
+# nonce to check — that would be the same fail-open reached by omitting the option.
+printf '5551 99\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=nonce_required' <<<"$out"; } \
+    && pass "…and the file form without --require-nonce is refused at the call" \
+    || die "--after-review-file without a nonce was accepted (rc=$rc out='$out')"
+grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && die "a file read with no nonce required let a review through: $out" \
+    || pass "…with no verdict announced"
+# AND THE VALUE FORM REFUSES A NONCE: the caller holds the id in a hardened process of
+# its own, nothing was reached past a refusal, and a nonce beside it means two ideas of
+# what is being waited on.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'reason=nonce_without_file' <<<"$out"; } \
+    && pass "…while --require-nonce beside the value form is refused" \
+    || die "--after-review with a nonce was accepted (rc=$rc out='$out')"
+# AND THE NONCE IS DIGITS. It is spelled into a `case` comparison; a value carrying
+# anything else is usage, and a missing one is the hang the other options have a case for.
+for _nn in "" "abc" "12 34" "1*"; do
+    out="$(run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce "$_nn" --interval 1 --timeout 6 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && grep -q 'decimal digits' <<<"$out"; } \
+        && pass "…and a nonce of '$_nn' is refused as not decimal digits" \
+        || die "--require-nonce '$_nn' gave rc=$rc out='$out'"
+done
+out="$(run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && grep -q 'needs a value' <<<"$out"; } \
+    && pass "…and a valueless --require-nonce is usage, not a hang" \
+    || die "--require-nonce with no value gave rc=$rc out='$out'"
+# THE SPLIT IS ON THE FIRST SPACE, so a comment-channel value survives whole: the round
+# close writes `comment:<id>` and the nonce must not eat into it.
+printf '5551 comment:100\n' > "$_bl"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -ne 2 ] \
+    && pass "…and a nonced comment:<id> baseline is split on the first space and accepted" \
+    || die "a nonced comment:<id> baseline was refused: rc=$rc out='$out'"
+
 # ── an expired deadline does not skip the baseline validation ─────────────
 #
 # `--timeout 0` made the pre-read clock report the ordinary timeout before the file was
@@ -1110,27 +1182,27 @@ out="$(run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file 2>&1)"; rc=$?
 # from a slow reviewer, forever. A bad argument is bad whatever the clock says.
 printf '\000' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 0 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_nul' <<<"$out"; } \
     && pass "a NUL baseline is refused even with the deadline already expired" \
     || die "--timeout 0 with a NUL baseline gave rc=$rc out='$out'"
-printf 'not-an-id\n' > "$_bl"
+printf '5551 not-an-id\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 0 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=malformed_review_id' <<<"$out"; } \
     && pass "…and so is a malformed one" \
     || die "--timeout 0 with a malformed baseline gave rc=$rc out='$out'"
 rm -f "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 0 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && grep -q 'reason=after_review_file_unreadable' <<<"$out"; } \
     && pass "…and so is a missing one" \
     || die "--timeout 0 with a missing baseline gave rc=$rc out='$out'"
 # AND A GOOD BASELINE WITH AN EXPIRED DEADLINE IS STILL THE ORDINARY TIMEOUT, or the
 # three cases above pass because the expiry stopped being honoured at all.
-printf '99\n' > "$_bl"
+printf '5551 99\n' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --interval 1 --timeout 0 2>&1)"; rc=$?
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 0 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
     && pass "…while a good baseline with an expired deadline is still the timeout" \
     || die "--timeout 0 with a good baseline gave rc=$rc out='$out'"

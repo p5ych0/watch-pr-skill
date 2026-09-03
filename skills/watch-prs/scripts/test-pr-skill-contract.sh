@@ -1905,7 +1905,7 @@ grep -q 'prior-review=' "$SKILL" \
 # path a same-UID process had replaced cost the operator the file it pointed at, with
 # nothing the helper could check in time. Given the path, the helper renames onto the name
 # through `writelib.sh`. #263.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "…the opening request writes the baseline into \$PRIOR_FILE" \
     || die "the opening request does not hand \$PRIOR_FILE to the helper"
 grep -q 'pr-request-review.sh N "$AUTO_REVIEW".*> "$PRIOR_FILE"' "$SKILL" \
@@ -1920,6 +1920,21 @@ grep -q 'pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"' "$SKILL" \
 # AND THE WATCH READS THAT FILE RATHER THAN A VALUE. `--after-review` takes an id
 # and is for a caller holding one in a hardened process of its own; the driver is
 # not that caller.
+grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"' "$SKILL" \
+    && pass "…and the watch is told to require this request's nonce (#264)" \
+    || die "the watch is not invoked with --require-nonce \$RB_NONCE; a previous round's baseline would be waited past"
+# THE NONCE IS GENERATED BEFORE EACH OF THE THREE REQUESTS AND PROBED AT SETUP. Three
+# generation sites — the opening request, the round close, the Copilot open — because each
+# is a request the watch must be bound to; fewer means a request reuses a nonce and the
+# stale-baseline refusal does not fire for it. The probe is what stops a startup file that
+# made the name readonly from leaving every round on one nonce.
+_nc_gen="$(grep -c 'RB_NONCE="$RANDOM$RANDOM$RANDOM$RANDOM"' "$SKILL")" || _nc_gen=0
+[ "$_nc_gen" -eq 3 ] \
+    && pass "…and a fresh nonce is generated before each of the three requests" \
+    || die "the nonce is generated in $_nc_gen place(s); the three requests each need their own"
+grep -q 'RB_NONCE="RbProbe' "$SKILL" \
+    && pass "…and RB_NONCE is probed at setup like every other name the driver assigns" \
+    || die "RB_NONCE is not probed at setup; a readonly one would leave every round on one nonce"
 grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"' "$SKILL" \
     && pass "…and the watch is armed from the file, not from a name" \
     || die "the watch is not invoked with --after-review-file \$PRIOR_FILE"
@@ -2165,7 +2180,7 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
 # AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in

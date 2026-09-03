@@ -79,7 +79,7 @@ run() {   # run [args…] ; prints "<rc>", with the baseline in $BASEF and stder
     : > "$BASEF"
     # THE OPTION IS SUPPLIED FOR THE ORDINARY TWO-ARGUMENT CALL, which is what the driver
     # makes. A case about the ARITY passes its own count and this does nothing to it.
-    if [ "$#" -eq 2 ]; then set -- "$@" --baseline-file "$BASEF"; fi
+    if [ "$#" -eq 2 ]; then set -- "$@" --baseline-file "$BASEF" --nonce 5551; fi
     (cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         /usr/bin/env bash -p "$DIR/pr-request-review.sh" "$@" <"$BODY_IN" >"$OUT" 2>"$ERR") || rc=$?
@@ -132,7 +132,7 @@ _ef=$?
 
 # ── THE ORDINARY MANUAL PATH ───────────────────────────────────────────────
 world; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(baseline)" = 4242 ]; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = "5551 4242" ]; } \
     && pass "the manual path posts and writes the baseline into the file it was given" \
     || die "the manual path gave rc=$rc baseline='$(baseline)' stderr='$(stderr)'"
 _cap bodies
@@ -159,10 +159,10 @@ grep -qF 'A one-paragraph account' <<<"$_CAP" \
 # purpose. So the assertion is the exact string rather than "not a failure": emitting
 # empty here would restore the old ambiguity and pass a laxer check.
 world; : > "$W/prior.out"; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(baseline)" = none ] && posted; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = "5551 none" ] && posted; } \
     && pass "…and no prior review on the manual path reports the none token, not an empty value" \
     || die "a first request with no prior review gave rc=$rc baseline='$(baseline)' stderr='$(stderr)'"
-raw_is "$BASEF" 'none
+raw_is "$BASEF" '5551 none
 ' "the manual path's none baseline"
 
 # AND A COMMENT-BACKED BASELINE COMES THROUGH AS IT IS. A reviewer's newest
@@ -171,7 +171,7 @@ raw_is "$BASEF" 'none
 # `pr-watch.sh` accepts. Rewriting or refusing it here would abort after the
 # request had been posted.
 world; printf 'comment:998877\n' > "$W/prior.out"; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ "$(baseline)" = comment:998877 ] && posted; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = "5551 comment:998877" ] && posted; } \
     && pass "…and a comment-backed baseline is reported unchanged" \
     || die "a comment-backed baseline gave rc=$rc baseline='$(baseline)'"
 
@@ -209,7 +209,7 @@ if ( : > "$_uw/probe" ) 2>/dev/null; then
     chmod 700 "$_uw"; rm -rf "$_uw"
     pass "(the unwritable-baseline case is skipped: this uid can create through mode 500)"
 else
-    rc="$(run 7 no --baseline-file "$_uw/prior.txt")"
+    rc="$(run 7 no --baseline-file "$_uw/prior.txt" --nonce 5551)"
     chmod 700 "$_uw"
     { [ "$rc" != 0 ] && nothing_posted; } \
         && pass "a baseline that cannot be written stops with NOTHING posted" \
@@ -226,10 +226,10 @@ fi
 # above gives — and the assertion is the exact string, since an empty value here would be
 # the ambiguity that change removed.
 world; rc="$(run 7 yes)"
-{ [ "$rc" = 0 ] && [ "$(baseline)" = none ]; } \
+{ [ "$rc" = 0 ] && [ "$(baseline)" = "5551 none" ]; } \
     && pass "the automatic path posts and reports the none token as its baseline" \
     || die "the automatic path gave rc=$rc baseline='$(baseline)' stderr='$(stderr)'"
-raw_is "$BASEF" 'none
+raw_is "$BASEF" '5551 none
 ' "the automatic path's none baseline"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \
@@ -238,6 +238,32 @@ _cap bodies
 grep -qF '@codex review' <<<"$_CAP" \
     && die "…but it posted a mention, queuing a second pass: $(bodies)" \
     || pass "…and posts the account WITHOUT a mention, so no second pass is queued"
+
+# ── THE NONCE IS REQUIRED, AND IT PREFIXES THE BASELINE — #264, second half ─────
+# The baseline above reads `5551 4242`, `5551 none`, `5551 comment:998877`: the nonce the
+# driver generated for THIS request, then the value. `pr-watch.sh --require-nonce 5551`
+# refuses a file carrying any other, which is how a previous round's well-formed id — left
+# in place by a bootstrap refusal the driver's `exit` returned from — stops being accepted
+# as this round's floor. The exact prefix is asserted above rather than "starts with digits":
+# a writer emitting its own nonce, or none, would pass a laxer check and defeat the watch.
+#
+# THE OLD FOUR-ARGUMENT FORM IS REFUSED WITH NOTHING POSTED. A caller on the pre-nonce
+# contract writes an unnonced baseline the watch refuses — but only AFTER the request is in
+# flight. Refusing the arity here stops it before the post.
+world; rc="$(run 7 no --baseline-file "$BASEF")"
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF -- '--nonce' <<<"$_CAP" && nothing_posted; } \
+    && pass "the four-argument form without --nonce is refused with nothing posted" \
+    || die "the old four-argument form gave rc=$rc posted=$(cat "$TMP/calls") stderr='$(stderr)'"
+# AND A NONCE THAT IS NOT DIGITS IS REFUSED THE SAME WAY, since the watch compares it
+# inside a `case` and requires digits of its own argument.
+for _nn in "" abc "12 34"; do
+    world; rc="$(run 7 no --baseline-file "$BASEF" --nonce "$_nn")"
+    _cap stderr
+    { [ "$rc" = 1 ] && grep -qF 'decimal digits' <<<"$_CAP" && nothing_posted; } \
+        && pass "…and a nonce of '$_nn' is refused as not decimal digits, with nothing posted" \
+        || die "--nonce '$_nn' gave rc=$rc posted=$(cat "$TMP/calls") stderr='$(stderr)'"
+done
 
 # ── THE BODY MUST NOT BECOME A RECORD ──────────────────────────────────────
 # The rule `pr-close-round.sh` and `pr-copilot-phase.sh` already had, missing
@@ -413,7 +439,7 @@ world; printf '1\n' > "$W/prior.rc"; rc="$(run 7 no)"
 # review id — which its shape check would then refuse, turning a posted request
 # into an abort.
 world; rc="$(run 7 no)"
-{ [ "$rc" = 0 ] && [ -z "$(stdout)" ] && [ "$(baseline)" = 4242 ]; } \
+{ [ "$rc" = 0 ] && [ -z "$(stdout)" ] && [ "$(baseline)" = "5551 4242" ]; } \
     && pass "…and a success says nothing there either, not even gh's own output" \
     || die "a success put '$(stdout)' on stdout"
 
@@ -432,11 +458,11 @@ world
 _sl="$TMP/reqlink"; rm -rf "$_sl"; mkdir -p "$_sl"
 printf 'the operator file, which must survive\n' > "$_sl/victim"
 ln -s "$_sl/victim" "$_sl/link"
-rc="$(run 7 no --baseline-file "$_sl/link")"
+rc="$(run 7 no --baseline-file "$_sl/link" --nonce 5551)"
 [ "$(cat "$_sl/victim")" = 'the operator file, which must survive' ] \
     && pass "a symlinked baseline path leaves the operator's file at the other end intact" \
     || die "the baseline write truncated the symlink's target (rc=$rc)"
-{ [ "$rc" = 0 ] && [ ! -L "$_sl/link" ] && [ "$(cat "$_sl/link")" = 4242 ]; } \
+{ [ "$rc" = 0 ] && [ ! -L "$_sl/link" ] && [ "$(cat "$_sl/link")" = "5551 4242" ]; } \
     && pass "…the link being what the rename replaced, with the baseline across" \
     || die "the symlinked baseline gave rc=$rc and '$(cat "$_sl/link" 2>/dev/null)'"
 rm -rf "$_sl"

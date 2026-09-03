@@ -1085,6 +1085,48 @@ the final `exit` the block reports success for a blocked, paused or queued merge
 and whatever runs it next carries on as though the PR had landed. The distinction
 the gate exists to draw survives only if it is passed on.
 
+## THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
+
+#264 landed in two halves, and this is the second. The first made an EMPTY baseline a
+refusal and spelled "no prior review" `none`, so a truncation could no longer produce the
+legal no-floor value. That tells a value from no value. It cannot tell THIS round's value
+from the LAST round's: both are complete, well-formed ids, written on purpose by a real
+run, and no shape test distinguishes them.
+
+The state that reaches the watch with the wrong one is a refusal the driver walked past.
+Every writer — the opening request, the round close, the Copilot open — aborts on a
+bootstrap or validation failure with `exit`, and this shell's `exit` may return. The
+writer never reached its write, so the file still holds the PREVIOUS round's baseline;
+the watch accepted it, and a terminal review newer than that was announced as this
+round's answer — a pass nobody requested this round, on a head that may have moved.
+
+So the file says WHICH RUN wrote it. This shell generates a nonce immediately before each
+request, hands it to the writer, which prefixes the value with it, and hands the same
+nonce to the watch, which refuses a file carrying any other. A previous round's baseline
+carries a previous nonce and is refused; an unnonced file — the old format, an older
+plugin — is refused rather than read as an id with nothing to check.
+
+THE NONCE IS THIS SHELL'S TO HOLD, and that is the objection the issue recorded against
+it: a value in the driving shell is what the file transport exists to avoid. It is
+answered the way every other value this shell holds is — `WHO`, `CODEX_SHA`, the four
+paths: the name is PROBED at setup, so a startup file that made it readonly or
+transforming stops the session before any request, and the assignment is proved by
+reading it back as digits and expanded with `:?` so an assignment that did not take is a
+refusal rather than a stuck value. Four `$RANDOM`s is sixty bits; what has to hold is only
+that two consecutive rounds differ, and this shell advances its own generator on each
+draw — a subshell does not, on bash 3.2, which is why it is not generated in one.
+
+THE WRITES STAY BEFORE THE REQUESTS. Moving them after would close the other case the
+issue named — a request that fails AFTER the write leaves this round's nonce and id — but
+that case is not a fail-open: a request that truly failed brings no review and the watch
+times out, and one `gh` reported failed but the remote took brings a pass that IS this
+round's answer. Moving the write would buy that non-defect at the price of a post-request
+write with nothing to refuse with, which is the ordering every writer already argues
+against. A head-bound value was rejected before this because the head does not change
+between rounds of one phase; a freshness rule because it compares clocks. The nonce is
+the shape the head file and `verdict-at=` already use — a value that says what it is
+about — applied to the round.
+
 ## THE REQUEST IS A SCRIPT.
 
 It was eighteen lines here that nothing executed, and what they do is post the
