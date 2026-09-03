@@ -28,12 +28,13 @@ the helpers, `*lib.sh` the shared libraries, `test-*.sh` the fixtures; `docs/dec
 holds accepted limits; `README.md` is the only document written for a person. The table
 below is the long form.
 
-**Naming.** Files: `pr-<stage>.sh`, `<area>lib.sh`, `test-<area>.sh`. Functions exported
-by a shared library: `rb_*` (a private implementation `_rb_*`); a helper's own local
-functions are plain names (`main`, `probe`, `request_review`). Driver variables that the
-setup block assigns and probes: `RB_*`; the driver's established names — `WHO`,
-`CODEX_SHA`, `AUTO_REVIEW`, the four `*_FILE`s — stay as they are. Machine records:
-`PR_<STAGE> status=… reason=…`. Decision records: `docs/decisions/YYYY-MM-DD-<slug>.md`.
+**Naming — for NEW names only.** Established names keep their spelling whatever it is
+(§ Code style): `sha_reason`, `run_limited`, `rb_setup_stop`, `CODEX_BOT` are all correct
+as they stand, and this rule never asks for a rename. For a name that does not exist yet:
+files `pr-<stage>.sh`, `<area>lib.sh`, `test-<area>.sh`; a function a shared library
+exports `rb_*`, its private implementation `_rb_*`; a helper's own function a plain name;
+a driver variable the setup block assigns and probes `RB_*`; machine records
+`PR_<STAGE> status=… reason=…`; decision records `docs/decisions/YYYY-MM-DD-<slug>.md`.
 
 **Code style.** Match the file: its strict-mode category (§ Bash conventions), its
 spellings, its refusal shape. Do not "fix" a script into a stricter mode or a newer
