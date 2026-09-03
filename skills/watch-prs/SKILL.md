@@ -390,13 +390,16 @@ then
     # WHY:
     # THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
     # WHY:
+    # AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because a memory of issued nonces is a list and a list is wrong by omission.
+    # WHY:
     # AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
     # WHY:
-    RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
     RB_NONCE=
     RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
     [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
-    [[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$RB_NONCE_SEQ"
+    [[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$((RB_NONCE_SEQ+1))"
+    RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
+    [[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
     RB_NONCE="${RB_NONCE:?the request nonce did not take — a name this shell needs is readonly or transforming, and the watch could not tell this round's baseline from the last one's}"
 
 #   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>
@@ -898,11 +901,12 @@ Then, and only then:
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY:
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
-RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
-[[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$RB_NONCE_SEQ"
+[[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$((RB_NONCE_SEQ+1))"
+RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
+[[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 # WHY:
@@ -1164,11 +1168,12 @@ way — the signoff is on the PR, so a later session reads it back with
 # Everything here runs when the operator has asked for the Copilot phase, and only
 # then.
 # a fresh nonce for this request — the claim and its argument are in step 2's request block
-RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
-[[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$RB_NONCE_SEQ"
+[[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$((RB_NONCE_SEQ+1))"
+RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
+[[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
 RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 # WHY:

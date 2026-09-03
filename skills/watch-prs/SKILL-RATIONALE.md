@@ -1133,8 +1133,9 @@ rounds of one phase; a freshness rule because it compares clocks. The nonce is t
 the head file and `verdict-at=` already use — a value that says what it is about — applied
 to the round.
 
-AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because the source can be REPLACED
-as well as frozen. Under `set -T`, `extdebug` and an inherited `DEBUG` trap that prints a
+## AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because a memory of issued nonces is a list and a list is wrong by omission.
+
+The source can be REPLACED as well as frozen. Under `set -T`, `extdebug` and an inherited `DEBUG` trap that prints a
 value and returns non-zero for the `perl` command, bash skips the command and the
 substitution captures the trap's output — measured: `5` on every request, which passes the
 digit test. Remembering the previous nonce and refusing a repeat was the first answer, and it
@@ -1157,6 +1158,19 @@ that skips arbitrary statements is the general hostile-shell case this document 
 not defend, and Codex's measured traps skip the external command only. The `perl` prefix is
 still there for what the counter cannot give: a nonce a PREVIOUS SESSION cannot have used,
 since every session's counter starts at zero.
+
+AND THE INCREMENT IS PROVED BY READ-BACK, because an assignment's status cannot be taken.
+`RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))` is an assignment, and `CLAUDE.md` records what a failed one
+does: a name made readonly — after setup, in the long-lived interactive driver shell, by a
+startup-provided `PROMPT_COMMAND` at the next prompt — prints a complaint and leaves the old
+value, with the list it is in reporting SUCCESS. The setup probe cannot see that; it ran
+earlier. Every request would then carry the same suffix, and with an injected constant the
+same nonce. So the nonce is built from the EXPECTED next value, `$((RB_NONCE_SEQ+1))`, an
+expansion rather than an assignment; the increment follows; and the nonce is required to end
+in what the variable NOW holds — `${RB_NONCE%"$RB_NONCE_SEQ"}` must be exactly the
+twenty-three-digit prefix. A failed increment leaves the variable one behind the suffix, the
+strip removes nothing or the wrong thing, the comparison fails, and the `:?` refuses. No
+second name holds the previous value, which is what the probe would have had to cover.
 
 ## AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
 

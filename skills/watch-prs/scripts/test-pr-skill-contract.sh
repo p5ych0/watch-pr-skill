@@ -1949,7 +1949,7 @@ grep -q 'RB_NONCE_SEQ="RbProbe' "$SKILL" \
 # generations are three DIFFERENT accepted nonces. The whole block is lifted from the document
 # — counter increment, generation, width and digit test, append — and run in a child that
 # starts the counter at zero as setup does.
-_nc_blk="$(awk '/^    RB_NONCE_SEQ=\$\(\(RB_NONCE_SEQ\+1\)\)$/,/^    RB_NONCE="\$\{RB_NONCE:\?/' "$SKILL" | head -20)"
+_nc_blk="$(awk '/^    RB_NONCE=$/,/^    RB_NONCE="\$\{RB_NONCE:\?/' "$SKILL" | head -20)"
 { [ -n "$_nc_blk" ] && grep -q 'RB_NONCE_SEQ' <<<"$_nc_blk" && grep -q ':?' <<<"$_nc_blk" && grep -q -- '-ne 23' <<<"$_nc_blk"; } \
     || die "the nonce generation block did not lift from the document; the injection case proves nothing"
 _nc_dir="$TMP_CL/nonce-inj"; mkdir -p "$_nc_dir" || die "the injection scratch directory could not be made"
@@ -1983,6 +1983,24 @@ _nc_sout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/short.sh" 2>/dev/
 { [ "$_nc_src" -ne 0 ] && ! grep -q '^N:' <<<"$_nc_sout"; } \
     && pass "…while an injected value of the wrong width is refused at the :? rather than counted" \
     || die "an injected '5' was accepted as a nonce (rc=$_nc_src out='$_nc_sout')"
+# AND A COUNTER THAT DID NOT ADVANCE IS REFUSED. The increment is an assignment, and a name
+# made readonly AFTER setup — in the long-lived interactive driver shell, by a
+# startup-provided `PROMPT_COMMAND` at the next prompt — fails it in silence with the list
+# reporting success; the setup probe ran earlier and cannot see it. Every request would then
+# carry the same suffix, and with an injected constant the same nonce. The nonce is built from
+# the EXPECTED next value and must end in what the variable holds after the increment; here the
+# counter is readonly at zero and the constant is injected, so the first generation must refuse.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "readonly RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/ro.sh" || die "the readonly-counter child could not be written"
+_nc_rrc=0
+_nc_rout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/ro.sh" 2>/dev/null)" || _nc_rrc=$?
+{ [ "$_nc_rrc" -ne 0 ] && ! grep -q '^N:' <<<"$_nc_rout"; } \
+    && pass "…and a counter made readonly after setup is caught by the increment read-back, refusing the request" \
+    || die "a readonly RB_NONCE_SEQ produced an accepted nonce (rc=$_nc_rrc out='$_nc_rout'); the same nonce would repeat every request"
 # AND THE SOURCE SURVIVES A FROZEN `$RANDOM`. `unset RANDOM; RANDOM=5` in a startup file
 # leaves `RANDOM` an ordinary variable — this file already records that unsetting it removes
 # its special behaviour — so a nonce drawn from it is the SAME on every request, a previous

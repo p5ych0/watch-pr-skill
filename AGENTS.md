@@ -293,9 +293,24 @@ When reviewing a change here:
   empty and `none` would have. The writes stay BEFORE the requests: a request that fails
   after the write leaves this round's nonce and id, which is not a fail-open (the watch
   waits for a review newer than the id or times out; a `gh` failure the remote took brings
-  a pass that IS this round's answer). A watch invoked on a baseline file without a nonce,
-  a writer that drops the prefix, or a "compatibility" arm accepting the old format is the
-  defect.
+  a pass that IS this round's answer).
+
+  **The nonce is DISTINCT BY CONSTRUCTION, not fresh by luck.** `$RANDOM` can be frozen
+  (`unset RANDOM; RANDOM=5`) and a command substitution can be REPLACED (an inherited
+  `DEBUG` trap under `extdebug` that prints a constant and returns non-zero skips the
+  command and its output is captured), so no external source alone is fresh. The nonce is a
+  FIXED-WIDTH prefix — `perl` under `env -i` prints exactly twenty-three digits, and the
+  driver refuses any other width — with the per-session counter `RB_NONCE_SEQ` APPENDED:
+  zero at setup, probed like every name the driver assigns, incremented before each
+  request. Fixed width plus a strictly increasing suffix cannot repeat within a session
+  whatever the prefix holds. The increment is PROVED BY READ-BACK, because an assignment's
+  status cannot be taken and the name can be made readonly after setup: the nonce is built
+  from `$((RB_NONCE_SEQ+1))` first, and after the increment must end in what the variable
+  now holds. The consequence of any repeat is the fail-open itself — a previous round's
+  baseline carrying that nonce is waited past. A watch invoked on a baseline file without a
+  nonce, a writer that drops the prefix, a "compatibility" arm accepting the old format,
+  a source without the width check, a nonce without the counter, or an increment without
+  its read-back is the defect.
 - **`--` before the operands, on every attempt.** A handoff path is the caller's and a
   relative one may begin with `-`, so the temporary derived from it does too: without it
   `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable
