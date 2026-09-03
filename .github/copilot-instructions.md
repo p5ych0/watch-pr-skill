@@ -836,21 +836,24 @@ the read later fails the case and revisits the record. Do not re-raise #272 as a
 finding, and do not reintroduce the `work.id`/`(dev, ino)` mechanism the record prices out.
 
 **A sixth is accepted since 2026-09-03**, in
-`docs/decisions/2026-09-03-driver-state-between-fences.md`: a hook that runs in the
-driving shell BETWEEN two of `SKILL.md`'"'"'s fences — a startup-provided `PROMPT_COMMAND`, a
-`DEBUG` trap under `extdebug` — owns every value the driver holds across that boundary:
+`docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`: a hook that runs in the
+driving shell BETWEEN the driver's statements — a startup-provided `PROMPT_COMMAND` at the
+prompt between two of `SKILL.md`'s fences, or a `DEBUG` trap under `extdebug` between the
+commands of one fence — owns every value the driver holds from one statement to the next:
 `RB_NONCE` and `RB_NONCE_SEQ`, but equally `CODEX_SHA` before the merge gate, `WHO`,
-`PRIOR_FILE`. The driver defends startup-time state (the setup probe) and values that go
-wrong inside a fence (the read-backs: a frozen source, a replaced source, a stuck counter,
-each with a refusing fixture). It does not defend a hook that rewrites variables between
-steps, because the fence that would check is the hook'"'"'s to rewrite and every defence is one
-more name — the chain `CLAUDE.md` records. Removing the dependency means no value crossing a
-fence, which is a different driver. The bound is that such a hook is the operator'"'"'s own
-environment, already trusted for `PATH`, credentials and the checkout, and that no value is
-more exposed than the merge itself. `test-pr-skill-contract.sh` pins it: two generation
-blocks with the counter reset between them yield an EQUAL nonce. Do not raise a
-between-fences rewrite of a driver-held value as a fresh finding, and do not answer one
-with another in-fence guard.
+`PRIOR_FILE`. The driver defends startup-time state (the setup probe) and a source that lies
+or an assignment that did not take (the read-backs: a frozen source, a replaced source, a
+readonly counter, each with a refusing fixture). It does not defend a hook that rewrites
+variables between statements — one that resets the counter one command before the increment
+passes the increment's own read-back — because the statement that would check is the hook's
+to rewrite, and every defence is one more name: the chain `CLAUDE.md` records. Removing the
+dependency means no value crossing a statement, which is a different driver. The bound is
+that such a hook is the operator's own environment, already trusted for `PATH`, credentials
+and the checkout, and that no value is more exposed than the merge itself.
+`test-pr-skill-contract.sh` pins it twice: two generation blocks with the counter reset
+between them, and with a trap resetting it inside the block, each yield an EQUAL nonce. Do
+not raise a hook's rewrite of a driver-held value — between fences or between commands — as
+a fresh finding, and do not answer one with another guard.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses

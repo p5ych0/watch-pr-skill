@@ -2007,7 +2007,7 @@ _nc_rout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/ro.sh" 2>/dev/nul
 # fences — a `PROMPT_COMMAND` — which owns every driver-held value: it can reset
 # `RB_NONCE_SEQ` to zero, pin `RB_NONCE` readonly, or re-read it from the stale file, and it
 # can do the same to `CODEX_SHA` before the merge gate. That is
-# `docs/decisions/2026-09-03-driver-state-between-fences.md`, and this case PINS it: two
+# `docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`, and this case PINS it: two
 # generation blocks with the counter reset between them, under a constant-injecting trap, yield
 # an EQUAL nonce. A later change that makes them differ fails this case and revisits the record
 # rather than silently outliving the limit.
@@ -2025,8 +2025,29 @@ _nc_hout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/hook.sh" 2>/dev/n
 _nc_h1="$(sed -n '1s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_hout")"
 _nc_h2="$(sed -n '2s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_hout")"
 { [ "$_nc_hrc" -eq 0 ] && [ -n "$_nc_h1" ] && [ "$_nc_h1" = "$_nc_h2" ]; } \
-    && pass "…while a hook resetting the counter between fences repeats the nonce — the accepted limit docs/decisions/2026-09-03-driver-state-between-fences.md pins" \
-    || die "the between-fences limit no longer holds (rc=$_nc_hrc '$_nc_h1' vs '$_nc_h2'); re-read docs/decisions/2026-09-03-driver-state-between-fences.md"
+    && pass "…while a hook resetting the counter between fences repeats the nonce — the accepted limit docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md pins" \
+    || die "the between-fences limit no longer holds (rc=$_nc_hrc '$_nc_h1' vs '$_nc_h2'); re-read docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md"
+# AND THE SAME HOOK ONE COMMAND CLOSER, PINNED TOO. A `DEBUG` trap that resets the counter when
+# `$BASH_COMMAND` carries `RB_NONCE_SEQ+1` — the append assignment and the increment, INSIDE the
+# block — so the increment restores `1` and its own read-back passes — repeats the nonce with
+# nothing rewritten between fences at all. Matched on that expansion-free substring, because a
+# pattern quoting the assignment's text expands `$RB_NONCE` at trap time and never matches. The read-back proves the increment TOOK; it cannot prove nothing ran between
+# the two statements it compares, which is the boundary the record draws.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; *"RB_NONCE_SEQ+1"*) RB_NONCE_SEQ=0;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/intrap.sh" || die "the in-fence-trap child could not be written"
+_nc_trc=0
+_nc_tout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/intrap.sh" 2>/dev/null)" || _nc_trc=$?
+_nc_t1="$(sed -n '1s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_tout")"
+_nc_t2="$(sed -n '2s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_tout")"
+{ [ "$_nc_trc" -eq 0 ] && [ -n "$_nc_t1" ] && [ "$_nc_t1" = "$_nc_t2" ]; } \
+    && pass "…and a DEBUG trap resetting the counter inside the block repeats the nonce too — the same accepted limit, one command closer" \
+    || die "the in-fence hook limit no longer holds (rc=$_nc_trc '$_nc_t1' vs '$_nc_t2'); re-read docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md"
 # AND THE SOURCE SURVIVES A FROZEN `$RANDOM`. `unset RANDOM; RANDOM=5` in a startup file
 # leaves `RANDOM` an ordinary variable — this file already records that unsetting it removes
 # its special behaviour — so a nonce drawn from it is the SAME on every request, a previous

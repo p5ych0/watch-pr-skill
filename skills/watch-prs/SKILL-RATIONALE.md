@@ -1173,20 +1173,22 @@ strip removes nothing or the wrong thing, the comparison fails, and the `:?` ref
 second name holds the previous value, which is what the probe would have had to cover.
 
 WHAT THESE THREE DEFEND, AND WHERE THE BOUNDARY IS. A frozen source, a replaced source and a
-counter that did not advance all go wrong INSIDE the fence that generates the nonce, and a
-read-back in that same fence sees each of them. What no read-back sees is code that runs
-BETWEEN fences — a startup-provided `PROMPT_COMMAND` at the next prompt — because it runs
-after the check and before the next one, with every driver variable writable: it can reset
-`RB_NONCE_SEQ` to zero so each fence counts to one, pin `RB_NONCE` readonly at the previous
-value so every clearing fails in silence, or read the nonce back out of the stale baseline
-file so the watch requires what the file already holds. It can do the same to `CODEX_SHA`
-before the merge gate. That is `docs/decisions/2026-09-03-driver-state-between-fences.md`,
-which accepts it: every defence against it is one more name the same hook rewrites, the
-dependency — a value crossing a fence at all — cannot be removed without a different driver,
-and the hook is the operator's own environment, already trusted for `PATH`, credentials and
-the checkout. The contract test pins the boundary from both sides: the three in-fence cases
-assert refusal, and a fourth, with the counter reset between two generation blocks, asserts
-the repeated nonce the record accepts.
+counter whose increment did not take are a SOURCE that lies and an ASSIGNMENT that failed,
+and a read-back sees each of them. What no read-back sees is code that runs BETWEEN the
+driver's statements with every variable writable: a startup-provided `PROMPT_COMMAND` at the
+prompt between two fences, or a `DEBUG` trap under `extdebug` between the commands of one
+fence. It can reset `RB_NONCE_SEQ` to zero so each fence counts to one, pin `RB_NONCE`
+readonly at the previous value so every clearing fails in silence, read the nonce back out
+of the stale baseline file so the watch requires what the file already holds — or, inside
+the block, reset the counter one command before the increment, which then restores it and
+passes its own read-back. It can do the same to `CODEX_SHA` before the merge gate. That is
+`docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`, which accepts it: every
+defence is one more name the same hook rewrites, the dependency — a value held from one
+statement to the next — cannot be removed without a different driver, and the hook is the
+operator's own environment, already trusted for `PATH`, credentials and the checkout. The
+contract test pins the boundary from both sides: the three in-fence cases assert refusal,
+and two more — the counter reset between two generation blocks, and reset by a trap inside
+one — assert the repeated nonce the record accepts.
 
 ## AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
 
