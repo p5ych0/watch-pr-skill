@@ -759,6 +759,26 @@ flag that selected the removing shape went with it. Do not reintroduce a name-ba
 here, and do not "fix" the leftover reservation by adding one — a `[[ -L ]]` in front of it
 is a check-then-use, which is the shape `2026-08-29-setup-leaf-cleanup.md` convicts.
 
+**A fifth is accepted since 2026-09-03**, in
+`docs/decisions/2026-09-03-workdir-parent-substitution.md`: every handoff resolves
+`$RB_SETUP_DIR/work` by NAME, so a same-UID process that renames `work` away and puts a
+symlink or a fresh directory at the name redirects the read — the driver reads a FORGED head
+out of the attacker's directory and merges on it, a gate BYPASS rather than a lost file.
+This differs from the four above in CONSEQUENCE, and it is still accepted, because the fix is
+unsound and the attacker already owns the account. PR #275 tried it and was closed: a
+file-based `(dev, ino)` is substitutable (`work.id` is a regular file a racer replaces before
+the driver reads it) and ABA-reusable (ext4/xfs reuse a freed inode, so deleting and
+recreating `work` restores the recorded pair), and the only sound anchor — a held descriptor
+inherited by the children — is not safely acquirable in the driver's bash (no
+`O_NOFOLLOW`/`O_NONBLOCK` on a directory redirection, no `{var}<` on bash 3.2, a helper cannot
+hand an fd back, and a long-lived fd-holder is the daemon v2 forbids). What bounds it is the
+threat model: a same-UID racer already has arbitrary code execution as the operator and can
+edit the commits under review, read the `gh` token and merge directly, or rewrite the driver
+itself, so a forged head is strictly weaker than what it already holds. `test-writelib.sh`
+stages the substitution against the real read and PINS that the forgery works, so anchoring
+the read later fails the case and revisits the record. Do not re-raise #272 as a fresh
+finding, and do not reintroduce the `work.id`/`(dev, ino)` mechanism the record prices out.
+
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection, and the
