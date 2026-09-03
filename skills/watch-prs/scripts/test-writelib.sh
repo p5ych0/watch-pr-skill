@@ -768,6 +768,40 @@ rb_handoff_is_sha "$_wh/absent" \
     || pass "…and an absent path is refused"
 rm -rf "$_wh"
 
+# ── A SUBSTITUTED PARENT DIRECTORY IS FOLLOWED, WHICH IS THE ACCEPTED LIMIT #272 ──
+#
+# The read resolves the parent of the head file by NAME. A same-UID process that renames
+# `work` away and puts a directory holding a FORGED head at the name has that forged head read
+# and accepted — the driver's post-gate CONFIRMATION is corrupted, and `CODEX_SHA` (read from
+# the same file) carries the forged value forward. It is NOT a completed merge: the merge gate
+# reads the durable signoff and the reviewer's verdict, not the work directory, and refuses a
+# forged `CODEX_SHA` the reviewer never signed. It is ACCEPTED rather than fixed:
+# `docs/decisions/2026-09-03-workdir-parent-substitution.md` measures the bound and prices
+# the fix (a file-based `(dev, ino)` is substitutable and ABA-reusable, and a held descriptor
+# is not safely acquirable in the driver's bash), and the attacker is a same-UID process that
+# already has arbitrary code execution as the operator.
+#
+# THIS CASE PINS THE LIMIT, AND IT DISTINGUISHES WHICH INODE WAS READ. `rb_handoff_is_sha`
+# answers only a STATUS, so both a real and a forged 40-hex value would return 0 and the case
+# could not tell a name-following read from an anchored one. So the ORIGINAL `work/head.txt`
+# is NOT a commit id and the substituted one IS: a status of 0 then means the read followed
+# the substituted parent to the valid forged head — the accepted limit — while an anchored
+# read that reached the original inode would read the invalid value and return non-zero,
+# failing this case and forcing the record to be revisited.
+_wl_p="$TMP/parentsub"; rm -rf "$_wl_p"; mkdir -p "$_wl_p/work"
+printf '%s\n' 'not-a-commit-id' > "$_wl_p/work/head.txt"
+mkdir -p "$_wl_p/attacker"
+printf '%s\n' 'ffffffffffffffffffffffffffffffffffffffff' > "$_wl_p/attacker/head.txt"
+mv "$_wl_p/work" "$_wl_p/work.real"
+if ln -s "$_wl_p/attacker" "$_wl_p/work" 2>/dev/null; then
+    rb_handoff_is_sha "$_wl_p/work/head.txt" \
+        && pass "a substituted work directory is followed to a forged head, not the original invalid one (accepted limit #272)" \
+        || die "the parent-substitution limit no longer holds; re-read docs/decisions/2026-09-03-workdir-parent-substitution.md"
+else
+    pass "(the parent-substitution limit case is skipped: no symlink support here)"
+fi
+rm -rf "$_wl_p"
+
 # ── THE EMPTYING POSTCONDITION ASKS ONE DESCRIPTOR TOO ─────────────────────
 #
 # `[ ! -L ]`, `[ -f ]` and `[ ! -s ]` are three separate resolutions of the name, so a racer

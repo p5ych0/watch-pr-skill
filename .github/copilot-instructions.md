@@ -775,6 +775,34 @@ flag that selected the removing shape went with it. Do not reintroduce a name-ba
 here, and do not "fix" the leftover reservation by adding one — a `[[ -L ]]` in front of it
 is a check-then-use, which is the shape `2026-08-29-setup-leaf-cleanup.md` convicts.
 
+**A fifth is accepted since 2026-09-03**, in
+`docs/decisions/2026-09-03-workdir-parent-substitution.md`: every handoff resolves
+`$RB_SETUP_DIR/work` by NAME, so a same-UID process that renames `work` away and puts a
+symlink or a fresh directory at the name redirects the read — the driver reads a FORGED head
+out of the attacker's directory: the driver treats a head as gated, resolves the round's
+threads on it, and carries a forged `CODEX_SHA` (read from the same `work/head.txt`) forward.
+It is NOT demonstrated to complete a merge — `pr-merge-gate.sh` never reads the work directory,
+checking `CODEX_SHA` against the durable signoff and the reviewer's actual verdict on that sha,
+so a forged value the reviewer never signed clean is refused there, fail-closed. The measured
+impact is the corrupted confirmation, not a lost file and not a merge.
+It is the same SAME-UID class as the `setup-leaf-cleanup` and `origin-cleanup-races` records
+(litter in the session's own area), differing only in CONSEQUENCE — a forged head — and unlike
+the `transport-candidate-in-argv` record, which is a cross-account denial of service, not this
+class. It is still accepted, because the fix is
+unsound and the attacker already owns the account. PR #275 tried it and was closed: a
+file-based `(dev, ino)` is substitutable (`work.id` is a regular file a racer replaces before
+the driver reads it) and ABA-reusable (ext4/xfs reuse a freed inode, so deleting and
+recreating `work` restores the recorded pair), and the only sound anchor — a held descriptor
+inherited by the children — is not safely acquirable in the driver's bash (no
+`O_NOFOLLOW`/`O_NONBLOCK` on a directory redirection, no `{var}<` on bash 3.2, a helper cannot
+hand an fd back, and a long-lived fd-holder is the daemon v2 forbids). What bounds it is the
+threat model: a same-UID racer already has arbitrary code execution as the operator and can
+edit the commits under review, read the `gh` token and merge directly, or rewrite the driver
+itself, so a forged head is strictly weaker than what it already holds. `test-writelib.sh`
+stages the substitution against the real read and PINS that the forgery works, so anchoring
+the read later fails the case and revisits the record. Do not re-raise #272 as a fresh
+finding, and do not reintroduce the `work.id`/`(dev, ino)` mechanism the record prices out.
+
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
 `gh pr merge --admin` by default, which bypasses branch protection.
