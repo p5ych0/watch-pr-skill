@@ -1,6 +1,6 @@
 {
   "name": "watch-pr-skill",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Native PR review loop \u2014 drives the Codex and Copilot GitHub reviewers to a clean signoff, then gates the merge.",
   "author": {
     "name": "p5ych0"

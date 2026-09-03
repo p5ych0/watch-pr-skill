@@ -3,7 +3,12 @@
 # line whenever the state changes and one final line when it is.
 #
 #   pr-watch.sh <pr> <reviewer-login> [--interval SECONDS] [--timeout SECONDS]
-#               [--after-review ID | --after-review-file PATH]
+#               [--after-review ID | --after-review-file PATH --require-nonce NONCE]
+#
+#   `--after-review-file` ALWAYS travels with `--require-nonce` — #264. The file holds
+#   `<nonce> <value>`, where the nonce is the one the driver generated for THIS request
+#   and handed to the writer; a file whose nonce is not the required one is a previous
+#   round's baseline reached past a refusal, and is refused rather than waited past.
 #
 #   0  a terminal state was reached — the last line says which
 #   1  the timeout expired first
@@ -143,9 +148,24 @@ AFTER_REVIEW_FILE=""
 # instead, which can hold an id that makes the watch wait out its whole timeout. The
 # FILE form needs no flag, because an empty path is refused where it arrives.
 AFTER_REVIEW_GIVEN=""
+# THE NONCE THE FILE MUST CARRY — #264. The driver generates one per request, hands it to
+# the writer, and requires it here, so the file is bound to the run that wrote it. It is
+# decimal digits; the empty string is "not given", which the file form refuses.
+REQUIRE_NONCE=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        # THE RUN THE BASELINE MUST BELONG TO. A well-formed id is a well-formed id whether
+        # this round or the last one wrote it, so shape alone cannot tell a baseline reached
+        # past a refusal — the driver's `exit` returning — from this round's. The nonce can:
+        # it changes every request, the writer prefixes the value with it, and this refuses
+        # a file carrying any other. Digits only, because a value the shell expands into a
+        # `case` pattern is a value that must not carry pattern characters.
+        --require-nonce) [ "$#" -ge 2 ] || { echo "$0: --require-nonce needs a value" >&2; exit 2; }
+                    case "$2" in
+                        ""|*[!0-9]*) echo "$0: --require-nonce needs decimal digits, and was given '$2'" >&2; exit 2 ;;
+                    esac
+                    REQUIRE_NONCE="$2"; shift 2 ;;
         # A missing value is usage, not something to recover from: `shift 2 ||
         # true` left the same option in $1 and the parser span forever, hanging
         # the watch before it started.
@@ -408,6 +428,20 @@ if [ -n "$AFTER_REVIEW_FILE" ] && [ -n "$AFTER_REVIEW_GIVEN" ]; then
     echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=after_review_both_forms" >&2
     exit 2
 fi
+# THE FILE FORM REQUIRES THE NONCE, AND THE VALUE FORM REFUSES IT — #264. Accepting a
+# file WITHOUT a nonce would keep the fail-open this closes and add a spelling, exactly as
+# accepting both empty and `none` would have. The value form is passed by a hardened
+# caller holding the id in a process of its own, where nothing was reached past a refusal
+# and a nonce has nothing to bind; given one anyway, the caller has two ideas of what it is
+# waiting on, and this does not pick.
+if [ -n "$AFTER_REVIEW_FILE" ] && [ -z "$REQUIRE_NONCE" ]; then
+    echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=nonce_required detail=$(q "$AFTER_REVIEW_FILE")" >&2
+    exit 2
+fi
+if [ -n "$REQUIRE_NONCE" ] && [ -z "$AFTER_REVIEW_FILE" ]; then
+    echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=nonce_without_file" >&2
+    exit 2
+fi
 # THE READ IS BOUNDED, because opening the path can block forever. A FIFO at that
 # name — supplied directly, or substituted by a same-UID process between the caller
 # naming it and this open — makes `9<` wait for a writer that never arrives, and the
@@ -538,6 +572,32 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
            # IT IS NOT HYPOTHETICAL: `printf '%s\n' ""` is exactly what the writers emitted
            # before #264, so a baseline file left by an older version of this plugin, or by
            # a caller written against the old contract, has precisely this shape.
+           case "$_bl_out" in
+               "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                   exit 2 ;;
+           esac
+           # THE NONCE COMES FIRST, AND IT MUST BE THIS REQUEST'S — #264. The token fix above
+           # tells a value from no value; it cannot tell THIS round's value from the last
+           # round's, because both are well-formed ids written on purpose by a real run. With
+           # the driver's `exit` shadowed to return, a refusal in the writer's bootstrap left
+           # the previous round's baseline in place, and a terminal review newer than THAT was
+           # announced as this round's answer — a pass nobody requested this round. The nonce
+           # is what changes between rounds: the driver generates one per request, the writer
+           # prefixes the value with it, and a file carrying any other nonce was written by a
+           # different run and is refused. `${_bl_out%% *}` and `${_bl_out#* }` split on the
+           # FIRST space, so a value that is itself `comment:123` survives intact; a file with
+           # no space at all is the pre-nonce format, or a sentinel, and is refused as such
+           # rather than read as an id with no nonce.
+           case "$_bl_out" in
+               *" "*) ;;
+               *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=baseline_without_nonce detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                  exit 2 ;;
+           esac
+           _bl_nonce="${_bl_out%% *}"
+           _bl_out="${_bl_out#* }"
+           [ "$_bl_nonce" = "$REQUIRE_NONCE" ] \
+               || { echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=stale_baseline_nonce detail=$(q "$AFTER_REVIEW_FILE")" >&2
+                    exit 2; }
            case "$_bl_out" in
                "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
                    exit 2 ;;

@@ -1085,6 +1085,129 @@ the final `exit` the block reports success for a blocked, paused or queued merge
 and whatever runs it next carries on as though the PR had landed. The distinction
 the gate exists to draw survives only if it is passed on.
 
+## THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
+
+#264 landed in two halves, and this is the second. The first made an EMPTY baseline a
+refusal and spelled "no prior review" `none`, so a truncation could no longer produce the
+legal no-floor value. That tells a value from no value. It cannot tell THIS round's value
+from the LAST round's: both are complete, well-formed ids, written on purpose by a real
+run, and no shape test distinguishes them.
+
+The state that reaches the watch with the wrong one is a refusal the driver walked past.
+Every writer — the opening request, the round close, the Copilot open — aborts on a
+bootstrap or validation failure with `exit`, and this shell's `exit` may return. The
+writer never reached its write, so the file still holds the PREVIOUS round's baseline;
+the watch accepted it, and a terminal review newer than that was announced as this
+round's answer — a pass nobody requested this round, on a head that may have moved.
+
+So the file says WHICH RUN wrote it. This shell generates a nonce immediately before each
+request, hands it to the writer, which prefixes the value with it, and hands the same
+nonce to the watch, which refuses a file carrying any other. A previous round's baseline
+carries a previous nonce and is refused; an unnonced file — the old format, an older
+plugin — is refused rather than read as an id with nothing to check.
+
+THE NONCE IS THIS SHELL'S TO HOLD, and that is the objection the issue recorded against
+it: a value in the driving shell is what the file transport exists to avoid. It is
+answered the way every other value this shell holds is — `WHO`, `CODEX_SHA`, the four
+paths: the name is PROBED at setup, so a startup file that made it readonly or
+transforming stops the session before any request, and the assignment is proved by
+reading it back as digits and expanded with `:?` so an assignment that did not take is a
+refusal rather than a stuck value.
+
+THE SOURCE IS A `perl` CHILD, NOT `$RANDOM`, because `$RANDOM` can be FROZEN from a startup
+file: `unset RANDOM; RANDOM=5` leaves it an ordinary variable, so four draws are `5555` on
+every request, a previous round's `5555 <id>` matches the nonce the watch is told to
+require, and the fail-open is back — and `RANDOM` is not a name this block assigns, so the
+setup probe never looks at it. The contract fixture already records that unsetting it
+removes its special behaviour. `$SECONDS`, `$EPOCHREALTIME` and `$BASHPID` are the same
+class of dynamic variable and freeze the same way. So the value comes from a process this
+shell cannot reach into: `/usr/bin/env -i PATH="$PATH" perl`, the spelling `writelib.sh`
+already uses, printing `time`, its own pid and `rand` as decimal digits. Two consecutive
+requests are two processes with two pids, so they differ whatever the clock and whatever
+the shell's variables hold; `env -i` means no `PERL5OPT` or seed reaches it. What has to
+hold is only that consecutive rounds differ, and a fixture runs two generations under the
+frozen-`RANDOM` startup and asserts exactly that.
+
+A head-bound value was rejected before this because the head does not change between
+rounds of one phase; a freshness rule because it compares clocks. The nonce is the shape
+the head file and `verdict-at=` already use — a value that says what it is about — applied
+to the round.
+
+## AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because a memory of issued nonces is a list and a list is wrong by omission.
+
+The source can be REPLACED as well as frozen. Under `set -T`, `extdebug` and an inherited `DEBUG` trap that prints a
+value and returns non-zero for the `perl` command, bash skips the command and the
+substitution captures the trap's output — measured: `5` on every request, which passes the
+digit test. Remembering the previous nonce and refusing a repeat was the first answer, and it
+remembers ONE value: a trap alternating `5`, `6`, `5` passed all three, and with the middle
+request refused before its write the third required `5` against a two-requests-old `5 <id>`.
+A memory of every nonce issued is a list, and a list is wrong by omission.
+
+So the nonce is made distinct rather than checked for repetition. `RB_NONCE_SEQ` is a
+per-session counter — set to zero with the other literals at setup, probed like every name
+this shell assigns, incremented before each request — and it is APPENDED to the external
+value. The external value is FIXED WIDTH: `perl` prints exactly twenty-three digits (ten of
+`time`, seven of its pid modulo ten million, six of `rand`), and this shell refuses anything
+that is not twenty-three digits before appending. With a fixed-width prefix and a strictly
+increasing suffix, two nonces from one session cannot be equal whatever the prefix holds:
+equal strings would need equal prefixes and then equal counters. An injected constant of the
+right width yields `<c>1`, `<c>2`, `<c>3`; an injected `5` fails the width test and is
+refused; the previous round's baseline carries a counter no later request will carry again.
+The counter is this shell's, so a trap that skips its increment repeats a nonce — but a trap
+that skips arbitrary statements is the general hostile-shell case this document already does
+not defend, and Codex's measured traps skip the external command only. The `perl` prefix is
+still there for what the counter cannot give: a nonce a PREVIOUS SESSION cannot have used,
+since every session's counter starts at zero.
+
+AND THE INCREMENT IS PROVED BY READ-BACK, because an assignment's status cannot be taken.
+`RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))` is an assignment, and `CLAUDE.md` records what a failed one
+does: a name made readonly — after setup, in the long-lived interactive driver shell, by a
+startup-provided `PROMPT_COMMAND` at the next prompt — prints a complaint and leaves the old
+value, with the list it is in reporting SUCCESS. The setup probe cannot see that; it ran
+earlier. Every request would then carry the same suffix, and with an injected constant the
+same nonce. So the nonce is built from the EXPECTED next value, `$((RB_NONCE_SEQ+1))`, an
+expansion rather than an assignment; the increment follows; and the nonce is required to end
+in what the variable NOW holds — `${RB_NONCE%"$RB_NONCE_SEQ"}` must be exactly the
+twenty-three-digit prefix. A failed increment leaves the variable one behind the suffix, the
+strip removes nothing or the wrong thing, the comparison fails, and the `:?` refuses. No
+second name holds the previous value, which is what the probe would have had to cover.
+
+WHAT THESE THREE DEFEND, AND WHERE THE BOUNDARY IS. A frozen source, a replaced source and a
+counter whose increment did not take are a SOURCE that lies and an ASSIGNMENT that failed,
+and a read-back sees each of them. What no read-back sees is code that runs BETWEEN the
+driver's statements with every variable writable: a startup-provided `PROMPT_COMMAND` at the
+prompt between two fences, or a `DEBUG` trap under `extdebug` between the commands of one
+fence. It can reset `RB_NONCE_SEQ` to zero so each fence counts to one, pin `RB_NONCE`
+readonly at the previous value so every clearing fails in silence, read the nonce back out
+of the stale baseline file so the watch requires what the file already holds — or, inside
+the block, reset the counter one command before the increment, which then restores it and
+passes its own read-back. It can do the same to `CODEX_SHA` before the merge gate. That is
+`docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`, which accepts it: every
+defence is one more name the same hook rewrites, the dependency — a value held from one
+statement to the next — cannot be removed without a different driver, and the hook is the
+operator's own environment, already trusted for `PATH`, credentials and the checkout. The
+contract test pins the boundary from both sides: the three in-fence cases assert refusal,
+and two more — the counter reset between two generation blocks, and reset by a trap inside
+one — assert the repeated nonce the record accepts.
+
+## AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
+
+The issue named a second case the nonce does not reach: a request that fails AFTER the
+baseline write leaves this round's nonce and this round's captured id in the file, and the
+watch accepts it. It is accepted deliberately, because it is not a fail-open. A request that
+truly failed brings no review, so the watch waits for one newer than the captured id and
+times out — the ordinary re-arm, not a verdict. One `gh` reported failed but the remote took
+brings a pass that IS this round's answer, on this head, which the watch reports correctly.
+Neither announces a pass nobody requested.
+
+Moving the write after the request would close that non-defect at a real price: a
+post-request write has nothing left to refuse with. If it fails, the request is already
+posted and the file holds the previous value — empty or the previous nonce, both refused —
+so the driver stops and a re-run posts a SECOND request over the same head, which is the
+duplicate the automatic path's branch exists to prevent. Every writer already argues this
+ordering in its own comment; this claim is here so the bijection sees it, because the
+rationale for the nonce above depends on it and a rationale is not a contract.
+
 ## THE REQUEST IS A SCRIPT.
 
 It was eighteen lines here that nothing executed, and what they do is post the

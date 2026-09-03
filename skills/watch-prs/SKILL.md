@@ -209,7 +209,11 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
    && ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
      && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
    && ( RB_REMOTE="RbProbe$$$RANDOM$RANDOM"; [[ $RB_REMOTE = RbProbe* ]] \
-     && [[ -z ${!RB_REMOTE:-} ]] ) 2>/dev/null; then
+     && [[ -z ${!RB_REMOTE:-} ]] ) 2>/dev/null \
+   && ( RB_NONCE="RbProbe$$$RANDOM$RANDOM"; [[ $RB_NONCE = RbProbe* ]] \
+     && [[ -z ${!RB_NONCE:-} ]] ) 2>/dev/null \
+   && ( RB_NONCE_SEQ="RbProbe$$$RANDOM$RANDOM"; [[ $RB_NONCE_SEQ = RbProbe* ]] \
+     && [[ -z ${!RB_NONCE_SEQ:-} ]] ) 2>/dev/null; then
     # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
     # WHY:
     RB_TMPPARENT=
@@ -266,6 +270,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             REQUEST_FILE="$RB_SETUP_DIR/work/request.md"
             PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"
             HEAD_FILE="$RB_SETUP_DIR/work/head.txt"
+            RB_NONCE_SEQ=0
             # THE ASSIGNMENTS ARE READ BACK, because a readonly name fails one in silence.
             # WHY:
             if [[ $CODEX_BOT = 'chatgpt-codex-connector[bot]' ]] \
@@ -274,6 +279,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                && [[ $REQUEST_FILE = "$RB_SETUP_DIR"/work/request.md ]] \
                && [[ $PRIOR_FILE = "$RB_SETUP_DIR"/work/prior.txt ]] \
                && [[ $HEAD_FILE = "$RB_SETUP_DIR"/work/head.txt ]] \
+               && [[ $RB_NONCE_SEQ = 0 ]] \
                && [[ -f $SUMMARY_FILE ]] && [[ ! -s $SUMMARY_FILE ]] \
                && [[ -f $REQUEST_FILE ]] && [[ ! -s $REQUEST_FILE ]] \
                && [[ -f $PRIOR_FILE ]] && [[ ! -s $PRIOR_FILE ]] \
@@ -333,7 +339,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
+    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, RB_NONCE, RB_NONCE_SEQ, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi
@@ -382,8 +388,21 @@ if ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
 then
     # THE REQUEST IS INSIDE THIS ARM, not a fence after it.
     # WHY:
+    # THE BASELINE IS BOUND TO THIS REQUEST BY A NONCE, because a well-formed id says nothing about which round wrote it.
+    # WHY:
+    # AND EVERY NONCE IN A SESSION IS DISTINCT BY CONSTRUCTION, because a memory of issued nonces is a list and a list is wrong by omission.
+    # WHY:
+    # AND THE WRITERS WRITE THE BASELINE BEFORE THEY REQUEST, so a request that fails after the write leaves this round's nonce and id, which is not a fail-open.
+    # WHY:
+    RB_NONCE=
+    RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
+    [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
+    [[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$((RB_NONCE_SEQ+1))"
+    RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
+    [[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
+    RB_NONCE="${RB_NONCE:?the request nonce did not take — a name this shell needs is readonly or transforming, and the watch could not tell this round's baseline from the last one's}"
 
-#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> < <body>
+#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>
 #
 #     0  posted — the baseline is in the FILE the option names, and it is the `none`
 #        token on the automatic path, where the trigger preceded us and there is
@@ -421,7 +440,7 @@ then
 # WHY:
 # THE CONTINUATION IS THE `then` BRANCH HERE TOO.
 # WHY:
-    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"; then
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"; then
         [[ -n x ]]
     else
         echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
@@ -463,33 +482,33 @@ something to act on and prints one line when the state changes:
 # an `exit` that returns carries a refusal into this line, and the file then holds
 # the previous round's id, this round's captured id, the `none` token where there was
 # no prior review to capture, a refusal sentinel, or nothing.
-# The watch decides on SHAPE, not on who wrote it: since #264 it refuses an EMPTY file
-# and one whose last byte is not the writer's newline, accepts `none` as "no baseline",
-# accepts any id, and refuses anything else. So the sentinel is refused, and so is a
-# readiness write that failed after truncating — it leaves an empty file, which no
-# longer passes. What is still accepted is a substituted value that happens to be a
-# COMPLETE id, and both
-# ids are, so a terminal review with a different id is reported as this round's
-# answer. Where the refusal came before the request, nothing was asked for and that
-# verdict is not this round's; where `--add-reviewer` itself failed, the request has
-# run and the remote may have taken it, so a pass may be pending and the verdict is a
-# STALE one rather than an imaginary one — do not read that refusal as "no pass is
-# coming". The watch cannot tell a stale id from a fresh one either way, which is why
-# the success rule above is the one to rely on and why the value is not re-derived or
-# defaulted here. A re-request on
+# The watch decides on SHAPE AND ON THE NONCE, not on who wrote it: since #264 it refuses
+# an EMPTY file and one whose last byte is not the writer's newline, accepts `none` as
+# "no baseline", accepts any id, and refuses anything else — and it requires the file to
+# carry THIS request's nonce, `$RB_NONCE`, which the step that requested the review
+# generated and handed to the writer. So the sentinel is refused, a readiness write
+# that failed after truncating is refused, and a PREVIOUS round's baseline is refused
+# too: it is a complete, well-formed id, which no shape test can reject, but it carries
+# the previous request's nonce. That is the case a refusal in a writer's bootstrap
+# leaves — the writer never reached its write — and before the nonce it was the one
+# state that passed, announcing a terminal review nobody requested this round. Where
+# `--add-reviewer` itself failed AFTER the write, the file carries this round's nonce
+# and id; the request has run and the remote may have taken it, so a pass may be
+# pending and the watch waits for one newer than the id or times out — do not read
+# that refusal as "no pass is coming". The value is not re-derived or defaulted here. A re-request on
 # an unchanged head (after a dismissal, or after answering a finding rather than
 # changing code) has nothing else to tell the new pass from the old one, so without
 # it the first poll reports the PREVIOUS review as this round's answer. It arrives
 # as a PATH: the value is never assigned in this shell, and an unreadable file is
 # `state=error` there rather than an empty baseline here — and an EMPTY file is
 # `state=error` too since #264, "no prior review" being spelled `none`.
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"; WATCH_RC=$?
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"; WATCH_RC=$?
 ```
 
 **Claude Code** — run it as this session's **Monitor** so the verdict surfaces
 into the chat by itself instead of being waited on:
 
-- `command`: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"`
+- `command`: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"`
 - `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
 - `persistent`: `true`
 
@@ -881,9 +900,17 @@ Then, and only then:
 # WHY:
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY:
+# a fresh nonce for this request — the claim and its argument are in step 2's request block
+RB_NONCE=
+RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
+[[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
+[[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$((RB_NONCE_SEQ+1))"
+RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
+[[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
+RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # THE STAGE RUNS AS A CONDITION HERE TOO, so no name holds its status.
 # WHY:
-if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE" "$RB_NONCE"; then
     # THE BASELINE STAYS IN THE FILE `post` WROTE.
     # WHY:
     # AND THE WATCH IS THE ONE THAT READS IT, where a failed read is not an empty baseline.
@@ -1140,6 +1167,14 @@ way — the signoff is on the PR, so a later session reads it back with
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
 # Everything here runs when the operator has asked for the Copilot phase, and only
 # then.
+# a fresh nonce for this request — the claim and its argument are in step 2's request block
+RB_NONCE=
+RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
+[[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
+[[ -n $RB_NONCE ]] && RB_NONCE="$RB_NONCE$((RB_NONCE_SEQ+1))"
+RB_NONCE_SEQ=$((RB_NONCE_SEQ+1))
+[[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
+RB_NONCE="${RB_NONCE:?the request nonce did not take; see step 2}"
 # PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 # WHY:
 # THE BASELINE GOES STRAIGHT INTO THE FILE THE WATCH READS.
@@ -1150,7 +1185,7 @@ way — the signoff is on the PR, so a later session reads it back with
 # WHY:
 # AND ITS STATUS IS NOT HELD, because a round boundary is not a refusal.
 # WHY:
-if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"; then
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE" "$RB_NONCE"; then
     # THE REVIEWER SWITCH IS A CONDITION, because its refusal has somewhere to fall.
     # WHY:
     # AND THE NAME IS PROVED HERE, because setup's probe cannot reach forward.

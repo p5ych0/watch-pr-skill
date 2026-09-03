@@ -3,7 +3,13 @@
 # and request the next pass.
 #
 #   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no> <head-file> <prior-file>
-#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file> <prior-file>
+#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file> <prior-file> <nonce>
+#
+#   `post` TAKES THE REQUEST NONCE AND `gate` REFUSES ONE — #264. `post` prefixes the baseline
+#   it writes with the nonce the driver generated for this request, the same value the driver
+#   hands to `pr-watch.sh --require-nonce`, so a baseline reached past a refusal — a previous
+#   round's, well-formed — carries the wrong nonce and is refused at the watch. `gate` writes
+#   no baseline, so a seventh argument to it is a caller confusing the stages.
 #
 # BOTH STAGES TAKE THE SAME <head-file>: `gate` writes the head it proved into it,
 # `post` reads it back. The head itself in that position is the pre-#202 form and
@@ -283,7 +289,7 @@ case "$STAGE" in
 esac
 shift
 
-PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"; PRIOR_FILE="${6:-}"
+PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"; PRIOR_FILE="${6:-}"; NONCE="${7:-}"
 # THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
 # stages take the same path: `gate` writes the head it proved into it, and `post`
 # reads it back out. The value never enters the driving shell.
@@ -354,6 +360,19 @@ if [ "$PRIOR_FILE" = "$SUMMARY_FILE" ] || [ "$PRIOR_FILE" -ef "$SUMMARY_FILE" ] 
     echo "ABORT: the prior file and the summary file are the same file ('$PRIOR_FILE'); the baseline would overwrite the account."
     exit 1
 fi
+# THE NONCE IS `post`'s AND ONLY `post`'s — #264. `post` prefixes the baseline it writes
+# with the nonce the driver generated for this request, the same value the driver hands
+# to `pr-watch.sh --require-nonce`, so a baseline the watch finds carrying any other nonce
+# was written by a previous round — reached past a refusal — and is refused there. `gate`
+# writes no baseline (it empties the file), so a nonce given to it is a caller confusing
+# the two stages and is refused rather than ignored: an ignored argument is how the
+# old three-argument `pr-request-review.sh` form dropped a body in silence.
+if [ "$STAGE" = post ]; then
+    case "$NONCE" in
+        ""|*[!0-9]*) echo "ABORT: 'post' takes a seventh argument, the request nonce, as decimal digits (got '$NONCE'); the baseline is prefixed with it and pr-watch.sh --require-nonce refuses any other."; exit 1 ;;
+    esac
+fi
+# `gate`'s OWN refusal of a nonce is BELOW its emptyings, not here — see the gate block.
 if [ "$PRIOR_FILE" = "$HEAD_FILE" ] || [ "$PRIOR_FILE" -ef "$HEAD_FILE" ] 2>/dev/null; then
     echo "ABORT: the prior file and the head file are the same file ('$PRIOR_FILE'); the baseline would overwrite the head 'post' re-proves against."
     exit 1
@@ -378,6 +397,18 @@ if [ "$STAGE" = gate ]; then
         || { echo "ABORT: could not empty the head file '$HEAD_FILE': $_rb_wh"; exit 1; }
     _rb_wh="$(rb_empty_handoff "$PRIOR_FILE")" \
         || { echo "ABORT: could not empty the prior file '$PRIOR_FILE': $_rb_wh"; exit 1; }
+    # AND ONLY NOW DOES `gate` REFUSE A NONCE IT WAS NOT MEANT TO TAKE. The refusal stood
+    # ABOVE these emptyings, and that was the walked-past-guard shape this file exists to
+    # avoid: a `gate` accidentally given a seventh argument refused with the previous round's
+    # OID still in the head file, and a driver whose `exit` returns then read it back through
+    # `rb_handoff_is_sha` as a proven head — reaching the irreversible thread replies with no
+    # push and no CI proof for this round. Every refusal below the clearing leaves an EMPTY
+    # head, which that read refuses. The nonce belongs to `post`, which writes the baseline;
+    # `gate` writes none, so an argument here is a caller confusing the stages, refused rather
+    # than ignored — an ignored argument is how the old three-argument `pr-request-review.sh`
+    # form dropped a body in silence.
+    [ -z "$NONCE" ] \
+        || { echo "ABORT: 'gate' takes six arguments; the request nonce ('$NONCE') belongs to 'post', which writes the baseline. 'gate' only empties it, and it has: the head and prior files are empty."; exit 1; }
 fi
 
 case "$PR" in
@@ -638,7 +669,11 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
     # direction that stops a round instead of announcing a pass nobody requested.
     prior="${prior:-none}"
-    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$prior")" \
+    # PREFIXED WITH THE REQUEST NONCE — #264. The driver generated it for this request and
+    # requires it at the watch, so a baseline the watch finds carrying a previous round's
+    # nonce — left in place by a refusal above this write that the driver's `exit` returned
+    # from — is refused rather than waited past. The value after the space is unchanged.
+    _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$NONCE $prior")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
     # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
     # re-prove the bytes itself, in a child, on a descriptor — `9<"$PRIOR_FILE"` — because

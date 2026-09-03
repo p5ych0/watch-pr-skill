@@ -180,6 +180,10 @@ run() {   # run <stage> [args…] ; prints "<rc>|<output>"
     # driver hands `open` one of setup's working files, and a case about that argument
     # itself passes a third and this does nothing. #243.
     if [ "${1:-}" = open ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/prior.txt"; fi
+    # AND THE REQUEST NONCE FOR `open`, FOURTH — #264. The driver generates one per request
+    # and hands the same value to the watch; `open` prefixes both its writes with it. A case
+    # about the nonce itself passes its own fourth argument and this does nothing.
+    if [ "${1:-}" = open ] && [ "$#" -eq 4 ]; then set -- "$@" 5551; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
@@ -292,7 +296,7 @@ fi
 # the PR and the sha resolved, the baseline a literal placeholder. Matching the
 # source spelling instead passes while the printed line says something else.
 _menu="${got#*|}"
-grep -qF "pr-copilot-phase.sh open 7 $HEAD40 <baseline-file>" <<<"$_menu" \
+grep -qF "pr-copilot-phase.sh open 7 $HEAD40 <baseline-file> <nonce>" <<<"$_menu" \
     && pass "…and the resume command it prints carries the baseline file it now requires" \
     || die "record advertises an open command that would abort: $_menu"
 # ASSERTED AGAINST THE STAGE'S OWN ARGUMENT COUNT, not against the text alone. A
@@ -1087,7 +1091,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # field out of it. It writes the file now, and these cases are about the file
 # rather than the record. #243.
 world; run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
-[ "$(cat "$TMP/prior.txt")" = 42 ] \
+[ "$(cat "$TMP/prior.txt")" = "5551 42" ] \
     && pass "open writes the captured baseline into the file the caller named" \
     || die "open wrote '$(cat "$TMP/prior.txt")' as the baseline, not the id it captured"
 # AND WRITES IT BEFORE THE REQUEST. After `--add-reviewer` there is nothing left to
@@ -1108,10 +1112,10 @@ run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 # newlines, which is how `pr-watch.sh` reads it. The value is the `none` token since #264,
 # and asserting the exact string is what keeps this case honest: `-z` would pass against an
 # empty file, which is the state that used to mean the same thing and now means a failure.
-{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = none ]; } \
+{ [ -f "$TMP/prior.txt" ] && [ "$(cat "$TMP/prior.txt")" = "5551 none" ]; } \
     && pass "…and the none token is written over a stale baseline, not left behind" \
     || die "a stale baseline survived an empty capture: '$(cat "$TMP/prior.txt")'"
-raw_is "$TMP/prior.txt" 'none
+raw_is "$TMP/prior.txt" '5551 none
 ' "open's none baseline"
 
 # A REFUSAL AFTER THE READINESS WRITE LEAVES THE SENTINEL, and that write is the clearing
@@ -1140,7 +1144,7 @@ printf '1\n' > "$W/head.rc"
 run open 7 "$HEAD40" "$TMP/prior.txt" >/dev/null
 _rb_res="$(cat "$TMP/prior.txt" 2>/dev/null)"
 case "$_rb_res" in
-    refused-no-baseline) pass "…and a refusal after the readiness write leaves a sentinel the watch refuses" ;;
+    "5551 refused-no-baseline") pass "…and a refusal after the readiness write leaves a nonced sentinel the watch refuses" ;;
     stale-from-a-previous-round) die "the readiness write did not happen before the refusal" ;;
     "") die "a refused open left an EMPTY baseline, which #264 made a refusal rather than the sentinel this stage should leave" ;;
     *) die "a refused open left '$_rb_res' in the baseline file" ;;
@@ -1486,7 +1490,7 @@ rm -rf "$TMP/brokeno"; cp -R "$DIR" "$TMP/brokeno" || die "could not copy the sc
 _bo_rc=0
 _bo_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    "$TMP/brokeno/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" 2>&1)" || _bo_rc=$?
+    "$TMP/brokeno/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" 5551 2>&1)" || _bo_rc=$?
 { [ "$_bo_rc" != 0 ] && [ "$(cat "$TMP/prior.txt" 2>/dev/null)" = 99 ]; } \
     && pass "an open that cannot bootstrap leaves the caller's baseline file untouched" \
     || die "an open bootstrap refusal altered the baseline file to '$(cat "$TMP/prior.txt" 2>/dev/null)' (rc=$_bo_rc out='$_bo_out')"
@@ -1600,11 +1604,41 @@ got="$(run open 7 "$HEAD40" "$TMP/prior.txt")"
 # while this case reported the outcome asserted.
 _ar="$(cat "$TMP/prior.txt" 2>/dev/null)"
 case "$_ar" in
-    42) pass "…and a refusal past the write leaves the captured id, not an empty file" ;;
+    "5551 42") pass "…and a refusal past the write leaves the nonced captured id, not an empty file" ;;
     stale-from-a-previous-round) die "the baseline write did not happen before the failed request" ;;
     "") die "a refusal past the write left the baseline empty, not the captured id" ;;
-    *) die "the baseline file holds '$_ar', which is not the captured id 42" ;;
+    *) die "the baseline file holds '$_ar', which is not the nonced captured id '5551 42'" ;;
 esac
+
+# ── THE NONCE IS REQUIRED, FOURTH, AND PREFIXES BOTH WRITES — #264, second half ──
+# The baseline above reads `5551 42` and the sentinel `5551 refused-no-baseline`: the nonce
+# the driver generated for THIS request, then the value. `pr-watch.sh --require-nonce 5551`
+# refuses a file carrying any other, which is how a previous round's well-formed id — left by
+# a bootstrap refusal the driver's `exit` returned from — stops being accepted as this round's
+# floor. The exact prefix is asserted rather than "starts with digits". Called directly here,
+# so the harness cannot complete the argument list.
+world; printf 'stale-from-a-previous-round\n' > "$TMP/prior.txt"
+_on_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$DIR/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" 2>&1)"; _on_rc=$?
+{ [ "$_on_rc" -eq 1 ] && grep -q 'fourth argument, the request nonce' <<<"$_on_out"; } \
+    && pass "open without the request nonce is refused" \
+    || die "open without a nonce gave rc=$_on_rc out='$_on_out'"
+[ "$(cat "$TMP/prior.txt")" = stale-from-a-previous-round ] \
+    && pass "…before either write, so the baseline file is untouched" \
+    || die "open without a nonce wrote '$(cat "$TMP/prior.txt")' before refusing"
+[ -z "$(posted)" ] \
+    && pass "…and nothing was posted" \
+    || die "open without a nonce posted: $(posted)"
+for _nn in abc "12 34"; do
+    world
+    _on_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$DIR/pr-copilot-phase.sh" open 7 "$HEAD40" "$TMP/prior.txt" "$_nn" 2>&1)"; _on_rc=$?
+    { [ "$_on_rc" -eq 1 ] && grep -q 'decimal digits' <<<"$_on_out" && [ -z "$(posted)" ]; } \
+        && pass "…and a nonce of '$_nn' is refused as not decimal digits, with nothing posted" \
+        || die "open with nonce '$_nn' gave rc=$_on_rc out='$_on_out' posted='$(posted)'"
+done
 
 world; got="$(run open 7)"
 { [ "${got%%|*}" = 1 ] && grep -qF "'open' needs the head" <<<"${got#*|}"; } \
@@ -1815,6 +1849,10 @@ shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[
     # driver hands `open` one of setup's working files, and a case about that argument
     # itself passes a third and this does nothing. #243.
     if [ "${1:-}" = open ] && [ "$#" -eq 3 ]; then set -- "$@" "$TMP/prior.txt"; fi
+    # AND THE REQUEST NONCE FOR `open`, FOURTH — #264. The driver generates one per request
+    # and hands the same value to the watch; `open` prefixes both its writes with it. A case
+    # about the nonce itself passes its own fourth argument and this does nothing.
+    if [ "${1:-}" = open ] && [ "$#" -eq 4 ]; then set -- "$@" 5551; fi
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         "${_RB_SHADOW:-$_RB_SHADOW_BRACKET}" \

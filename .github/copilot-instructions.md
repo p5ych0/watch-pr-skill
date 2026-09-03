@@ -307,6 +307,38 @@ When reviewing a change here:
   head file through `rb_handoff_is_sha` instead of `[[ -f ]]` and then a substitution — that
   pair is a test and then a separate open, and a FIFO arriving between them blocks a shell
   with no watchdog.
+- **the baseline file says which request wrote it, and the watch requires that (#264,
+  second half).** `none` told a value from no value; it cannot tell THIS round's value from
+  the LAST round's, because both are well-formed ids written on purpose by a real run. A
+  refusal in a writer's bootstrap that the driver's `exit` returned from left the previous
+  round's baseline in place, and the watch announced a terminal review newer than it as
+  this round's answer — a pass nobody requested. So the driver generates a nonce
+  (`RB_NONCE`, probed at setup like every other name it assigns) immediately before each
+  request, the writer prefixes the value with it (`<nonce> <value>`), and the driver hands
+  the same nonce to `pr-watch.sh --require-nonce`, which refuses any other. The file form
+  without `--require-nonce`, an unnonced file, and a nonce beside the VALUE form are all
+  refused — accepting any would keep the fail-open and add a spelling, as accepting both
+  empty and `none` would have. The writes stay BEFORE the requests: a request that fails
+  after the write leaves this round's nonce and id, which is not a fail-open (the watch
+  waits for a review newer than the id or times out; a `gh` failure the remote took brings
+  a pass that IS this round's answer).
+
+  **The nonce is DISTINCT BY CONSTRUCTION, not fresh by luck.** `$RANDOM` can be frozen
+  (`unset RANDOM; RANDOM=5`) and a command substitution can be REPLACED (an inherited
+  `DEBUG` trap under `extdebug` that prints a constant and returns non-zero skips the
+  command and its output is captured), so no external source alone is fresh. The nonce is a
+  FIXED-WIDTH prefix — `perl` under `env -i` prints exactly twenty-three digits, and the
+  driver refuses any other width — with the per-session counter `RB_NONCE_SEQ` APPENDED:
+  zero at setup, probed like every name the driver assigns, incremented before each
+  request. Fixed width plus a strictly increasing suffix cannot repeat within a session
+  whatever the prefix holds. The increment is PROVED BY READ-BACK, because an assignment's
+  status cannot be taken and the name can be made readonly after setup: the nonce is built
+  from `$((RB_NONCE_SEQ+1))` first, and after the increment must end in what the variable
+  now holds. The consequence of any repeat is the fail-open itself — a previous round's
+  baseline carrying that nonce is waited past. A watch invoked on a baseline file without a
+  nonce, a writer that drops the prefix, a "compatibility" arm accepting the old format,
+  a source without the width check, a nonce without the counter, or an increment without
+  its read-back is the defect.
 - **`--` before the operands, on every attempt.** A handoff path is the caller's and a
   relative one may begin with `-`, so the temporary derived from it does too: without it
   `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable
@@ -802,6 +834,26 @@ itself, so a forged head is strictly weaker than what it already holds. `test-wr
 stages the substitution against the real read and PINS that the forgery works, so anchoring
 the read later fails the case and revisits the record. Do not re-raise #272 as a fresh
 finding, and do not reintroduce the `work.id`/`(dev, ino)` mechanism the record prices out.
+
+**A sixth is accepted since 2026-09-03**, in
+`docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`: a hook that runs in the
+driving shell BETWEEN the driver's statements — a startup-provided `PROMPT_COMMAND` at the
+prompt between two of `SKILL.md`'s fences, or a `DEBUG` trap under `extdebug` between the
+commands of one fence — owns every value the driver holds from one statement to the next:
+`RB_NONCE` and `RB_NONCE_SEQ`, but equally `CODEX_SHA` before the merge gate, `WHO`,
+`PRIOR_FILE`. The driver defends startup-time state (the setup probe) and a source that lies
+or an assignment that did not take (the read-backs: a frozen source, a replaced source, a
+readonly counter, each with a refusing fixture). It does not defend a hook that rewrites
+variables between statements — one that resets the counter one command before the increment
+passes the increment's own read-back — because the statement that would check is the hook's
+to rewrite, and every defence is one more name: the chain `CLAUDE.md` records. Removing the
+dependency means no value crossing a statement, which is a different driver. The bound is
+that such a hook is the operator's own environment, already trusted for `PATH`, credentials
+and the checkout, and that no value is more exposed than the merge itself.
+`test-pr-skill-contract.sh` pins it twice: two generation blocks with the counter reset
+between them, and with a trap resetting it inside the block, each yield an EQUAL nonce. Do
+not raise a hook's rewrite of a driver-held value — between fences or between commands — as
+a fresh finding, and do not answer one with another guard.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses

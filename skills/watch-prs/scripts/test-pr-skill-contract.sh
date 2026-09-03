@@ -1905,7 +1905,7 @@ grep -q 'prior-review=' "$SKILL" \
 # path a same-UID process had replaced cost the operator the file it pointed at, with
 # nothing the helper could check in time. Given the path, the helper renames onto the name
 # through `writelib.sh`. #263.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "…the opening request writes the baseline into \$PRIOR_FILE" \
     || die "the opening request does not hand \$PRIOR_FILE to the helper"
 grep -q 'pr-request-review.sh N "$AUTO_REVIEW".*> "$PRIOR_FILE"' "$SKILL" \
@@ -1920,6 +1920,165 @@ grep -q 'pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE"' "$SKILL" \
 # AND THE WATCH READS THAT FILE RATHER THAN A VALUE. `--after-review` takes an id
 # and is for a caller holding one in a hardened process of its own; the driver is
 # not that caller.
+grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"' "$SKILL" \
+    && pass "…and the watch is told to require this request's nonce (#264)" \
+    || die "the watch is not invoked with --require-nonce \$RB_NONCE; a previous round's baseline would be waited past"
+# THE NONCE IS GENERATED BEFORE EACH OF THE THREE REQUESTS AND PROBED AT SETUP. Three
+# generation sites — the opening request, the round close, the Copilot open — because each
+# is a request the watch must be bound to; fewer means a request reuses a nonce and the
+# stale-baseline refusal does not fire for it. The probe is what stops a startup file that
+# made the name readonly from leaving every round on one nonce.
+_nc_gen="$(grep -cF 'RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e' "$SKILL")" || _nc_gen=0
+[ "$_nc_gen" -eq 3 ] \
+    && pass "…and a fresh nonce is generated before each of the three requests" \
+    || die "the nonce is generated in $_nc_gen place(s); the three requests each need their own"
+grep -q 'RB_NONCE="RbProbe' "$SKILL" \
+    && pass "…and RB_NONCE is probed at setup like every other name the driver assigns" \
+    || die "RB_NONCE is not probed at setup; a readonly one would leave every round on one nonce"
+grep -q 'RB_NONCE_SEQ="RbProbe' "$SKILL" \
+    && pass "…and so is RB_NONCE_SEQ, the per-session counter appended to every nonce" \
+    || die "RB_NONCE_SEQ is not probed at setup; a readonly one would repeat a nonce on every request"
+# AND EVERY NONCE IN A SESSION IS DISTINCT WHATEVER THE SOURCE PRINTS. A frozen `$RANDOM`
+# is one way the source stops being fresh; a REPLACED substitution is the other. Under
+# `set -T`, `extdebug` and an inherited `DEBUG` trap that prints a value and returns
+# non-zero for the `perl` command, bash skips the command and the substitution captures the
+# trap's output. Remembering the previous nonce caught a constant and missed an alternation
+# (`5`, `6`, `5`: the third repeats the first, two requests later). So the nonce is a
+# fixed-width external prefix plus a per-session counter, and this stages the worst source —
+# a CONSTANT of the right width, injected on every request — and asserts three consecutive
+# generations are three DIFFERENT accepted nonces. The whole block is lifted from the document
+# — counter increment, generation, width and digit test, append — and run in a child that
+# starts the counter at zero as setup does.
+_nc_blk="$(awk '/^    RB_NONCE=$/,/^    RB_NONCE="\$\{RB_NONCE:\?/' "$SKILL" | head -20)"
+{ [ -n "$_nc_blk" ] && grep -q 'RB_NONCE_SEQ' <<<"$_nc_blk" && grep -q ':?' <<<"$_nc_blk" && grep -q -- '-ne 23' <<<"$_nc_blk"; } \
+    || die "the nonce generation block did not lift from the document; the injection case proves nothing"
+_nc_dir="$TMP_CL/nonce-inj"; mkdir -p "$_nc_dir" || die "the injection scratch directory could not be made"
+_nc_const=12345678901234567890123   # twenty-three digits, the width the block requires
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; esac'"'"' DEBUG'
+    for _nc_i in 1 2 3; do
+        printf '%s\n' "$_nc_blk"
+        printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+    done
+} > "$_nc_dir/inj.sh" || die "the injection child could not be written"
+_nc_irc=0
+_nc_inj="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/inj.sh" 2>/dev/null)" || _nc_irc=$?
+_nc_n1="$(sed -n '1s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_inj")"
+_nc_n2="$(sed -n '2s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_inj")"
+_nc_n3="$(sed -n '3s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_inj")"
+{ [ "$_nc_irc" -eq 0 ] && [ "$_nc_n1" = "${_nc_const}1" ] && [ "$_nc_n2" = "${_nc_const}2" ] && [ "$_nc_n3" = "${_nc_const}3" ]; } \
+    && pass "…and three requests under a DEBUG trap injecting one constant get three DIFFERENT nonces, each the constant plus the counter" \
+    || die "an injected constant did not yield distinct counted nonces (rc=$_nc_irc out='$_nc_inj')"
+# AND A VALUE OF THE WRONG WIDTH IS REFUSED, which is what stops an injected `5` from
+# becoming `51`, `52`, … — the prefix width is what makes the concatenation unambiguous.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf 5; return 1;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/short.sh" || die "the short-injection child could not be written"
+_nc_src=0
+_nc_sout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/short.sh" 2>/dev/null)" || _nc_src=$?
+{ [ "$_nc_src" -ne 0 ] && ! grep -q '^N:' <<<"$_nc_sout"; } \
+    && pass "…while an injected value of the wrong width is refused at the :? rather than counted" \
+    || die "an injected '5' was accepted as a nonce (rc=$_nc_src out='$_nc_sout')"
+# AND A COUNTER THAT DID NOT ADVANCE IS REFUSED. The increment is an assignment, and a name
+# made readonly AFTER setup — in the long-lived interactive driver shell, by a
+# startup-provided `PROMPT_COMMAND` at the next prompt — fails it in silence with the list
+# reporting success; the setup probe ran earlier and cannot see it. Every request would then
+# carry the same suffix, and with an injected constant the same nonce. The nonce is built from
+# the EXPECTED next value and must end in what the variable holds after the increment; here the
+# counter is readonly at zero and the constant is injected, so the first generation must refuse.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "readonly RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/ro.sh" || die "the readonly-counter child could not be written"
+_nc_rrc=0
+_nc_rout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/ro.sh" 2>/dev/null)" || _nc_rrc=$?
+{ [ "$_nc_rrc" -ne 0 ] && ! grep -q '^N:' <<<"$_nc_rout"; } \
+    && pass "…and a counter made readonly after setup is caught by the increment read-back, refusing the request" \
+    || die "a readonly RB_NONCE_SEQ produced an accepted nonce (rc=$_nc_rrc out='$_nc_rout'); the same nonce would repeat every request"
+# AND A HOOK BETWEEN FENCES IS THE ACCEPTED LIMIT, PINNED HERE. The three cases above are
+# what the driver defends INSIDE a fence: a frozen source, a replaced source, a counter that
+# did not advance. What it does not defend is code the operator's startup files run BETWEEN
+# fences — a `PROMPT_COMMAND` — which owns every driver-held value: it can reset
+# `RB_NONCE_SEQ` to zero, pin `RB_NONCE` readonly, or re-read it from the stale file, and it
+# can do the same to `CODEX_SHA` before the merge gate. That is
+# `docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`, and this case PINS it: two
+# generation blocks with the counter reset between them, under a constant-injecting trap, yield
+# an EQUAL nonce. A later change that makes them differ fails this case and revisits the record
+# rather than silently outliving the limit.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+    printf '%s\n' "RB_NONCE_SEQ=0   # the PROMPT_COMMAND shape: state rewritten between fences"
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/hook.sh" || die "the between-fences child could not be written"
+_nc_hrc=0
+_nc_hout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/hook.sh" 2>/dev/null)" || _nc_hrc=$?
+_nc_h1="$(sed -n '1s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_hout")"
+_nc_h2="$(sed -n '2s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_hout")"
+{ [ "$_nc_hrc" -eq 0 ] && [ -n "$_nc_h1" ] && [ "$_nc_h1" = "$_nc_h2" ]; } \
+    && pass "…while a hook resetting the counter between fences repeats the nonce — the accepted limit docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md pins" \
+    || die "the between-fences limit no longer holds (rc=$_nc_hrc '$_nc_h1' vs '$_nc_h2'); re-read docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md"
+# AND THE SAME HOOK ONE COMMAND CLOSER, PINNED TOO. A `DEBUG` trap that resets the counter when
+# `$BASH_COMMAND` carries `RB_NONCE_SEQ+1` — the append assignment and the increment, INSIDE the
+# block — so the increment restores `1` and its own read-back passes — repeats the nonce with
+# nothing rewritten between fences at all. Matched on that expansion-free substring, because a
+# pattern quoting the assignment's text expands `$RB_NONCE` at trap time and never matches. The read-back proves the increment TOOK; it cannot prove nothing ran between
+# the two statements it compares, which is the boundary the record draws.
+{
+    printf '%s\n' 'set -T; shopt -s extdebug' "RB_NONCE_SEQ=0" \
+        'trap '"'"'case "$BASH_COMMAND" in "/usr/bin/env "*) printf '"$_nc_const"'; return 1;; *"RB_NONCE_SEQ+1"*) RB_NONCE_SEQ=0;; esac'"'"' DEBUG'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+    printf '%s\n' "$_nc_blk"
+    printf '%s\n' 'printf "N:[%s]\n" "$RB_NONCE"'
+} > "$_nc_dir/intrap.sh" || die "the in-fence-trap child could not be written"
+_nc_trc=0
+_nc_tout="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash "$_nc_dir/intrap.sh" 2>/dev/null)" || _nc_trc=$?
+_nc_t1="$(sed -n '1s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_tout")"
+_nc_t2="$(sed -n '2s/^N:\[\(.*\)\]$/\1/p' <<<"$_nc_tout")"
+{ [ "$_nc_trc" -eq 0 ] && [ -n "$_nc_t1" ] && [ "$_nc_t1" = "$_nc_t2" ]; } \
+    && pass "…and a DEBUG trap resetting the counter inside the block repeats the nonce too — the same accepted limit, one command closer" \
+    || die "the in-fence hook limit no longer holds (rc=$_nc_trc '$_nc_t1' vs '$_nc_t2'); re-read docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md"
+# AND THE SOURCE SURVIVES A FROZEN `$RANDOM`. `unset RANDOM; RANDOM=5` in a startup file
+# leaves `RANDOM` an ordinary variable — this file already records that unsetting it removes
+# its special behaviour — so a nonce drawn from it is the SAME on every request, a previous
+# round's baseline matches the nonce the watch is told to require, and the fail-open this
+# change closes is back. `RANDOM` is not a name the driver assigns, so the setup probe never
+# looks at it. The generation is lifted from the document and run twice under that startup;
+# the two values must differ. Run in a clean `env` so the frozen value is the case's own.
+_nc_gen_line="$(grep -m1 -F 'RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e' "$SKILL")" || _nc_gen_line=""
+[ -n "$_nc_gen_line" ] || die "the nonce generation could not be lifted from the document"
+_nc_pair="$(env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+    unset RANDOM; RANDOM=5
+    '"$_nc_gen_line"'; _a="$RB_NONCE"
+    '"$_nc_gen_line"'; _b="$RB_NONCE"
+    printf "%s|%s" "$_a" "$_b"' 2>/dev/null)" || _nc_pair="|"
+_nc_a="${_nc_pair%%|*}"; _nc_b="${_nc_pair#*|}"
+# EACH HALF IS SHAPE-CHECKED ON ITS OWN: tested joined, the `|` separator is itself a
+# non-digit and the case reported a defect the generation did not have.
+_nc_bad=""
+for _nc_v in "$_nc_a" "$_nc_b"; do
+    case "$_nc_v" in
+        "") _nc_bad="empty" ;;
+        *[!0-9]*) _nc_bad="non-digits" ;;
+    esac
+done
+if [ -n "$_nc_bad" ]; then
+    die "the nonce generation produced $_nc_bad under a frozen RANDOM ('$_nc_pair')"
+elif [ "$_nc_a" != "$_nc_b" ]; then
+    pass "…and two consecutive requests get different nonces with RANDOM frozen to a constant"
+else
+    die "two consecutive nonces were both '$_nc_a' with RANDOM frozen; a stale baseline would match"
+fi
 grep -q 'pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE"' "$SKILL" \
     && pass "…and the watch is armed from the file, not from a name" \
     || die "the watch is not invoked with --after-review-file \$PRIOR_FILE"
@@ -2165,7 +2324,7 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" < "$REQUEST_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
 # AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in

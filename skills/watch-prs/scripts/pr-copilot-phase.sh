@@ -4,7 +4,7 @@
 # Copilot's own clean verdict.
 #
 #   pr-copilot-phase.sh record <pr> <body-file> <sha-file>
-#   pr-copilot-phase.sh open   <pr> <codex-sha> <baseline-file>
+#   pr-copilot-phase.sh open   <pr> <codex-sha> <baseline-file> <nonce>
 #   pr-copilot-phase.sh close  <pr> <codex-sha> [both|codex-only]
 #
 #   0  recorded / opened / closed
@@ -265,6 +265,15 @@ if [[ $STAGE = open ]]; then
     PRIOR_FILE="${3:-}"
     [[ -n $PRIOR_FILE ]] \
         || { echo "ABORT: a baseline file is required: 'open' writes the review id it captured into it, and pr-watch.sh --after-review-file reads it back."; exit 1; }
+    # THE REQUEST NONCE, FOURTH — #264. The driver generates one per request and hands the
+    # same value to `pr-watch.sh --require-nonce`; both writes below prefix the file with
+    # it, so a baseline the watch finds carrying a previous round's nonce — left by a
+    # refusal above the write that the driver's `exit` returned from — is refused rather
+    # than waited past. Digits only, as the watch requires.
+    NONCE="${4:-}"
+    case "$NONCE" in
+        ""|*[!0-9]*) echo "ABORT: 'open' takes a fourth argument, the request nonce, as decimal digits (got '$NONCE'); the baseline is prefixed with it and pr-watch.sh --require-nonce refuses any other."; exit 1 ;;
+    esac
     # THIS READINESS WRITE STAYS, AND IT IS NOT WHAT #245 IS ABOUT. #245 is the UNBOUNDED
     # truncating open above the bootstrap, where `run_limited` does not exist yet: its
     # `[[ -f ]]` guard refused a FIFO already at the path, so what could block it was a
@@ -349,7 +358,7 @@ if [[ $STAGE = open ]]; then
     # which is the same direction `rb_load` fails in, reached without it.
     _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
         'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
-        _ "$_RB_SELF_DIR" "$PRIOR_FILE" refused-no-baseline)" \
+        _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$NONCE refused-no-baseline")" \
         || { echo "ABORT: could not write the baseline file '$PRIOR_FILE'. Nothing has been posted: $_rb_wh"; exit 1; }
     # THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF, and the answer can arrive
     # a session later, so this is re-proven rather than assumed. Requesting
@@ -477,7 +486,7 @@ if [[ $STAGE = open ]]; then
     PRIOR_REVIEW="${PRIOR_REVIEW:-none}"
     _rb_wh="$(run_limited 10 /usr/bin/env bash -p -c \
         'rb_write_handoff() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_write_handoff "$2" "$3"' \
-        _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$PRIOR_REVIEW")" \
+        _ "$_RB_SELF_DIR" "$PRIOR_FILE" "$NONCE $PRIOR_REVIEW")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; Copilot has NOT been requested: $_rb_wh"; exit 1; }
     # THIS IS THE WRITE THE HALF-OPEN RISK BELONGS TO. It stands after the revocation and
     # before the request, so a hang here leaves the phase reopened with no pass asked for
@@ -995,9 +1004,11 @@ Codex has signed off on $CODEX_SHA, and the signoff is recorded on the PR.
         REVIEWERS=codex-only, which requires the head to BE this commit and is
         therefore a narrower gate than the two-reviewer one, not a looser one
     (b) open the Copilot phase on the same head —
-        pr-copilot-phase.sh open $PR $CODEX_SHA <baseline-file>
+        pr-copilot-phase.sh open $PR $CODEX_SHA <baseline-file> <nonce>
         where <baseline-file> is a writable path this session will hand to
-        pr-watch.sh --after-review-file; the driver uses its own \$PRIOR_FILE
+        pr-watch.sh --after-review-file, and <nonce> is the decimal request nonce
+        it will hand to pr-watch.sh --require-nonce; the driver uses its own
+        \$PRIOR_FILE and generates \$RB_NONCE immediately before the call
 
 Nothing further happens until you say. This is resumable: the signoff is on the
 PR, so a later session can read it back with pr-signoff.sh.

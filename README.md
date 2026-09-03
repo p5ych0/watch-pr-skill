@@ -336,7 +336,12 @@ Then:
    token is what a reader can trust either way. A failed read that quietly became the `none` token would let the
    watch report the review the round just answered as the next one — which is why
    the read is refused rather than degraded, and why empty is refused rather than
-   read as no floor.
+   read as no floor. Since 2.2.0 the file also says WHICH REQUEST wrote it: the loop
+   generates a nonce before every review request, the writer prefixes the baseline
+   with it (`<nonce> <id>`), and the watch is told to require it. A well-formed id
+   from the PREVIOUS round — what a refusal the loop walked past leaves behind —
+   carries the previous nonce and is refused, where before it was the one stale value
+   no shape test could reject.
 
    Every comment on the review counts as a finding, replies included. A reviewer
    sometimes delivers a clean verdict as a reply, and that is *not* exempted:
@@ -433,7 +438,7 @@ Then:
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
      everything a machine reads back is composed by the script;
-   - `open <PR> <sha> <baseline-file>` runs only on the answer, and proves the phase
+   - `open <PR> <sha> <baseline-file> <nonce>` runs only on the answer, and proves the phase
      is still open before it changes anything: the head is unmoved, Codex's **live verdict**
      on that sha is clean, and the **recorded Codex signoff** still names it. A
      recorded signoff is history, not a current verdict — and a revocation is how a
@@ -484,25 +489,25 @@ Then:
      returns carries the refusal past the abort and into the wait step, which reads
      this path. That fallback is real and is tested.
 
-     **What the watch refuses is decided by shape, not by which stage wrote the
-     value.** Since 2.0.99 it refuses an empty file, and one whose last byte is not the
-     newline every writer ends with; it accepts `none` as "no baseline", and any
-     complete id. So the sentinel stops it *while it survives* — the captured id
-     overwrites it once the capture succeeds — and so does an empty file left by a
-     readiness write that failed after truncating, which used to pass. What is still
-     accepted is a substituted value that happens to be a complete id. Every well-formed
-     id is
-     accepted, including the *previous* round's after a bootstrap refusal and this
-     round's after a failed request: if the current terminal review has a different id,
-     the watch reports it as this round's answer. Where nothing was asked for, that
-     verdict is simply not this round's. **The failed request is the exception**, and the
-     one not to lump in with the rest: `--add-reviewer` has already run and the remote may
-     have accepted it before the client reported the error, so a pass may genuinely be
-     pending and what the watch reports is a *stale* verdict rather than an imaginary one
-     — do not read a refusal there as "no Copilot pass is coming". All of these are known
-     residues of the fallback rather than things the watch can catch, which is why the rule
-     is the one above: the contents are authoritative only where `open` returned 0, and the
-     driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
+     **What the watch refuses is decided by shape and by the request nonce, not by
+     which stage wrote the value.** Since 2.0.99 it refuses an empty file, and one whose
+     last byte is not the newline every writer ends with; it accepts `none` as "no
+     baseline", and any complete id. Since 2.2.0 it also requires the file to carry the
+     nonce the loop generated for **this** request — the writer prefixes the value with
+     it (`<nonce> <id>`), and the loop hands the same nonce to the watch. So the sentinel
+     stops it *while it survives* — the captured id overwrites it once the capture
+     succeeds — so does an empty file left by a readiness write that failed after
+     truncating, and so does the **previous round's id after a bootstrap refusal**: a
+     complete, well-formed id no shape test could reject, which before the nonce was the
+     one stale value the walked-past watch accepted and reported as this round's answer.
+     It carries the previous nonce now, and is refused. What the nonce does not change is
+     this round's own value after a **failed request**, which is not a fail-open and is the
+     one not to lump in with the rest: the file carries this round's nonce and id, and
+     `--add-reviewer` has already run, so the remote may have accepted it before the client
+     reported the error — a pass may genuinely be pending, and the watch waits for one
+     newer than the id or times out. Do not read a refusal there as "no Copilot pass is
+     coming". The rule stays the one above: the contents are authoritative only where
+     `open` returned 0, and the driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass. The
