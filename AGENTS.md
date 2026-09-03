@@ -360,32 +360,40 @@ When reviewing a change here:
   the later writes.** The clearing replaces it, so the write never meets it. Plant it
   at the point a racer could — after the CI gate returns, after the summary is posted.
 
-## Claims and their arguments in `SKILL.md`
+## Comments, claims and prose — what to flag and what not to ask for
 
-`SKILL.md`'s bash fences keep a one-line CLAIM beside the code and carry the
-ARGUMENT in `skills/watch-prs/SKILL-RATIONALE.md`, marked by a bare `# WHY:`
-directly under the claim. The section heading IS the claim, character for
-character, and `test-pr-skill-contract.sh` proves the bijection: every claim has a
-section, every section has a claim, neither side repeats, the totals agree, and no
-section is a heading with nothing under it.
+The authoring rules (`CLAUDE.md` § Working rules) now say: a comment is written only
+where the code looks wrong and is not — the non-obvious WHY, one or two lines, sentence
+case — and never says WHAT the code does, never carries an issue number, a review round,
+a measurement or a history. Those go to `CHANGELOG.md` and `docs/decisions/`. Apply that
+as a reviewer:
 
-**What the contract cannot see, and what to check by reading:**
+- **flag** a comment that describes what the code does, a comment that has gone stale
+  against the code beside it (it will be followed as an instruction), a comment carrying
+  history or a ticket reference, and a rationale paragraph added where a one-line
+  constraint would do;
+- **do not ask for** a comment, a "claim", a `# WHY:` marker, a rationale section, a
+  paragraph in this file, or a changelog narration as the answer to a finding. A
+  behavioural defect is answered by code and a fixture; a comment-policy finding — a
+  WHAT-comment, a stale one, history in a comment — by deleting or editing the comment
+  alone, since there is no behaviour for a fixture to pin and no checker to ask for; an
+  accepted limit by a dated record in `docs/decisions/` named here; the reason for a
+  change by its changelog entry where the change is release-bearing, and by its commit
+  message and PR body where it is not (tests, authoring documentation, these files). A
+  missing argument beside working code is not a finding.
 
-- **a merged claim that has lost a clause.** The bijection compares headings, so a
-  claim naming two invariants where its section argues three is well-formed to
-  everything mechanical. That happened three times in three consecutive pull
-  requests, and a reviewer caught each one. **One claim per invariant** is the
-  rule; pairs may stack above a single line of code, so nothing has to be merged
-  in order to be pointed at;
-- **a capitalised assertion with no `# WHY:` under it.** It reads as a claim whose
-  argument has gone missing. An instruction is written in sentence case; a short
-  argument may stay beside the code with no pointer at all. Which of the three a
-  line is, is a judgement, and it is yours.
+`SKILL.md`'s fenced `# CLAIM` / `# WHY:` pairs and `skills/watch-prs/SKILL-RATIONALE.md`
+are the state of the tree, not the rule: that mechanism is being retired, no new claims
+are added, and its removal is its own change. Until then the bijection
+`test-pr-skill-contract.sh` proves still holds for what exists, and the EXISTING claims
+stay authoritative for as long as they are installed — a claim that has gone stale
+against the code beneath it is followed as an instruction, so flag it exactly as any other
+stale comment. What is not asked for is a NEW claim: a new or changed line with no `# WHY:`
+above it is not a finding.
 
-Do not ask for a check that decides these. A Markdown parser and then a set of
-`grep`s were both built for the adjacent question and both removed across a dozen
-rounds, and the authoring rules record the 2,200-line scanner this repository paid
-for once already.
+Do not ask for a check that decides which comments are non-obvious. A Markdown parser
+and then a set of `grep`s were both built for an adjacent question and both removed, and
+the authoring rules record the 2,200-line scanner this repository paid for once already.
 
 ## Reviewing a pull request
 
