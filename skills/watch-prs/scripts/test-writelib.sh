@@ -698,33 +698,41 @@ fi
 ) && pass "a handoff path beginning with a dash is a path, not an option" \
   || die "the dash-leading path case failed"
 
-# ── THE READ SIDE: `rb_handoff_is_sha` ────────────────────────────────────
+# ── THE READ SIDE: `rb_handoff_is_sha`, ANCHORED TO THE WORK DIRECTORY ─────
 #
-# THE DRIVER'S READ LIVES HERE FOR THE REASON THE WRITE DOES. `SKILL.md` asked
-# `[[ -f $HEAD_FILE ]]` and then `case "$(<"$HEAD_FILE")"`, which is a test and then a
-# separate open of the same name — a FIFO swapped in between them BLOCKS a shell that has no
-# watchdog and no non-blocking read, before the thread-resolution step. One `sysopen` with
-# `O_NOFOLLOW|O_NONBLOCK`, the type from `fstat` on that handle, and the bytes read by a
-# `sysread` loop to a zero-length read and
-# matched whole is the only shape that answers about the inode it read.
+# THE DRIVER'S READ LIVES HERE FOR THE REASON THE WRITE DOES: `SKILL.md` asked `[[ -f ]]`
+# and then a substitution of the same name, which a FIFO swapped in between blocks. One
+# `sysopen` answers about the inode it read.
+#
+# AND SINCE #272 IT ANCHORS TO THE WORK DIRECTORY'S (dev, ino), not its name. The parent is
+# resolved by name at every handoff step, so a same-UID process that renames `work` away and
+# leaves a symlink or a fresh directory at the name would have the driver read a FORGED head —
+# `O_NOFOLLOW` guards the final component only. The read opens the directory, refuses unless
+# its identity is the recorded pair, `fchdir`s to that inode, and reads the basename relative
+# to it. The signature is `rb_handoff_is_sha <workdir> <dev> <ino> <basename>`.
 [ "$(type -t rb_handoff_is_sha 2>/dev/null)" = function ] \
     || die "writelib.sh does not define rb_handoff_is_sha"
-_wh="$TMP/sharead"; rm -rf "$_wh"; mkdir -p "$_wh"
+# THE IDENTITY OF A DIRECTORY, VIA PERL, because `stat -c`/`stat -f` differ across platforms
+# and perl is already this library's hard dependency.
+_wh_id() { /usr/bin/env perl -e 'my @s=stat($ARGV[0]) or exit 1; print "$s[0] $s[1]\n"' -- "$1"; }
+_wh="$TMP/sharead"; rm -rf "$_wh"; mkdir -p "$_wh/work"
 _wh_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-# THE VALUE THE WRITER PRODUCES IS ACCEPTED, which is the case that has to pass or the driver
-# never proceeds — and it is written by the library rather than by hand, so the two halves
-# cannot drift apart on the terminator.
-rb_write_handoff "$_wh/head" "$_wh_sha" >/dev/null 2>&1 \
-    && rb_handoff_is_sha "$_wh/head" \
-    && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha" \
+_wh_forged=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+_wh_idval="$(_wh_id "$_wh/work")"; _wh_dev="${_wh_idval% *}"; _wh_ino="${_wh_idval#* }"
+{ [ -n "$_wh_dev" ] && [ -n "$_wh_ino" ]; } || die "could not read the work directory's identity"
+# THE VALUE THE WRITER PRODUCES IS ACCEPTED, written by the library so the two halves cannot
+# drift on the terminator, and read back through the anchored path.
+rb_write_handoff "$_wh/work/head" "$_wh_sha" >/dev/null 2>&1 \
+    && rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" head \
+    && pass "a head written by rb_write_handoff is accepted through the anchored read" \
     || die "the value this library writes is not accepted by its own reader"
 # AND THE SHAPES THAT MUST NOT BE. A short id, a long one, uppercase, non-hex, empty, and a
 # 40-hex value with anything after it — the last being what a stopping reader would accept.
 for _wh_bad in "" "aaaaaaaa" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag" ; do
-    printf '%s\n' "$_wh_bad" > "$_wh/bad"
-    rb_handoff_is_sha "$_wh/bad" \
+    printf '%s\n' "$_wh_bad" > "$_wh/work/bad"
+    rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" bad \
         && die "rb_handoff_is_sha accepted '$_wh_bad'" \
         || _wh_ok=1
 done
@@ -733,27 +741,28 @@ done
     || die "the bad-shape loop did not run"
 # A 40-HEX PREFIX FOLLOWED BY A NUL is the forgery a reader that stops at the delimiter
 # accepts, and it is the exact shape the driver's own `$(<…)` would have swallowed.
-printf '%s\n\000trailing' "$_wh_sha" > "$_wh/nul"
-rb_handoff_is_sha "$_wh/nul" \
+printf '%s\n\000trailing' "$_wh_sha" > "$_wh/work/nul"
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" nul \
     && die "a 40-hex prefix followed by a NUL was accepted as a commit id" \
     || pass "…and a 40-hex prefix followed by a NUL is refused"
 # A MISSING TERMINATOR is refused too: every writer here emits one, so its absence means the
 # bytes are not what this library wrote.
-printf '%s' "$_wh_sha" > "$_wh/noterm"
-rb_handoff_is_sha "$_wh/noterm" \
+printf '%s' "$_wh_sha" > "$_wh/work/noterm"
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" noterm \
     && die "a head file with no terminating newline was accepted" \
     || pass "…and a value with no terminating newline is refused"
-# A SYMLINK TO A GOOD VALUE IS REFUSED AT THE OPEN, which is `O_NOFOLLOW`: the driver must
-# read the file the gate wrote, not one a racer pointed the name at.
-ln -s "$_wh/head" "$_wh/link"
-rb_handoff_is_sha "$_wh/link" \
-    && die "a symlink to a valid head file was followed" \
-    || pass "…and a symlink is refused at the open rather than followed"
+# A SYMLINK AT THE BASENAME IS REFUSED AT THE FILE OPEN, which is `O_NOFOLLOW`: the driver
+# must read the file the gate wrote, not one a racer pointed the name at.
+ln -s "$_wh/work/head" "$_wh/work/link"
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" link \
+    && die "a symlink at the basename was followed" \
+    || pass "…and a symlink at the basename is refused at the open rather than followed"
 # A FIFO RETURNS INSTEAD OF BLOCKING, which is the whole reason this is not a shell read.
 # Bounded, because against a blocking open the case never returns.
-if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_wh/fifo" 2>/dev/null; then
+if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_wh/work/fifo" 2>/dev/null; then
     rc=0
-    run_limited 10 bash -c '. "$1"; rb_handoff_is_sha "$2"' _ "$SELF_DIR/writelib.sh" "$_wh/fifo" || rc=$?
+    run_limited 10 bash -c '. "$1"; rb_handoff_is_sha "$2" "$3" "$4" fifo' \
+        _ "$SELF_DIR/writelib.sh" "$_wh/work" "$_wh_dev" "$_wh_ino" || rc=$?
     case "$rc" in
         124|125) die "rb_handoff_is_sha BLOCKED on a FIFO; the open is not non-blocking" ;;
         0)       die "a FIFO was accepted as a head file" ;;
@@ -762,10 +771,56 @@ if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_wh/fifo" 2>/dev/null; then
 else
     pass "…(the FIFO reader case is skipped: no mkfifo, or this filesystem refused one)"
 fi
-# AND A MISSING PATH IS A REFUSAL, not an error the caller has to distinguish.
-rb_handoff_is_sha "$_wh/absent" \
-    && die "an absent path was accepted as a head file" \
-    || pass "…and an absent path is refused"
+# AND A MISSING BASENAME IS A REFUSAL, not an error the caller has to distinguish.
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" absent \
+    && die "an absent basename was accepted as a head file" \
+    || pass "…and an absent basename is refused"
+
+# ── THE IDENTITY MUST MATCH, AND THE ARGUMENTS ARE GUARDED (#272) ──────────
+#
+# THE RECORDED (dev, ino) IS WHAT DISCRIMINATES a substituted directory from the real one.
+# Called with a DIFFERENT directory's identity, the read refuses even though the file at the
+# basename is a perfectly-formed head — so the check is the identity and not the shape.
+mkdir -p "$_wh/other"
+_wh_oidval="$(_wh_id "$_wh/other")"; _wh_odev="${_wh_oidval% *}"; _wh_oino="${_wh_oidval#* }"
+rb_handoff_is_sha "$_wh/work" "$_wh_odev" "$_wh_oino" head \
+    && die "a mismatched (dev,ino) was accepted, so the identity is not checked" \
+    || pass "the read refuses when the recorded identity is another directory's"
+# THE ARITY AND THE ARGUMENT SHAPES ARE GUARDED BEFORE perl RUNS, so a caller error is a
+# refusal rather than a numeric comparison against 0 or a basename that escapes the anchor.
+rb_handoff_is_sha "$_wh/work" \
+    && die "the one-argument form was accepted" \
+    || pass "…and the old one-argument form is refused"
+rb_handoff_is_sha "$_wh/work" x "$_wh_ino" head \
+    && die "a non-numeric device was accepted" \
+    || pass "…and a non-numeric identity is refused"
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" ../work/head \
+    && die "a basename containing a slash was accepted, so it can escape the anchor" \
+    || pass "…and a basename that is a path is refused"
+
+# ── A SUBSTITUTED WORK DIRECTORY IS REFUSED, WHICH IS THE WHOLE OF #272 ────
+#
+# ONE IDENTITY CHECK CLOSES BOTH SUBSTITUTION SHAPES, and the two cases prove it catches each.
+# Both hold a WELL-FORMED but forged head, so it is the identity that refuses and not the shape.
+#
+# ATTACK A — the directory is renamed away and a SYMLINK to an attacker directory is put at
+# its name. The open follows the symlink to the attacker's directory, whose inode is not the
+# recorded one, so the identity check refuses before `fchdir` and the forged head is never read.
+mkdir -p "$_wh/attacker"; printf '%s\n' "$_wh_forged" > "$_wh/attacker/head"
+mv "$_wh/work" "$_wh/work.real"
+ln -s "$_wh/attacker" "$_wh/work"
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" head \
+    && die "a symlinked work directory was followed to a forged head" \
+    || pass "a work directory replaced by a symlink to an attacker directory is refused"
+rm -f "$_wh/work"; mv "$_wh/work.real" "$_wh/work"
+# ATTACK B — the directory is renamed away and a FRESH directory holding a forged head is put
+# at the name. There is no symlink; the fresh directory has a fresh inode, which an attacker
+# cannot choose, so the recorded identity refuses it.
+mv "$_wh/work" "$_wh/work.real2"
+mkdir "$_wh/work"; printf '%s\n' "$_wh_forged" > "$_wh/work/head"
+rb_handoff_is_sha "$_wh/work" "$_wh_dev" "$_wh_ino" head \
+    && die "a work directory replaced by a fresh directory was accepted, so its forged head would merge" \
+    || pass "a work directory replaced by a fresh directory is refused at the identity check"
 rm -rf "$_wh"
 
 # ── THE EMPTYING POSTCONDITION ASKS ONE DESCRIPTOR TOO ─────────────────────

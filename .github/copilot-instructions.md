@@ -307,6 +307,17 @@ When reviewing a change here:
   head file through `rb_handoff_is_sha` instead of `[[ -f ]]` and then a substitution — that
   pair is a test and then a separate open, and a FIFO arriving between them blocks a shell
   with no watchdog.
+- **the parent directory is a NAME too, and the head read is anchored to its recorded
+  identity (#272).** `O_NOFOLLOW` guards only the FINAL component, so a same-UID process that
+  renames `$RB_SETUP_DIR/work` away and puts a symlink or a fresh directory at that name
+  redirects the read — the driver reads a FORGED head and merges on it, a gate BYPASS. So
+  `pr-setup.sh` records `work`'s `(dev, ino)`, the driver holds it from ONE read at setup, and
+  `rb_handoff_is_sha <workdir> <dev> <ino> <basename>` opens the directory, refuses unless its
+  identity is that pair, `fchdir`s to the verified inode, and reads the basename relative to
+  it. An attacker cannot choose a `(dev, ino)`. This anchors the merge-critical READ; the
+  writes are still name-based and are #272's follow-ups. Passing the identity per call, not
+  re-reading `work.id`, is the point — a re-read reopens the whole session as the window. A
+  head read that resolves the parent by name, or a `work.id` re-read per call, is the defect.
 - **`--` before the operands, on every attempt.** A handoff path is the caller's and a
   relative one may begin with `-`, so the temporary derived from it does too: without it
   `mv` reads the source as an option bundle and `perl` reads it as a switch, and a writable

@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.2.0] — 2026-09-03
+
+- **The driver's head read is anchored to the working directory's identity, so a substituted
+  parent directory can no longer feed it a forged head.** Every handoff resolves
+  `$RB_SETUP_DIR/work` by NAME at each step. A same-UID process that renames `work` away and
+  puts a symlink — or a fresh directory — at that name redirects the read: `O_NOFOLLOW` guards
+  only the FINAL component, so it does nothing for a substituted parent. The driver would then
+  read a **forged head** out of the attacker's directory and merge on it, which is a gate
+  **bypass** rather than a lost file — the worst of the family (#272).
+
+  **The anchor is the directory's `(dev, ino)`**, a pair an attacker cannot choose.
+  `pr-setup.sh` records it in `work.id` right after it creates `work`; the driver reads it once
+  at setup and holds `RB_WORK_DEV`/`RB_WORK_INO` in shell memory; and `rb_handoff_is_sha` now
+  takes `<workdir> <dev> <ino> <basename>`, opens the directory, refuses unless its identity is
+  that pair, `fchdir`s to the verified inode, and reads the basename relative to it. A rename
+  of the name after the open cannot reach the held inode, and a substitution before it lands on
+  a different inode and is refused.
+
+  **This is the first slice.** It closes the merge-critical READ — a forged head defeating the
+  gate. The handoff WRITES are still name-based: a substitution during a write lands the value
+  in the attacker's directory, after which this anchored read finds the real `head.txt`
+  unwritten and refuses, so the write side degrades to a denial of service rather than a
+  forgery. Anchoring the writes, and the `--body-file` posts, are #272's follow-ups. Two narrow
+  windows remain and are irreducible from separate processes — setup's own `mkdir`→fstat, and
+  the driver's one read of `work.id` — because `mkdir` hands back no descriptor; both fail
+  **closed** (the session refuses its own head) rather than forging.
+
+  **`perl` gains one more use**, already a hard requirement: it performs the identity `fstat`
+  and the `fchdir`, since `stat -c`/`stat -f` differ across GNU and BSD.
+
+
 ## [2.1.0] — 2026-09-02
 
 - **The file handoffs rename instead of truncating, so a symlink at one of those paths no

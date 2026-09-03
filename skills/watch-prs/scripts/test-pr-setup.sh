@@ -174,6 +174,20 @@ done
 [ -d "$ok_dir/work" ] \
     && pass "…under the literal the driver builds its paths from" \
     || die "the helper did not create work/ under the directory it was given"
+# AND `work.id` HOLDS THE REAL (dev, ino) OF `work` (#272). The head read anchors to it, so
+# it must be the actual identity of the directory the helper created, not something else — a
+# helper that recorded the wrong pair would have the driver refuse its own head. Two decimal
+# fields, matching what a fresh `stat` of `work` reports.
+_wid="$(cat "$ok_dir/work.id" 2>/dev/null)" || _wid=""
+_wid_real="$(/usr/bin/env perl -e 'my @s=stat($ARGV[0]) or exit 1; print "$s[0] $s[1]\n"' -- "$ok_dir/work")" || _wid_real=""
+{ [ -n "$_wid" ] && [ "$_wid" = "$_wid_real" ]; } \
+    && pass "…and work.id records the real (dev, ino) of the work directory it created" \
+    || die "work.id does not match the work directory's identity: file='$_wid' actual='$_wid_real'"
+case "$_wid" in
+    *[!0-9\ ]*|""|" "*|*" ") die "work.id is not two clean decimal fields: '$_wid'" ;;
+    *" "*) pass "…as two decimal fields the driver can split on a single space" ;;
+    *) die "work.id is not two space-separated fields: '$_wid'" ;;
+esac
 
 # ── a hostile origin is a string ───────────────────────────────────────────
 # EVERY SHAPE THAT USED TO NEED ESCAPING, against the real helper. While the driver
@@ -692,7 +706,7 @@ esac
 _od="$(mktemp -d "$TMP/od.XXXXXX")/dir"
 _out_only="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_od" 2>/dev/null)" || true
 case "$_out_only" in
-    "PR_SETUP status=ready origin=$_od/origin work=$_od/work") pass "stdout carries the ready line and nothing else" ;;
+    "PR_SETUP status=ready origin=$_od/origin work=$_od/work work_id=$_od/work.id") pass "stdout carries the ready line and nothing else" ;;
     *) die "stdout carried something other than the ready line: '$_out_only'" ;;
 esac
 _err_d="$(mktemp -d "$TMP/ed.XXXXXX")/dir"

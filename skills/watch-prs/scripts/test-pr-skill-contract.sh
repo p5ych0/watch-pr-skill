@@ -580,6 +580,12 @@ mkdir -m 700 "$1/work" || exit 1
 for _f in summary.md request.md prior.txt head.txt; do
     if [ -n "${FORGE_NONEMPTY:-}" ]; then printf 'stale\n' > "$1/work/$_f"; else : > "$1/work/$_f"; fi
 done
+# THE WORK DIRECTORY'S IDENTITY, `<dev> <ino>`, which the driver anchors the head read to
+# (#272). `FORGE_NO_WORKID` omits it, so a case can prove the block refuses when it is absent.
+if [ -z "${FORGE_NO_WORKID:-}" ]; then
+    _fwid="$(perl -e 'my @s=stat($ARGV[0]) or exit 1; print "$s[0] $s[1]\n"' -- "$1/work")" || exit 1
+    printf '%s\n' "$_fwid" > "$1/work.id" || exit 1
+fi
 # THE ORIGIN, RAW, which is the whole transport now. There is no quoting to get right
 # because nothing evaluates it: the driver reads it with `$(<…)` and hands it to the
 # identity parser.
@@ -631,6 +637,34 @@ FORGE
             pass "…and all four working paths arrive in the driving shell" ;;
         *)  die "the working paths did not arrive: '$_su_p'" ;;
     esac
+    # …AND THE WORK DIRECTORY'S IDENTITY ARRIVES, TWO DECIMAL FIELDS (#272). The head read
+    # anchors to `RB_WORK_DEV`/`RB_WORK_INO`, so a block that read them but lost or mangled
+    # them would anchor to nothing — and the good run above would still pass, since it names
+    # only the four paths.
+    _su_w="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            '"$_setup_body"'
+            printf "W=[%s][%s]\n" "${RB_WORK_DEV-}" "${RB_WORK_INO-}"
+        ' 2>&1)" || true
+    case "$_su_w" in
+        *'W=['*[0-9]']['*[0-9]']'*)
+            case "$_su_w" in *'W=[]['*|*'][]'*) die "the work identity arrived with an empty field: '$_su_w'" ;;
+                             *) pass "…and the work directory's (dev, ino) arrives, two decimal fields" ;; esac ;;
+        *)  die "the work directory identity did not arrive: '$_su_w'" ;;
+    esac
+    # …AND A MISSING `work.id` STOPS THE SESSION, because the head read cannot be anchored
+    # to an identity that never crossed. `FORGE_NO_WORKID` omits the file the forge otherwise
+    # writes, and the block's `:?` on it must refuse rather than proceed with no anchor.
+    _su_nw=0
+    _su_nwout="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" \
+        FORGE_NO_WORKID=1 FORGE_PIN_ECHO=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            '"$_setup_body"'
+            printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"
+        ' 2>&1)" || _su_nw=$?
+    { [ "$_su_nw" -ne 0 ] \
+      && case "$_su_nwout" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…and a missing work.id stops the session rather than leaving the head read unanchored" \
+        || die "setup proceeded with no work identity (rc=$_su_nw out='$_su_nwout')"
     # …AND A HELPER THAT WRITES A USABLE FILE AND THEN FAILS PINS NOTHING. This is
     # the shape the status check exists for: one that failed to write would be refused
     # by the read, and the block would look correct with no handler at all.
@@ -1647,9 +1681,14 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # closing it; `rb_handoff_is_sha` opens once with `O_NOFOLLOW|O_NONBLOCK` and answers from
 # that handle.
 _hf_guard_ln="$(grep -n '^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\] && \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\] \\$' "$SKILL" | head -1 | cut -d: -f1)" || true
-grep -q 'rb_handoff_is_sha "\$2"' "$SKILL" \
+grep -q 'rb_handoff_is_sha "\$2" "\$3" "\$4" head.txt' "$SKILL" \
     && pass "…and the head content is read through the library's one-descriptor reader" \
     || die "the driver reads \$HEAD_FILE itself; a test then a substitution is a check-before-open"
+# AND THE ANCHOR IS PASSED, which is #272: the work directory, its recorded identity, and the
+# basename — not the assembled path. Without these the read would resolve the parent by name.
+grep -qF '_ "$RB_SCRIPTS" "$RB_WORK_DIR" "$RB_WORK_DEV" "$RB_WORK_INO"' "$SKILL" \
+    && pass "…anchored on the work directory's recorded (dev, ino)" \
+    || die "the head read is not passed the work directory identity; it resolves the parent by name"
 grep -q 'case "\$(<"\$HEAD_FILE")" in' "$SKILL" \
     && die "the driver still opens \$HEAD_FILE with a substitution; a FIFO there blocks it forever" \
     || pass "…and no longer opens it with a substitution of its own"
@@ -1668,7 +1707,7 @@ _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)
 # the file once for its LENGTH and again for its ALPHABET, so a value that was forty
 # characters on the first read and something else on the second satisfied both. One read
 # is the invariant; requiring exactly one occurrence is what states it.
-_hf_dup="$(grep -c 'rb_handoff_is_sha "\$2"' "$SKILL")" || _hf_dup=0
+_hf_dup="$(grep -c 'rb_handoff_is_sha "\$2" "\$3" "\$4" head.txt' "$SKILL")" || _hf_dup=0
 [ "$_hf_dup" -eq 1 ] \
     && pass "…and the head file is read exactly once, with the post fence not repeating it" \
     || die "the head file is read in $_hf_dup place(s); it must be read once, before the replies"
@@ -1682,7 +1721,7 @@ _hf_dup="$(grep -c 'rb_handoff_is_sha "\$2"' "$SKILL")" || _hf_dup=0
 # gated head, after which the threads are resolved claiming a head nobody wrote.
 _hp_dir="$TMP_CL/hp"; mkdir -p "$_hp_dir" || die "the head-proof scratch directory could not be made"
 awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_dir/hp.sh"
-{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'rb_handoff_is_sha "$2"' "$_hp_dir/hp.sh"; } \
+{ [ -s "$_hp_dir/hp.sh" ] && grep -q 'rb_handoff_is_sha "$2" "$3" "$4" head.txt' "$_hp_dir/hp.sh"; } \
     && pass "the head proof lifts, so the cases below reach the code they name" \
     || die "the head proof did not lift; the cases prove nothing"
 
@@ -1692,47 +1731,56 @@ awk '/^if \[\[ \$HEAD_FILE != "\$SUMMARY_FILE" \]\]/, /^fi$/' "$SKILL" > "$_hp_d
 # was shadowed. Each refusal arm ends in `[[ -n "" ]]`, so a refusal reports non-zero
 # even with `exit` returning, and the success arm ends in `[[ -n x ]]`.
 # `RB_SCRIPTS` IS SUPPLIED, because the block now reaches `writelib.sh` through it. A case
-# that left it unset would exercise the child's own refusal rather than the read.
-_hp_run() {   # _hp_run <head-file> <summary-file> ; prints "S:<status> <output>"
-    HEAD_FILE="$1" SUMMARY_FILE="$2" RB_SCRIPTS="$SCRIPT_DIR" bash -c '
+# that left it unset would exercise the child's own refusal rather than the read. AND SINCE
+# #272 THE ANCHOR IS SUPPLIED TOO: the block reads `head.txt` inside `RB_WORK_DIR`, verified
+# against `RB_WORK_DEV`/`RB_WORK_INO`, so each case puts its head content at `<wd>/head.txt`
+# and `_hp_run` records the directory's real identity. The alias check still runs on
+# `HEAD_FILE` and `SUMMARY_FILE`, so those are set too.
+_hp_id() { /usr/bin/env perl -e 'my @s=stat($ARGV[0]) or exit 1; print "$s[0] $s[1]\n"' -- "$1"; }
+_hp_run() {   # _hp_run <workdir> <summary-file> ; head content already at <workdir>/head.txt
+    local _wd="$1" _sum="$2" _id _dev _ino
+    _id="$(_hp_id "$_wd")"; _dev="${_id%% *}"; _ino="${_id##* }"
+    HEAD_FILE="$_wd/head.txt" SUMMARY_FILE="$_sum" \
+        RB_WORK_DIR="$_wd" RB_WORK_DEV="$_dev" RB_WORK_INO="$_ino" RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         exit() { return 0; }
         . "$1" 2>/dev/null; _s=$?
         printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null
 }
+: > "$_hp_dir/summary"; : > "$_hp_dir/sum"
 
-# A FIFO AT THE HEAD FILE, WITH `exit` RETURNING — THE STATE THAT USED TO HANG.
+# A FIFO AT THE ANCHORED HEAD FILE, WITH `exit` RETURNING — THE STATE THAT USED TO HANG.
+# The read opens `head.txt` inside the verified directory `O_NONBLOCK`, so a FIFO there
+# returns at once and is refused rather than blocking the walked-past driver.
 #
-# `$(<"$HEAD_FILE")` OPENS the path, and opening a FIFO for reading BLOCKS until a writer
-# arrives. This shell has no watchdog and no non-blocking read, so the loop stopped with the
-# round's threads unresolved and nothing said — no wrong answer, no answer at all.
-#
-# IT NEEDS NO RACE. `gate`'s pre-bootstrap clearing is guarded by `[[ -f ]]` and skips a
-# non-regular path; `rb_empty_handoff` further down refuses one by TYPE and leaves it exactly
-# as it was, which is the handoff library's promise. So a FIFO put there before `gate` runs
-# survives the whole stage, and a driver whose `exit` returns then opens it.
-#
-# BOUNDED, AND THAT IS THE ASSERTION: against the unguarded read this never returns, so a
+# BOUNDED, AND THAT IS THE ASSERTION: against a blocking read this never returns, so a
 # timeout here is the defect rather than a slow machine.
-if command -v mkfifo >/dev/null 2>&1 && mkfifo "$_hp_dir/head-fifo" 2>/dev/null; then
-    _hp_fifo="$(run_limited 10 env HEAD_FILE="$_hp_dir/head-fifo" SUMMARY_FILE="$_hp_dir/summary" RB_SCRIPTS="$SCRIPT_DIR" \
-        bash -c '
-            exit() { return 0; }
-            . "$1" 2>/dev/null; _s=$?
-            printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"; _hp_frc=$?
-    case "$_hp_frc" in
-        124|125) die "the driver BLOCKED reading a FIFO at \$HEAD_FILE; it must prove the file regular before opening it" ;;
-        *)       pass "a FIFO at \$HEAD_FILE does not block the walked-past read" ;;
-    esac
-    case "${_hp_fifo##*S:}" in
-        0*) die "a FIFO at \$HEAD_FILE was accepted as a gated head: $_hp_fifo" ;;
-        *)  pass "…and it is refused, so no thread is resolved on it" ;;
-    esac
-    grep -q 'not a plain regular file' <<<"$_hp_fifo" \
-        && pass "…naming the type rather than the aliasing, which is a different recovery" \
-        || die "the FIFO refusal does not name the type: $_hp_fifo"
-    rm -f "$_hp_dir/head-fifo"
+if command -v mkfifo >/dev/null 2>&1; then
+    _hp_wf="$_hp_dir/wfifo"; rm -rf "$_hp_wf"; mkdir -p "$_hp_wf"
+    if mkfifo "$_hp_wf/head.txt" 2>/dev/null; then
+        _hp_wfid="$(_hp_id "$_hp_wf")"; _hp_wfdev="${_hp_wfid%% *}"; _hp_wfino="${_hp_wfid##* }"
+        _hp_fifo="$(run_limited 10 env HEAD_FILE="$_hp_wf/head.txt" SUMMARY_FILE="$_hp_dir/summary" \
+            RB_WORK_DIR="$_hp_wf" RB_WORK_DEV="$_hp_wfdev" RB_WORK_INO="$_hp_wfino" RB_SCRIPTS="$SCRIPT_DIR" \
+            bash -c '
+                exit() { return 0; }
+                . "$1" 2>/dev/null; _s=$?
+                printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"; _hp_frc=$?
+        case "$_hp_frc" in
+            124|125) die "the driver BLOCKED reading a FIFO at the anchored head file; it must open non-blocking" ;;
+            *)       pass "a FIFO at the anchored head file does not block the walked-past read" ;;
+        esac
+        case "${_hp_fifo##*S:}" in
+            0*) die "a FIFO at the head file was accepted as a gated head: $_hp_fifo" ;;
+            *)  pass "…and it is refused, so no thread is resolved on it" ;;
+        esac
+        grep -q 'does not hold a commit id' <<<"$_hp_fifo" \
+            && pass "…naming that no head was proven" \
+            || die "the FIFO refusal does not name the failure: $_hp_fifo"
+        rm -rf "$_hp_wf"
+    else
+        pass "(the FIFO head-file case is skipped: this filesystem refused a fifo)"
+    fi
 else
-    pass "(the FIFO head-file case is skipped: no mkfifo, or this filesystem refused one)"
+    pass "(the FIFO head-file case is skipped: no mkfifo)"
 fi
 
 # AN EMPTY `writelib.sh` DOES NOT HAND THE HEAD CHECK TO `PATH`. The driver's child sources
@@ -1740,14 +1788,17 @@ fi
 # name undefined, so it became a command lookup — and an executable by that name exiting 0
 # accepted a stale head and sent the driver on to resolve threads. The child defines a
 # refusing stub before it sources. Staged with `RB_SCRIPTS` pointing at a directory whose
-# `writelib.sh` is empty, a valid-looking head, `exit` returning, and the forger on `PATH`.
-_hp_forge="$_hp_dir/forge"; mkdir -p "$_hp_forge/bin"; : > "$_hp_forge/writelib.sh"
-printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/stale"
-printf '%s\n' 'the summary' > "$_hp_dir/summary"
+# `writelib.sh` is empty, a valid head in its anchored directory, `exit` returning, and the
+# forger on `PATH`.
+_hp_forge="$_hp_dir/forge"; rm -rf "$_hp_forge"; mkdir -p "$_hp_forge/bin"; : > "$_hp_forge/writelib.sh"
+_hp_wfg="$_hp_dir/wforge"; rm -rf "$_hp_wfg"; mkdir -p "$_hp_wfg"
+printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_wfg/head.txt"
+_hp_wfgid="$(_hp_id "$_hp_wfg")"; _hp_wfgdev="${_hp_wfgid%% *}"; _hp_wfgino="${_hp_wfgid##* }"
 : > "$_hp_forge/forger.log"
 { printf '#!/bin/sh\n'; printf 'echo forged >> "%s"\n' "$_hp_forge/forger.log"; printf 'exit 0\n'; } > "$_hp_forge/bin/rb_handoff_is_sha"
 chmod +x "$_hp_forge/bin/rb_handoff_is_sha"
-_hp_fg="$(HEAD_FILE="$_hp_dir/stale" SUMMARY_FILE="$_hp_dir/summary" RB_SCRIPTS="$_hp_forge" \
+_hp_fg="$(HEAD_FILE="$_hp_wfg/head.txt" SUMMARY_FILE="$_hp_dir/summary" \
+    RB_WORK_DIR="$_hp_wfg" RB_WORK_DEV="$_hp_wfgdev" RB_WORK_INO="$_hp_wfgino" RB_SCRIPTS="$_hp_forge" \
     PATH="$_hp_forge/bin:$PATH" bash -c '
         exit() { return 0; }
         . "$1" 2>/dev/null; _s=$?
@@ -1759,11 +1810,13 @@ esac
 [ ! -s "$_hp_forge/forger.log" ] \
     && pass "…and the PATH executable by the library's name was never run" \
     || die "the head check fell through to a PATH executable named rb_handoff_is_sha"
-rm -rf "$_hp_forge"
+rm -rf "$_hp_forge" "$_hp_wfg"
 
-# THE ALIAS, with a summary that is a valid-looking OID and `exit` returning.
-printf '%s' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/summary"
-_hp_out="$(_hp_run "$_hp_dir/summary" "$_hp_dir/summary")"
+# THE ALIAS, with a summary that is a valid-looking OID and `exit` returning. `HEAD_FILE` and
+# `SUMMARY_FILE` are the SAME file, so the alias check refuses before the anchored read runs.
+_hp_wa="$_hp_dir/walias"; rm -rf "$_hp_wa"; mkdir -p "$_hp_wa"
+printf '%s' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_wa/head.txt"
+_hp_out="$(_hp_run "$_hp_wa" "$_hp_wa/head.txt")"
 case "${_hp_out##*S:}" in
     0*) die "an aliased head file holding a hex-shaped summary was accepted as a gated head: $_hp_out" ;;
     *)  pass "…and an aliased head file is refused before its content is read" ;;
@@ -1776,8 +1829,8 @@ grep -q 'the same file' <<<"$_hp_out" \
 # passes the SAME string twice, so `!=` answers first and short-circuits — the `-ef` half
 # is never reached, and deleting it would leave the suite green. A symlink is the shape
 # an operator's scratch directory actually produces.
-if ln -sf "$_hp_dir/summary" "$_hp_dir/head-link" 2>/dev/null; then
-    _hp_lnk="$(_hp_run "$_hp_dir/head-link" "$_hp_dir/summary")"
+if ln -sf "$_hp_wa/head.txt" "$_hp_dir/head-link" 2>/dev/null; then
+    _hp_lnk="$(_hp_run "$_hp_wa" "$_hp_dir/head-link")"
     case "${_hp_lnk##*S:}" in
         0*) die "a symlinked head file was accepted as a gated head: $_hp_lnk" ;;
         *)  pass "…and an alias reached by a different pathname is refused too" ;;
@@ -1789,27 +1842,28 @@ if ln -sf "$_hp_dir/summary" "$_hp_dir/head-link" 2>/dev/null; then
 else
     pass "no symlink support here, so the distinct-path alias is skipped by name"
 fi
+rm -rf "$_hp_wa"
 
-# A REAL GATED HEAD IN A FILE OF ITS OWN STILL PASSES, or the case above passes by
-# refusing everything.
-printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_dir/head"
-: > "$_hp_dir/sum"
-_hp_ok="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+# A REAL GATED HEAD IN A WORK DIRECTORY OF ITS OWN STILL PASSES, or the case above passes by
+# refusing everything. The remaining content cases reuse this directory, overwriting head.txt.
+_hp_wok="$_hp_dir/wok"; rm -rf "$_hp_wok"; mkdir -p "$_hp_wok"
+printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_wok/head.txt"
+_hp_ok="$(_hp_run "$_hp_wok" "$_hp_dir/sum")"
 case "${_hp_ok##*S:}" in
-    0*) pass "…while a real gated head in a file of its own continues" ;;
+    0*) pass "…while a real gated head read through the anchored directory continues" ;;
     *)  die "a valid gated head was refused: $_hp_ok" ;;
 esac
-# AND A NON-OID IN A FILE OF ITS OWN IS STILL REFUSED, which is the content half.
-printf 'not a commit id\n' > "$_hp_dir/head"
-_hp_bad="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+# AND A NON-OID IS STILL REFUSED, which is the content half.
+printf 'not a commit id\n' > "$_hp_wok/head.txt"
+_hp_bad="$(_hp_run "$_hp_wok" "$_hp_dir/sum")"
 case "${_hp_bad##*S:}" in
     0*) die "a head file holding no commit id was accepted: $_hp_bad" ;;
     *)  pass "…and a head file holding no commit id is still refused" ;;
 esac
 # AND A HEAD OF THE RIGHT LENGTH THAT IS NOT HEX, which the single read has to catch on
 # the same pass as the length — two reads answered those separately.
-printf '%s\n' 'ZZZZZZ0123456789abcdef0123456789abcdef01' > "$_hp_dir/head"
-_hp_hex="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+printf '%s\n' 'ZZZZZZ0123456789abcdef0123456789abcdef01' > "$_hp_wok/head.txt"
+_hp_hex="$(_hp_run "$_hp_wok" "$_hp_dir/sum")"
 case "${_hp_hex##*S:}" in
     0*) die "a forty-character non-hex head was accepted: $_hp_hex" ;;
     *)  pass "…and a forty-character non-hex head is refused on the same read" ;;
@@ -1820,13 +1874,36 @@ esac
 # green — and a head file altered to hold a short or long hex value would reach the
 # irreversible replies.
 for _hp_len in 'abcdef01' 'abcdef0123456789abcdef0123456789abcdef0123'; do
-    printf '%s\n' "$_hp_len" > "$_hp_dir/head"
-    _hp_wl="$(_hp_run "$_hp_dir/head" "$_hp_dir/sum")"
+    printf '%s\n' "$_hp_len" > "$_hp_wok/head.txt"
+    _hp_wl="$(_hp_run "$_hp_wok" "$_hp_dir/sum")"
     case "${_hp_wl##*S:}" in
         0*) die "an all-hex head of ${#_hp_len} characters was accepted: $_hp_wl" ;;
         *)  pass "…and an all-hex head of ${#_hp_len} characters is refused" ;;
     esac
 done
+rm -rf "$_hp_wok"
+
+# AND A SUBSTITUTED WORK DIRECTORY IS REFUSED END TO END — the whole of #272 at the driver.
+# The block is given the identity the driver recorded once; a work directory swapped for a
+# fresh one holding a well-formed but FORGED head has a different inode, so the anchored read
+# refuses it and the forged head never reaches the replies. `exit` returns, which is the
+# walked-past driver this anchoring protects.
+_hp_wsub="$_hp_dir/wsub"; rm -rf "$_hp_wsub"; mkdir -p "$_hp_wsub"
+printf '%s\n' 'abcdef0123456789abcdef0123456789abcdef01' > "$_hp_wsub/head.txt"
+_hp_subid="$(_hp_id "$_hp_wsub")"; _hp_subdev="${_hp_subid%% *}"; _hp_subino="${_hp_subid##* }"
+rm -rf "$_hp_wsub"; mkdir -p "$_hp_wsub"
+printf '%s\n' 'ffffffffffffffffffffffffffffffffffffffff' > "$_hp_wsub/head.txt"
+_hp_sub="$(HEAD_FILE="$_hp_wsub/head.txt" SUMMARY_FILE="$_hp_dir/sum" \
+    RB_WORK_DIR="$_hp_wsub" RB_WORK_DEV="$_hp_subdev" RB_WORK_INO="$_hp_subino" RB_SCRIPTS="$SCRIPT_DIR" \
+    bash -c '
+        exit() { return 0; }
+        . "$1" 2>/dev/null; _s=$?
+        printf "S:%s " "$_s"' _ "$_hp_dir/hp.sh" 2>/dev/null)"
+case "${_hp_sub##*S:}" in
+    0*) die "a work directory replaced after its identity was recorded was accepted, so a forged head would merge: $_hp_sub" ;;
+    *)  pass "a work directory replaced after its identity was recorded is refused end to end" ;;
+esac
+rm -rf "$_hp_wsub"
 
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already

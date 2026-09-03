@@ -4,7 +4,8 @@
 #
 #   pr-setup.sh <dir>
 #
-#   0  <dir>/origin holds the remote and <dir>/work holds the session's four files
+#   0  <dir>/origin holds the remote, <dir>/work holds the session's four files, and
+#      <dir>/work.id holds `<dev> <ino>` of <dir>/work, the identity the head read anchors to
 #   1  stopped — the reason is on stderr
 #   2  the STORAGE would not take it — the directory could not be created
 #      exclusively, or a write inside it failed. The caller retries under a second
@@ -68,7 +69,9 @@
 # wrote a file of assignments the driver SOURCED, which made `.` — a NAME, in the one
 # shell that cannot re-exec out of its operator's functions — the thing carrying the
 # session's identity. It hands back the ORIGIN alone now, in a file read with `$(<…)`,
-# so a replaced file yields a STRING rather than commands running in that shell.
+# so a replaced file yields a STRING rather than commands running in that shell. Since #272
+# it also hands back the work directory's `(dev, ino)` in `work.id`, read the same way and
+# split into two integers — a second value the driver cannot derive, and still data not code.
 #
 # WHICH IS NOT THE SAME AS THE STRING BEING CHECKED, and this comment used to imply it
 # was. `rb_identity` asks whether the value IS a usable identity, not whether it is THIS
@@ -284,6 +287,54 @@ umask 077
 set -C
 RB_WORK_DIR="$RB_DIR/work"
 /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" 2>/dev/null || rb_setup_stop work_dir 2
+
+# ── the work directory's identity, recorded once, as close to `mkdir` as it goes ──
+#
+# #272: EVERY handoff resolves `$RB_DIR/work` by NAME at each step, so a same-UID process that
+# renames it away and puts a symlink or a fresh directory at the name redirects the operation
+# — the driver reads a FORGED head out of the attacker's directory and merges on it. The only
+# anchor against that is the directory's (dev, ino): recorded HERE, held by the driver in
+# shell memory from one read, and verified by `rb_handoff_is_sha` before it reads the head. A
+# name cannot be the anchor, because the name is what the attacker controls.
+#
+# RECORDED IMMEDIATELY AFTER `mkdir`, so a same-UID racer has the smallest window to swap
+# `work` before this fstat. One remains — between `mkdir` and this open by name — and it is
+# irreducible from a separate process: `mkdir` returns no descriptor, so `work` must be
+# reopened by name to be fstat'd. A swap in that window records the wrong identity and the
+# session then refuses ITS OWN head, which fails closed rather than forging. That residual,
+# and the write-side consumers this slice does not yet anchor, are what #272 stays open for.
+#
+# VIA perl AND `fstat`, not `stat -c`/`stat -f`: those differ across GNU and BSD, perl is a
+# hard dependency already, and fstat asks the inode that was opened. `O_NOFOLLOW` refuses a
+# symlink swapped into the `mkdir`→open window — `work` is a real directory, so it is a no-op
+# on the honest path — which shrinks the residual to a REAL-directory swap in that one window;
+# the driver's identity check then refuses that, since the fresh directory's inode is not the
+# recorded one.
+RB_WORK_ID=""
+RB_WORK_ID="$(/usr/bin/env -i PATH="$PATH" perl -e '
+    use Fcntl qw(O_RDONLY O_NOFOLLOW);
+    sysopen(my $dh, $ARGV[0], O_RDONLY|O_NOFOLLOW) or exit 2;
+    my @s = stat($dh) or exit 3;
+    exit 4 unless -d _;
+    print "$s[0] $s[1]\n";
+    exit 0;
+' -- "$RB_WORK_DIR")" || rb_setup_stop work_id 2
+# TWO NON-EMPTY DECIMAL FIELDS, `<dev> <ino>`, or it is not an identity the driver can split
+# on a single space. This refuses anything else before it reaches the file the driver reads.
+_rb_wid_dev="${RB_WORK_ID%% *}"; _rb_wid_ino="${RB_WORK_ID##* }"
+case "$RB_WORK_ID" in "$_rb_wid_dev $_rb_wid_ino") ;; *) rb_setup_stop work_id 2 ;; esac
+case "$_rb_wid_dev" in ""|*[!0-9]*) rb_setup_stop work_id 2 ;; esac
+case "$_rb_wid_ino" in ""|*[!0-9]*) rb_setup_stop work_id 2 ;; esac
+# WRITTEN, THEN READ BACK, exactly as the origin below is: `printf` can report success and
+# fail at the flush, and a driver reading a truncated identity would compare `work` against a
+# half-recorded pair and refuse its own head. The open is exclusive under the `set -C` in
+# force, so a pre-planted name is refused rather than followed.
+printf '%s\n' "$RB_WORK_ID" > "$RB_DIR/work.id" || rb_setup_stop work_id 2
+[ -s "$RB_DIR/work.id" ] || rb_setup_stop work_id 2
+_rb_wid_back=""
+_rb_wid_back="$(cat "$RB_DIR/work.id" 2>/dev/null)" || rb_setup_stop work_id 2
+[ "$_rb_wid_back" = "$RB_WORK_ID" ] || rb_setup_stop work_id 2
+
 for _f in summary.md request.md prior.txt head.txt; do
     : > "$RB_WORK_DIR/$_f" || rb_setup_stop work_files 2
     { [ -f "$RB_WORK_DIR/$_f" ] && [ ! -s "$RB_WORK_DIR/$_f" ]; } \
@@ -305,10 +356,11 @@ done
 # information: `OWNER`, `REPO` and `HOST` are what `rb_identity` derives from the
 # origin and the driver runs it anyway; the two reviewer logins are constants the
 # driver already proves against their literals; the working directory and its four
-# files are a literal suffix under a directory the driver named. Only the ORIGIN
-# crosses a boundary the driver cannot see across — and a single value comes back the
-# way `pr-origin.sh` has always sent one, in a file the caller reads with `$(<…)`,
-# which is an expansion with no command in it to shadow.
+# files are a literal suffix under a directory the driver named. The ORIGIN crosses a
+# boundary the driver cannot see across, and since #272 so does the work directory's
+# `(dev, ino)` — the driver cannot fstat a directory this process created and closed. Both
+# come back the way `pr-origin.sh` has always sent one, in a file the caller reads with
+# `$(<…)`, which is an expansion with no command in it to shadow.
 #
 # SO THERE IS NO QUOTING HERE, and that whole class is gone with it. The value is
 # written raw and read as data; nothing evaluates it, so a remote carrying a quote, a
@@ -361,5 +413,5 @@ _rb_back="$(cat "$RB_DIR/origin" 2>/dev/null)" || rb_setup_stop origin_write 2
 # driver retries once under a second fixed name.
 
 
-echo "PR_SETUP status=ready origin=$RB_DIR/origin work=$RB_WORK_DIR"
+echo "PR_SETUP status=ready origin=$RB_DIR/origin work=$RB_WORK_DIR work_id=$RB_DIR/work.id"
 exit 0

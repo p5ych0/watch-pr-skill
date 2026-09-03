@@ -1395,6 +1395,31 @@ The `else` arm covers the alias and everything else, because they have the same 
 no gate wrote a head there, so resolve nothing. It re-asks the identity to say which, since
 `[[` opens nothing and the two send an operator to different places.
 
+## AND THE READ IS ANCHORED TO THE WORK DIRECTORY'S RECORDED IDENTITY, not resolved by its name.
+
+Everything above closes the FINAL component — the head file itself being a FIFO or a symlink.
+The PARENT is still resolved by name. `HEAD_FILE` is `$RB_SETUP_DIR/work/head.txt`, and a
+same-UID process that renames `work` away and puts a symlink, or a fresh directory, at that
+name redirects the read: `O_NOFOLLOW` does not see a substituted ancestor, so the child would
+`fchdir` into the attacker's directory and read a FORGED head, and the driver would resolve
+threads and merge on it. That is #272, and it is the worst of the family because it is a gate
+BYPASS rather than a lost file.
+
+So the child is given the work directory, its recorded `(dev, ino)`, and the basename
+`head.txt`, not the assembled path. `rb_handoff_is_sha` opens the directory, refuses unless
+its identity is that pair, `fchdir`s to the verified inode, and reads `head.txt` relative to
+it. A rename of the name after the open does not reach the held inode; a substitution before
+it lands on a different inode and is refused — an attacker cannot choose a `(dev, ino)`.
+
+The identity is `RB_WORK_DEV`/`RB_WORK_INO`, which this shell read ONCE from `work.id` at
+setup and holds in memory. Passing it per call rather than having the child re-read the file
+is the point: a re-read would give a same-UID process the whole session to substitute the
+file it is read from, which is the window the one-time recording closes. This anchors the
+READ. The writes are still name-based — a substitution during a WRITE lands the value in the
+attacker's directory, after which this anchored read finds the real `head.txt` unwritten and
+REFUSES, so the write side degrades to a denial of service rather than a forgery, and its
+own anchoring is a follow-up. #272.
+
 ## THE INTERFACE IS IN THE SCRIPT'S OWN HEADER, and it is not restated here.
 
 Twenty-four lines of this block were the two invocations, the exit statuses and the
@@ -2112,9 +2137,10 @@ the same three refusals this block has always made about an origin.
 ## EVERY OTHER VALUE IS THIS SHELL'S OWN, ASSIGNED FROM A LITERAL.
 
 The helper hands back the origin and nothing else, so the rest is assigned here: the two
-reviewer logins, which are constants, and the four working paths, which are a literal
-suffix under a directory this shell chose. Assigning them here rather than receiving
-them removes the transport they used to travel in, and with it the `.` that carried it.
+reviewer logins, which are constants, and the four working paths and the work directory
+that holds them, which are a literal suffix under a directory this shell chose. Assigning
+them here rather than receiving them removes the transport they used to travel in, and with
+it the `.` that carried it.
 
 THAT THEY ARRIVED IS A SEPARATE OBLIGATION, and it has its own claim below. This one is
 about PROVENANCE — where the values come from — and a future edit could satisfy it while
@@ -2129,6 +2155,27 @@ its old value. So the postcondition is the assertion: each name is compared agai
 literal it was just given, and the four files are required to exist and be empty
 besides. A `readonly SUMMARY_FILE` pointing somewhere else is what that catches, and it
 is the same shape this block uses for `RB_REMOTE` — assign, then prove by reading back.
+
+## THE WORK DIRECTORY'S IDENTITY CROSSES IN A FILE AND IS HELD, so the head read can anchor to it.
+
+The origin is not the only thing setup knows that this shell cannot derive. #272: every
+handoff resolves `$RB_SETUP_DIR/work` by NAME, so a same-UID process that renames it away and
+substitutes a symlink or a fresh directory redirects the read and the driver merges on a
+forged head. The anchor against that is the directory's `(dev, ino)` — a pair an attacker
+cannot choose — recorded by `pr-setup.sh` right after it creates `work`, and read here into
+`RB_WORK_DEV`/`RB_WORK_INO`.
+
+It crosses the way the origin does: a file `work.id` this shell binds to fd 9 and reads with
+`$(<…)`, `-O` and `-f` first so a name swapped between the test and the read is refused. Then
+it is SPLIT on the single space and each field proved decimal, because a value the head read
+compares against with `==` must be two integers or it is not an identity at all.
+
+HELD, NOT RE-READ. The two numbers stay in this shell's memory and are passed to the head
+read per call. A child that re-read `work.id` each time would give a same-UID process the
+whole session to substitute the file — the very window recording it once, here, closes. What
+survives is the narrow window between setup creating `work` and setup fstat'ing it, which no
+separate process can remove, since `mkdir` hands back no descriptor — that residual, and the
+write-side consumers this slice does not yet anchor, are what #272 stays open for.
 
 ## ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
 

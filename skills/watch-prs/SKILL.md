@@ -209,7 +209,15 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
    && ( WHO="RbProbe$$$RANDOM$RANDOM"; [[ $WHO = RbProbe* ]] \
      && [[ -z ${!WHO:-} ]] ) 2>/dev/null \
    && ( RB_REMOTE="RbProbe$$$RANDOM$RANDOM"; [[ $RB_REMOTE = RbProbe* ]] \
-     && [[ -z ${!RB_REMOTE:-} ]] ) 2>/dev/null; then
+     && [[ -z ${!RB_REMOTE:-} ]] ) 2>/dev/null \
+   && ( RB_WORK_ID="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_ID = RbProbe* ]] \
+     && [[ -z ${!RB_WORK_ID:-} ]] ) 2>/dev/null \
+   && ( RB_WORK_DEV="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DEV = RbProbe* ]] \
+     && [[ -z ${!RB_WORK_DEV:-} ]] ) 2>/dev/null \
+   && ( RB_WORK_INO="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_INO = RbProbe* ]] \
+     && [[ -z ${!RB_WORK_INO:-} ]] ) 2>/dev/null \
+   && ( RB_WORK_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
+     && [[ -z ${!RB_WORK_DIR:-} ]] ) 2>/dev/null; then
     # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
     # WHY:
     RB_TMPPARENT=
@@ -266,6 +274,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
             REQUEST_FILE="$RB_SETUP_DIR/work/request.md"
             PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"
             HEAD_FILE="$RB_SETUP_DIR/work/head.txt"
+            RB_WORK_DIR="$RB_SETUP_DIR/work"
             # THE ASSIGNMENTS ARE READ BACK, because a readonly name fails one in silence.
             # WHY:
             if [[ $CODEX_BOT = 'chatgpt-codex-connector[bot]' ]] \
@@ -274,11 +283,26 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
                && [[ $REQUEST_FILE = "$RB_SETUP_DIR"/work/request.md ]] \
                && [[ $PRIOR_FILE = "$RB_SETUP_DIR"/work/prior.txt ]] \
                && [[ $HEAD_FILE = "$RB_SETUP_DIR"/work/head.txt ]] \
+               && [[ $RB_WORK_DIR = "$RB_SETUP_DIR"/work ]] \
                && [[ -f $SUMMARY_FILE ]] && [[ ! -s $SUMMARY_FILE ]] \
                && [[ -f $REQUEST_FILE ]] && [[ ! -s $REQUEST_FILE ]] \
                && [[ -f $PRIOR_FILE ]] && [[ ! -s $PRIOR_FILE ]] \
                && [[ -f $HEAD_FILE ]] && [[ ! -s $HEAD_FILE ]]
             then
+                # THE WORK DIRECTORY'S IDENTITY CROSSES IN A FILE AND IS HELD, so the head read can anchor to it.
+                # WHY:
+                RB_WORK_ID=
+                { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                    && RB_WORK_ID="$(<"/dev/fd/9")"; } 9<"$RB_SETUP_DIR/work.id"
+                RB_WORK_ID="${RB_WORK_ID:?the setup helper wrote no work-directory identity; the head read cannot be anchored to it}"
+                RB_WORK_DEV="${RB_WORK_ID%% *}"
+                RB_WORK_INO="${RB_WORK_ID##* }"
+                [[ $RB_WORK_ID != "$RB_WORK_DEV $RB_WORK_INO" ]] && RB_WORK_ID=
+                [[ $RB_WORK_DEV = *[!0-9]* ]] && RB_WORK_ID=
+                [[ $RB_WORK_INO = *[!0-9]* ]] && RB_WORK_ID=
+                [[ -z $RB_WORK_DEV ]] && RB_WORK_ID=
+                [[ -z $RB_WORK_INO ]] && RB_WORK_ID=
+                RB_WORK_ID="${RB_WORK_ID:?the work-directory identity is not two decimal fields; the head read cannot be anchored}"
                 # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
                 # WHY:
                 # ONE NAME PER CALL, because `export` is a name this shell may have wrapped.
@@ -333,7 +357,7 @@ if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
         [[ -n "" ]]
     fi
 else
-    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
+    echo "ABORT: one of the names this session assigns — RB_TMPPARENT, RB_TMPPARENT2, RB_SETUP_DIR, RB_PIN_SEEN, RB_REMOTE, RB_WORK_ID, RB_WORK_DEV, RB_WORK_INO, RB_WORK_DIR, CODEX_SHA, CODEX_BOT, COPILOT_BOT, SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE, HEAD_FILE or WHO — is readonly, value-transforming, or aimed at another name; this session cannot be set up"
     exit 1
     [[ -n "" ]]
 fi
@@ -853,9 +877,11 @@ fi
 # WHY:
 # AND THE CONTENT IS ASKED OF ONE DESCRIPTOR, not of the name a second time.
 # WHY:
+# AND THE READ IS ANCHORED TO THE WORK DIRECTORY'S RECORDED IDENTITY, not resolved by its name.
+# WHY:
 if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]] \
-   && /usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' \
-      _ "$RB_SCRIPTS" "$HEAD_FILE"; then
+   && /usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2" "$3" "$4" head.txt' \
+      _ "$RB_SCRIPTS" "$RB_WORK_DIR" "$RB_WORK_DEV" "$RB_WORK_INO"; then
     [[ -n x ]]
 else
     # THE TWO REASONS ARE NAMED APART, because they send the operator to different places:

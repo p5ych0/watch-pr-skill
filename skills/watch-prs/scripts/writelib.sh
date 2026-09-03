@@ -119,10 +119,11 @@
 #
 # The caller supplies its own abort prose: these are three stages with three consequences,
 # and a shared message would name none of them.
-# rb_handoff_is_sha <path>
-#   0  the path is a plain regular file holding exactly one 40-character lowercase
-#      hexadecimal commit id and the terminating newline this library writes
-#   1  it is not, or could not be read
+# rb_handoff_is_sha <workdir> <dev> <ino> <basename>
+#   0  <workdir> is the directory whose identity is <dev>/<ino>, and <basename> within it
+#      is a plain regular file holding exactly one 40-character lowercase hexadecimal
+#      commit id and the terminating newline this library writes
+#   1  it is not, the directory identity did not match, or it could not be read
 #
 # THE READ SIDE OF THE SAME RULE, and it exists because the DRIVER needs it. `SKILL.md`
 # asked `[[ -f $HEAD_FILE ]]` and then `case "$(<"$HEAD_FILE")"`, which is a test and then a
@@ -131,9 +132,34 @@
 # read, before the thread-resolution step. No additional pathname test closes that; only
 # asking the question of the descriptor that was opened does.
 #
-# SO IT IS ONE OPEN AND EVERY ANSWER COMES FROM IT. `O_NOFOLLOW` refuses a symlink at the
-# open, `O_NONBLOCK` makes a FIFO return at once instead of waiting, `-f` on the HANDLE gives
-# the type of the inode actually opened, and the bytes are read with `sysread` until a
+# AND IT IS ANCHORED TO THE WORK DIRECTORY'S IDENTITY, NOT ITS NAME — #272. Every step of a
+# handoff resolves the parent `$RB_SETUP_DIR/work` by NAME, and a same-UID process that
+# renames that directory away and puts a symlink, or a fresh directory, at the name redirects
+# the read: `O_NOFOLLOW` refuses a symlink in the FINAL component only, so it does nothing for
+# a substituted PARENT, and the driver would then read a FORGED head out of the attacker's
+# directory and merge on it. So this opens the work directory, `fstat`s it, and REFUSES unless
+# its (dev, ino) is the pair the driver recorded from setup — then `fchdir`s to that verified
+# inode and reads <basename> RELATIVE to it. A rename of the name after the open does not reach
+# the held inode; a substitution before it lands on a different inode and is refused. That one
+# identity check closes BOTH substitution shapes: a `work` replaced by a symlink resolves to
+# the attacker's directory, whose inode is not the recorded one, and a `work` replaced by a
+# fresh directory has a fresh inode — an attacker cannot choose a (dev, ino). `O_NOFOLLOW` on
+# the DIRECTORY open would only move the symlink case's refusal one step earlier and is not
+# added, because the identity check already refuses it and a guard that changes nothing is a
+# guard a reviewer has to disprove. The FILE open below keeps `O_NOFOLLOW`, where it IS
+# load-bearing: a symlink at the basename itself. `<basename>` is a basename and not a path —
+# a `/` in it would resolve outside the anchored directory — so it is refused.
+#
+# THE IDENTITY IS PASSED IN, NOT READ HERE. The driver holds it in shell memory from ONE read
+# at setup, and every consumer is given it. Re-reading it per call would give a same-UID
+# process the whole session to substitute the file it is read from — which is the window the
+# one-time recording exists to close. This anchors the READ, which is the merge-critical
+# consumer, a forged head being a gate bypass; the writes are still name-based and are their
+# own follow-ups (#272).
+#
+# SO IT IS ONE OPEN OF THE FILE AND EVERY ANSWER COMES FROM IT. `O_NOFOLLOW` refuses a symlink
+# at the open, `O_NONBLOCK` makes a FIFO return at once instead of waiting, `-f` on the HANDLE
+# gives the type of the inode actually opened, and the bytes are read with `sysread` until a
 # zero-length read and matched whole — a slurp returns what arrived BEFORE an I/O error, so
 # a matching prefix followed by a failure read as a complete head; `sysread` returns undef
 # on the error and this refuses.
@@ -141,11 +167,22 @@
 # NOTHING CROSSES BACK, WHICH IS THE POINT FOR THAT CALLER. The driver does not need the sha
 # — it needs to know a gate proved one — so this answers with a STATUS and the driver uses it
 # as a condition. A value would have to land in a name, and a name a startup file has made
-# readonly loses it silently.
+# readonly loses it silently. The guards below refuse SILENTLY for the same reason: a bad
+# arity, a non-numeric identity or a basename that is a path is a caller error, and the caller
+# reads only the status.
 rb_handoff_is_sha() {
+    [ "$#" -eq 4 ] || return 1
+    case "$2" in ""|*[!0-9]*) return 1 ;; esac
+    case "$3" in ""|*[!0-9]*) return 1 ;; esac
+    case "$4" in ""|.|..|*/*) return 1 ;; esac
     /usr/bin/env -i PATH="$PATH" perl -e '
         use Fcntl qw(O_RDONLY O_NONBLOCK O_NOFOLLOW);
-        sysopen(my $h, $ARGV[0], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
+        sysopen(my $dh, $ARGV[0], O_RDONLY) or exit 2;
+        my @ds = stat($dh) or exit 3;
+        exit 8 unless -d _;
+        exit 7 unless $ds[0] == $ARGV[1] && $ds[1] == $ARGV[2];
+        chdir($dh) or exit 9;
+        sysopen(my $h, $ARGV[3], O_RDONLY|O_NONBLOCK|O_NOFOLLOW) or exit 2;
         stat($h) or exit 3;
         exit 4 unless -f _;
         my $got = "";
@@ -157,7 +194,7 @@ rb_handoff_is_sha() {
         }
         exit 5 unless $got =~ /\A[0-9a-f]{40}\n\z/;
         exit 0;
-    ' -- "$1" 2>/dev/null
+    ' -- "$1" "$2" "$3" "$4" 2>/dev/null
 }
 
 
