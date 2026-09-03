@@ -778,17 +778,21 @@ rm -rf "$_wh"
 # is not safely acquirable in the driver's bash), and the attacker is a same-UID process that
 # already has arbitrary code execution as the operator.
 #
-# THIS CASE PINS THE LIMIT. It asserts the substituted parent IS followed, so a later change
-# that anchors the read and stops the forgery makes this case fail — which forces the record
-# to be revisited rather than silently outliving the limit it accepts.
+# THIS CASE PINS THE LIMIT, AND IT DISTINGUISHES WHICH INODE WAS READ. `rb_handoff_is_sha`
+# answers only a STATUS, so both a real and a forged 40-hex value would return 0 and the case
+# could not tell a name-following read from an anchored one. So the ORIGINAL `work/head.txt`
+# is NOT a commit id and the substituted one IS: a status of 0 then means the read followed
+# the substituted parent to the valid forged head — the accepted limit — while an anchored
+# read that reached the original inode would read the invalid value and return non-zero,
+# failing this case and forcing the record to be revisited.
 _wl_p="$TMP/parentsub"; rm -rf "$_wl_p"; mkdir -p "$_wl_p/work"
-printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' > "$_wl_p/work/head.txt"
+printf '%s\n' 'not-a-commit-id' > "$_wl_p/work/head.txt"
 mkdir -p "$_wl_p/attacker"
 printf '%s\n' 'ffffffffffffffffffffffffffffffffffffffff' > "$_wl_p/attacker/head.txt"
 mv "$_wl_p/work" "$_wl_p/work.real"
 if ln -s "$_wl_p/attacker" "$_wl_p/work" 2>/dev/null; then
     rb_handoff_is_sha "$_wl_p/work/head.txt" \
-        && pass "a substituted work directory is followed to a forged head (accepted limit #272)" \
+        && pass "a substituted work directory is followed to a forged head, not the original invalid one (accepted limit #272)" \
         || die "the parent-substitution limit no longer holds; re-read docs/decisions/2026-09-03-workdir-parent-substitution.md"
 else
     pass "(the parent-substitution limit case is skipped: no symlink support here)"
