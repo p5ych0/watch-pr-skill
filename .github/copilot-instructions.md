@@ -401,16 +401,23 @@ as a reviewer:
   history or a ticket reference, and a rationale paragraph added where a one-line
   constraint would do;
 - **do not ask for** a comment, a "claim", a `# WHY:` marker, a rationale section, a
-  paragraph in this file, or a changelog narration as the answer to a finding. A defect
-  is answered by code and a fixture; an accepted limit by a dated record in
-  `docs/decisions/` named here; the reason for a change by its changelog entry. A missing
-  argument beside working code is not a finding.
+  paragraph in this file, or a changelog narration as the answer to a finding. A
+  behavioural defect is answered by code and a fixture; a comment-policy finding — a
+  WHAT-comment, a stale one, history in a comment — by deleting or editing the comment
+  alone, since there is no behaviour for a fixture to pin and no checker to ask for; an
+  accepted limit by a dated record in `docs/decisions/` named here; the reason for a
+  change by its changelog entry where the change is release-bearing, and by its commit
+  message and PR body where it is not (tests, authoring documentation, these files). A
+  missing argument beside working code is not a finding.
 
 `SKILL.md`'s fenced `# CLAIM` / `# WHY:` pairs and `skills/watch-prs/SKILL-RATIONALE.md`
 are the state of the tree, not the rule: that mechanism is being retired, no new claims
 are added, and its removal is its own change. Until then the bijection
-`test-pr-skill-contract.sh` proves still holds for what exists; do not ask that a new
-line be given a claim, and do not treat a fence's comment lines as load-bearing.
+`test-pr-skill-contract.sh` proves still holds for what exists, and the EXISTING claims
+stay authoritative for as long as they are installed — a claim that has gone stale
+against the code beneath it is followed as an instruction, so flag it exactly as any other
+stale comment. What is not asked for is a NEW claim: a new or changed line with no `# WHY:`
+above it is not a finding.
 
 Do not ask for a check that decides which comments are non-obvious. A Markdown parser
 and then a set of `grep`s were both built for an adjacent question and both removed, and

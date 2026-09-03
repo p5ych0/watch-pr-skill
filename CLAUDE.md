@@ -16,18 +16,24 @@ request cannot rewrite the rules it is judged by.
 The short form. Where a rule below conflicts with a longer section later in this file,
 this section wins; the longer sections are history that will be compressed to match.
 
-**Stack.** bash — 3.2.57 (macOS) and 5 (Linux), every helper started `bash -p`; `perl`
-(hard runtime requirement since 2.1.0); GNU or BSD coreutils; `gh`; `git`. No Node, no
-Python at runtime. Two reviewers: Codex and Copilot, both GitHub apps; no daemon.
+**Stack.** bash — 3.2.57 (macOS) and 5 (Linux). Every `pr-*.sh` helper is started
+`bash -p` by its caller, with two exceptions the tests pin: `pr-selfcheck.sh`, which
+re-execs into a clean shell itself, and `pr-origin.sh`, which is not executable and is
+always started by a caller naming the interpreter. Runtime executables: `perl` (hard
+requirement since 2.1.0), `jq`, `gh`, `git`, GNU or BSD coreutils. No Node, no Python at
+runtime. Two reviewers: Codex and Copilot, both GitHub apps; no daemon.
 
 **Structure.** `skills/watch-prs/SKILL.md` drives; `skills/watch-prs/scripts/pr-*.sh` are
 the helpers, `*lib.sh` the shared libraries, `test-*.sh` the fixtures; `docs/decisions/`
 holds accepted limits; `README.md` is the only document written for a person. The table
 below is the long form.
 
-**Naming.** `pr-<stage>.sh`, `<area>lib.sh`, `test-<area>.sh`; functions `rb_*`; driver
-variables `RB_*`; machine records `PR_<STAGE> status=… reason=…`; decision records
-`docs/decisions/YYYY-MM-DD-<slug>.md`.
+**Naming.** Files: `pr-<stage>.sh`, `<area>lib.sh`, `test-<area>.sh`. Functions exported
+by a shared library: `rb_*` (a private implementation `_rb_*`); a helper's own local
+functions are plain names (`main`, `probe`, `request_review`). Driver variables that the
+setup block assigns and probes: `RB_*`; the driver's established names — `WHO`,
+`CODEX_SHA`, `AUTO_REVIEW`, the four `*_FILE`s — stay as they are. Machine records:
+`PR_<STAGE> status=… reason=…`. Decision records: `docs/decisions/YYYY-MM-DD-<slug>.md`.
 
 **Code style.** Match the file: its strict-mode category (§ Bash conventions), its
 spellings, its refusal shape. Do not "fix" a script into a stricter mode or a newer
@@ -35,20 +41,31 @@ idiom while you are in it for something else.
 
 **Abstractions.** A shared library or a new helper exists only for a rule that was
 written more than once and then found missing from a copy — a measured defect. None in
-anticipation; no wrapper that only delegates. Three similar lines beat a premature one.
+anticipation. No wrapper that only delegates — except an interface wrapper whose public
+symbol IS the load verification: `rb_write_handoff`/`rb_empty_handoff` delegate to
+`_rb_handoff` and are defined last so that a truncated library leaves the public name
+undefined for the stub to refuse; inlining them reopens the `PATH` lookup they close.
+Three similar lines beat a premature abstraction.
 
 **Comments.** Default to none. Write one only where the code looks wrong and is not — the
 non-obvious WHY, one or two lines, sentence case (§ Already paid for lists the class).
 Never say WHAT the code does. Never put an issue number, a review round, a measurement or
-a history in a comment: those go to `CHANGELOG.md` and `docs/decisions/`. A comment that
+a history in a comment: those go to `CHANGELOG.md` where the change is release-bearing, to
+the commit message and PR body where it is not, and to `docs/decisions/` where a limit is
+accepted rather than closed. A comment that
 contradicts the code beside it will be followed as an instruction, so a stale comment is
 a defect to delete, never prose to preserve. The `# WHY:` claim-and-rationale mechanism in
 `SKILL.md` is being retired under this rule: add no new claims; the bijection and
 `SKILL-RATIONALE.md` are removed in their own change.
 
-**Tests.** Never change an existing test to make a change pass; a failing existing test
-means the change is wrong. A behaviour change ships its test in the same PR, and a new
-test is proved to fail against the unfixed code. Assert the invariant, not the route.
+**Tests.** Never weaken an existing test to make a change pass: where the behaviour it
+covers is meant to stay, a failing test means the change is wrong. A test that encodes a
+contract the change intentionally replaces is updated in the same PR, together with the
+fixture for the new contract. A behaviour change ships its test in the same PR, and a new
+test is proved to fail against the unfixed code. Assert the invariant, not the version's
+route to it, wherever the invariant can be staged; where a required mechanism cannot be
+reproduced portably — the `sysread`-to-EOF loop against a matching-prefix-then-error read
+— a source assertion of the mechanism is the check, beside the behavioural case.
 
 **Scope.** Exactly what was asked. No adjacent improvement, no unbroken refactor, no
 unasked feature. A defect found on the way is filed, not fixed — unless this change
