@@ -3,9 +3,9 @@
 ## [2.3.0] — 2026-09-03
 
 - **`SKILL.md` no longer carries a claim-and-rationale mechanism, and the rationale
-  document is gone.** Every bash fence in the driver document kept a one-line CLAIM above
-  its code with a bare `# WHY:` pointing at an identically-titled section of
-  `SKILL-RATIONALE.md` — 95 pairs, 190 of the 605 fenced lines, beside a 2,300-line document
+  document is gone.** Ten of the driver document's sixteen bash fences kept one-line CLAIMs
+  above their code, each with a bare `# WHY:` pointing at an identically-titled section of
+  `SKILL-RATIONALE.md` — 95 pairs, 190 of the 649 fenced lines, beside a 2,300-line document
   that shipped with the plugin. It was written so that a reviewer could find the argument
   for every line, and it made the document the driving model reads on every invocation half
   comment. Under the authoring rules adopted in #278 a comment states a non-obvious

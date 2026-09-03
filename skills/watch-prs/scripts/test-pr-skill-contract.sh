@@ -4631,8 +4631,6 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # who does not know the refusal exists writes a remote the parser will reject and
 # has nothing to read about why.
 #
-# IN `SKILL.md`'S OWN PROSE, one sentence under Derive identity, since 2.3.0 — the
-# rationale document that carried it is gone.
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
     && pass "the identity parser accepts only GitHub network transports" \
     || die "the parser reads any URL scheme as a GitHub identity"

@@ -777,7 +777,6 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# a fresh nonce for this request — the claim and its argument are in step 2's request block
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
@@ -1022,7 +1021,6 @@ way — the signoff is on the PR, so a later session reads it back with
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
 # Everything here runs when the operator has asked for the Copilot phase, and only
 # then.
-# a fresh nonce for this request — the claim and its argument are in step 2's request block
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
