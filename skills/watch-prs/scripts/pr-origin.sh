@@ -8,7 +8,6 @@ fi
 # No `-e`: statuses are control flow here.
 set -uo pipefail
 
-# Nothing goes to stdout: the value is in the file and every reason on stderr, so the caller reads one stream.
 MODE="${1-}"
 case "$MODE" in
     read|pin) ;;
@@ -16,11 +15,11 @@ case "$MODE" in
     *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
 # A directory this script creates, not a file the caller made a place for: the exclusion has to run where
-# no name can be shadowed.
+# no shell function or variable of the caller's reaches it.
 RB_DIR="${2-}"
 [[ -n $RB_DIR ]] \
     || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
-# Refused by name: a caller still passing the old fallback directory would have it dropped in silence.
+# Refused by name: a third argument dropped in silence would leave its caller believing it was honoured.
 [[ $# -le 2 ]] \
     || { echo "ABORT: pr-origin.sh takes a mode and ONE directory; the optional fallback directory of 2.0.62 was removed in 2.0.63, and the caller retries with a second call instead" >&2; exit 1; }
 # Named here, so there is no path the caller can be talked into passing.
@@ -28,13 +27,13 @@ case "$MODE" in
     read) OUT="$RB_DIR/origin" ;;
     pin)  OUT="$RB_DIR/pin" ;;
 esac
-# `set -C` makes the one `>` below an exclusive create, which refuses an existing file and a symlink alike;
-# `>|` is never used, since it overrides that. `umask 077` says who may write what the create makes.
+# `set -C` makes the one `>` below refuse a path that resolves to an existing regular file; `>|` is never
+# used, since it overrides that. `umask 077` says who may write what the create makes.
 umask 077
 set -C
 [[ $RB_DIR = /* ]] \
     || { echo "ABORT: the output directory must be absolute; '$RB_DIR' cannot be checked to the root" >&2; exit 1; }
-# The walk starts one level up: the directory itself does not exist yet and is created exclusively below.
+# The walk starts one level up: the directory itself is trusted only through the exclusive `mkdir` below.
 _rb_dir="${RB_DIR%/*}"
 [[ -n $_rb_dir ]] || _rb_dir=/
 # Every component to the root, by ownership as well as mode: an account that can rename anything on the way
@@ -75,12 +74,14 @@ _rb_walk() {
     return 0
 }
 # Two facts, because neither is signal-safe alone: `RB_OWNED` is set after the `mkdir` returns and a signal
-# delivered during it is handled before that; `RB_PREEXISTED` says whether anything stood at the name first.
+# delivered during it is handled before that; `RB_PREEXISTED` records what `-e` saw at the name first, which a
+# dangling symlink escapes.
 RB_OWNED=no
 RB_PREEXISTED=no
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
 # `rmdir` alone, on every path out: it refuses a symlink and a non-empty directory, so a replaced reservation
-# costs at most somebody else's empty directory, and a refusal past the write leaves the leaf.
+# costs at most somebody else's empty directory, and a refusal past the write leaves the leaf while the
+# reservation stays non-empty.
 rb_cleanup() {
     # This run's, or not ours to remove: `-O` refuses a name another account holds, which neither flag can see.
     [[ $RB_OWNED = yes ]] \
@@ -90,7 +91,6 @@ rb_cleanup() {
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
-# Status 2 means the storage would not take what was asked, the one refusal a caller retries under another parent.
 rb_refuse() {
     [[ -n ${1-} ]] && echo "$1" >&2
     exit "${2:-1}"
