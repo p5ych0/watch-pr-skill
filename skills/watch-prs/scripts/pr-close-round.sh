@@ -23,7 +23,7 @@ if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
         exit 1
     }
 fi
-# The same for the baseline, otherwise the previous round's for the watch to accept. Both arms take only
+# The same for the baseline, so a `post` that fails leaves no previous round's value readable. Both arms take only
 # an existing file whose name holds a `/`, since a commit id has none, and never the summary, whose emptying destroys the account.
 if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \

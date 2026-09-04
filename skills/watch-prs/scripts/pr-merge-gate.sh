@@ -275,8 +275,8 @@ case "$CHECKS_RC" in
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
 esac
 
-# The boundary once more: a clean verdict on the threshold-th head must not walk into the largest
-# irreversible action unasked.
+# The Copilot round boundary once more, counted in every reviewers mode: a clean verdict at the
+# threshold-th Copilot round must not walk into the largest irreversible action unasked.
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$COPILOT_BOT"; MERGE_ROUNDS_RC=$?
 case "$MERGE_ROUNDS_RC" in
     0) ;;

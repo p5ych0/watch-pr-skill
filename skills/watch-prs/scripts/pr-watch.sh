@@ -103,7 +103,7 @@ elapsed_s() {
     return 0
 }
 
-# Each probe is bounded by what is left of the deadline, in its own process group so the kill
+# Bounded by the limit the caller took from the deadline, in its own process group so the kill
 # reaches what `gh` spawned; `mktemp`, since a predictable name under `/tmp` can be pre-linked.
 probe() {
     local limit="$1"; shift
@@ -310,7 +310,7 @@ while :; do
         exit 2
     fi
 
-    # The whole record, an empty tail, and its identity against the head this poll pinned.
+    # A line about another PR, reviewer or head, or one carrying an appended field, must not be read as this head's state.
     if rb_review_record "$line" state; then
         state="$RB_REC_VALUE"
     else
