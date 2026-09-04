@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.5.0] — 2026-09-04
+
+- **The six shared libraries carry a comment only where the code looks wrong without
+  one.** `writelib.sh`, `recordlib.sh`, `testlib.sh`, `identitylib.sh`, `clocklib.sh` and
+  `loadlib.sh` held 1,239 comment lines over 426 lines of code: the history of each rule,
+  the issue it came from, the alternatives refuted in review, and a restatement of what the
+  line beside it does — every one of them also in `CLAUDE.md`'s What-ships row for that
+  library or in an earlier entry here. Under the authoring rules a comment states a
+  non-obvious constraint in a line or two, so that is what remains, 164 lines, each beside
+  the code it explains: the `type` call `rb_load` accepts as shadowable, the twelve `?` and
+  the `0?*` in the clock's width test, `O_CREAT|O_EXCL` through `perl` rather than `set -C`,
+  the exact-destination rename and the one-descriptor read-back, the wrappers defined last,
+  the `[bot]` logins compared as strings and never as patterns. The `rb-assigns:`
+  declaration `pr-selfcheck.sh` reads is unchanged. No executable line changes: the
+  non-comment, non-blank lines of every file diff empty against 2.4.0, and the suite passes
+  as it did. #284.
+
 ## [2.4.0] — 2026-09-04
 
 - **`SKILL.md` is written as instructions, and its fences hold commands.** 2.3.0 removed
