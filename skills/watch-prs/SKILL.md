@@ -5,138 +5,88 @@ description: Use when driving a pull request through review to merge. Requests r
 
 # /watch-prs — native PR review loop
 
-Both reviewers are **first-party GitHub apps**:
+Both reviewers are first-party GitHub apps. Nothing runs locally — no watcher, no daemon:
+you drive the loop with `gh` and the helper scripts, and every stop below is the
+operator's decision.
 
-| Reviewer | Login | How it is triggered |
+| Reviewer | Login | Trigger |
 | --- | --- | --- |
 | Codex | `chatgpt-codex-connector[bot]` | a comment containing `@codex review`, or automatically on push if the repo has auto-review on |
 | Copilot | `copilot-pull-request-reviewer[bot]` | `gh pr edit <PR> --add-reviewer @copilot` |
 
-Nothing runs locally. There is no watcher, no response monitor, no bus
-directory, no systemd unit. You drive the loop with `gh`, and the two helper
-scripts answer the two questions `gh` cannot answer safely on its own.
+**Once per account** the Codex GitHub connector must be linked at
+`chatgpt.com/codex/cloud/settings/connectors`. Until it is, `@codex` replies *"To use
+Codex here, create a Codex account and connect to github"* — that reply is the
+diagnostic, not a review. Per-repository behaviour (auto-review, trigger condition,
+exhaustive review, credit use) is set on the Codex **Code review** settings page.
 
-**Prerequisite, once per account:** the Codex GitHub connector must be linked at
-`chatgpt.com/codex/cloud/settings/connectors`. Until it is, `@codex` replies
-*"To use Codex here, create a Codex account and connect to github"* — that reply
-is the diagnostic, not a review. Per-repository behaviour (auto-review, trigger
-condition, exhaustive review, credit use) is set on the Codex **Code review**
-settings page.
+**The loop:** derive identity → 1 state the task → 2 request Codex → 3 wait → 4 read the
+findings → 5 fix and close the round, with the check-in of 6 inside it → back to 3 until
+Codex is clean → 7 STOP, and on the operator's word the Copilot phase, which is 3–6 again
+with `$WHO` switched → 8 STOP, and on the operator's word the merge gate. Every helper is
+started as `/usr/bin/env bash -p "$RB_SCRIPTS"/<helper>` except `pr-selfcheck.sh`, which
+re-execs into a clean shell itself and is run directly; every status is branched on, an
+`ABORT:` ends the session, and every "cannot tell" is a stop rather than "no findings".
 
 ## How to work this loop
 
-These rules bind you for every round. They are here because breaking them is what
-turns a three-round PR into a fifty-round one, and every line below was earned
-that way rather than assumed.
+These rules bind every round.
 
-**Fix what the finding names. Nothing else.** A round is about the findings in
-that round. Refactoring nearby code, tidying something you noticed, hardening a
-path nobody raised, renaming for consistency — all of it enlarges the diff the
-next review has to read, and a reviewer judges relevance against what the PR said
-it set out to do. Unrelated improvements arrive as their own PR or as an issue.
+**Fix what the finding names. Nothing else.** A round is about that round's findings.
+Refactoring, tidying, hardening or renaming nearby enlarges the diff the next review
+reads; unrelated improvements arrive as their own PR or an issue. "What the finding names"
+is the DEFECT, not the line: the same defect in a copy this PR already changes is the same
+finding, and fixing fewer of those is leaving it open. If the finding **states its
+scope** — "apply the same rule in the other parsers" — that scope governs **for the
+copies this PR already changes**. A *different* pre-existing defect found while fixing
+this one is not in scope, and a same-shape defect outside this PR's diff is not pulled in
+even when the finding names it — answer on the thread, file an issue, reference the
+number in the summary. A regression the fix itself introduces is another matter: it is
+part of what this PR changed, so it is this round's work wherever the file sits, and
+where you broke an untouched consumer, repairing that consumer is not widening the PR, it
+is finishing the change you made.
 
-**"What the finding names" is the DEFECT, not the line.** The same defect in
-another copy is the same finding — closing one site and leaving its twin is what
-produced three consecutive rounds of head validation, then non-zero statuses, then
-record identity, and the self-check below asks you about exactly that. The two
-rules meet like this:
+**Do not build more than the finding requires.** The smallest change that makes the
+finding false is the correct change. A general fix that is genuinely justified is an issue
+raised with the operator outside the review request — never built silently, and never
+proposed in the summary, which rides with the `@codex review` mention.
 
-- If the finding **states its scope** — "apply the same rule in the other
-  parsers" — that scope governs **for the copies this PR already changes**, and
-  fixing less of those is leaving the finding open.
-- If it names one site and the same shape exists **elsewhere in what this PR
-  already changes**, fix those together. That is completing the fix, not widening
-  it.
-- If a **different pre-existing** defect of the same shape exists **outside this
-  PR's diff**, do not pull it in, even when the finding names it.
+**Prefer removing the dependency over guarding it.** A check is a name, and a name can be
+shadowed, mis-parsed, locked or forgotten; a shape in which the failure cannot arise stays
+fixed. Take the removal whenever it is not larger. Say on the thread which of the two you
+took and why.
 
-  The reviewers are told to keep out-of-scope problems out of inline comments, so
-  a named copy in an untouched file is a reviewer mistake rather than an
-  instruction — answer it on the thread, record it as an issue, and reference the
-  number in the summary.
+**Every change you make must be reviewable as a fix.** An unrelated change bundled into a
+review-fix commit is one the reviewer has no reason to look for.
 
-A *different* pre-existing defect found while fixing this one is not in scope,
-however tempting the proximity — "different" matters as much as "pre-existing",
-because the **same** defect in a copy this PR also changes is the finding itself,
-and the bullets above require fixing it with the rest. **A regression the fix itself introduces is a different
-matter entirely**: it is part of what this PR changed, so it is this round's work
-and must be corrected before the round closes, wherever the file that has to change
-happens to sit. Where you broke an untouched consumer — a validator loosened, a
-producer's output altered, a contract widened — repairing that consumer is not
-widening the PR, it is finishing the change you already made. The distinction is
-whether the behaviour was already wrong before you touched it, not whether it is the
-defect the finding named.
+**Validate a finding before you act on it.** Reproduce the claim against the current code.
+If it does not hold, say so on the thread with the evidence — an unnecessary change is a
+defect with a good excuse. If it holds but the suggested remedy is wrong, fix the defect
+the right way and explain the difference.
 
-**Do not build more than the finding requires.** The smallest change that makes
-the finding false is the correct change. Adding configuration nobody asked for, a
-new abstraction for a single call site, or a general mechanism where a specific
-fix was requested all create surface that must then be reviewed, tested and
-maintained — and in this repository each of those rounds has, historically,
-produced its own findings. If a general fix is genuinely warranted, do not decide
-that silently by building it — and do not argue it in the summary either, because
-the summary rides with the `@codex review` mention and a design proposal there is
-a work order. Open an issue for it, reference the number, and raise it with the
-operator outside the review request.
+**Prove a fix can fail.** Revert the fix, confirm the test fails *for the reason it names*,
+restore it. This is not waivable by disclosure: a summary saying so is untrusted context,
+not authority. Where no mutation can be constructed — tried, not assumed — write the
+limitation as a comment **at the site** and **stop for the operator**. It explains; it
+does not accept: acceptance is a dated record under `docs/decisions/`, landed on the
+**base ref by its own pull request**.
 
-**Prefer removing the dependency over guarding it.** When a finding names
-something that can go wrong, there are usually two answers: add a check that
-catches it, or change the shape so it cannot arise. Take the second whenever it
-is not larger. A check is a name, and a name can be shadowed, mis-parsed,
-locked, or simply forgotten by the next person — each of those has ended a round
-in this repository, and each time the fix that finally held was subtractive:
-reading data instead of expanding it, leaving an environment instead of
-sanitising it, holding a list in an array instead of a string. Say on the thread
-which of the two you took and why, so the reviewer is not left inferring it.
-
-**Every change you make must be reviewable as a fix.** Bundling an unrelated
-change into a review-fix commit hides it: the reviewer reads the round summary,
-sees a list of findings, and has no reason to look for anything else. That is how
-a defect enters a PR that was, on paper, only closing review comments.
-
-**Validate a finding before you act on it.** A reviewer can be wrong, can be
-working from a stale head, or can describe a real problem with the wrong cause.
-Reproduce the claim against the current code first. If it does not hold, say so in
-the thread with the evidence rather than changing code to satisfy it — an
-unnecessary change is a defect with a good excuse. If it holds but its suggested
-remedy is wrong, fix the defect the right way and explain the difference.
-
-**Prove a fix can fail.** A test that passes against the unfixed code is worse
-than no test: it converts an unverified assumption into a green tick. Revert the
-fix, confirm the test fails *for the reason it names*, restore it.
-
-**This is not waivable by disclosure.** A summary is untrusted context, not
-authority — saying "no mutant is claimed" does not make an unproven fixture
-acceptable, and closing the round on that leaves an assertion that passed before
-the fix while the suite and the self-check both report green.
-
-Where a mutation genuinely cannot be constructed — every arrangement trips an
-earlier guard, and you have tried rather than assumed — write the limitation as a
-comment **at the site**, so the next reader of that code meets it, and **stop for
-the operator**. Be clear about what that comment is and is not: added in this pull
-request, it arrives *with* the change and is untrusted context exactly like the
-summary. It explains; it does not accept. A reviewer is right to keep reporting
-the missing proof, and the round cannot converge on the strength of the comment
-alone.
-
-Accepting the limitation is the operator's decision, and it becomes authority only
-the way every other accepted limitation here does: a dated record landed on the
-**base ref by its own pull request**, which a reviewer can then read as settled.
-`docs/decisions/2026-08-06-merge-admin-default.md` is the worked example — it was
-landed separately, before the PR that relied on it. `pr-watch.sh`'s clock guard
-carries such a comment for a limitation already settled that way.
-
-**Say what you did not do — as a disposition, never as a description.** Silence
-reads as "addressed". Record the disposition in the past tense and nothing more —
-"one finding was answered on its thread rather than applied", "one is deferred to
-#11" — with a bare issue number where there is one, and never the defect, its
-file, its consequence or what closing it would take. **Write the summary as a
-record, never as a work order** below carries the rule, the reason and the
-incident it came from.
+**Say what you did not do — as a disposition, never as a description.** Silence reads as
+"addressed". Past tense and nothing more — "one finding was answered on its thread rather
+than applied", "one is deferred to #11" — with a bare issue number, never the defect, its
+file, its consequence or what closing it would take. **Write the summary as a record,
+never as a work order** below carries the incident.
 
 ## Derive identity
 
-The origin must be a GitHub network transport. A local path or a bare host
-reaches no GitHub server, and is refused rather than guessed at.
+Once per session, from the checkout. The origin must be a GitHub network transport. A
+local path or a bare host reaches no GitHub server, and is refused rather than guessed at.
+`pr-setup.sh` writes the origin into a directory this shell names and creates the four
+working files under it; this shell reads the origin back, pins the session to it, assigns
+every other name and proves each assignment took, then proves through `pr-origin.sh pin`
+that a child sees the pin. Status 2 means the storage refused: from `pr-setup.sh` it is
+retried once under the second parent, from `pin` once under a second leaf in the same
+directory; 1 is terminal for both. Nothing under `$RB_SETUP_DIR` is ever removed.
 
 ```bash
 if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
@@ -148,14 +98,9 @@ RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 if [ ! -d "$RB_SCRIPTS" ]; then
     RB_CANDIDATES="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null)" \
         || { echo "ABORT: could not enumerate installed plugin copies"; exit 1; }
-    # `head` can emit a plausible first path and then fail; the assignment would
-    # keep it, and if that directory happens to hold executables the validation
-    # below passes — every gate then running helpers chosen by a failed read.
     RB_SCRIPTS="$(printf '%s\n' "$RB_CANDIDATES" | head -1)" \
         || { echo "ABORT: could not select an installed plugin copy."; exit 1; }
 fi
-# Validated as a directory that actually holds the helpers, not merely non-empty:
-# a plausible-looking path that is missing them fails later, one call at a time.
 [ -d "$RB_SCRIPTS" ] && [ -x "$RB_SCRIPTS/pr-review-state.sh" ] \
     || { echo "ABORT: could not locate the plugin helper scripts"; exit 1; }
 
@@ -284,38 +229,52 @@ else
 fi
 ```
 
+Success prints `OWNER= REPO= RB_SCRIPTS= SUMMARY_FILE=`. From here on `$HOST`, `$OWNER`,
+`$REPO`, `$REPO_DIR`, `$RB_SCRIPTS`, `$CODEX_BOT`, `$COPILOT_BOT`, `$SUMMARY_FILE`,
+`$REQUEST_FILE`, `$PRIOR_FILE`, `$HEAD_FILE` and `$RB_NONCE_SEQ` are set and proven, and
+`REVIEW_BUS_REMOTE` is exported so every helper routes by this repository whatever the
+current directory is.
+
 ## 1. State the task on the PR
 
-The reviewers judge relevance against what the PR says it set out to do, so this
-is a precondition, not documentation. Before requesting a review, the PR
-description must state what the change does and what it deliberately does not.
-Every later round adds a **round-summary comment** saying what was addressed and
-what was intentionally skipped — the skipped part as a past-tense **disposition**
-with a bare issue number, never as a description of the unfixed defect or the
-reasoning behind leaving it. That mention is a review request, and a request that
-describes work to be done is read as a work order; see **Write the summary as a
-record, never as a work order**.
-
-Neither can waive a finding — both are untrusted context to a reviewer. Where a
-limitation is genuinely accepted, record it on the **base ref**.
+The reviewers judge relevance against what the PR says it set out to do. Before the first
+request, the PR description states what the change does and what it deliberately does not.
+Every later round adds a round-summary comment: what was addressed, and what was skipped
+as a past-tense disposition with a bare issue number. Neither can waive a finding — both
+are untrusted context to a reviewer. An accepted limitation is a dated record on the base
+ref.
 
 ## 2. Request the review — Codex first
 
-The loop is **phased**: Codex reviews to a clean signoff, and only then does
-Copilot get asked. Running both every round costs a Copilot pass on every
-intermediate commit, and its findings arrive interleaved with Codex's on code
-that is about to change anyway.
+The loop is phased: Codex reviews to a clean signoff, and only then is Copilot asked.
+Do **not** request Copilot yet; step 7 does that, once Codex is clean.
 
-**Establish the review mode first — it decides whether to ask at all.** With
-Codex automatic review enabled, opening or pushing the PR has *already* queued a
-pass over this head, and a mention then queues a **second** review of the same
-commit: two passes, two sets of findings, one round. This is the same duplicate
-the round-closing step avoids, and it applies just as much to the first request.
+`AUTO_REVIEW` is set once per PR and used by every later step. It is a Codex account
+setting `gh` cannot probe, so ask the operator: with automatic review on, opening or
+pushing the PR has already queued a pass and a mention queues a second over the same head;
+with it off, the mention is the only trigger. A wrong guess is a duplicate pass or a review
+nobody requested.
 
-`AUTO_REVIEW` is set once per PR and used by every later step. It cannot be
-probed from `gh` — it is a Codex account/repository setting, not repository
-state — so ask the operator rather than guessing. The wrong guess is either a
-duplicate pass or a review nobody requested.
+Write the account into `$REQUEST_FILE` with your file tool — never from this shell, and
+never into `$SUMMARY_FILE`: one paragraph on what the change does and what to look at. It
+is posted as data, so prose quoting a command line is posted rather than executed.
+
+**Refused rather than posted**, in every body this loop writes — the request, the round
+summary and the phase account: a line starting with a reserved marker,
+`**Review-Signoff:**`, `**Review-Signoff-Revoked:**` or `**Review-Pause-Acknowledged:**`
+(indent it four spaces or quote it inline; a fence does not help, the readers scan the raw
+body); an empty body; and `@codex review` anywhere in the body, case-insensitively — in
+the opening request where automatic review is on, since a pass is already queued, and in
+a Copilot-round summary or the phase account whatever the mode, since it would start a
+Codex pass nobody asked for. Write the mention without the `@`, or broken up.
+
+`pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>`
+posts the request — 0 posted, 1 stopped with nothing posted — and writes
+`<nonce> <baseline>` into `$PRIOR_FILE` for the watch: on the manual path the newest
+verdict's id — a review id, or `comment:<id>` where it came through the comment channel —
+and on the automatic path `none`, where the trigger preceded us and there is nothing to
+capture. The nonce is generated fresh before every request, as below, and the watch
+refuses a baseline that carries any other.
 
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
@@ -331,26 +290,6 @@ then
     [[ ${RB_NONCE%"$RB_NONCE_SEQ"} = "${RB_NONCE:0:23}" ]] || RB_NONCE=
     RB_NONCE="${RB_NONCE:?the request nonce did not take — a name this shell needs is readonly or transforming, and the watch could not tell this round's baseline from the last one's}"
 
-#   pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>
-#
-#     0  posted — the baseline is in the FILE the option names, and it is the `none`
-#        token on the automatic path, where the trigger preceded us and there is
-#        nothing to capture. `none` means "no prior review to wait past"; an EMPTY
-#        value is refused by the watch — not because a failed write still produces one,
-#        which the rename stopped, but because an explicit clearing and a file left by
-#        an older version both can, and neither is an answer. Nothing
-#        is written to stdout: the helper RENAMES onto that path — it never opens the
-#        path you name in order to write it — where a `> "$PRIOR_FILE"` here would be
-#        opened by this shell before the helper starts and would follow a symlink
-#     1  stopped — nothing was posted
-#
-# Write the account into `$REQUEST_FILE` with your file-writing tool — not from
-# this shell, and NOT into `$SUMMARY_FILE`: one paragraph on what this change does
-# and what to look at. It is inserted as DATA, so prose quoting a command line is
-# posted rather than executed; a line reproducing one of the markers the loop reads
-# as a record, or an `@codex review` on the automatic path, is refused rather than
-# published. `$REQUEST_FILE` was created empty at setup and an empty body is
-# refused, so a write that does not happen stops the request.
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"; then
         [[ -n x ]]
     else
@@ -365,77 +304,31 @@ else
 fi
 ```
 
-Either way the wait step is next: with auto-review on there is a pass in flight
-to watch, and with it off one has just been asked for.
-
-Do **not** request Copilot yet. Step 7 does that, once Codex is clean.
+Either way the wait step is next: a pass is in flight, or one has just been asked for.
 
 ## 3. Wait for the verdict
 
-Poll the **active** reviewer — `$CODEX_BOT` in the Codex phase, `$COPILOT_BOT`
-in the Copilot phase. Set `WHO` once at the top of the round and use it
-throughout, so the round is fixed, summarised and re-requested for the same
-reviewer it was waiting on.
-
-Do not sit in a polling loop by hand. `pr-watch.sh` blocks until there is
-something to act on and prints one line when the state changes:
+`$WHO` is the active reviewer — set and proven in step 2, switched in step 7 — and
+`$PRIOR_FILE` and `$RB_NONCE` are what the step that made the request left; none of them
+is re-assigned here. Do not poll by hand: `pr-watch.sh` blocks until there is something
+to act on and prints one line per state change.
 
 ```bash
-# $WHO is the reviewer this round is addressed to. It is set and PROVEN in step 2 and
-# switched, proven again, in step 7 — so it is not re-assigned here: an assignment is
-# where a nameref does its damage, and one that only restates a value already set would
-# be a third site to guard for nothing. Codex in the Codex phase, Copilot after step 7.
-# $PRIOR_FILE holds the review id captured BEFORE the request that this watch is
-# waiting on — written by step 2, step 5 and step 7 — and it is authoritative only
-# where the stage that wrote it returned 0. Those steps abort on anything else, but
-# an `exit` that returns carries a refusal into this line, and the file then holds
-# the previous round's id, this round's captured id, the `none` token where there was
-# no prior review to capture, a refusal sentinel, or nothing.
-# The watch decides on SHAPE AND ON THE NONCE, not on who wrote it: since #264 it refuses
-# an EMPTY file and one whose last byte is not the writer's newline, accepts `none` as
-# "no baseline", accepts any id, and refuses anything else — and it requires the file to
-# carry THIS request's nonce, `$RB_NONCE`, which the step that requested the review
-# generated and handed to the writer. So the sentinel is refused, a readiness write
-# that failed after truncating is refused, and a PREVIOUS round's baseline is refused
-# too: it is a complete, well-formed id, which no shape test can reject, but it carries
-# the previous request's nonce. That is the case a refusal in a writer's bootstrap
-# leaves — the writer never reached its write — and before the nonce it was the one
-# state that passed, announcing a terminal review nobody requested this round. Where
-# `--add-reviewer` itself failed AFTER the write, the file carries this round's nonce
-# and id; the request has run and the remote may have taken it, so a pass may be
-# pending and the watch waits for one newer than the id or times out — do not read
-# that refusal as "no pass is coming". The value is not re-derived or defaulted here. A re-request on
-# an unchanged head (after a dismissal, or after answering a finding rather than
-# changing code) has nothing else to tell the new pass from the old one, so without
-# it the first poll reports the PREVIOUS review as this round's answer. It arrives
-# as a PATH: the value is never assigned in this shell, and an unreadable file is
-# `state=error` there rather than an empty baseline here — and an EMPTY file is
-# `state=error` too since #264, "no prior review" being spelled `none`.
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"; WATCH_RC=$?
 ```
 
-**Claude Code** — run it as this session's **Monitor** so the verdict surfaces
-into the chat by itself instead of being waited on:
+**Claude Code** — run it as this session's **Monitor**, so the verdict surfaces into the
+chat by itself:
 
 - `command`: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"`
-- `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
-- `persistent`: `true`
+- `description`: `Review verdict for PR N` · `timeout_ms`: `3600000` · `persistent`: `true`
 
-**Arm it as part of the round, and re-arm it the same way — do not ask.** The
-watch is how the loop notices anything at all; a round that ends without one
-leaves the driver waiting on a verdict nothing will report. `pr-watch.sh` exits
-when it reaches a terminal state, so **one arming covers one verdict**: every
-review request in step 2 needs its own, for the reviewer named by `$WHO`. It
-reads no secrets, changes nothing, and stopping it costs one `TaskStop`, so a
-prompt per round buys nothing and turns an automatic loop back into a manual one
-— and a harness that prompts anyway is a permissions gap rather than a question
-worth relaying, which `README.md § Watching without prompts` answers.
-
-It prints on **change**, not on every poll, so a long wait does not bury the
-session in identical lines:
+**Arm it as part of the round, and re-arm it the same way — do not ask.** One arming
+covers one verdict, so every request needs its own, for the reviewer `$WHO` names. It
+reads no secrets and changes nothing; a harness that prompts anyway is a permissions gap,
+which `README.md § Watching without prompts` answers.
 
 ```
-PR_REVIEW_WATCH pr=10 reviewer=chatgpt-codex-connector[bot] state=none waited_s=0
 PR_REVIEW_WATCH pr=10 reviewer=chatgpt-codex-connector[bot] state=pending waited_s=120
 PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verdict=findings findings=5
 ```
@@ -443,145 +336,83 @@ PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verd
 | `WATCH_RC` | meaning | what to do |
 | --- | --- | --- |
 | `0` | terminal state reached, verdict on the last line | step 4 |
-| `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask: that is the manual loop this replaces. |
-| `2` | the state could not be read | **fail closed** — never treat it as "no findings" |
-| `4` | the review carried comments and **every one was a reply** | **STOP. Do not go to step 4.** There is nothing for `pr-findings.sh` to list and this is not a signoff, so there is no round to fix and none to close. Put the comment to the operator and wait. |
+| `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask. |
+| `2` | the state could not be read | **fail closed** — never "no findings" |
+| `4` | the review carried comments and **every one was a reply** | **STOP. Do not go to step 4.** Nothing to list and not a signoff: no round to fix, none to close. Put the comment to the operator. |
 
-**`4` does not continue into the fix round, and that is the whole point of it.**
-A reviewer sometimes answers on an existing thread — a verdict, a correction, a
-question — and none of those can be told apart by reading the text. Entering step
-4 there finds no findings, closes the round on nothing and requests another pass,
-which is the loop this status exists to end. Say what the comment was, and let
-the operator decide.
+States: `none` no review on this head · `pending` a draft is open · `reviewed` a
+submitted APPROVED/COMMENTED review · `blocked` CHANGES_REQUESTED — findings, plus its
+body in step 4 · `dismissed` the signoff was withdrawn — request again.
 
-**AND THE DECISION IS RECORDED, or the stop is just a different deadlock.** The
-verdict stays non-clean for as long as that review is the newest one: re-running
-the watch returns 4 again, there is no thread to resolve, and re-requesting is
-forbidden. So the operator's answer has to become state:
+**On `4` the operator's answer must become state**, or the stop is a deadlock: the watch
+returns 4 for as long as that review is the newest, there is no thread to resolve, and
+re-requesting is forbidden.
 
-- **it was a clean verdict** — record the signoff for that reviewer and head, the
-  same `**Review-Signoff:**` line step 7 writes — reviewer and head in backticks,
-  and optionally a third field, the time of the verdict being signed off, which
-  the phase adds when it can read it. **Include it whenever you have it**: it is
-  what a later revocation is ordered against, and `pr-signoff.sh` decides that
-  ordering — without it a revocation can only be placed by position. The merge
-  gate accepts the record *for this shape only*: a `source=replies-only` verdict
-  plus a recorded signoff naming that head merges, and says so in its output. A
-  review with real findings is not a question anyone was asked, so a signoff never
-  carries one.
+- **It was a clean verdict** — record the signoff, the same `**Review-Signoff:**` line
+  step 7 writes: reviewer and head in backticks, and the verdict's time as a third field
+  whenever you have it, since that is what a later revocation is ordered against. Record
+  it AFTER reading: it must be newer than the later of that review and its newest reply,
+  or the merge gate and `pr-phase-state.sh` refuse it, naming both times. If a reply lands
+  while you decide, read it and record again. The gate accepts the record for this shape
+  only — `source=replies-only` plus a signoff naming that head — and says so.
+- **It was a finding** — fix it and push. The head moves and the round is ordinary again.
 
-  **RECORD IT AFTER READING, NOT BEFORE.** The signoff must be newer than the
-  LATEST of that review and its newest reply — a head is not a moment, and the
-  verdict here is produced by the replies rather than by the review. One recorded
-  before a later reply arrives does not answer that reply, and both the merge gate
-  and `pr-phase-state.sh` refuse it, naming the two times so you can see which one
-  moved. If a reply lands while you are deciding, read it and record again;
-- **it was a finding** — fix it and push. The head moves, the round is ordinary
-  again, and nothing needs an override.
-
-Absence is not permission: with no signoff recorded, the gate refuses and names
-what to do.
-
-The states it reports, and what each means:
-
-| state | meaning |
-| --- | --- |
-| `none` | no review on this head yet |
-| `pending` | a draft is open — the pass is not finished |
-| `reviewed` | a submitted APPROVED/COMMENTED review exists |
-| `blocked` | CHANGES_REQUESTED — treat as findings, and read its body in step 4 |
-| `dismissed` | the signoff was withdrawn — request the review again |
+Absence is not permission: with no signoff recorded, the gate refuses and names what to do.
 
 ## 4. Read the findings
 
-Inline review comments are the findings. The review **body** is the reviewer's
-non-blocking channel and does not gate the merge — with one exception, below.
+Inline review comments are the findings. The review body is the non-blocking channel and
+does not gate the merge, with one exception below.
 
 ```bash
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-findings.sh list N; FIND_RC=$?
 ```
 
-- `0` — the printed threads are the complete set of unresolved findings.
-- `2` — the read could not be trusted. **Stop.** Do not reply, resolve or
-  summarise: a truncated or malformed page is indistinguishable from a shorter
-  review, and everything downstream would be based on it.
+- `0` — the printed threads are the complete set of unresolved findings, each with its
+  full body under its `thread=`/`comment=` line.
+- `2` — the read could not be trusted. **Stop.** Do not reply, resolve or summarise.
 
-**When a reviewer's state is `blocked`, read its review body too.** A
-`CHANGES_REQUESTED` review can carry its whole argument in the body with no
-inline comment — the merge gate then refuses to pass while `list` shows nothing to
-fix, which looks like a stuck loop rather than a request.
+When the state is `blocked`, read the review body too: a `CHANGES_REQUESTED` review can
+carry its whole argument there with no inline comment, and the merge gate then refuses
+while `list` shows nothing to fix.
 
 ```bash
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO"; BODY_RC=$?
 ```
 
-`BODY_RC` carries the same contract as `FIND_RC`: **`2` is a stop.** If the head
-lookup or the reviews fetch is unreadable, empty output means "could not read",
-not "there is no body" — and this is the only path that can surface a body-only
-request, so continuing would fix, close and re-request as though the reviewer had
-asked for nothing.
-
-The head argument is **omitted on purpose**: `$HEAD_OID` is not assigned until the
-merge gate, so passing it here would abort under `set -u` or — worse in a
-long-lived session — filter against a stale 40-hex value left over from another
-PR. The helper resolves the head itself, with its own guarded lookup.
-
-Scoped to the current head either way: a stale `CHANGES_REQUESTED` on an older
-commit, already superseded by a signoff on this one, is not an active finding.
+`BODY_RC` carries the same contract: `2` is a stop, and empty output from a failed read is
+"could not read", not "no body". The head argument is omitted on purpose — the helper
+resolves the head itself, and a stale `CHANGES_REQUESTED` on an older commit is not an
+active finding.
 
 ### Read each finding whole, not just its title
 
 `list` prints one line per thread so the set is countable. **That line is not the
-finding.** The reviewers write a one-line title and then several sentences that
-carry the actual argument — the input that triggers it, why the current code
-mishandles it, and what the consequence is. Acting on the title alone produces a
-fix aimed at a paraphrase, which is how a round ends with the finding still true
-and the thread resolved.
+finding.** The argument is in the body printed under it. Read it there and nowhere else:
+`pulls/N/comments` has no resolution filter and returns every comment the PR ever had, so
+it hands you findings answered rounds ago. Three things in a body change what you do:
 
-`list` already prints each finding's **complete body** under its `thread=`/
-`comment=` line — that is what the multi-line output after each header is. Read
-it there. Do **not** reach for `pulls/N/comments` to fetch bodies: that endpoint
-has no resolution filter and returns every review comment the PR has ever had, so
-it hands you findings answered three rounds ago mixed in with the current set —
-and fixing an already-answered comment is precisely the scope expansion the rules
-above forbid. `pr-findings.sh` filters to unresolved threads; the REST endpoint
-cannot.
+- **A code suggestion** — a fenced suggestion block, or a patch in the prose. Treat it as
+  a proposal rather than an instruction: it was written without your context. Where you
+  disagree, implement the correct fix and say on the thread why the suggestion was not
+  taken.
+- **A stated consequence** — "…so the merge proceeds with no trusted checks result" is
+  what the test asserts. A test of the mechanism alone leaves it unproven.
+- **A scope hint** — "apply the same rule in the other parsers" is part of the finding,
+  for the copies this PR changes.
 
-Three things in a body change what you should do, and all three are easy to miss
-when skimming:
-
-- **A code suggestion.** Both reviewers can attach one — a fenced ```suggestion
-  block, or a proposed patch written into the prose. Read it, and treat it as a
-  proposal rather than an instruction: it is written without the surrounding
-  context you have, and applying one unread is how a fix lands that satisfies the
-  comment and breaks something else. Where you disagree, implement the correct
-  fix and say in the thread why the suggestion was not taken.
-- **A stated consequence.** "…so the merge proceeds with no trusted checks
-  result" tells you what to assert in the test. A fix whose test asserts the
-  mechanism but not the consequence leaves the consequence unproven — and in this
-  repository that has repeatedly meant a mutant that changed nothing.
-- **A scope hint.** Wording like "and apply the same rule in the other parsers"
-  or "add a fixture for this form" is part of the finding, not a suggestion for
-  later. Ignoring it produces the same finding again next round, in the copy you
-  did not touch.
-
-Reply to each thread with **what changed and why**, not "fixed". The reply is
-what a reviewer reads if the same area comes up again, and "fixed" tells it
-nothing it can check.
+Reply to each thread with what changed and why, not "fixed".
 
 ## 5. Fix, then close the round
 
-Fix the findings. Where you disagree, say so in the thread rather than silently
-resolving it. Then, in one pass:
+Fix the findings; where you disagree, say so on the thread rather than resolving it
+silently. Then, in this order:
 
-1. commit — `fix(review): <what changed>`. **In the Copilot phase, add a
-   `Review-Phase: copilot` trailer**: it is what tells the merge gate that the
-   head advanced only through Copilot fixes, so Codex's earlier signoff still
-   covers it and does not have to be re-earned.
-
-   **It has to be a real trailer, not a line in the body.** `git` parses trailers
-   from the LAST paragraph of the message only, so this belongs in the same block
-   as `Co-Authored-By:` with no blank line before it:
+1. **commit** — `fix(review): <what changed>`. In the Copilot phase add a
+   `Review-Phase: copilot` trailer: it tells the merge gate the head advanced only through
+   Copilot fixes, so Codex's signoff still covers it. `git` reads trailers from the
+   LAST paragraph only, so it goes in the same block as `Co-Authored-By:` with no blank
+   line above it:
 
    ```
    fix(x): what changed
@@ -592,152 +423,69 @@ resolving it. Then, in one pass:
    Co-Authored-By: …
    ```
 
-   A blank line above it makes it its own paragraph, which `git` does not read as
-   a trailer at all — the commit then looks correct to anyone reading it and is
-   invisible to the merge gate, which reports `untagged_commit` and asks for a
-   trailer that is plainly already there. `pr-merge-range.sh` names that case
-   separately (`trailer_not_in_trailer_block`) because the fix is different;
-2. **run the self-check — step 5a — and fix what it finds.** This is the step
-   that exists to stop a defect reaching a reviewer, so it runs while the change
-   can still be amended, before anything leaves the machine;
-3. **check the round boundary — step 6.** Both this and the self-check have to
-   precede the push: with Codex automatic review enabled the *push itself*
-   requests the next review, so a boundary check after it cannot stop anything
-   and a self-check after it has already let the round start. **The push is not
-   here** — it belongs to the mode-specific recipe below, because the checks on
-   what it pushes decide whether this round may be closed at all;
-4. **run `pr-close-round.sh gate` — the recipe below** — and only then reply to
-   each thread with what changed, **react to it**, and resolve it, and
-   **verify the resolve succeeded** rather than assuming it did.
+   A blank line above it makes it invisible to the gate, which reports `untagged_commit`;
+   `pr-merge-range.sh` names that case `trailer_not_in_trailer_block`;
+2. **run the self-check — step 5a — and fix what it finds**, before anything leaves the
+   machine;
+3. **check the round boundary — step 6.** Both this and the self-check precede the push:
+   with automatic review on the push itself requests the next review, so a check after it
+   stops nothing. **The push is not here** — `gate` below pushes, because the checks on
+   what it pushes decide whether the round may close at all;
+4. **run `pr-close-round.sh gate`** — the recipe below — and only then reply to each
+   thread with what changed, react to it, resolve it, and verify the resolve succeeded:
+   `resolveReviewThread` returns `thread{isResolved}`; read it. A resolve cannot be taken
+   back, so it follows the pushed, green head.
 
-   **The gate comes first, and this is an ordering, not a preference.** A
-   resolved thread cannot be taken back: resolve before the push and a round that
-   then fails to push, or pushes red, has already recorded its findings as
-   answered on a commit that never landed. With automatic review on it is worse —
-   the pass the push starts reads threads already marked resolved, with no summary
-   saying what resolved them.
-   `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
-   as "all threads resolved" when they were not sends the next review over
-   findings that were already answered, and the extra volume reads as regression
-   rather than repetition.
-
-   The reaction is not decoration: every Codex finding ends with *"Useful? React
-   with 👍 / 👎"*, and it is the only signal the reviewer gets about whether a
-   review was worth making. `pr-findings.sh list` prints `comment=<id>` beside
-   `thread=<id>` for exactly this — the thread id resolves over GraphQL, the
-   comment id reacts over REST, and neither substitutes for the other.
+   The reaction is the only signal the reviewer gets about whether a review was worth
+   making. `list` prints `comment=<id>` beside `thread=<id>` for it: the thread id
+   resolves over GraphQL, the comment id reacts over REST.
 
    ```bash
-   # 👍 when the finding was acted on, or was correct and recorded as accepted.
-   # 👎 only when it was wrong on the facts — not when it was right but declined
-   # for cost or scope. Marking a correct finding unhelpful teaches the reviewer
-   # to stop reporting that class, which is the opposite of what a decline means.
+   # 👍 acted on, or correct and recorded as accepted; 👎 only when wrong on the facts
    gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/comments/<comment-id>/reactions" \
        -f content='+1' || echo "note: reaction failed for <comment-id>"
    ```
 
-   A failed reaction is a note, not an abort: it is feedback, and losing it must
-   not stop a round from closing;
-4. **run `pr-close-round.sh post`** — which posts the summary and re-requests
-   `$WHO`, after the push, after the CI gate has said the pushed head is green,
-   and after the threads are answered. Resolving a thread and posting a summary
-   are the irreversible parts of closing a round, so they come last: a comment
-   saying "that round did not really close" is a record, not a retraction, and it
-   is itself a call that can fail.
-
-   `post` re-proves the head is still the one `gate` reported — locally and on the
-   PR — because the replies take as long as they take, and a commit made in
-   between leaves the summary describing one commit while the reviewer reads
-   another.
-
-   With automatic review on the push also *starts* a pass, and that one cannot be
-   held back. It reads open threads and no summary, so it may re-report what this
-   round already answered — which is why the explicit request at the end is sent
-   in that mode too, and is the pass that carries the summary. A wasted pass is
-   recoverable; a round closed on a red head is not.
+   A failed reaction is a note, not an abort;
+5. **run `pr-close-round.sh post`** — it re-proves that head, posts the summary and
+   re-requests `$WHO`. The irreversible parts of a round come last.
 
 ### 5a. Self-check before the push
 
-**Review your own diff before a reviewer has to.** PR #10 took nineteen rounds,
-and almost none of the findings were subtle — they were the same few mistakes,
-reaching a reviewer because nothing looked at the change first. Rounds are the
-expensive part of this loop: each one costs a review pass, a fix, a summary and a
-wait, so a finding caught here is worth several caught there.
+Rounds are the expensive part of this loop; a finding a script can make in a second must
+not cost a review pass.
 
 ```bash
 "$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?
 ```
 
-- `0` — the mechanical checks pass. Continue with the judgement list below.
-- `1` — findings. **Fix them now.** Pushing a change this catches spends a whole
-  round on something a script found in a second.
-- `2` — the check could not run. Fail closed: that is not a clean bill.
-- `3` — **not applicable**: this repository is not a `watch-pr-skill` checkout,
-  so none of these checks had anything in scope. That is the normal case in every
-  other project, and it is a *separate status from `0` on purpose* — the same
-  exit code would have let the driver report that the checks passed when none
-  ran. Nothing was verified, so the judgement list below carries the whole
-  weight; say so in the summary rather than claiming a clean check.
+- `0` — the mechanical checks pass. Continue with the list below.
+- `1` — findings. Fix them now.
+- `2` — the check could not run. Fail closed.
+- `3` — **not applicable**: this repository is not a `watch-pr-skill` checkout, so nothing
+  was in scope. Normal in every other project, and a separate status from `0` on purpose:
+  nothing was verified, so say so in the summary rather than claiming a clean check.
 
-It checks what can be checked without judgement: every variable used in this
-file is assigned in it, every script parses, every helper this file drives is
-shipped, every script has a test, no fixture pipes a `printf` into `grep`, and
-the suite passes. That set is not arbitrary — each one is a mistake that actually
-shipped from this repository.
+Then read your own diff against the classes that produced the rounds:
 
-**Then read your own diff against the list below.** These are the classes that
-produced the rounds, and none of them is mechanical:
+- Did I fix the instance or the class, within this diff? Before fixing a finding, search
+  for the same shape **everywhere else this PR already changes** and fix those together.
+- Did I widen something — a validator, a contract — without rechecking what consumes it?
+- Did I trace every identifier and ordering I touched, end to end?
+- Can each new assertion actually fail, for the reason it names?
+- Did I answer the finding, or just silence it?
 
-- **Did I fix the instance or the class, within this diff?** A finding names one
-  place. Before fixing it, search for the same shape **everywhere else this PR
-  already changes** and fix those together. A copy in a file this PR does not
-  touch is recorded and left to the operator, exactly as the scope rules above
-  require; this check asks whether the class was closed inside the diff, never
-  whether the diff was widened to reach it.
-- **Did I widen something without rechecking what consumes it?** Accepting ISO
-  offsets in a timestamp validator reopened a lexical-sort hole an earlier round
-  had closed, because the sort was never revisited. A validator is a contract
-  with its consumers; loosening it is a change to all of them.
-- **Did I trace every identifier and ordering I touched, end to end?** A variable
-  written into two places and assigned in none shipped as a P1. So did an
-  ordering that assumed a push was inert when auto-review makes it the trigger.
-- **Can each new assertion actually fail?** Revert the fix and watch the test
-  fail *for the reason it names*. An assertion matching prose that wrapped across
-  a line, or a token that also appears elsewhere in the file, passes against the
-  unfixed code.
-- **Did I answer the finding, or just silence it?** Resolving a thread without
-  fixing or arguing is the one move that guarantees it comes back.
-
-Write what this pass changed into the round summary. If it found nothing, say so
-— that is a claim the next review will test.
+Write what this pass changed into the round summary; if it found nothing, say so.
 
 ### The order depends on what triggers the review
 
-The reviewer contract says the newest round summary is read before the diff. That
-only holds if the summary exists before the pass starts — so the ordering is
-decided by **what starts it**, and there are two different answers.
-
-`$AUTO_REVIEW` was established in step 2 and is carried for the whole PR.
-
-**Automatic review OFF** — the mention is the trigger, so it can carry the
-summary and the push is inert. Nothing is queued until that comment is posted,
-which means the gate can prove the head with nothing yet requested.
-
-**Automatic review ON** — the push starts the pass, so the ordering is decided by
-what is *irreversible*: push, prove the checks, close afterwards. Closing first
-and pushing last cannot be gated — by the time the checks on the pushed commit
-can be consulted, the threads are resolved and the summary is posted, and neither
-can be taken back. A later "this round is not closed" comment is a record, not a
-retraction, and is itself a call that can fail.
-
-**The cost of that mode is real and is not hidden:** the pass the push starts
-reads open threads and no summary, so it can re-report findings this round already
-answered. It is superseded by the explicit request `post` makes at the end. The
-trade is a wasted pass against a round that closes on a red head, and only one of
-those can be undone by the next round.
-
-Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
-hard-coded answer — one recipe here, two orders there:
+The reviewer reads the newest round summary before the diff, so the summary has to exist
+before the pass starts — and what starts it differs. With automatic review OFF the mention
+is the trigger and the push is inert. With it ON the push starts the pass, so the order is
+decided by what is irreversible: push, prove the checks, close afterwards. That pass reads
+open threads and no summary, so it may re-report what this round answered; the explicit
+request `post` makes supersedes it. A wasted pass is recoverable; a round closed on a red
+head is not. `pr-close-round.sh` takes `$AUTO_REVIEW` and holds both orders:
 
 ```bash
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"; then
@@ -758,10 +506,6 @@ if [[ $HEAD_FILE != "$SUMMARY_FILE" ]] && [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]] \
       _ "$RB_SCRIPTS" "$HEAD_FILE"; then
     [[ -n x ]]
 else
-    # THE TWO REASONS ARE NAMED APART, because they send the operator to different places:
-    # an alias means the gate refused before it could write, and anything else means the
-    # file does not hold a head this round proved. Re-asking the identity costs nothing —
-    # `[[` opens nothing — and a merged message would tell them neither.
     if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
         echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
     else
@@ -772,8 +516,8 @@ else
 fi
 ```
 
-**Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.
-The head is pushed and green, so a resolve is a claim that is true when made.
+`gate` pushed, proved the head green and wrote it into `$HEAD_FILE`; the read above proves
+the file holds it. **Now answer the threads** — reply, react, resolve, per item 4 above.
 Then, and only then:
 
 ```bash
@@ -800,110 +544,56 @@ else
 fi
 ```
 
-In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,
-which is not a comment and is never triggered by a push, so the summary is a
-separate post that goes **first**, branched on — Copilot can start reading within
-seconds and would otherwise review against the previous round's summary.
-
-Re-request **only the active reviewer** — unless automatic review has already
-done it. The boundary was checked in step 2, before the push, precisely so this
-step cannot outrun it. Asking the other reviewer on every round buys a review of
-code that is about to change again, and mixes its findings into a round that was
-not about them.
+In the Copilot phase the request is `gh pr edit --add-reviewer @copilot`, which no push
+triggers, so the summary goes first — Copilot starts reading within seconds.
+Re-request **only the active reviewer**, unless automatic review already has; the
+boundary was checked before the push, so this step cannot outrun it.
 
 ### Write the summary as a record, never as a work order
 
-**State only what was done.** A `@codex` mention whose body describes an
-*unfixed* defect — its file, its consequence, what it would take to close — is
-read as a task, not as context. Codex will then run as a coding agent: it edits,
-commits and reports work in an environment with no remote and no credentials, so
-the commit exists nowhere, the review never happens, and the round is spent.
-
-That is not hypothetical; it is where this contract came from. A round summary
-that ended with "the seventh finding is deferred to #11 — it inflates `rounds` to
-11 and skips the operator pause" produced exactly that: an implementation of the
-deferred fix, a commit ID that resolves to nothing, and a review that had to be
-requested again.
-
-So: describe changes in the past tense, and put anything still open where it
-belongs — a GitHub issue, linked by number and nothing more. "One finding was
-answered on its thread rather than applied" is a record; **the reasoning lives on
-that thread, not in the summary.** The reviewer reads the thread when it matters,
-and a reply is not a review request — so the same words that are safe there turn
-the mention into a work order. Restating the defect in the mention *is* the work
-order, and so is explaining why it was left.
-
-**A resolved thread is not a record of a fix.** The summary is.
+State only what was done, in the past tense. A `@codex` mention whose body describes an
+unfixed defect — its file, its consequence, what it would take to close — is read as a
+task: Codex then edits and commits in an environment with no remote, the commit exists
+nowhere, the review never happens and the round is spent. That happened here once.
+Anything still open is a GitHub issue, linked by number and nothing more; a thread reply
+is not a review request, so the argument lives there. A resolved thread is not a record of
+a fix — the summary is.
 
 ## 6. Round check-in
 
-**This runs inside step 5, before the request-triggering command** — both
-recipes above call it. Counting afterwards meant the pause fired once the next
-round had already been queued, which is a notification rather than a decision.
-It is documented separately because the phase transitions in steps 7 and 8 check
-the same boundary for the same reason.
+Runs inside step 5, before the request-triggering command; counting afterwards would make
+the pause a notification. Steps 7 and 8 check the same boundary.
 
 ```bash
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
 ```
 
-The count is **per reviewer**: the Codex phase and the Copilot phase are separate
-loops with separate boundaries.
+The count is per reviewer: a round is a distinct PR head that received a submitted review,
+derived from GitHub each time, so it survives a new session.
 
 - `0` — carry on.
-- `3` — **stop and decide with the operator.** A review loop that never pauses is
-  a loop nobody chose to keep running. Put the options to them in these terms,
-  because the useful ones are not all "carry on or give up":
-
-  - **Continue** — the direction is right and the rounds are converging.
-  - **Merge now** — enough review has happened for what this change is worth.
-  - **Leave it open** — park it; the signoffs are on the PR and a later session
-    resumes from them.
-  - **Close it and start over with a better approach.** This is the option a loop
-    will never propose for itself, and it is the one that check-ins exist to
-    surface. Ten rounds on the same PR is evidence about the APPROACH, not only
-    about the remaining defects: a design that needs a finding fixed every round
-    is usually a design that will keep producing them. This repository has a
-    worked example — a PR spent fifty-two rounds on a text scanner before it was
-    abandoned and rebuilt around running the suite instead, which then took
-    eleven. Nothing in the first fifty-two rounds was wrong on its own terms.
-
-  **Say what the rounds have been about**, not just how many there were. "Ten
-  rounds, each a new false positive in the same parser" and "ten rounds, each a
-  distinct defect the fixes did not cause" are the same number and opposite
-  situations, and the operator cannot tell them apart from a count.
-
-  When the operator says continue, RECORD THAT ON THE PR before requesting the
-  next review — the gate reads its own acknowledgement back, so without it every
-  subsequent call pauses again on the same count:
+- `2` — the count could not be established. Fail closed: do not re-request as if it were
+  round one.
+- `3` — **stop and decide with the operator.** Say what the rounds have been about, not
+  only how many, and put all four options: **continue**; **merge now**; **leave it open**
+  — the signoffs are on the PR and a later session resumes from them; **close it and
+  start over with a better approach** — ten rounds is evidence about the approach, and
+  this is the option a loop never proposes for itself. When the operator says continue,
+  record it on the PR before requesting the next review, or every later call pauses on
+  the same count. The count comes from the gate, not retyped, and its status must be the
+  distinguished 3 — permission is never inferred from unreadable output:
 
   ```bash
-  # The count comes from the gate itself rather than being retyped: an
-  # acknowledgement naming the wrong number either pauses again immediately or
-  # skips a later check-in, and both are silent.
-  #
-  # THE HELPER'S STATUS IS TAKEN, and it must be the distinguished 3. In a
-  # pipeline the parse hides it: a run that printed a plausible pause line and
-  # then died some other way still yielded digits and `sed` still succeeded, so
-  # the acknowledgement below recorded the operator's permission on the strength
-  # of a probe that failed. Permission is the one thing that must never be
-  # inferred from unreadable output.
-  #
   ROUNDS_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
   if [[ $ROUNDS_RC == 3 ]]; then
       if ROUNDS="$(printf '%s\n' "$ROUNDS_OUT" \
                    | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')"; then
-          # A count of `0` is refused with the shapes that are not counts at all: no
-          # pause happens at zero rounds, and under a `declare -i` inherited from the
-          # operator's shell an empty parse becomes exactly that.
+          # 0 and non-digits are not counts: no pause happens at zero rounds
           case "$ROUNDS" in
               ""|0|*[!0-9]*)
                   echo "ABORT: could not read a round count to acknowledge; nothing was recorded." ;;
               *)
-                  # The footer NAMES THE REVIEWER, because the count is per reviewer.
-                  # An unscoped acknowledgement of 41 Codex rounds is read by a
-                  # Copilot invocation with 5 and trips its ahead-of-count guard,
-                  # blocking that phase permanently.
+                  # the footer names the reviewer, because the count is per reviewer
                   gh pr comment N --repo "$HOST/$OWNER/$REPO" \
                       --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" "$ROUNDS")" \
                       || echo "ABORT: could not record the acknowledgement; do not request another review." ;;
@@ -915,54 +605,28 @@ loops with separate boundaries.
       echo "ABORT: the round counter did not report a pause (rc=$ROUNDS_RC); nothing was recorded."
   fi
   ```
- Only OWNER, MEMBER and
-  COLLABORATOR comments are read as acknowledgements, and one naming a round that
-  has not happened yet is refused — the marker records a decision, it cannot
-  manufacture permission. `REVIEW_ROUND_THRESHOLD=0` still disables the check-in
-  entirely, which is a different thing from acknowledging one pause.
-- `2` — the count could not be established. Fail closed: do not re-request as if
-  it were round one.
 
-A round is a **distinct PR head that received a submitted review**, derived from
-GitHub each time — so two reviewers on one commit is one round, a re-review of an
-unchanged head does not inflate it, and the count survives a new session or a new
-machine.
+  Only OWNER, MEMBER and COLLABORATOR comments are read as acknowledgements, and one
+  naming a round that has not happened yet is refused. `REVIEW_ROUND_THRESHOLD=0` disables
+  the check-in entirely.
 
 ## 7. Codex is clean — now the Copilot phase
 
-When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done.
+When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done. That
+verdict counts every comment on the newest review, replies included: a retraction is a
+paragraph after the verdict line, so no reading of the text separates them.
+`source=replies-only` is neither answer — nothing to fix, and not a signoff. Stop and put
+it to the operator; do not re-request, and do not treat it as clean. A malformed
+`in_reply_to_id` is a stop too.
 
-That verdict counts the comments on the reviewer's newest review: a comment that OPENS a thread is a finding, and a reply is one too.
-A reply is NOT exempt, even when it carries a clean verdict: the real verdict is
-followed by paragraphs of explanation and a retraction is also a paragraph after
-the verdict line, so no reading of the text separates them.
-
-When a review's comments are ALL replies the answer says `source=replies-only`.
-That is neither answer: `pr-findings.sh` lists nothing to fix, and it is not a
-signoff. **Stop and put it to the operator** — one comment has to be read by a
-human. Do not re-request, and do not treat it as clean.
-
-A malformed `in_reply_to_id` is a stop, not a reply.
-Ask Copilot:
+`pr-copilot-phase.sh` is the phase, in three stages with the operator's decision between
+them. First write one paragraph into `$SUMMARY_FILE` — what the PR does and what the Codex
+phase changed; say so if Codex approved on the first pass — under the body rules of step 2.
+`record` proves Codex clean on an exact head, proves that head's checks, re-proves both
+immediately before writing, orders any revocation against the verdict, and writes the
+Codex signoff onto the PR:
 
 ```bash
-# THE PHASE IS A SCRIPT, IN THREE STAGES with the operator's decision at each
-# boundary. Its invocations and its statuses are in its own header, beside the code
-# they describe; what matters here is that the stages are separate calls and that the
-# decision between them is the operator's.
-#
-# WRITE THE ACCOUNT FIRST: one paragraph on what the PR does and what the Codex
-# phase changed. If Codex approved on the first pass with no fix rounds, say so.
-#
-# THE RESERVED MARKERS MUST NOT START A LINE IN THIS BODY:
-# `**Review-Signoff:**`, `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`.
-# Indent one by four spaces or quote it inline. A fence does not help — the readers
-# scan the raw body, where a line inside a fence still begins at column 0.
-# `**Reviewed commit:**` is not one of them and is left alone.
-#
-# `@codex review` is matched ANYWHERE in the body, case-insensitively, so
-# indenting, quoting or fencing it changes nothing: break the mention up, or
-# write it without the `@`.
 cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
@@ -995,32 +659,19 @@ else
 fi
 ```
 
-**STOP — the next phase is the operator's decision.** `record` has proved Codex
-clean on an exact head, proved that head's checks, re-proved the head and the
-verdict immediately before writing — and, where a revocation is the newest
-record, proved it is OLDER than that verdict, so this pass is answering a
-reopening rather than superseding one — the CI gate WAITS, so a push or a dismissal
-can land in that window and either stops the record with nothing posted — and
-written the signoff onto the PR. What happens next is not the loop's call to
-make:
+**STOP — the next phase is the operator's decision.** The signoff is on the PR, so either
+answer is resumable; `pr-signoff.sh` reads it back in a later session.
 
-- **merge now** — one reviewer's clean signoff is a legitimate place to stop, and
-  for a small or urgent change it is often the right one. Run step 8 with
-  `REVIEWERS=codex-only`, which requires the head to BE `$CODEX_SHA` and is
-  therefore a narrower gate than the two-reviewer one, not a looser one;
-- **open the Copilot phase** — a second, differently-trained reviewer over the
-  same head. It costs rounds, and it finds things Codex does not.
+- **merge now** — one reviewer's clean signoff is a legitimate place to stop, and for a
+  small or urgent change often the right one. Run step 8 with `REVIEWERS=codex-only`,
+  which requires the head to BE `$CODEX_SHA`: a narrower gate, not a looser one;
+- **open the Copilot phase** — a second, differently-trained reviewer over the same head.
+  It costs rounds, and it finds things Codex does not.
 
-Ask, then stop. Do not open the phase because the loop happens to continue in
-that direction: every Copilot pass costs a round of somebody's attention, and the
-phase this opens can run as long as the one just finished. It is resumable either
-way — the signoff is on the PR, so a later session reads it back with
-`pr-signoff.sh` rather than needing this shell.
+Ask, then stop. Only on the second answer:
 
 ```bash
-# ── ONLY ON (b) ────────────────────────────────────────────────────────────
-# Everything here runs when the operator has asked for the Copilot phase, and only
-# then.
+# only when the operator chose the Copilot phase
 RB_NONCE=
 RB_NONCE="$(/usr/bin/env -i PATH="$PATH" perl -e 'printf "%010d%07d%06d\n", time, $$ % 10000000, int(rand 1e6)')"
 [[ $RB_NONCE = *[!0-9]* || ${#RB_NONCE} -ne 23 ]] && RB_NONCE=
@@ -1051,37 +702,26 @@ else
 fi
 ```
 
-Keep `$CODEX_SHA` for step 8. It is the only record of what Codex approved.
-
-Then run steps 3–6 again with `$WHO` set to Copilot, until its verdict is clean
-too. Every fix commit in this phase carries `Review-Phase: copilot`.
-
-`gh pr edit --add-reviewer` fails when Copilot is not available to the
-repository. That failure is **not** permission to skip the pass: report it and
-decide with the operator.
-
-**Codex is not re-requested during this phase.** That is the point of the
-trailer: the merge gate proves the head advanced only through Copilot fixes, so
-the Codex signoff still covers it. If a commit here lacks the trailer, the range
-check fails and Codex has to review again — which is the correct outcome, since
-unreviewed work reached the head.
+Keep `$CODEX_SHA` for step 8: it is the only record of what Codex approved. Then run steps
+3–6 again with `$WHO` set to Copilot until its verdict is clean, every fix commit carrying
+`Review-Phase: copilot`. **Codex is not re-requested during this phase**: the merge gate
+proves the head advanced only through Copilot fixes, and a commit without the trailer fails
+the range check — correctly, since unreviewed work reached the head. `gh pr edit
+--add-reviewer` failing because Copilot is unavailable to the repository is not permission
+to skip the pass: report it and decide with the operator.
 
 ## 8. Merge gate
 
-Run every check immediately before merging — an earlier check answered about an
-earlier head.
+Run every check immediately before merging — an earlier check answered about an earlier
+head.
 
 ### First: record the Copilot signoff, then STOP and ask
 
-Reaching a clean Copilot verdict is the end of the review work, not the start of
-a merge. Record it, then put the decision to the operator — the same shape as the
-end of the Codex phase, for the same reason.
+A clean Copilot verdict is the end of the review work, not the start of a merge. Record
+it, then put the decision to the operator, as at the end of the Codex phase.
 
 ```bash
-# ── ONLY WHEN THERE WAS A COPILOT PHASE ────────────────────────────────────
-#
-# `$CODEX_SHA` is passed as well as the head being read, because whether the two
-# are EQUAL decides which question the stop asks.
+# only when there was a Copilot phase
 REVIEWERS=both   # or `codex-only`
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
@@ -1092,45 +732,33 @@ if [[ $CLOSE_RC -ne 0 ]]; then
 fi
 ```
 
-It prints the record it made and then the stop:
+It prints the record it made, then the stop:
 
 ```
 PR_COPILOT_PHASE_CLOSED pr=N reviewer=<copilot> copilot-sha=<sha> codex-sha=<sha>
 ```
 
-**On the two-reviewer path, STOP. MERGING IS THE OPERATOR'S DECISION.** The
-stage prints a menu and asks; do not run the merge gate until the operator has
-answered. Merging is the largest irreversible action this tool takes, and "every
-gate passed" is an input to that decision rather than the decision itself.
+**On the two-reviewer path, STOP. MERGING IS THE OPERATOR'S DECISION.** The stage prints
+a menu and asks; do not run the merge gate until the operator has answered. `close` is
+given `$CODEX_SHA` because whether the two shas are equal decides which menu it prints:
+equal means Codex reviewed exactly what is being merged and no fault-tolerance pass is
+offered — one would cost a revocation, a round and a reopened phase for a verdict that
+cannot differ; different means the Codex signoff is carried forward only if the gate
+proves every commit between them is a `Review-Phase: copilot` fix.
 
-**In `codex-only` there is no second question.** No Copilot review was ever
-requested, so the stage records nothing and prints no menu — and the decision this
-stop exists to collect was already taken at the Codex stop, where "merge now on
-Codex's signoff alone" is what selected the mode. Go straight to the merge gate.
-Waiting here would be waiting for an answer to a question nobody was asked.
-
-**Read the two shas rather than assuming them.** Where they are the same commit,
-Codex has already reviewed exactly what is being merged and no fault-tolerance
-pass is offered — taking one there costs a revocation, a round and a reopened
-phase for a verdict that cannot differ, and a session resuming into the reopened
-phase reads it as a Copilot phase to run again. That is what #55 was raised for.
-Where they differ, the older Codex result is carried forward only if the merge
-gate validates that every commit between them is a `Review-Phase: copilot` fix.
+**In `codex-only` there is no second question.** No Copilot review was requested, so the
+stage records nothing and prints no menu, and the decision was taken at the Codex stop.
+Go straight to the merge gate.
 
 ### Resuming after a stop
 
-A later session — tomorrow, another machine — has none of the variables the stop
-was reached with. This is the recipe that restores them. Run it before step 8, or
-before continuing into the Copilot phase.
+A later session has none of the variables the stop was reached with. Run this before step
+8, or before continuing into the Copilot phase. `pr-phase-state.sh` reads the phase off the
+PR's own records and re-validates the one that has to stand: 0 readable and standing;
+1 stopped — no signoff, a moved head, or a verdict that no longer stands, and its record
+says which; 2 unreadable, which is not "no signoff".
 
 ```bash
-#   pr-phase-state.sh <pr>
-#
-#     0  readable, and the record it names still stands
-#     1  stopped — the record on stdout says which: no signoff, a moved head, or a
-#        verdict that no longer stands
-#     2  unreadable — fail closed. NOT "no signoff"
-#
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
     CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
     RX_SHA40='^[0-9a-f]{40}$'
@@ -1140,7 +768,7 @@ if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
         [[ -n "" ]]
     fi
 else
-    # `$?` HERE IS THE CONDITION'S, read before anything else can change it.
+    # $? is the condition's; read it before anything else can change it
     case $? in
         1) echo "Stopping here: the phase is not what resuming assumed. The record above says which, and what to run instead."
            exit 0
@@ -1154,23 +782,17 @@ fi
 
 ### Then: the gate
 
+`pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> <reviewers: both|codex-only>`
+evaluates every gate immediately before the merge and pins the merge to one head: 0
+merged, and the head it names is on the base branch; 1 blocked, with the reason on
+stdout; 3 paused at a round boundary, which is not a refusal; 4 queued — a merge queue
+took the request without landing it, and `gh` calls that success. `$CODEX_SHA` is the full
+40-hex head Codex signed off on, already in this session from step 7 or the resume above;
+in the Copilot phase the head moves past it and Codex is deliberately not re-run, so that
+is what Codex's verdict is checked against. `$REVIEWERS` is `both` unless the operator
+chose otherwise at the Codex stop.
+
 ```bash
-#   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> <reviewers: both|codex-only>
-#
-#     0  merged   — the head it names is on the base branch
-#     1  blocked  — a gate refused; the reason is on stdout
-#     3  paused   — a round boundary. NOT a refusal: decide with the operator
-#     4  queued   — the request was accepted but the PR is not MERGED. A merge
-#                   queue does that, and `gh` reports it as success. The head is
-#                   not on the base branch; the session is not finished
-#
-# CODEX_SHA is the FULL 40-hex head Codex signed off on, captured and validated in
-# step 7. In the Copilot phase the head moves past it and Codex is deliberately not
-# re-run, so this — not the current head — is what Codex's verdict is checked
-# against. THERE IS NO PLACEHOLDER TO FILL IN: the value is already in this session.
-#
-# REVIEWERS is `both` unless the operator chose otherwise at the stop that closed
-# the Codex phase.
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
 case "$MERGE_RC" in
@@ -1182,13 +804,13 @@ esac
 exit "$MERGE_RC"
 ```
 
-If any gate fails, do **not** merge. Post the reason on the PR and hand it back
-to the operator.
+If any gate fails, do **not** merge: post the reason on the PR and hand it back to the
+operator.
 
 ## What this skill deliberately does not do
 
-- **It does not run a reviewer.** Codex and Copilot are GitHub apps; a local
-  process reviewing PRs duplicates them, authors its comments as the repository
-  owner rather than as a bot, and consumes a separate credit pool.
-- **It does not merge unattended past a failed or unreadable gate.** Every
-  "cannot tell" is a stop.
+- **It does not run a reviewer.** Codex and Copilot are GitHub apps; a local process
+  reviewing PRs duplicates them, authors its comments as the repository owner, and spends
+  a separate credit pool.
+- **It does not merge unattended past a failed or unreadable gate.** Every "cannot tell"
+  is a stop.
