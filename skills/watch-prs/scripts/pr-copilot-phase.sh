@@ -100,7 +100,6 @@ if [[ $STAGE = open ]]; then
         esac
         return 0
     }
-    # Once here, so a closed phase costs one round trip.
     phase_still_open || exit 1
 
     # Enforced here too: `record` publishes the signoff before pausing, so a resumed session can arrive
@@ -192,8 +191,8 @@ if [[ $STAGE = close ]]; then
 
     echo "PR_COPILOT_PHASE_CLOSED pr=$PR reviewer=$RB_COPILOT_BOT copilot-sha=$COPILOT_SHA codex-sha=$CODEX_SHA"
 
-    # Which question is asked depends on whether the phase produced commits: with equal shas Codex has reviewed
-    # what is merged, and a pass there costs a revocation and a reopened phase for a verdict that cannot differ.
+    # Which question is asked depends on whether the phase produced commits: with equal shas Codex has already
+    # reviewed what is merged, and a pass there costs a revocation and a reopened phase over unchanged code.
     if [[ $COPILOT_SHA = "$CODEX_SHA" ]]; then
         cat <<EOF
 

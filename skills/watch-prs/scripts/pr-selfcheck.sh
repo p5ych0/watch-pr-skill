@@ -230,7 +230,6 @@ for f in "$SCRIPTS"/test-*.sh; do
           # A trailing pipe continues a line as legally as a trailing backslash.
           while ((sub(/\\$/, "", line) || line ~ /\|[ \t]*$/) && (getline nxt) > 0)
               line = line " " nxt
-          # Three substring questions and no parsing; `||` is not a pipe.
           t = line; gsub(/\|\|/, ")", t)
           if (t ~ /printf/ && t ~ /\|/ && t ~ /grep/)
               printf "%d:%s\n", n, line
@@ -295,8 +294,8 @@ if [ "$suite_files" -gt 0 ]; then
         echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
         exit 2
     }
-    # Every index exactly once: a total is satisfied by `P 1` printed twice, and an `xargs` that runs nothing
-    # prints exactly what a clean suite prints.
+    # Every index exactly once: a total is satisfied by `P 1` printed twice, and a status check by an `xargs`
+    # that runs nothing and exits 0.
     suite_seen=0
     suite_failed=()
     while read -r rec; do
