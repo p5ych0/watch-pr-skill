@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.3.0] — 2026-09-03
+
+- **`SKILL.md` no longer carries a claim-and-rationale mechanism, and the rationale
+  document is gone.** Ten of the driver document's sixteen bash fences kept one-line CLAIMs
+  above their code, each with a bare `# WHY:` pointing at an identically-titled section of
+  `SKILL-RATIONALE.md` — 95 pairs, 190 of the 649 fenced lines, beside a 2,300-line document
+  that shipped with the plugin. It was written so that a reviewer could find the argument
+  for every line, and it made the document the driving model reads on every invocation half
+  comment. Under the authoring rules adopted in #278 a comment states a non-obvious
+  constraint in a line and the argument for a change lives in this changelog, so the
+  mechanism is retired: the 95 pairs are removed, `SKILL-RATIONALE.md` is deleted, and the
+  bijection machinery in `test-pr-skill-contract.sh` that proved claim ↔ section goes with
+  it. The one documentation sentence that test still asserts — that an origin reaching no
+  GitHub server is refused rather than guessed at — moves into `SKILL.md`'s own prose under
+  Derive identity, and the assertion points there. Nothing the driver executes changes:
+  the fences hold the same commands; `SKILL.md` drops from 1,389 lines to 1,194, and the
+  prose around the fences is the next change.
+
+
 ## [2.2.0] — 2026-09-03
 
 - **The review baseline says which request wrote it, so a refusal the loop walked past can
