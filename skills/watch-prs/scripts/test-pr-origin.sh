@@ -1627,7 +1627,7 @@ grep -qF 'trap '"'"'trap "" EXIT HUP INT TERM; rb_cleanup'"'"' EXIT' "$SCRIPT" \
 # does not remove it, because the candidate is an argv entry published at exec. A
 # maintainer reading the reservation ordering has to learn what it does not buy, or
 # the next round re-derives it — which is what happened twice on #158. #160.
-grep -qF 'WHAT THIS ORDERING DOES NOT CLOSE' "$SCRIPT" \
+grep -qF 'What this ordering does not close' "$SCRIPT" \
     && pass "…and the file states the interval the ordering cannot remove" \
     || die "the reservation ordering claims a property it does not have; the argv limit is unstated"
 

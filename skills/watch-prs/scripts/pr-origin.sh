@@ -1,395 +1,49 @@
 #!/usr/bin/env bash
-# The session's repository, read where the driving shell's names cannot reach.
-#
-#   /usr/bin/env bash -p pr-origin.sh read "$RB_ORIGIN_DIR" || abort
-#   { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-#     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" || abort
-#
-# THE DIRECTORY IS THIS SCRIPT'S TO CREATE, and the file inside it is this
-# script's to name. The caller passes a path that must NOT exist; `mkdir` here is
-# what makes it this run's. It used to pass a file inside a directory it had built
-# itself, and building it took a two-candidate loop, three names, three
-# assignability probes with cross-variable alias checks and two cleanup arms — in
-# the operator's own shell, where every one of those names can be readonly,
-# value-transforming or a nameref aimed at another. #146, #148, #150, #151 and
-# half of #155 are all that block. None of it is needed on this side of the
-# `bash -p`: no functions are imported, no `BASH_ENV` is sourced, and these names
-# are this process's. #157.
-#
-# THE VALUE GOES TO A FILE, IN A DIRECTORY THE CALLER NAMES AND THIS SCRIPT
-# CREATES, and that is the third mechanism this script has used. The first two put it on a descriptor — stdout, then fd 9 — and
-# both spent rounds of review on the same problem from different angles: whichever
-# descriptor carries the value, a caller tracing to it has its trace written into
-# the value, and the redirections that would move one out of the way move the
-# other into place. Moving the trace target instead closed fd 2 when it was
-# restored, so the second call of a session returned nothing at all.
-#
-# A path has none of those properties. The caller's tracing goes wherever it
-# already went, this script writes inside the directory it was told to make, and
-# there is no descriptor for the two to collide over.
-#
-# `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. `bash -p …` calls a function
-# called `bash` if the caller has one, and such a function creates the directory
-# it was handed, writes a forged URL into it and returns, without this script
-# running at all. A path cannot be shadowed.
-#
-# `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
-# stops `BASH_ENV` being sourced, so it has to be in force before this file's first
-# line. A hook needs to shadow nothing to use the gap: one that creates the
-# directory it sees as `$2`, writes the value file inside it and exits is a
-# complete attack, finished before this script's first line.
-# There is no fallback for a caller that forgets — see the block above the guard
-# for why one cannot work — so a missing `-p` is refused, not recovered from.
-#
-# THERE ARE NO BRACES AND NO DESCRIPTORS LEFT TO GET WRONG, which is the point of
-# the file. An earlier version of this header required both, and required them for
-# a real reason — bash traces a simple command before applying its redirections, so
-# the trace landed inside a substitution that was already the capture. Nothing is
-# captured now: the usage above is the whole invocation, and a maintainer reading
-# the old paragraph would have reintroduced the failure it described.
-#
-#   0  the second argument is a DIRECTORY this script created, and the value is in
-#      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
-#      itself is the directory, never the file — a caller that opens it directly
-#      opens a directory.
-#   2  refused, and RETRYING UNDER ANOTHER PARENT IS SENSIBLE: both ancestry walks
-#      passed and the storage would not take what this script asked of it. Two
-#      moments produce it and they are the same question one step apart — the
-#      DIRECTORY could not be created exclusively, or the LEAF could not. A full
-#      filesystem, a quota, a read-only mount, or a name another account got to
-#      first. Nothing about the PATH is implicated.
-#
-#      THE LEAF IS INCLUDED BECAUSE THE FAILURE IS THE SAME ONE ONE STEP LATER: a
-#      filesystem with room for a directory and none for the bytes in it fails
-#      there, and a caller told that terminally would skip a second parent that
-#      would have worked.
-#
-#      THIS IS THE ONLY PLACE THAT CAN SAY IT, because it is the only one that runs
-#      both the `mkdir` and the walk. A caller that ignores it is no worse off than
-#      before: 2 is non-zero, so `if helper …; then` treats it as a refusal.
-#   1  refused, TERMINALLY — an ancestry another account can interfere with, a path
-#      that will not resolve, an unreadable `origin`, a caller that asked for
-#      something this script does not do. A caller must not route around these into
-#      another parent: what is wrong is not the storage, and an operator has to see
-#      it named.
-#
-#      The reason is on STDERR, and on a refusal BEFORE the write this script
-#      creates no value file at all. A write that opens and then fails DOES leave a
-#      leaf, and it may be EMPTY or PARTIAL: the storage can take a prefix and then
-#      refuse — an origin longer than an `RLIMIT_FSIZE` allowance is the measurable
-#      case — and `printf` returns non-zero having written it. Since #266 nothing
-#      removes it. So a caller must branch on the STATUS and never on the file's
-#      presence or its contents.
-#
-#      THAT IS NOT THE SAME AS "THE LEAF IS ABSENT", and the difference is the
-#      pre-existing case: where `<dir>` was already there and already held an
-#      `origin` or a `pin`, the `mkdir` refuses before anything is written and that
-#      leaf — the caller's, or somebody else's — is still there afterwards. Absence
-#      is NOT guaranteed for a refusal after this script WROTE either, and since #266 that
-#      is the ordinary case: the cleanup is `rmdir` alone throughout, so a refusal past
-#      the write leaves the directory AND the leaf, `rmdir` failing on a non-empty
-#      directory — for as long as it stays non-empty, since a same-UID process is free to
-#      unlink that leaf and let the `rmdir` through. It used to remove the leaf first, and that removal could reach a file
-#      outside this reservation entirely. What a refusal BEFORE the write leaves is nothing,
-#      unless a same-UID process has put something in the directory — that residue is
-#      deliberate too, and is the same one: the alternative is unlinking by a name this run
-#      did not write.
-#
-#      WHAT IS AT THE ARGUMENT ON A NON-ZERO STATUS DEPENDS ON WHICH SIDE OF THE
-#      `mkdir` the refusal happened, and the two are opposite. That is a different
-#      question from WHICH status: a name already taken on a sound ancestry is a 2
-#      and is on the before side; an unsafe ancestor is a 1 and is on the after
-#      side; a bad mode or a relative path is a 1 on the before side.
-#
-#        - BEFORE it — a bad mode, a relative path, or the `mkdir` itself failing
-#          because the name is ALREADY TAKEN — nothing here created anything, so
-#          nothing here removes anything. A pre-existing directory, file or symlink
-#          at that name survives untouched, contents included. That is the
-#          exclusion working: a name somebody else got to first is theirs, and a
-#          refusal that tidied it up would be this script deleting what it just
-#          refused to trust.
-#        - AFTER it — an UNSAFE ANCESTOR, the git read, an empty origin, a newline
-#          in it, the pin's mismatch — this script created the directory, so it
-#          gives the directory back before stopping, WHILE THAT DIRECTORY IS EMPTY.
-#          The cleanup is one `rmdir` and it fails on anything else, so what is left
-#          to collect is decided by the reservation's CONTENTS and not by which
-#          refusal fired: a leaf this run wrote, which a failed write leaves open;
-#          or a sibling a same-UID process planted, which any of the refusals above
-#          can meet. Both residues are accepted in
-#          `docs/decisions/2026-09-01-origin-cleanup-races.md`, and both mean the
-#          same thing to a caller — the status is the answer, never the directory.
-#
-#          AND LEAVING A NON-EMPTY ONE IS DELIBERATE. Every refusal gets `rmdir` alone
-#          since #266, and `rmdir` cannot remove a directory that holds a file — so a
-#          refusal past the write leaves the leaf it wrote, unless a same-UID process
-#          unlinks it first and the `rmdir` then succeeds, and a directory such a process
-#          has filled survives any refusal at all. Neither is an exception to the rule
-#          above; they are the two ways it is reached. The residue is the point rather
-#          than a gap: the only way to empty it is to unlink by a name this run did not
-#          write, and that removal is what #266 took out for reaching a file outside
-#          this reservation.
-#
-#          THE CLEANUP HAS ONE BODY AND THREE WAYS IN, and they are not the same
-#          thing. An ordinary refusal and any other abnormal end reach it through
-#          the `EXIT` trap. A SIGNAL reaches it directly from its own handler,
-#          which then re-raises — going through `EXIT` there would mean handling
-#          the signal by RETURNING, which is what made the helper resume the work
-#          it was killed during. And a SUCCESSFUL run reaches it not at all: it
-#          resets `EXIT` and leaves the directory for the caller, which is the
-#          point of the call. "The EXIT trap cleans up on every path" invites both
-#          halves of the mistake — removing the direct signal cleanup, and cleaning
-#          up a successful result.
-#
-#          THE BODY HAS ONE SHAPE AND IT IS `rmdir` ALONE. It had two, chosen by a
-#          phase flag, and the second removed the leaf by NAME before the directory
-#          — which resolves a path a same-UID process may have substituted, and
-#          #266 measured it removing a file in an unrelated directory through a
-#          replaced reservation. `rmdir` refuses a symlink and refuses a non-empty
-#          directory, so it can only take an empty directory at this name. The
-#          refusals themselves clean up nothing — they say why and stop — so the
-#          removal happens at most once, whichever way the run ends.
-#
-#      THE ANCESTRY IS ON THE SECOND LIST, and it moved there with the `mkdir`.
-#      The walks used to run first, so an unsafe component was refused before
-#      anything existed; the reservation ordering put the create in front of them,
-#      so that refusal now has a directory of its own to remove. A maintainer
-#      reading the old classification would expect the opposite cleanup semantics
-#      for a path that runs on every unsafe parent.
-#
-#      THE FAILED-`mkdir` DIAGNOSTIC PATH IS SEPARATE AND STILL PRE-CREATION: a
-#      `mkdir` that fails runs the walks itself, purely to name the cause, and
-#      nothing was created there either.
-#
-#      A caller cannot tell the two apart from the status, and does not need to:
-#      the rule it follows is that it removes only what a status 0 gave it.
-#
-# NOTHING IS EVER WRITTEN TO STDOUT. The value goes to the file and the reasons go
-# to stderr, so a caller reads one and never sees the other — which is what lets
-# the value be read with `$(<"$path")` whatever the shell happens to be tracing.
-#
-# WHY THIS EXISTS
-#
-# `SKILL.md`'s setup block runs in the operator's own shell, which nothing
-# controls, and it needed two things that shell cannot be trusted to give it: the
-# origin URL, read with `git`, and proof that the pin it exported reaches a child,
-# taken with `bash -c`. Both are NAMES. A function called `git` that answers only
-# `remote get-url origin` forges the identity every stage is then addressed by; a
-# function called `bash` runs in a shell copy that inherits non-exported
-# variables, so it agrees the pin arrived while the real helpers — which exec
-# through `#!/usr/bin/env bash` and resolve on `PATH` — inherit nothing.
-#
-# Neither is reachable here, and the reason is the whole design: the caller starts
-# this file with `/usr/bin/env bash -p` — a PATH rather than a name, so no function
-# can stand in front of it, and PRIVILEGED, so `BASH_ENV` and `ENV` are never
-# sourced, shell functions are never imported from the environment, and
-# `SHELLOPTS` is ignored. There is no hook to escape and nothing inherited to
-# clear. See issues #84 and #83.
-#
-# `pin` IS NOT A CONVENIENCE MODE. It exists because "a child sees the pin" is the
-# property the export has to have, and asking it from inside the driving shell
-# asks a different question — an `export` that assigns without setting the export
-# attribute leaves that shell holding the right value and every helper holding
-# none. This process is a real child, reached without a name, so its answer is the
-# one that matters.
-#
-# ── THE STARTUP HOOK IS NOT ESCAPED; IT IS NEVER RUN ───────────────────────
-#
-# `bash -p` does three things this file used to spend fifty lines failing to do
-# from inside an ordinary shell — measured, all three at once:
-#
-#   · `BASH_ENV` and `ENV` are not sourced, so a startup hook never executes;
-#   · shell functions are NOT imported from the environment, so `BASH_FUNC_…`
-#     entries arrive and are ignored;
-#   · `SHELLOPTS` is ignored, so an exported `xtrace` never turns on.
-#
-# WHAT THAT REPLACED, and why every one of them was a defect waiting to be found:
-# a re-exec whose guard the hook could set for itself; a function sweep made of
-# `unset`, `builtin`, `compgen` and `read`, each of which the hook could shadow or
-# mark `readonly -f` so the clearing failed and the loop then CALLED it; a `:`
-# probe that ran before any of it. Each was a name used to escape names, and each
-# round of review found the next one. `-p` removes the question instead of
-# answering it again.
-#
-# THE GUARD IS `$-`, WHICH IS SHELL STATE. A hook can set any variable, replace
-# the positional parameters with `set --`, and define any function — it cannot
-# make `$-` claim a `p` that is not there. Both were the previous two guards, and
-# both were forged.
-#
-# `[[` and `!=` are reserved-word syntax, so the guard itself cannot be
-# intercepted.
-# STRICT MODE IS SET HERE, AFTER THE GUARD, AND THAT POSITION IS FORCED. `bash -p`
-# ignores an inherited `SHELLOPTS`, which is most of why it is used — so a strict
-# calling shell cannot supply these. `CLAUDE.md` classifies this file in the `set -uo pipefail`
-# row; an earlier draft deleted the line along with the block it lived in and the
-# script ran with none of it.
-#
-# `-e` IS EXCLUDED, as in every other helper here: the probes below report their
-# answers as exit statuses. See CLAUDE.md § Bash conventions.
-#
-# THERE IS NO HOP, AND THE FILE IS NOT EXECUTABLE. Both were removed together, and
-# for the same reason: neither could work. The hop re-execed into `bash -p` for a
-# caller that had forgotten it — but by then the caller's `BASH_ENV` hook had
-# already run in this process, and a hook that writes a forged value to `$2` and
-# exits has finished the job before any line of this file executes. Advertising a
-# recovery that cannot recover is worse than refusing, because a caller may rely
-# on it. Removing the executable bit removes the invocation that reaches that
-# state at all: `./pr-origin.sh …` and `#!/usr/bin/env bash` are gone, and the
-# documented `/usr/bin/env bash -p pr-origin.sh …` is unaffected — `bash` reads
-# the file, it does not exec it.
-#
-# WHAT IS LEFT IS A REFUSAL, and it is the guard rather than a bound: `$-` is
-# shell state a hook cannot write, so an unprivileged shell that reaches here
-# stops, with nothing read and nothing captured.
+# A refusal rather than a re-exec: a `BASH_ENV` hook has already run by the time an unprivileged shell reaches
+# this line, and the file is not executable, so `bash -p` is the caller's to supply.
 if [[ $- != *p* ]]; then
     echo "ABORT: this shell is not privileged; invoke as /usr/bin/env bash -p pr-origin.sh <mode> <path>" >&2
     exit 1
 fi
+# No `-e`: statuses are control flow here.
 set -uo pipefail
 
-# ── THE OUTPUT PATH IS REQUIRED, AND IS THE SECOND ARGUMENT ────────────────
-#
-# Diagnostics go to stderr; the VALUE goes only to this file. Keeping them on
-# different streams is what lets the caller read the value with `$(<…)` and never
-# see anything else, whatever the shell is tracing.
+# Nothing goes to stdout: the value is in the file and every reason on stderr, so the caller reads one stream.
 MODE="${1-}"
 case "$MODE" in
     read|pin) ;;
     "") echo "ABORT: a mode is required: 'read' (origin's URL) or 'pin' (REVIEW_BUS_REMOTE as a child sees it)" >&2; exit 1 ;;
     *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
-# THE ARGUMENT IS A DIRECTORY THIS SCRIPT CREATES, not a file the caller made a
-# place for. It was a file path, and the caller had to build a private directory
-# around it first — a two-candidate loop, three names of its own, three
-# assignability probes with cross-variable alias checks, an exclusive `mkdir`, and
-# two cleanup arms, all in the OPERATOR's shell where every one of those names can
-# be readonly, value-transforming or a nameref aimed at another. That is the whole
-# subject of #146, #148, #150, #151 and half of #155.
-#
-# NONE OF IT IS NEEDED HERE. This process is privileged: it imports no functions,
-# sources no `BASH_ENV`, and `RB_DIR` below is its own. Creating the directory
-# where the exclusion can actually be relied on deletes the thing those guards
-# were guarding rather than adding another. #157.
+# A directory this script creates, not a file the caller made a place for: the exclusion has to run where
+# no name can be shadowed.
 RB_DIR="${2-}"
 [[ -n $RB_DIR ]] \
     || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
-# AND NOTHING AFTER IT. 2.0.62 took an optional SECOND candidate here and 2.0.63
-# removed it, because the driver could not use the distinction it existed for — so
-# a caller written against that form is out there, and reading `$2` while dropping
-# `$3` gives it an ordinary refusal on the first name while the fallback it thinks
-# it supplied is silently ignored. A refusal by name says which interface this is.
+# Refused by name: a caller still passing the old fallback directory would have it dropped in silence.
 [[ $# -le 2 ]] \
     || { echo "ABORT: pr-origin.sh takes a mode and ONE directory; the optional fallback directory of 2.0.62 was removed in 2.0.63, and the caller retries with a second call instead" >&2; exit 1; }
-# THE FILE IS THIS SCRIPT'S TO NAME. The caller reads `<dir>/origin` or
-# `<dir>/pin`, and naming it here rather than taking it means there is no path
-# the caller can be talked into passing.
+# Named here, so there is no path the caller can be talked into passing.
 case "$MODE" in
     read) OUT="$RB_DIR/origin" ;;
     pin)  OUT="$RB_DIR/pin" ;;
 esac
-# CREATED, NOT TRUNCATED, AND THE DIFFERENCE IS THE WHOLE POINT. `: > "$OUT"`
-# opens with O_TRUNC and FOLLOWS SYMLINKS: an account that can replace the
-# directory this path names can put a symlink there pointing at any file the
-# operator owns, and this helper then truncates that file and writes a remote URL
-# into it. The caller's `-O` check passes precisely BECAUSE the target belongs to
-# the operator, so nothing downstream sees it. A world-writable target is worse
-# still — the account edits it afterwards and the session pins what it likes.
-#
-# `set -C` MAKES `>` EXCLUSIVE. With noclobber, `> file` fails if the path exists
-# at all, and that is O_EXCL: it refuses a regular file, and it refuses a symlink
-# whether or not the target exists, because O_CREAT|O_EXCL fails on a symlink by
-# definition. Nothing legitimate is lost — this script creates the directory
-# exclusively a few lines above, so this path never pre-exists. `>|` is deliberately NOT used;
-# that is the spelling that overrides noclobber, and it is what a later edit
-# reaches for when this refuses something.
-#
-# `umask 077` GOES WITH IT, because O_EXCL says who may replace the object and the
-# mode says who may write it once created. The caller's umask is whatever the
-# operator's shell had.
-#
-# THE CREATE AND THE WRITE ARE ONE OPEN, and that is the whole reason there is no
-# separate truncation here any more. Creating the file and then appending to it
-# by NAME is two opens: `set -C` governs the first and not the second, so an
-# account able to replace the directory could wait for the exclusive create to
-# close, put a symlink at the same name, and have the `>>` follow it into a file
-# the operator owns. The value is written by the single redirection that creates
-# the object, below, so there is no interval and no second lookup.
-#
-# A REFUSAL BEFORE THE WRITE LEAVES NOTHING OF THIS RUN'S, which is what the exclusive
-# create is for: such a run creates no file at all, and the EXIT cleanup `rmdir`s the
-# directory before the process ends — WHILE IT IS EMPTY. A same-UID process that has put
-# anything in it makes the `rmdir` fail and the reservation stays, which is the residue
-# `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts and the fixture measures. The caller opens the result once to check and
-# read it, and sees the open fail rather than an empty file.
-#
-# A REFUSAL PAST THE WRITE LEAVES BOTH — while the reservation is still non-empty when the
-# cleanup runs — and that is #266's residue rather than an oversight: `rmdir` alone fails on
-# a directory holding the leaf, and succeeds where a same-UID process has unlinked it first. The leaf may hold NOTHING or a PREFIX of the value — the storage can accept
-# part of it and then refuse — so the caller sees a non-zero status and must not read
-# the file, whatever is in it.
+# `set -C` makes the one `>` below an exclusive create, which refuses an existing file and a symlink alike;
+# `>|` is never used, since it overrides that. `umask 077` says who may write what the create makes.
 umask 077
 set -C
-# AND THE DIRECTORY IT SITS IN MUST BE ONE NOBODY ELSE CAN WRITE. Everything
-# above protects the object; this protects the NAME. An `-O` test in the caller —
-# which is where this used to be — says the parent belongs to the operator and
-# cannot say whether the operator has left it open to others — bash has no test for another account's write bit — so an
-# owned mode-0777 `TMPDIR` passed it, and an account with write there can replace
-# the whole transport directory between this script closing its file and the
-# caller opening it. Both `-O` and `-f` then pass on the planted file, because the
-# planted file belongs to the operator too.
-#
-# `find -prune -perm` IS THE TEST, and it is POSIX rather than `stat`, whose flags
-# differ between GNU and BSD. It runs HERE and not in the caller because this
-# process is privileged: `find` is a name, and in the driving shell a function by
-# that name would answer instead. What remains is `PATH`, which is #91.
-# EVERY DIRECTORY UP TO THE ROOT, not just the one holding the file. Checking the
-# file's own directory is not enough and was the first shape of this: it is
-# created mode 700 below, so it was always going to pass — while an account
-# with write on the directory ABOVE it can rename it after the check and put a
-# writable replacement at the same name. The question is not "can they write where
-# the file goes" but "can they rename anything on the way to it", and that is
-# every component.
-#
-# OWNERSHIP AS WELL AS MODE, because a mode is only what the owner has chosen so
-# far. A sticky directory stops one account renaming ANOTHER'S entries and does
-# nothing about its OWNER renaming ours — so an attacker-owned `1777` ancestor
-# passed a permission-only test while its owner could replace the subtree
-# underneath it. An attacker-owned `0755` one is no better: its owner can add the
-# write bit after the probe. What has to be true is not "nobody may write it now"
-# but "nobody hostile decides", and that is ownership.
-#
-# THIS USER OR ROOT, and nothing else. Root is trusted here because root can
-# replace this script, the `git` it runs and the shell interpreting it, so
-# refusing a root-owned `/` or `/home` would buy nothing and reject every machine.
-#
-# STICKY IS STILL THE MODE EXCEPTION, and is why `/tmp` works: root owns it, and
-# `1777` lets anyone create entries while letting nobody rename another account's.
-# `0777` without the bit is refused even when we own it.
-#
-# `$EUID` IS AN EXPANSION, so the identity this compares against costs no command;
-# `-uid` is understood by both GNU and BSD `find`, like the rest of this test.
 [[ $RB_DIR = /* ]] \
     || { echo "ABORT: the output directory must be absolute; '$RB_DIR' cannot be checked to the root" >&2; exit 1; }
-# THE ANCESTORS ARE WHAT THE WALK IS ABOUT, and the directory itself does not
-# exist yet — it is created below, exclusively, which is what makes IT safe. So
-# the walk starts one level up.
+# The walk starts one level up: the directory itself does not exist yet and is created exclusively below.
 _rb_dir="${RB_DIR%/*}"
 [[ -n $_rb_dir ]] || _rb_dir=/
-# THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
-# WRITTEN and as it RESOLVES, and neither covers the other.
-_rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
+# Every component to the root, by ownership as well as mode: an account that can rename anything on the way
+# can replace the subtree, root is trusted, and a sticky world-writable directory is how `/tmp` passes.
+_rb_walk() {
     local p="$1" bad frc next
     while : ; do
-        # THE PROBE'S STATUS IS TAKEN, and that is the fail-closed rule rather
-        # than tidiness. If a component is renamed while its turn is being
-        # probed, `find` fails and prints NOTHING — and empty output is what this
-        # loop reads as safe, so the attacker's own interference would have been
-        # the thing that let them through. An unreadable component is a refusal.
-        # `! -type l` ON THE MODE CLAUSE ONLY. A symlink's own mode is `0777` on
-        # every system that has them, so asking whether it is world-writable
-        # refuses every path that goes through one — which is every macOS
-        # temporary directory. What a link's mode means is nothing; what its
-        # OWNER means is everything, because that account can repoint it, so the
-        # ownership clause applies to links exactly as it does to directories.
+        # The probe's status is taken: a component renamed mid-probe makes `find` print nothing, which would read
+        # as safe. `! -type l` on the mode clause only, since a symlink's own mode is `0777` everywhere.
         bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
         frc=$?
         if [[ $frc -ne 0 ]]; then
@@ -400,31 +54,14 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
             echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
             return 1
         fi
-        # AND AN ACL IS A PERMISSION THE MODE BITS DO NOT SHOW. On macOS a
-        # user-owned `0700` directory can still grant another local account
-        # `add_file`/`delete_child` through an extended ACL, and Linux POSIX ACLs
-        # do the same — `find -perm` sees none of it, so every check above passes
-        # while that account can replace this directory.
-        #
-        # THE MARKER, NOT THE CONTENTS. `ls -l` appends `+` to the mode field of
-        # anything carrying an ACL, on both platforms; reading WHAT the ACL grants
-        # means `getfacl` on one and `ls -e` on the other, with different grammars
-        # to parse and a new way to be wrong on each. Refusing any component that
-        # carries one is coarse and fails closed, and the message says which
-        # component so an operator can look.
+        # An ACL is a permission the mode bits do not show, and `ls -l` marks one with `+`; on macOS an `@` can
+        # hide it, so either mark refuses.
         acl="$(ls -ld "$p" 2>/dev/null)"
         arc=$?
         if [[ $arc -ne 0 ]]; then
             echo "ABORT: could not read the permissions of '$p'; refusing rather than assuming it is safe" >&2
             return 1
         fi
-        # `@` COUNTS AS WELL AS `+`, and on macOS it is the one that hides an ACL.
-        # There, `ls -l` marks extended ATTRIBUTES with `@` and extended security
-        # information with `+` — and a component carrying BOTH shows `@` alone, so
-        # a directory with an ACL granting another account `delete_child` and any
-        # xattr at all read as clean. `@` is ambiguous rather than harmless, and
-        # this cannot tell the two apart without asking a platform-specific tool,
-        # so it refuses on either mark.
         case "${acl%% *}" in
             *+|*@) echo "ABORT: '$p' is marked as carrying an access-control list or extended attributes, which the mode bits do not show; refusing rather than trusting a permission this cannot read" >&2
                 return 1 ;;
@@ -437,557 +74,96 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
     done
     return 0
 }
-# THE HANDLERS ARE DEFINED AND ARMED BEFORE THE RESERVATION, both of them. The
-# definitions used to come after the `mkdir`, leaving an interval — a phase
-# assignment and three function definitions wide — in which a signal took its
-# DEFAULT action and terminated the helper with the directory already created; and
-# the arming used to come after it too, which left the same gap for the duration of
-# the external `mkdir` itself. The caller performs no cleanup after a non-zero
-# status, so either way that directory stayed for the life of the machine. Nothing
-# here needs the reservation to exist, and the ownership facts below are what make
-# arming before it safe.
-#
-# THE CLEANUP EXISTS ONCE AND RUNS ONCE, and both halves of that are the fix. It
-# used to live in two refusal functions AND an EXIT trap, so a refusal cleaned up
-# and then `exit` fired the trap, which cleaned up again — and the second pass is
-# the dangerous one: on a shared sticky parent an account watching the published
-# path can recreate it between the two, and a second pass resolves that name again.
-# When this was written the second pass was `rm -f "$OUT"`, which followed a symlink
-# into a file this run never created; since #266 it is `rmdir`, which refuses a
-# symlink — so what a recreated name costs is an empty directory of somebody else's.
-# Running once is still the fix, and it is cheaper to keep than to re-derive.
-#
-# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap gives the reservation back for
-# them and for any other abnormal end — where it still can, which since #266 means while
-# the reservation is EMPTY: ordinarily a refusal before the write, and not one a same-UID
-# process has populated — and there is nothing left to do twice.
-#
-# A SIGNAL DOES NOT COME THROUGH `EXIT`, and that is deliberate: its handler
-# disables `EXIT`, calls the cleanup DIRECTLY, and re-raises. Routing it through
-# `EXIT` would mean handling the signal by RETURNING, which leaves bash resuming
-# the work it was killed during — and, between a successful write and the disarm,
-# returning status 0 for a run somebody killed.
-#
-# AND A SUCCESSFUL RUN DOES NOT CLEAN UP AT ALL: it resets `EXIT` and leaves the
-# directory for the caller, which is the point of the call. "The EXIT trap cleans
-# up on every path out" is the sentence that invites removing the direct signal
-# cleanup, or cleaning up a successful result.
-#
-# THERE IS ONE SHAPE AND IT IS `rmdir` ALONE, on every path out. There were two, chosen by
-# `RB_PHASE`: `rmdir` while no leaf could exist, and leaf-then-directory once a write had
-# happened, because `rmdir` necessarily fails on a directory holding its leaf. #266 removed
-# the second — the leaf removal resolved a NAME, and the `-d` and `-O` tests in front of it
-# follow symlinks, so a replaced reservation had a file removed in the directory the
-# symlink pointed at. `rmdir` needs no such confinement: it refuses a symlink outright and
-# refuses a non-empty directory.
-#
-# `RB_PHASE` WENT WITH IT, and that is the point rather than a tidy-up. It existed only to
-# select the removing shape, so with that gone the flag has no consumer — and this file
-# spent three review rounds on WHERE to flip it, because every placement traded one window
-# for another. A value nothing reads cannot have a wrong placement. What replaces the
-# guarantee it was carrying is the shape of the removal itself.
-#
-# THE COST IS LITTER, and it is the cost already accepted for a refusal that finds the
-# reservation populated: a refusal after a write leaves the directory and its leaf, because
-# `rmdir` fails on a non-empty directory — for as long as it IS non-empty, a same-UID
-# process being free to unlink the leaf and let the `rmdir` through. `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts exactly that for
-# the pre-write case, and this is the same kind — no leaf destroyed, and nothing beneath
-# the reservation.
-# WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
-# neither is signal-safe alone.
-#
-# `RB_OWNED` IS THE CERTAIN ONE and it is set after a successful `mkdir` — but not
-# in time for every signal. Measured on bash 5: a `TERM` delivered while an
-# external `mkdir` runs is handled once that command RETURNS and BEFORE the `&&`
-# after it, so the handler sees the directory created and the flag still `no`.
-#
-# `RB_PREEXISTED` IS WHAT COVERS THAT WINDOW. It is a `[[ -e ]]` taken before the
-# traps are armed — a reserved word, no command, nothing to be interrupted between
-# — and it says whether anything stood at the name when this run began. If nothing
-# did, then a directory there afterwards is one this run made, whatever the flag
-# has had time to say.
-#
-# AND IT IS AN INFERENCE, NOT A HANDOFF, which is the limit rather than a defect to
-# guard further. Two interleavings defeat it: a concurrent SAME-UID process that
-# creates this name between the `[[ -e ]]` and the `mkdir` makes the cleanup remove
-# a directory this run did not create, and one that removes an observed entry
-# before the `mkdir` succeeds leaks this run's directory if a signal lands before
-# `RB_OWNED=yes`. Both need that process to hit a window on a name carrying this
-# session's pid and three `$RANDOM` draws. The fix is not a third fact: it is the
-# helper choosing the name as well as creating it, after which nothing outside this
-# process can have created what it finds. #162 carries that with #160 and #161,
-# which want the same change for other reasons.
-#
-# AND AN OWNED, EMPTY, PRE-EXISTING DIRECTORY IS THE CASE THAT MAKES BOTH
-# NECESSARY. `-O` alone cannot see it: the operator own empty directory at that
-# name passes every test a created one passes, and removing it contradicts the
-# status-1 contract that a pre-existing argument survives untouched. The `keepme`
-# file in the exclusion fixtures hid it, because `rmdir` refuses a non-empty
-# directory and the removal failed for the wrong reason.
+# Two facts, because neither is signal-safe alone: `RB_OWNED` is set after the `mkdir` returns and a signal
+# delivered during it is handled before that; `RB_PREEXISTED` says whether anything stood at the name first.
 RB_OWNED=no
 RB_PREEXISTED=no
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
-rb_cleanup() {   # give back what this run created, while it is still empty
-    # THIS RUN'S, OR IT IS NOT OURS TO REMOVE. The traps are armed before the
-    # `mkdir`, so this can run at a moment when the `mkdir` had already failed
-    # because the name was taken. `-O` is kept as well as the two facts above: it
-    # is what refuses a name another ACCOUNT holds, which neither flag can see.
+# `rmdir` alone, on every path out: it refuses a symlink and a non-empty directory, so a replaced reservation
+# costs at most somebody else's empty directory, and a refusal past the write leaves the leaf.
+rb_cleanup() {
+    # This run's, or not ours to remove: `-O` refuses a name another account holds, which neither flag can see.
     [[ $RB_OWNED = yes ]] \
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
         || return 0
     [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
-    # `rmdir` ALONE, ON EVERY PATH OUT, AND THAT IS #266. This removed the leaf by name first
-    # where a write had happened, and the two tests above do not confine it: `-d` and `-O`
-    # both FOLLOW SYMLINKS, so a same-UID process that renames this reservation and leaves
-    # a symlink to another directory passes both — the target is a directory and is owned
-    # by the same user — and `rm -f "$OUT"` then unlinked a file in THAT directory.
-    # Measured: with the write failing under a zero file-size limit and the swap performed
-    # between the write and the cleanup, a file in an unrelated directory was removed.
-    #
-    # A FURTHER CHECK IS NOT THE ANSWER, and that is why this is a removal. `[[ -L ]]` here
-    # is a check-then-use: the `rm` resolves the name again afterwards, which is the shape
-    # `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the whole removal class on
-    # — and that record already declined to accept this case on this helper's behalf.
-    # `pr-setup.sh` answered the same question by removing nothing at all.
-    #
-    # `rmdir` NEEDS NO SUCH CONFINEMENT because it refuses a symlink outright and refuses a
-    # non-empty directory, so it can only ever take an empty directory at this name.
-    #
-    # THE RESIDUE IS THE LITTER ALREADY ACCEPTED. A refusal after a write leaves the
-    # directory and its leaf while the directory is still non-empty when this runs, because
-    # `rmdir` fails on one that is — which is the
-    # cost `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts, and the same KIND:
-    # no leaf destroyed, and nothing beneath the reservation.
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
-# THE STATUS IS AN ARGUMENT, defaulting to 1. Most refusals are terminal — the
-# ancestry, the checkout, an argument — and 2 says the storage would not take what
-# this script asked of it, which is the one a caller can retry under another
-# parent. See the status contract at the top.
-rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap cleans up
+# Status 2 means the storage would not take what was asked, the one refusal a caller retries under another parent.
+rb_refuse() {
     [[ -n ${1-} ]] && echo "$1" >&2
     exit "${2:-1}"
 }
-# AND A SIGNAL BETWEEN THE RESERVATION AND THE WRITE GIVES THE RESERVATION BACK, so long
-# as it is still empty — a same-UID process that has filled it makes the `rmdir` fail here
-# exactly as it does for a refusal. The
-# caller performs no cleanup after a non-zero status, deliberately — it cannot know
-# who created the path — so an interrupted run used to leak its `watch-pr.*`
-# directory for the life of the machine. The obligation moved here with the
-# creation, and a signal is a way out no refusal sees.
-#
-# NOT AFTER THE WRITE, AND SINCE #266 THAT IS THE HONEST STATEMENT. The cleanup is
-# `rmdir` alone, which fails on a directory holding the leaf this run just wrote, so a
-# signal landing between the write and `trap - EXIT` leaves the reservation AND the leaf —
-# unless a same-UID process unlinked that leaf first, after which the `rmdir` succeeds.
-# That residue is the accepted cost in
-# `docs/decisions/2026-09-01-origin-cleanup-races.md`. What bought it is narrower than "no
-# removal resolves a name" — `rmdir` resolves `$RB_DIR`, and against a replaced name it can
-# take somebody else's EMPTY directory, which the re-entrancy note below covers. What it
-# cannot do is follow a symlink, or reach a leaf beneath the reservation: those are the two
-# ways the old removal took a file this run never wrote.
-#
-# THE HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal REPLACES its
-# default terminating action: handled and returned from, bash resumes the
-# interrupted work — a `TERM` arriving while `git` runs left this process waiting
-# for that child, and one arriving between a successful write and the disarm let it
-# return status 0, reporting success for a run somebody killed. Each handler cleans
-# up, removes its own trap, and kills this process with the same signal, so the
-# caller sees the true cause and the true status.
-#
-# `kill` AND `$$` ARE THE SHELL'S OWN, and this process is privileged, so neither
-# is a name anything can stand in for. `EXIT` is removed with the signal's trap in
-# the same statement: without that the re-raise runs the EXIT handler as well,
-# which is the second pass this whole block exists to prevent.
-# AND THE SIGNALS ARE IGNORED WHILE IT RUNS, NOT RESET TO THEIR DEFAULTS. `trap -`
-# restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is to terminate:
-# it stops the cleanup being re-entered and makes it INTERRUPTIBLE instead, so a
-# second signal during `rb_on_signal`, or one during the EXIT handler on an
-# ordinary refusal, kills the shell before the `rmdir` runs — and the caller removes
-# nothing after a non-zero status, so the reservation leaks. `trap ''` ignores them,
-# which stops both. This mattered more when the cleanup was two commands and a signal
-# could land BETWEEN them; since #266 it is one, and what remains is a shell killed
-# before it. The original signal is restored to its default immediately before
-# the re-raise, and only that one.
-#
-# AND EVERY TRAP IS DISARMED BEFORE THE CLEANUP RUNS, NOT AFTER IT. Disarming
-# afterwards leaves the cleanup RE-ENTRANT: a signal arriving while it runs — or a
-# second signal arriving while the first handler is between its two statements —
-# invokes it again, and the second pass is the dangerous one for the reason the
-# refusals gave up their own cleanup. After the first pass has freed the candidate, an
-# account watching that path on a shared parent can recreate it — and a second pass then
-# resolves the name again. `rmdir` refuses a symlink, so what a recreated directory costs
-# now is an empty directory of somebody else's rather than a file of theirs; the
-# re-entrancy is still worth stopping, and the disarm is what stops it.
-#
-# ALL FOUR IN ONE STATEMENT, in both exit paths, and BEFORE the first removal.
-# Removing only the signal that fired leaves the other two armed; removing them
-# after `rb_cleanup` leaves the whole window open.
-rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
+# A trap replaces a signal's terminating action, so each handler re-raises after cleaning up; every trap is
+# ignored first, since `trap -` would make the cleanup interruptible and a second signal re-entrant.
+rb_on_signal() {
     trap '' EXIT HUP INT TERM
     rb_cleanup
     trap - "$1"
     kill -s "$1" "$$"
 }
 
-# ── THE NAME IS RESERVED BEFORE IT IS WALKED ───────────────────────────────
-#
-# WHAT THIS ORDERING DOES NOT CLOSE, STATED HERE BECAUSE IT CANNOT BE CLOSED FROM
-# INSIDE. The candidate is an ARGV ENTRY, published by `ps` and `/proc` at exec —
-# before this script's first line. Moving the `mkdir` ahead of the walks narrows
-# the interval to process startup; it does not remove it. A local account watching
-# `/proc` continuously can still win that interval and make an otherwise valid
-# setup abort.
-#
-# THE ONLY PROTOCOL THAT REMOVES IT PUTS THE `mkdir` BACK IN THE CALLER, and that
-# is the trade rather than an oversight. For the name never to be published, the
-# directory in argv has to be one the caller ALREADY created private — nobody else
-# can create anything inside a mode-700 directory — and then the caller is doing
-# the `mkdir`, in the operator's own long-lived shell, on a name that shell may
-# have made readonly, `declare -i`, `declare -l` or a nameref aimed at another
-# transport variable. That is #146, #148, #150, #151 and half of #155: five issues
-# and dozens of review rounds, and removing it is what #157 is.
-#
-# The exposure that remains is a DENIAL OF SERVICE by an account already on the
-# machine, and it fails CLOSED: setup refuses, nothing is forged, and the
-# directory is 700 so nothing is read. Trading that for the class above is not a
-# trade worth making silently, so it is written down instead — the same shape as
-# the `PATH` limit at the foot of this file and #91. #160.
-#
-# THE `mkdir` COMES FIRST, and that ordering is a fix rather than an accident. It
-# used to run AFTER both ancestry walks, and the candidate is visible to every
-# account on the machine the moment this process starts: it is an argv entry, which
-# `ps` and `/proc` publish. On a shared sticky parent such as `/tmp`, another local
-# account could read it, create the name while the walks ran, and this `mkdir`
-# would then refuse — repeatably, for as long as they watched. The random suffix
-# stops a name being GUESSED and does nothing about one being READ. The caller's
-# `mkdir` had reserved the name before the helper was invoked at all, so #157 lost
-# that property by moving the create without moving it far enough.
-#
-# `mkdir` FAILS IF THE NAME EXISTS, and that is the exclusion the caller used to
-# perform. It refuses a directory, a file and a symlink alike — `mkdir` does not
-# follow the last component — so an account that gets there first gets a refusal
-# rather than a path this script then writes through.
-#
-# `-m 700` IS APPLIED BY `mkdir` ITSELF, so there is no interval between the
-# directory existing and being private. The `umask 077` above governs the file;
-# this governs the name it sits under, and together they say who may replace the
-# object and who may write it.
-#
-# WALKING AFTERWARDS IS NOT WEAKER. The walk asks who may rename the components on
-# the way; creating a private child first does not change any of their answers, and
-# NOTHING IS WRITTEN into the child until the walk has passed. A refusal from the
-# walk removes the directory again — the EXIT cleanup `rmdir`s it, which succeeds
-# because THIS RUN has written nothing yet — so the reservation is given back rather
-# than left behind, unless a same-UID process has put something there in the meantime,
-# which is the accepted residue and not a case this ordering can close.
-#
-# HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
-# this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
-# readonly, `declare -i`, `declare -l` or a nameref aimed at another transport
-# variable — each of which took a probe, and each probe a containment arm once
-# `exit` turned out to be replaceable. Here the name is this process's own.
-# AND A FAILED `mkdir` ASKS THE WALK WHY, BEFORE REFUSING. Reserving first costs
-# the DIAGNOSTIC otherwise: `mkdir` reports `Permission denied` where the real
-# answer is that a component belongs to another account, and an operator reading
-# that has nothing to act on. The walk runs on the failure path to produce the
-# precise reason, and its refusal is the one that comes out; the generic message
-# is what remains when the ancestry is fine and the name was simply taken. Nothing
-# was created on this path, so nothing is removed on it.
-# THE TRAPS ARE ARMED BEFORE THE `mkdir`, NOT AFTER IT. Armed afterwards they
-# protected only what follows the command RETURNING: a signal arriving while the
-# external `mkdir` ran terminated this shell while the child went on to create
-# the directory, and the caller — which removes nothing after a non-zero status —
-# was left with it. The window is small and it is not zero, and it is the one
-# window the ordering fixture could not see.
-#
-# WHICH MAKES `rb_cleanup`'S THREE-PART DECISION LOAD-BEARING RATHER THAN
-# BELT-AND-BRACES. Arming first means the cleanup can now run at a moment when this
-# run has NOT created the directory — when the `mkdir` had already failed because
-# the name was taken. What tells those apart is the combination stated above it:
-# `RB_OWNED` where the `mkdir` has already reported success, `RB_PREEXISTED` for
-# the window where it has not reported anything yet, and `-O` for a name another
-# ACCOUNT holds. No one of the three is sufficient — an EMPTY pre-existing
-# directory owned by the operator passes `-O` exactly as a created one does, and
-# `RB_OWNED` is not yet set when a signal is handled straight out of the `mkdir`.
-# `rmdir` refuses a symlink and a non-empty directory besides.
+# Armed before the `mkdir`, or a signal during that external command leaves the directory it created.
 trap 'trap "" EXIT HUP INT TERM; rb_cleanup' EXIT
 trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT
 trap 'rb_on_signal TERM' TERM
 
+# Reserved before it is walked, since the name is public in argv from exec and a watcher could take it during
+# the walks. What this ordering does not close: the name taken before the `mkdir`, a refusal that fails closed.
 /usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
     || { _rb_walk "$_rb_dir" || exit 1
-         # AND THE RESOLVED PATH TOO, because a symlinked ancestor is exactly the
-         # case the lexical walk cannot answer: the link's own owner is fine and
-         # what it points at is not, so `mkdir` fails and only this pass can say
-         # why. Both walks run here for the same reason they both run below.
+         # The resolved path too: a symlinked ancestor is the case the lexical walk cannot answer.
          _rb_fail_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
-         # A PATH THAT WILL NOT RESOLVE IS ITS OWN REFUSAL, and it is the answer for
-         # a link into a tree this account cannot enter: the lexical walk sees only
-         # the link, which we own, and `cd -P` is what fails. Reporting the generic
-         # message there would hide the one fact the operator needs.
          [[ -n $_rb_fail_real ]] \
              || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
          [[ $_rb_fail_real != "$_rb_dir" ]] \
              && { _rb_walk "$_rb_fail_real" || exit 1; }
-         # STATUS 2 SAYS "THE ANCESTRY IS SOUND AND THE NAME COULD NOT BE TAKEN",
-         # which is the one failure a caller can do something about: a full
-         # filesystem, a quota, a read-only mount, or a name another account got
-         # to first. Both walks above have passed by the time this line is
-         # reached, so nothing about the PATH is implicated — only the storage or
-         # the moment.
-         #
-         # EVERY OTHER REFUSAL IS 1, and the difference is what lets a caller
-         # retry under another parent without stepping past an ancestry this
-         # process refused. That distinction cannot be made anywhere else: this is
-         # the only place that runs both the `mkdir` and the walk.
-         #
-         # A CALLER THAT IGNORES IT IS NO WORSE OFF than before — 2 is non-zero,
-         # so every existing `if helper …; then` treats it as the refusal it is.
+         # Both walks passed, so the ancestry is sound and only the storage or the moment is implicated.
          echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
          exit 2; }
-# AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES — WHILE IT IS STILL EMPTY. Every
-# refusal from here on happens AFTER the directory exists — the two ancestry walks, the
-# git read, an empty origin, a newline in it, a write that opens and then fails — and
-# each used to leave nothing behind because the CALLER owned the directory and cleaned
-# up in its own arms. It does not own it any more, so the obligation moved with the
-# creation. What moved with it is bounded by the removal's shape: `rmdir` gives back an
-# empty reservation, and a refusal past the write leaves one that is not empty — while it
-# stays that way, since a same-UID process may unlink the leaf — which
-# `docs/decisions/2026-09-01-origin-cleanup-races.md` accepts.
-#
-# `rmdir`, NOT `rm -rf`. This removes only what it made and only while empty: a
-# path this script created cannot legitimately hold anything else, and a recursive
-# delete on a variable is the shape that turns a refusal into data loss when the
-# variable is not what anyone thought.
-#
-# AN EMPTY MESSAGE PRINTS NOTHING, for the callers whose own refusal has already
-# said why — the ancestry walks name the component and the reason, and a second
-# line after them would say less.
-# THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
-# examines the link rather than what it points at, so this pass asks who owns each
-# link on the way — an account that owns one can repoint it.
+# As written, where the symlinks live, and then as it resolves, where the file lives; symlinks cannot simply
+# be refused, since macOS reaches its temporary directories through them.
 _rb_walk "$_rb_dir" || rb_refuse
-# …AND THE PATH AS IT RESOLVES, which is where the FILE lives. A lexical walk
-# never sees the real ancestry: `TMPDIR=/home/me/t` pointing at `/srv/other/mine`
-# checks `/home/me` and never `/srv/other`, and the account that owns that one can
-# replace `mine` after every check has passed. Symlinks cannot simply be refused
-# instead — macOS reaches its own temporary directories through them, so refusing
-# would refuse that platform.
-#
-# `cd -P` AND `pwd -P` ARE BUILTINS, and this process is privileged, so no
-# function can stand in front of either. In the driving shell they would be names.
 _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
     || rb_refuse "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
 [[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse
-# THE NAME IS TRUSTED FROM HERE, and the walks are all above this line. Nothing about the
-# CLEANUP changes here, and since #266 nothing about it changes anywhere: it is `rmdir`
-# alone from the reservation to the end. There used to be a phase flag selecting a
-# leaf-removing shape, and the question at this line was whether to flip it here — the
-# answer was no, because the refusals between here and the write would then run `rm -f
-# "$OUT"` on a leaf this run never created, and against a replaced directory that deletes
-# ITS file. The removal is gone, so the question is too.
 
-
-
-# THE STATUS IS TAKEN, NOT JUST THE OUTPUT. `git remote get-url origin` can print
-# a plausible URL and then exit non-zero — a partially configured remote, a
-# permissions error part-way through a read — and command substitution keeps
-# whatever it wrote. Every `gh` call in the session is addressed by this value, so
-# accepting output from a failed read sends one project's review traffic
-# somewhere else.
-# A SENTINEL, BECAUSE COMMAND SUBSTITUTION STRIPS TRAILING NEWLINES and cannot
-# tell `git`'s output terminator from data. `git remote add origin $'…\n'` is
-# accepted — measured — so a configured remote can genuinely END in a newline, and
-# without the sentinel it arrives here identical to the well-formed URL. The
-# session would then post against a slug the operator never configured, which is
-# the wrong-repository failure this file exists to prevent, reached from the other
-# direction. The `x` is appended inside the substitution and removed after, so
-# every byte `git` wrote survives to be checked.
-# `env -i` BECAUSE `GIT_DIR` IS NOT A NAME AND `bash -p` DOES NOT TOUCH IT.
-# Privileged mode refuses startup files and inherited functions; it keeps ordinary
-# environment variables, and `GIT_DIR` pointing at a second checkout makes this
-# real `git` read that repository's origin while running in this one. Every later
-# signoff, revocation and review request then goes to the wrong project — which is
-# the failure this whole file exists to prevent, arriving by a route that has
-# nothing to do with shadowing.
-#
-# `-i` RATHER THAN A LIST OF `-u`s. `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
-# `GIT_CONFIG`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
-# `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM` … a list is wrong
-# by omission the first time git adds one, and this repository has a rule about
-# that. An empty environment needs no list.
-#
-# WHAT IS CARRIED BACK IN is `PATH`, because that is how `git` is found at all
-# (#91); `HOME` and `XDG_CONFIG_HOME`; and every `GIT_CONFIG_*` variable, by
-# prefix rather than by name — see the block just above the list. They say WHICH
-# CONFIG the operator's git reads, and a different one loses the rewrites the
-# session honours.
-# `HOME` SURVIVES `-i`, AND THAT IS NOT A WEAKENING. `git remote get-url` is
-# documented to expand `url.<base>.insteadOf`, and those rules live in the user's
-# GLOBAL config — so an emptied environment returned the UNEXPANDED alias, and a
-# checkout whose origin used such an alias came back with the alias read as the host.
-# `rb_identity` then refused a valid checkout, or addressed the session somewhere
-# that is not where it pushes. Measured both ways.
-#
-# WHAT IS EXCLUDED IS EVERYTHING THAT SCOPES THE REPOSITORY: `GIT_DIR`,
-# `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY` and the rest go with
-# `-i`, and the list needs no maintaining because the environment is emptied
-# rather than filtered. The `GIT_CONFIG_*` variables are CARRIED, not excluded —
-# see the block above the list — because they say which config the operator's git
-# reads, and reading a different one loses the rewrites the session honours.
-# `XDG_CONFIG_HOME` is carried for the same reason: git reads
-# `$XDG_CONFIG_HOME/git/config` as global config too.
-#
-# A CARRIED CONFIG CAN CHOOSE THE REPOSITORY, and that is accepted rather than
-# guarded — see the block above the resolution below, and the limits at the
-# bottom. It is the same capability as a forged `HOME`, through a weaker channel.
-#
-# A FORGED `HOME` CAN STILL REWRITE URLS, and that is the operator's own shell
-# lying about the operator's own home — the boundary this file already records at
-# the bottom, not a new one.
-#
-# THE CONFIG VARIABLES ARE CARRIED BY PREFIX, NOT BY NAME. `${!GIT_CONFIG_@}`
-# lists every set variable whose name starts with `GIT_CONFIG_`, and each is
-# passed through with the value it has. That is `GIT_CONFIG_GLOBAL`,
-# `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, the runtime family
-# `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`,
-# `GIT_CONFIG_PARAMETERS`, and whatever git adds next.
-#
-# A LIST OF THREE WAS WRONG BY OMISSION, which is the failure this repository has
-# already paid for twice. It named the two file locations and the opt-out, and
-# missed both runtime channels — so an operator whose rewrite arrives as
-# `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.…insteadOf` had it expanded by every
-# ordinary command and dropped here, and the session was pinned to the unexpanded
-# alias. Both channels measured on git 2.55. An indexed family cannot be
-# enumerated at all, so the shape changes instead: no list, no omission.
-#
-# SETNESS COMES FREE WITH IT. A name only appears in `${!GIT_CONFIG_@}` if it is
-# set, so `GIT_CONFIG_GLOBAL=` is carried as empty rather than dropped — and that
-# matters, because git defines these by whether they are SET and reads an empty
-# path as no such file. An operator exporting one empty has switched that source
-# off; a `[[ -n … ]]` test silently restored git's default file, and a rule in it
-# reached this helper alone.
-#
-# NOTHING THAT SCOPES THE REPOSITORY SHARES THE PREFIX. `GIT_DIR`,
-# `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`,
-# `GIT_CEILING_DIRECTORIES` and the rest are dropped by `-i` and cannot arrive
-# through this loop, which is the whole point of matching on `GIT_CONFIG_` rather
-# than on `GIT_`.
+# `env -i`, since `bash -p` keeps ordinary variables and a `GIT_DIR` would read another checkout's origin;
+# `HOME`, `XDG_CONFIG_HOME` and every `GIT_CONFIG_*` are carried, because `insteadOf` rewrites live in global config.
 _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 [[ -n ${XDG_CONFIG_HOME+x} ]] && _rb_env+=( XDG_CONFIG_HOME="$XDG_CONFIG_HOME" )
+# By prefix, not by name, so the indexed runtime family arrives too; a set-but-empty value is carried as set,
+# which is how git reads it.
 for _rb_n in ${!GIT_CONFIG_@}; do
     _rb_env+=( "$_rb_n=${!_rb_n}" )
 done
-# GIT RESOLVES THE URL, AND NOTHING HERE SECOND-GUESSES IT. Every attempt to take
-# a piece of that resolution into this file has produced a divergence from git's
-# own semantics, and the count is the evidence: a scalar read returning the LAST
-# of several URLs where `remote get-url` returns the first; a `--local` query that
-# cannot see the worktree scope; a hand-applied `insteadOf` re-deriving
-# longest-match; `ls-remote --get-url` resolving its operand as a remote NAME; and
-# then, from the two-call design that replayed extracted rewrite rules as `-c`
-# options, cross-scope ordering, `~`-includes lost with `HOME`, and a subsection
-# containing a space. Each fix was correct about the case it named and produced
-# the next one, because the thing being rebuilt is git's config machinery.
-#
-# So there is ONE call and it is the ordinary one. `git remote get-url origin`, under the
-# operator's own config, is what `fetch` consults — and what `push` consults only where
-# no `remote.origin.pushurl` is set, since this call omits `--push`. Agreeing with the
-# FETCH url is the property this file needs, because that is the identity every `gh` call
-# is addressed by; where a push lands is `pr-close-round.sh`'s question and it validates
-# that separately. Re-deriving either is how the agreement was repeatedly lost.
-#
-# THE LOCKOUT THAT USED TO BE HERE DEFENDED NOTHING. It shut the operator's global
-# and system config out of the resolution so a carried file could not contribute
-# `[remote "origin"] url = …` — which does win `get-url`, measured. But the same
-# file may contain `url.<base>.insteadOf`, which this helper must honour or it
-# pins the session to an unexpanded alias, and a rewrite rule redirects the origin
-# COMPLETELY where an injected URL only adds a second one. The channel left open
-# is strictly the stronger of the two, so closing the weaker one bought no
-# guarantee and cost agreement with git in every case above. That boundary is
-# recorded at the bottom of this file, where it already was.
-rb_read_origin() {   # sets $_rb_origin from the checkout, or refuses
+# One ordinary `git remote get-url origin` under the operator's own config, since re-deriving any part of that
+# resolution diverges from git's. The fetch url is the identity `gh` is addressed by; the push url is not asked.
+rb_read_origin() {
+# The `x` keeps every byte `git` wrote, since command substitution strips trailing newlines and a remote can
+# end in one; the status travels with it.
 _rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" \
     git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     rb_refuse "ABORT: could not read origin in $(command pwd 2>/dev/null)"; }
 _rb_origin="${_rb_origin%x}"
-# `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything
-# after it is — and the newline in this pattern is written literally for the same
-# reason as the one below: `$(printf '\n')` strips its own newline, so the pattern
-# would be empty, nothing would be removed, and every valid origin would be refused
-# for carrying `git`'s own terminator. That is the second time this exact
-# substitution has been wrong in this file.
+# A literal newline in the pattern: `$(printf '\n')` strips its own and would match nothing.
 _rb_origin="${_rb_origin%'
 '}"
 [[ -n $_rb_origin ]] || rb_refuse "ABORT: origin is empty; there is no repository to pin this session to"
-# ONE LINE, AND NOTHING THAT CAN BECOME TWO. A remote containing a newline would
-# otherwise arrive at the caller as two values, and the second is whatever the
-# first line's tail happened to be. `identitylib.sh` parses the URL itself; what
-# has to hold HERE is that exactly one value leaves this process.
-# A LITERAL NEWLINE IN THE PATTERN, not one produced by a command. The first
-# attempt used `*"$(printf '\n')"*`, and command substitution strips trailing
-# newlines — so the needle was the EMPTY string, the pattern matched every input,
-# and a perfectly good origin was refused. Caught on the first run; it would have
-# refused every session.
+# One value leaves this process: a remote holding a newline would arrive at the caller as two.
 if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
     rb_refuse "ABORT: origin contains a newline; it cannot be a single value"
 fi
 }
 
-# ── pin: what a child inherits, AND whether it is this checkout's ─────────
-#
-# `pin` used to write the inherited value and stop. That answered "does the export
-# reach a child" and nothing else — so a value the driver had been fed instead of the
-# one setup wrote was exported, inherited, reported back, and compared equal to
-# ITSELF. The origin crosses from `pr-setup.sh` to the driver as a NAMED FILE, and a
-# same-UID process that replaces it between the write and the driver's open is what
-# the driver then parses and pins. Every later post, signoff and merge is addressed by
-# that value, so the failure is a WRONG REPOSITORY rather than a stall.
-#
-# Nothing downstream caught it. The pin PROVED INHERITANCE AND NOTHING ELSE — that is the
-# behaviour this check replaced, stated in the past because the comparison below is what
-# changed it — and `rb_identity` asks whether a string is a usable identity, not whether it
-# is THIS checkout's, which is still true. Both agreed with a planted-but-valid remote,
-# being computed from it.
-#
-# So this asks the checkout. It is the question actually at stake — "is what you
-# exported the identity this checkout FETCHES from" — and this process is where it can
-# be asked: privileged, in the checkout, with `git` not a name anything can shadow.
-#
-# THE FETCH URL, AND NOT THE PUSH DESTINATION. `git remote get-url origin` without
-# `--push` answers `remote.origin.url`; a checkout that sets `remote.origin.pushurl`
-# pushes somewhere this never looks. That is the right half to pin, because it is the
-# identity every `gh` call is addressed by — but it is not a push guard, and
-# `pr-close-round.sh` keeps its own `--push --all` validation for the destination.
-# Saying "what fetch and push would use" would make that one read as redundant. #230.
-# CREDENTIALS ARE NOT PRINTED, and the mismatch refusal is the one place two whole
-# remotes would otherwise be named. An HTTPS remote can carry `https://user:token@host/…`,
-# and setup diagnostics live in terminal scrollback and session logs — so a refusal that
-# echoed both raw values would put a token there for anyone who later reads them.
-#
-# THE USERINFO IS REPLACED, NOT THE WHOLE VALUE. The operator needs to see WHICH two
-# remotes disagreed or the refusal says nothing actionable; what they do not need is the
-# secret between `//` and the `@`. The host and path survive.
-#
-# SCP-LIKE REMOTES ARE LEFT ALONE — the `user@host:path` form has no `://`, and its user
-# part is a login with no secret in it, so there is nothing to redact and rewriting it
-# would only make the message harder to match against the operator's config.
-# ONE EXIT, SO NO BRANCH CAN RETURN UNESCAPED. The first version escaped the `://` arm and
-# let the SCP-like one return early through a bare `%s` — so a planted `user@host:path` with
-# a carriage return in it reached the terminal raw, which is the whole failure the escaping
-# exists to stop. Every arm assigns and falls through to one `printf` now, which is a shape
-# a later arm cannot get wrong rather than a rule it has to remember.
-rb_redact() {   # prints its argument with any URL userinfo, query and fragment replaced
+# A remote can carry `https://user:token@host/…` or a token in its query, and this goes to scrollback and logs;
+# `%q` on the way out, since a planted remote can carry a carriage return or an escape that rewrites the diagnostic.
+rb_redact() {
     local _u="$1" _scheme _rest _auth _path _out
-    # THE QUERY AND FRAGMENT GO FIRST, AND FROM EVERY FORM. A credential does not have to
-    # be in the userinfo: `https://host/path.git?access_token=…` is a remote git
-    # accepts, and the token is in the query. What identifies a remote for this message is
-    # the scheme, host and path, so nothing diagnostic is lost by dropping what follows
-    # them — and this runs before the scheme test so an SCP-like value is covered too.
     case "$_u" in
         *[?#]*) _u="${_u%%[?#]*}?***" ;;
     esac
@@ -999,124 +175,37 @@ rb_redact() {   # prints its argument with any URL userinfo, query and fragment 
                 */*) _path="/${_rest#*/}"; _auth="${_rest%%/*}" ;;
                 *)   _auth="$_rest" ;;
             esac
-            # THE LAST `@` IN THE AUTHORITY, because a password may contain one. Everything
-            # up to it is userinfo by definition; the host is what follows it.
             case "$_auth" in
+                # The last `@`: a password may contain one.
                 *@*) _auth="***@${_auth##*@}" ;;
             esac
             _out="$_scheme://$_auth$_path" ;;
-        # SCP-LIKE VALUES ARE NOT REWRITTEN, and that is a decision about REDACTION rather
-        # than about escaping: `user@host:path` has no `://` and its user part is a login
-        # with no secret in it. It still leaves through the same escape below.
+        # An SCP-like value keeps its login, which holds no secret.
         *)  _out="$_u" ;;
     esac
-    # `%q`, BECAUSE A REMOTE IS ATTACKER-CONTROLLED HERE AND THIS GOES TO A TERMINAL. The
-    # value being reported is the one a racer planted, and `rb_identity` accepts anything
-    # that parses — including a carriage return or an ANSI escape, which rewrite or hide
-    # the very diagnostic that names them, in scrollback and in session logs. `%q` renders
-    # control bytes as escapes, which is the same answer `pr-watch.sh` gives for helper
-    # output it prints. An ordinary remote has no shell-special byte in it and passes
-    # through unchanged.
     printf '%q' "$_out"
 }
 
 if [[ $MODE = pin ]]; then
-    # AN EMPTY PIN IS STILL A REAL ANSWER, and it is answered before anything is
-    # verified. The caller is asking what a child inherits, and "nothing" is the reply
-    # that says the export did not take; refusing here would make that indistinguishable
-    # from a checkout this helper could not read. There is also nothing to verify: an
-    # empty value cannot be the wrong repository.
+    # An empty pin is a real answer, "the export did not take", and needs no verification.
     if [[ -n ${REVIEW_BUS_REMOTE-} ]]; then
-        # THE COMPARISON IS AGAINST THE CHECKOUT, NOT AGAINST THE FILE. Comparing with
-        # what `pr-setup.sh` wrote would compare the planted value with the planted
-        # file. `rb_read_origin` refuses on its own if origin cannot be read — which in
-        # this flow means something moved since setup read it, and is not a state to
-        # write a pin for.
+        # Compared with the checkout, not with the file setup wrote, which a racer may have replaced along with the value.
         rb_read_origin
         [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
             || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$(rb_redact "$REVIEW_BUS_REMOTE")', origin '$(rb_redact "$_rb_origin")'); the value the driver exported did not come from this repository"
     fi
-    # NO PHASE FLIPS HERE, and none anywhere: since #266 the cleanup is `rmdir` alone
-    # whatever has been written. This write used to be wrapped in a group that flipped a
-    # flag first — `{ RB_PHASE=post; printf …; } > "$OUT"` — so that the leaf was open
-    # before the flag said it might be, because a flag set even slightly early let a
-    # refusal run the leaf-removing cleanup against a directory somebody had replaced.
-    # With no removal to select, the wrapping has nothing to arm and the write is a write.
-    #
-    # THE WRITE'S STATUS IS TAKEN, AND IT IS THE ONLY THING THAT SAYS ANYTHING. An output
-    # target can open and then reject data — `/dev/full`, or a quota reached after the
-    # truncation above — and what it leaves is not one shape but two. ZERO BYTES is the
-    # dangerous one in `pin` mode: it is exactly what a legitimately unset pin leaves, so
-    # without this status a caller could not tell a refusal from an empty pin. A PREFIX is
-    # the other, measured under a one-block file-size limit with an origin longer than it,
-    # and it is dangerous differently — it LOOKS like a value, so a caller inspecting the
-    # file rather than the status reads a truncated remote as the session's identity.
-    # Neither is removed, since #266, so the status is all there is.
+    # The status is all there is: a target can open and then reject data, leaving zero bytes, which is what an
+    # unset pin leaves too, or a prefix that looks like a value.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
-    # ONLY `EXIT` IS RESET. The EXIT handler would try to give this reservation back,
-    # and a successful run leaves it for the caller — that is the point of the call. The
-    # SIGNAL handlers stay armed through the final command: resetting them too left
-    # a window in which a `TERM` terminated the helper by default, with no cleanup
-    # — and the caller, seeing a non-zero status, removes nothing, so a completed
-    # directory leaked.
+    # Only `EXIT`: the signal handlers stay armed through the final command, or a `TERM` here leaks the directory.
     trap - EXIT
     exit 0
 fi
 
-# THE READ IS A FUNCTION SO `pin` CAN ASK THE SAME QUESTION, and a second copy of it
-# would be the duplication `CLAUDE.md` records paying for. `read` calls it and writes what
-# it got; `pin` calls it to CHECK what it inherited. Neither derives the origin twice.
 rb_read_origin
-# NO PHASE FLIPS HERE EITHER, and the refusals this note was about are why the flag was
-# hard to place: `rb_read_origin` refuses on a checkout with no origin, on a `git` that
-# fails, and on a value it cannot accept — all after the walks and all before any write,
-# so a flag set any earlier had each of them running the leaf-removing shape for a leaf
-# the run had not made. #266 removed the shape, so there is nothing left to place.
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
-# ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
-# stay armed through the final command.
+# Only `EXIT`, for the reason `pin` gives.
 trap - EXIT
 exit 0
-
-# ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────
-#
-# Written here rather than left for a reader to rediscover. What remains needs a
-# shell that is already executing arbitrary code as the operator — and such a
-# shell can edit this file, or the commit, instead of out-arguing it.
-#
-# THE CALLER'S HALF, WHICH THIS FILE CANNOT SUPPLY. `bash -p` has to be in force
-# before the first line, so a caller that omits it gets a refusal rather than a
-# recovery: a hook that writes the value file and exits has already answered by
-# then. That is why the invocation is asserted by `test-pr-skill-contract.sh`
-# rather than assumed, and why there is no fallback hop here to be shadowed.
-#
-# THE OPERATOR'S OWN GIT CONFIG, WHICH THIS HELPER REPRODUCES RATHER THAN JUDGES.
-# `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are
-# carried, so a config file the operator's git reads is a config file this helper
-# reads. Such a file can redirect the origin — with `url.<base>.insteadOf`
-# completely, with `[remote "origin"] url = …` by putting a second URL in front of
-# the repository's own. Locking the second one out was tried for three rounds and
-# is why this note exists: it left the FIRST channel open, which is the stronger
-# of the two, so it closed nothing while making this helper disagree with
-# `git remote get-url` over `~`-includes, cross-scope rule order and subsections
-# containing a space. Agreement with the operator's git is the property the pin
-# needs. Setting one of those variables means owning the shell that starts this
-# session, which is the boundary the paragraph above already draws.
-#
-# A POISONED `PATH`, WHICH IS NOT THIS FILE'S TO ANSWER. A directory prepended to
-# `PATH` — readonly, so the hook's own shell cannot undo it — supplies a forged
-# `git` here and a forged `gh` in every other helper. It is not specific to the
-# origin read, and a defence belonging to one helper would be the narrow guard
-# this repository keeps having to delete.
-#
-# SETTLED IN #91, AND NOT AS A FIX: `command -p` searches a default path holding
-# the STANDARD utilities, and neither `git` nor `gh` is one; a fixed list has to
-# know where the operator's binaries live, which is what `PATH` answers; and a
-# prepended directory is what a version manager does on every machine, so "wrong"
-# is unknowable. The loop trusts the `PATH` of the shell it was started from, as
-# it trusts that shell not to have run a hook first — nothing inside a process can
-# tell the honest version of something it inherited. `CLAUDE.md` § the helpers are
-# started privileged carries the statement, and both reviewer files carry it
-# verbatim, so nobody builds the narrow version here.
