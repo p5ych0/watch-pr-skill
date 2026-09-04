@@ -13,8 +13,11 @@
   defines a refusing stub, why a threshold with a leading zero falls back to the default,
   why the CI gate checks its clock before the probe as well as after it, why the round
   boundary is crossed rather than landed on, why the malformed-sha case is an arm of the
-  branch and not a guard before it. No executable text changes: with comments stripped, the
-  lines of every file diff empty against 2.5.0, and the suite passes as it did. #286.
+  branch and not a guard before it. No executable text changes in the six helpers: with
+  comments stripped, the lines of each diff empty against 2.5.0. The one fixture change is
+  in `test-recordlib.sh`, whose load assertions matched the string `recordlib.sh` — which
+  only a comment supplied — and match the executable `rb_load … recordlib` call now, the
+  `pr-watch.sh` one bound to `is_full_sha`. The suite passes as it did. #286.
 
 ## [2.5.0] — 2026-09-04
 
