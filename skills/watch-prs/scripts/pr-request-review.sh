@@ -11,8 +11,8 @@ set -uo pipefail
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable" >&2; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition" >&2; exit 1; }
-# The bootstrap cannot use the loader: clear and take the clear's status, define a refusing stub
-# so an empty `loadlib.sh` cannot leave `rb_load` to `PATH`, source. The first load's 127 is the stub's.
+# The bootstrap cannot use the loader. The refusing stub is what stops an empty `loadlib.sh` from
+# leaving `rb_load` to `PATH`, and the first load's 127 is the stub's rather than the loader's.
 rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || { echo "ABORT: reason=loadlib_unreadable" >&2; exit 1; }
 # No `2>&1`: nothing goes to stdout from here, and stderr is where every reason goes.
@@ -26,8 +26,8 @@ rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" || exit 1
 rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON" >&2; exit 1; }
 
-# A third positional once named the body file, so that form is refused rather than ignored, and
-# the baseline path is an option so the old form cannot have its body file overwritten.
+# A third positional is refused rather than ignored, and the baseline path is an option rather than
+# a positional, so a caller passing a body file there cannot have it overwritten with the baseline.
 { [ "$#" -le 2 ] || { [ "$#" -eq 6 ] && [ "$3" = --baseline-file ] && [ "$5" = --nonce ]; }; } \
     || { echo "ABORT: this takes <pr> <auto-review> --baseline-file <path> --nonce <digits> and the body on stdin (got $# — a third positional was the body file, and the body is no longer a file; the four-argument form without --nonce is #264's old contract)" >&2; exit 1; }
 PR="${1:-}"; AUTO_REVIEW="${2:-}"; BASELINE_FILE="${4:-}"; NONCE="${6:-}"

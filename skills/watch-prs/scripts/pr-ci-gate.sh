@@ -10,8 +10,8 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: the CI gate could not resolve its own directory"; exit 1; }
-# The bootstrap cannot use the loader: clear and take the clear's status, define a refusing stub
-# so an empty `loadlib.sh` cannot leave `rb_load` to `PATH`, source. The first load's 127 is the stub's.
+# The bootstrap cannot use the loader. The refusing stub is what stops an empty `loadlib.sh` from
+# leaving `rb_load` to `PATH`, and the first load's 127 is the stub's rather than the loader's.
 unset -f rb_load 2>/dev/null || {
     echo "ABORT: a pre-existing rb_load could not be cleared"; exit 1; }
 rb_load() { return 127; }

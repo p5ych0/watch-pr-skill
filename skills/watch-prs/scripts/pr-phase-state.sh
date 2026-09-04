@@ -10,8 +10,8 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_PHASE status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# The bootstrap cannot use the loader: clear and take the clear's status, define a refusing stub
-# so an empty `loadlib.sh` cannot leave `rb_load` to `PATH`, source. The first load's 127 is the stub's.
+# The bootstrap cannot use the loader. The refusing stub is what stops an empty `loadlib.sh` from
+# leaving `rb_load` to `PATH`, and the first load's 127 is the stub's rather than the loader's.
 unset -f rb_load 2>/dev/null || {
     echo "PR_PHASE status=error reason=loadlib_stale_definition" >&2; exit 2; }
 rb_load() { return 127; }
@@ -51,7 +51,7 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
         1) RB_VOUCH_REASON=no_signoff; return 1 ;;
         *) RB_VOUCH_REASON=unreadable; return 2 ;;
     esac
-    # One GraphQL response carries the id and both times, so nothing here compares anything.
+    # One GraphQL response carries the id and both times, so no comparison spans separate reads.
     _snap=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh escape-snapshot "$PR" "$1" "$2") || _src=$?
     case "$_src" in
         0) ;;

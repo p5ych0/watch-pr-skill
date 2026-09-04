@@ -10,8 +10,8 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_ROUND_COUNT status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# The bootstrap cannot use the loader: clear and take the clear's status, define a refusing stub
-# so an empty `loadlib.sh` cannot leave `rb_load` to `PATH`, source. The first load's 127 is the stub's.
+# The bootstrap cannot use the loader. The refusing stub is what stops an empty `loadlib.sh` from
+# leaving `rb_load` to `PATH`, and the first load's 127 is the stub's rather than the loader's.
 unset -f rb_load 2>/dev/null || {
     echo "PR_ROUND_COUNT status=error reason=loadlib_stale_definition" >&2; exit 2; }
 rb_load() { return 127; }
@@ -97,8 +97,8 @@ _clean=$(printf '%s' "$icraw" | jq -s --argjson who "$1" "$RECORDLIB_JQ"'
                | select((.user.login | IN($who[])) and ((.body | type) == "string"))
                | select(.body | test("(?m)^\\*\\*Reviewed commit:\\*\\* `[0-9a-f]{10}`"))
                | select(.body | test("[Dd]idn.t find any major issues"))
-               # Exactly ten hex, the footer width, so a clean re-review of a counted head
-               # deduplicates against the ten-character prefix of a full sha; the last anchored line.
+               # Exactly ten hex, the footer width, so a clean re-review deduplicates against a full sha
+               # prefix; the last footer line, since a footer-shaped line in the prose could name another head.
                | (.body | [scan("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`")] | last // [""] | .[0])
              ] | map(select(. != "")) | unique
         end' 2>/dev/null) || {

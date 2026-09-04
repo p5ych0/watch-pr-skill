@@ -11,8 +11,8 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_FINDINGS status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# The bootstrap cannot use the loader: clear and take the clear's status, define a refusing stub
-# so an empty `loadlib.sh` cannot leave `rb_load` to `PATH`, source. The first load's 127 is the stub's.
+# The bootstrap cannot use the loader. The refusing stub is what stops an empty `loadlib.sh` from
+# leaving `rb_load` to `PATH`, and the first load's 127 is the stub's rather than the loader's.
 unset -f rb_load 2>/dev/null || {
     echo "PR_FINDINGS status=error reason=loadlib_stale_definition" >&2; exit 2; }
 rb_load() { return 127; }
