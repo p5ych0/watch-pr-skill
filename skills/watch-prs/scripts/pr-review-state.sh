@@ -48,8 +48,8 @@ reviewer_reviews() {
             end' 2>/dev/null || return 2
 }
 
-# Codex reports a clean pass as an issue comment and submits no review, so `pulls/N/reviews` is empty
-# on a clean head; two signals are required, since the footer hash alone or the phrase alone accepts the wrong comment.
+# Codex reports a clean pass as an issue comment and creates no review for it, so the comment channel
+# is read too; two signals are required, since the footer hash alone or the phrase alone accepts the wrong comment.
 clean_comment_for_head() {
     local pr="$1" who="$2" head="$3" raw out
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/issues/$pr/comments" --paginate 2>/dev/null); then
@@ -80,8 +80,8 @@ clean_comment_for_head() {
     printf '%s' "$out"
 }
 
-# `<state>\t<review-id>\t<submitted-at>` from one snapshot: taken from separate fetches, the three
-# can describe different reviews, and the id is what proves they describe one.
+# One snapshot for all three values: taken from separate fetches they can describe different
+# reviews, and the id is what proves they describe one.
 head_review_snapshot() {
     local pr="$1" who="$2" head="$3" reviews out cid
     reviews=$(reviewer_reviews "$pr" "$who") || return 2
