@@ -42,7 +42,6 @@ AFTER_REVIEW_FILE=""
 # Supplied-ness tracked apart from the value: an empty `--after-review ""` is legitimate, so
 # emptiness cannot mean "not given".
 AFTER_REVIEW_GIVEN=""
-# Decimal digits; empty is "not given", which the file form refuses.
 REQUIRE_NONCE=""
 
 while [ "$#" -gt 0 ]; do
@@ -470,7 +469,6 @@ while :; do
                 printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s verdict=%s%s\n' \
                     "$PR" "$WHO" "$state" "$v_field" "$v_tail"
                 printf '%s\n' "$verdict"
-                # Status 4 for all-replies, decided in the grammar above rather than asked again.
                 [ "$v_replies" -eq 1 ] && exit 4
                 exit 0
             fi
@@ -483,7 +481,6 @@ while :; do
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
         exit 1
     fi
-    # Never sleep past the deadline.
     nap="$INTERVAL"
     remaining=$((TIMEOUT - waited))
     [ "$nap" -gt "$remaining" ] && nap="$remaining"

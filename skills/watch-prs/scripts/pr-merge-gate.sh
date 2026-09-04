@@ -270,7 +270,6 @@ case "$CHECKS_RC" in
     1) echo "merge blocked: a required check is not green"; exit 1 ;;
     6) echo "merge blocked: the base branch requires its pull requests to be up to date and this head is behind it; bring the base in and re-run the gate"; exit 1 ;;
     3) echo "merge blocked: the required checks have not finished"; exit 1 ;;
-    # 5 is a moved head, not a failed probe: the caller re-runs the gate.
     5) echo "merge blocked: the PR head no longer matches the gated head; re-run the gate for the head that is there now"; exit 1 ;;
     *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 1 ;;
 esac

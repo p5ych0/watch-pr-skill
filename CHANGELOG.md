@@ -6,7 +6,7 @@
   wrong without one.** `pr-merge-gate.sh`, `pr-close-round.sh` and `pr-watch.sh` held 1,666
   comment lines over 916 lines of code: the same startup and loader essays, then the
   history of every guard, its incidents and its refuted alternatives — all in `CLAUDE.md`'s
-  What-ships row for the helper or in an earlier entry here. 177 lines remain, each a
+  What-ships row for the helper or in an earlier entry here. 173 lines remain, each a
   constraint of at most two lines beside the code it explains: why Codex is asked about the
   current head before the recorded signoff, why a revocation is consulted for a contradiction
   and absence is not one, why `codex-only` pins the head to the signed commit, why the head
