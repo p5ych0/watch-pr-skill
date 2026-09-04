@@ -2,6 +2,7 @@
 
 # Sets HOST, OWNER and REPO rather than printing them: three values through one string make
 # any delimiter a value a remote can contain. `REVIEW_BUS_*` is the caller stating the identity.
+
 # rb-assigns: HOST OWNER REPO RB_IDENTITY_REASON
 rb_identity() {
     local remote p h _host _owner _repo
