@@ -310,7 +310,6 @@ required_checks_verdict() {
 ERRF="$(mktemp 2>/dev/null)" || {
     echo "PR_CI_STATE pr=$PR status=error reason=no_scratch_file" >&2; exit 2; }
 RC=0
-# A call with no `--head` goes to `gh pr checks`, since there is no commit to address.
 if [ -n "$WANT_HEAD" ] && [ -z "$REQUIRED" ]; then
     OUT="$(commit_checks_verdict "$WANT_HEAD")" || RC=$?
     MSG=""
