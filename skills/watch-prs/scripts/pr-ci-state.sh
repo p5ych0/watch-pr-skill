@@ -48,7 +48,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --required) REQUIRED="--required"; shift ;;
         --head)
-            # `shift 2` on a one-element list would leave the check silently unpinned.
+            # Turns a missing value into the usage refusal; `set -u` would abort on `$2` with only its own message.
             [ "$#" -ge 2 ] || { echo "usage: $0 <pr> [--required] [--head <oid>]" >&2; exit 2; }
             WANT_HEAD="$2"; shift 2 ;;
         *) echo "usage: $0 <pr> [--required] [--head <oid>]" >&2; exit 2 ;;

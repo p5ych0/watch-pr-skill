@@ -81,7 +81,7 @@ clean_comment_for_head() {
 }
 
 # One snapshot for all three values: taken from separate fetches they can describe different
-# reviews, and the id is what proves they describe one.
+# reviews, and on a terminal state the id is what proves they describe one.
 head_review_snapshot() {
     local pr="$1" who="$2" head="$3" reviews out cid
     reviews=$(reviewer_reviews "$pr" "$who") || return 2
@@ -92,8 +92,8 @@ head_review_snapshot() {
           | ( [ $mine[] | select(.submitted_at != null) ]
               | sort_by(.submitted_at) | last ) as $latest
           | ( if ($mine | length) == 0 then "none"
-              # An unsubmitted draft dominates, and DISMISSED or any unaccepted state reads as
-              # dismissed, which is what removes a signoff.
+              # An unsubmitted draft dominates, and DISMISSED reads as dismissed, which is what removes
+              # a signoff; an unknown state is refused by the shared validator before this.
               elif any($mine[]; .state == "PENDING" or .submitted_at == null) then "pending"
               elif $latest == null then "dismissed"
               elif $latest.state == "CHANGES_REQUESTED" then "blocked"
