@@ -24,7 +24,8 @@ exhaustive review, credit use) is set on the Codex **Code review** settings page
 findings → 5 fix and close the round, with the check-in of 6 inside it → back to 3 until
 Codex is clean → 7 STOP, and on the operator's word the Copilot phase, which is 3–6 again
 with `$WHO` switched → 8 STOP, and on the operator's word the merge gate. Every helper is
-started as `/usr/bin/env bash -p "$RB_SCRIPTS"/<helper>`, every status is branched on, an
+started as `/usr/bin/env bash -p "$RB_SCRIPTS"/<helper>` except `pr-selfcheck.sh`, which
+re-execs into a clean shell itself and is run directly; every status is branched on, an
 `ABORT:` ends the session, and every "cannot tell" is a stop rather than "no findings".
 
 ## How to work this loop
@@ -262,8 +263,10 @@ is posted as data, so prose quoting a command line is posted rather than execute
 summary and the phase account: a line starting with a reserved marker,
 `**Review-Signoff:**`, `**Review-Signoff-Revoked:**` or `**Review-Pause-Acknowledged:**`
 (indent it four spaces or quote it inline; a fence does not help, the readers scan the raw
-body); and, on the automatic path, `@codex review` anywhere in the body, case-insensitively
-(write it without the `@`, or broken up). An empty body is refused as well.
+body); an empty body; and `@codex review` anywhere in the body, case-insensitively — in
+the opening request where automatic review is on, since a pass is already queued, and in
+a Copilot-round summary or the phase account whatever the mode, since it would start a
+Codex pass nobody asked for. Write the mention without the `@`, or broken up.
 
 `pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>`
 posts the request — 0 posted, 1 stopped with nothing posted — and writes

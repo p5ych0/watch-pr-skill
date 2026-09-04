@@ -3131,8 +3131,6 @@ _mk_n="$(grep -c . <<<"$_mk_set")" || _mk_n=0
 # has nothing to do with what an author may write. That is the "the token also
 # appears elsewhere" trap, and the first version of this check fell into it: a
 # marker deleted from the refusal list still passed.
-# IN SKILL.md THE PASSAGE IS PROSE under step 2, stated once for every body the loop
-# posts; it was a comment inside the Copilot-phase fence until #282.
 _skill_pass="$(awk '/^\*\*Refused rather than posted\*\*/{c=5} c-->0' "$SKILL")" || true
 _readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/README.md")" || true
 { [ -n "$_skill_pass" ] && [ -n "$_readme_pass" ]; } \

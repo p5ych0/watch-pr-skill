@@ -5,11 +5,11 @@
 - **`SKILL.md` is written as instructions, and its fences hold commands.** 2.3.0 removed
   the claim-and-rationale pairs and left the rest as it was: 1,194 lines, with the prose
   between the fences written as argument — every rule carrying its history, its incident
-  and its refuted alternatives — and ten fences still holding multi-line commentary: a
+  and its refuted alternatives — and eleven fences still holding multi-line commentary: a
   thirty-line note on the baseline above the watch call, the request helper's synopsis,
   the phase-body rules, the merge gate's usage and status list. A driver reads the
   document whole on every invocation, and what it needs from it is what to run, in what
-  order, and where to stop. The prose is rewritten to say that and no more: 812 lines,
+  order, and where to stop. The prose is rewritten to say that and no more: 815 lines,
   and the 130 comment lines inside fences are down to 7, each a one-line constraint.
   Nothing the driver executes changes — the fences hold the same commands, built from
   2.3.0's by line range, and the non-comment fence lines diff empty against it. Every
