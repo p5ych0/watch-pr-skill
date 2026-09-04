@@ -338,7 +338,7 @@ case "$RB_TRIGGER" in
         *reason=revoked*) ;;
         *) echo "ABORT: the newest record changed while the verdict's time was read ('$SIGNOFF_NOW'); nothing posted"; exit 1 ;;
     esac
-    # `${…##*at=}` on a record without `at=` returns the whole line, whose first word sorts below every timestamp.
+    # `${…##*at=}` on a record without `at=` returns the whole line, which is not a time and must not reach the comparison.
     case "$SIGNOFF_NOW" in
         *" at="*) ;;
         *) echo "ABORT: a revocation is the newest record and carries no time ('$SIGNOFF_NOW'); nothing posted"; exit 1 ;;
