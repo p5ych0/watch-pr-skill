@@ -192,11 +192,11 @@ if [[ $MODE = pin ]]; then
         [[ $REVIEW_BUS_REMOTE = "$_rb_origin" ]] \
             || rb_refuse "ABORT: the pinned remote is not this checkout's origin (pinned '$(rb_redact "$REVIEW_BUS_REMOTE")', origin '$(rb_redact "$_rb_origin")'); the value the driver exported did not come from this repository"
     fi
-    # The status is all there is: a target can open and then reject data, leaving zero bytes, which is what an
-    # unset pin leaves too, or a prefix that looks like a value.
+    # The status is all there is: a target can open and then reject data, leaving zero bytes, which the caller
+    # reads as the same empty value an unset pin gives, or a prefix that looks like a value.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
-    # Only `EXIT`: the signal handlers stay armed through the final command, or a `TERM` here leaks the directory.
+    # Only `EXIT` is reset, since a successful run leaves the reservation for the caller.
     trap - EXIT
     exit 0
 fi
