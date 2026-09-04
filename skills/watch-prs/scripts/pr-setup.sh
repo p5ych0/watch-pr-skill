@@ -20,8 +20,8 @@ rb_load() { return 127; }
     echo "PR_SETUP status=error reason=loadlib_unreadable" >&2; exit 1; }
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_SETUP status=error" || exit 1
 
-# Only the shape is refused: a missing or relative name cannot be a handoff between two
-# processes, while any character is data, since the value is quoted everywhere and never evaluated.
+# Only the shape is refused: a missing name, or a relative one, which is not stable across processes
+# that need not share a working directory; any character is data, quoted everywhere and never evaluated.
 RB_DIR="${1-}"
 case "$RB_DIR" in
     "") echo "PR_SETUP status=error reason=bad_dir" >&2; exit 1 ;;
@@ -60,8 +60,8 @@ REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
     exit 1
 }
 
-# `set -C` makes every open below exclusive, so a symlink planted at a working file is refused rather
-# than truncated through, and `umask 077` says who may write what the open created. `>|` is never used.
+# `set -C` refuses an existing regular file or symlink at a working-file path, so a planted link is
+# refused rather than truncated through; `umask 077` says who may write what the open created. `>|` is never used.
 umask 077
 set -C
 RB_WORK_DIR="$RB_DIR/work"

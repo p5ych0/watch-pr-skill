@@ -106,8 +106,8 @@ head_review_snapshot() {
                + "\t" + (if $latest != null and ($latest.submitted_at | canonical_utc)
                           then $latest.submitted_at else "" end)
         end' 2>/dev/null)" || return 2
-    # Both channels, placed in time: a clean re-review on an unchanged head arrives as a comment,
-    # so whichever is newer wins, and equal times are unreadable rather than a decision.
+    # Both channels, placed in time: a clean re-review on an unchanged head arrives as a comment, so
+    # the newer wins unless a draft is pending, and equal times are unreadable rather than a decision.
     local latest_ts cinfo cid cts
     cinfo="$(clean_comment_for_head "$pr" "$who" "$head")"; crc=$?
     case "$crc" in
@@ -214,8 +214,8 @@ main() {
             exit 2
         }
     fi
-    # Length as well as alphabet, for the explicit argument too: an all-hex non-sha matched no
-    # commit_id and reported `state=none`, which callers read as "not judged" rather than "nonsense".
+    # Length as well as alphabet, for the explicit argument too: an all-hex non-sha would match no
+    # commit_id and read as `state=none`, which callers take as "not judged" rather than "nonsense".
     if ! _sha_why="$(sha_reason "$head")"; then
         echo "PR_REVIEW_STATE pr=$pr status=error reason=$_sha_why" >&2
         exit 2

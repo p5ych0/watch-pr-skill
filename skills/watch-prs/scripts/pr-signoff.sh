@@ -47,7 +47,7 @@ while :; do
     # A 200 can carry `errors` beside structurally valid, partial `data`.
     printf '%s' "$PAGE" | jq -e 'has("errors") | not' >/dev/null 2>&1 || { OK=0; break; }
     # Every node is validated before any is filtered: a discarded malformed node turns "not
-    # trustworthy" into "no signoff", and `createdAt` is second-resolution, so the id breaks ties.
+    # trustworthy" into "no signoff"; the id travels with the time so two records in one second stay distinct.
     FOUND=$(printf '%s' "$PAGE" | jq -r --arg who "$WHO" "$RECORDLIB_JQ"'
         .data.repository.pullRequest.comments.nodes as $n
         | if ($n | type) != "array"
@@ -62,7 +62,7 @@ while :; do
                  | .createdAt as $c
                  | .databaseId as $i
                  # Anchored at both ends, both markers in one scan so their order decides, and an
-                 # optional third field for the verdict time, since every record before it lacks one.
+                 # optional third field for the verdict time, since a record without one must stay readable.
                  | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?(?: `([^`\n]*)`)?[[:space:]]*$")]
                           | last // ["","","",""])
                  | select(.[1] == $who)

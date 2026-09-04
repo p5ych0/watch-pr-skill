@@ -36,7 +36,7 @@ REQUIRED=""; WANT_HEAD=""; DEADLINE="${PR_CI_PROBE_TIMEOUT:-60}"
 # A bad bound falls back to the default rather than removing the watchdog; a leading zero is octal.
 case "$DEADLINE" in ""|0|0*|*[!0-9]*|??????*) DEADLINE=60 ;; esac
 # One deadline for the whole run rather than per call, and an expired one is not a short one:
-# clamped up, each remaining call got a fresh second plus the watchdog's escalation.
+# clamping it up would grant each remaining call a fresh second plus the watchdog's escalation.
 _RB_T0=$SECONDS
 rb_left() {
     local left=$((DEADLINE - (SECONDS - _RB_T0)))
@@ -90,7 +90,8 @@ checks_msg_is_none_configured() {
 commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
     local oid="$1" _left _out
     _left="$(rb_left)" || return 2
-    # `-f`, not `-F`: `--field` sends a numeric-looking value as a JSON number, and all three are `String!`.
+    # `-f`, not `-F`: `--field` sends a numeric-looking value as a JSON number, and the variables are
+    # `String!` and `GitObjectID!`.
     _out="$(run_limited "$_left" gh api graphql --hostname "$HOST" \
         -f query='query($o:String!,$r:String!,$oid:GitObjectID!){repository(owner:$o,name:$r){object(oid:$oid){... on Commit{statusCheckRollup{state}}}}}' \
         -f o="$OWNER" -f r="$REPO" -f oid="$oid" 2>/dev/null)" || return 2
@@ -325,8 +326,8 @@ elif [ -n "$WANT_HEAD" ]; then
         echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
     BASE_REF="$(run_limited "$_left_base" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO"                   --json baseRefName --jq '.baseRefName' 2>/dev/null)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=base_unreadable" >&2; exit 2; }
-    # Encoded, not refused: `#`, `%` and a space are legal in a ref. `..` is refused, since `.` stays
-    # itself under encoding and would traverse into another repository's branch.
+    # Encoded, not refused: `#` and `%` are legal in a ref. `..` is refused, since `.` stays itself
+    # under encoding and would traverse into another repository's branch.
     case "$BASE_REF" in
         ""|*..*)
             echo "PR_CI_STATE pr=$PR status=error reason=bad_base base=$BASE_REF" >&2; exit 2 ;;

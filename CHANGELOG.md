@@ -7,7 +7,7 @@
   comment lines over 902 lines of code: the same privileged-startup and loader-bootstrap
   essays as the rest, then the history of each guard, its measurements and its refuted
   alternatives — all in `CLAUDE.md`'s What-ships row for the helper or in an earlier entry
-  here. 120 lines remain, each a constraint of at most two lines beside the code it
+  here. 121 lines remain, each a constraint of at most two lines beside the code it
   explains: why the setup helper removes nothing and traps `INT` alone, why `set -C` makes
   its working files exclusive, why a signoff stands only if no revocation is newer than the
   verdict it answers, why every comment on a review counts and the clean verdict is read
