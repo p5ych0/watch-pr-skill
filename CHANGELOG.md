@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.6.1] — 2026-09-04
+
+- **Four more helpers carry a comment only where the code looks wrong without one.**
+  `pr-setup.sh`, `pr-signoff.sh`, `pr-review-state.sh` and `pr-ci-state.sh` held 1,495
+  comment lines over 902 lines of code: the same privileged-startup and loader-bootstrap
+  essays as the rest, then the history of each guard, its measurements and its refuted
+  alternatives — all in `CLAUDE.md`'s What-ships row for the helper or in an earlier entry
+  here. 120 lines remain, each a constraint of at most two lines beside the code it
+  explains: why the setup helper removes nothing and traps `INT` alone, why `set -C` makes
+  its working files exclusive, why a signoff stands only if no revocation is newer than the
+  verdict it answers, why every comment on a review counts and the clean verdict is read
+  twice, why one rollup addressed by the commit replaces two paginated reads, why the
+  required set is the union of two sources read twice. No executable text changes: with
+  comments stripped, the lines of each file diff empty against 2.6.0, and the suite passes
+  as it did. A patch release: nothing a session does changes. #288.
+
 ## [2.6.0] — 2026-09-04
 
 - **The six smallest helpers carry a comment only where the code looks wrong without one.**
