@@ -81,7 +81,7 @@ RB_PREEXISTED=no
 # `rmdir` alone, on every path out: it refuses a symlink and a non-empty directory, so a replaced reservation costs
 # at most somebody else's empty directory, and a failed write leaves its leaf while the reservation stays non-empty.
 rb_cleanup() {
-    # This run's, or not ours to remove: `-O` refuses a name another account holds, which neither flag can see.
+    # `-O` is what refuses a name another account holds, which neither flag can see.
     [[ $RB_OWNED = yes ]] \
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
         || return 0
@@ -93,8 +93,8 @@ rb_refuse() {
     [[ -n ${1-} ]] && echo "$1" >&2
     exit "${2:-1}"
 }
-# A trap replaces a signal's terminating action, so each handler re-raises after cleaning up; every trap is
-# ignored first, since `trap -` would make the cleanup interruptible and a second signal re-entrant.
+# A trap replaces a signal's terminating action, so each handler re-raises after cleaning up; the traps are
+# ignored before it, since a reset would leave the cleanup interruptible and one still armed would re-enter it.
 rb_on_signal() {
     trap '' EXIT HUP INT TERM
     rb_cleanup
