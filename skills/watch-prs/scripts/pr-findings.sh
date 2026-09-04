@@ -1,148 +1,36 @@
 #!/usr/bin/env -S bash -p
-# Read a PR's findings, and the blocking review body when there is one.
-#
-#   pr-findings.sh list <pr>
-#   pr-findings.sh blocked-body <pr> <reviewer-login> [head-oid]
-#
-#   0  output printed (possibly empty: no unresolved threads / no blocking body)
-#   2  the read could not be trusted — the caller MUST NOT act on a partial answer
-#
-# WHY THIS IS A SCRIPT AND NOT A SNIPPET IN SKILL.md
-#
-# It was a snippet. Three consecutive review rounds found fail-open cases in it —
-# an unchecked `jq` status, an unvalidated `hasNextPage`, a `gh api --jq` that
-# could not run at all, a missing `pipefail`, interpolation rendering a missing
-# author as `null` — and each fix was itself prose that no test executed. This
-# repository has been here before: the merge-range check lived inline in SKILL.md
-# "where nothing executed it", shipped two defects, and became
-# `pr-merge-range.sh`. Code that decides whether the driver has read the findings
-# belongs where a test can run it.
-#
-# `set -uo pipefail`, NOT `-e`: `gh` probes fail as normal operation and the
-# result is control flow. `pipefail` matters here in particular — `gh --paginate`
-# can write a valid page and THEN fail, and without it the pipeline would report
-# jq's success and the partial page would pass for the whole answer.
-# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
-#
-# The shebang above is `env -S bash -p`, and that is the defence this block
-# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
-# functions from the environment, and honours an exported `SHELLOPTS` — so every
-# builtin this script uses is a name the operator's shell can replace, and each
-# one found took a review round of its own: `type`, `return`, `set`, `echo`,
-# `exit`. Privileged mode does none of the three, so there is nothing to shadow
-# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
-# a privileged shell reports both as builtins.
-#
-# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
-# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
-# that prints a forged `PR_FINDINGS status=error` line and exits has already answered the
-# caller — no later re-exec takes that back. The interpreter has to be privileged
-# from the start, which only the shebang or the caller can arrange.
-#
-# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
-# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
-# which starts a fresh privileged interpreter whatever the driving shell is and
-# whatever that platform's `env` supports. The shebang covers the other way in —
-# executing the file directly — and needs `env -S`, which is why it is not the
-# thing relied on.
-#
-# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
-# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
-# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
-# then define `echo` or `exit`, after which `$-` contains `p` and this test
-# passes on a shell that has already executed hostile code. Nothing inside a
-# script can detect work done before its first line — so this catches the honest
-# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
-# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
-# running `set -p; echo() { :; }` prints `hpBc function`.
+# A last-resort refusal: `$-` proves the mode, not how the shell got there.
 if [[ $- != *p* ]]; then
     echo "PR_FINDINGS status=error reason=not_privileged" >&2
     exit 2
 fi
 
+# No `-e`: statuses are control flow here. `pipefail` matters: `gh --paginate` can write a
+# valid page and then fail.
 set -uo pipefail
 
-# The shared record validators. Three scripts read the same two endpoints, and
-# each used to re-implement the same field checks — which is why the same rule
-# kept having to be added a third and fourth time, and why `state` reached two
-# scripts and stopped. See recordlib.sh and issue #11.
-#
-# The status is taken: a helper whose validators failed to load would fall back
-# to whatever the jq programs below happen to do with undefined functions, which
-# is an error per call rather than a clear refusal here.
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_FINDINGS status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# The library loader — and it obeys its own rule. A helper cannot load the file
-# that defines it, so this sequence is written out here; that asymmetry is
-# irreducible, but it is not a licence to load the loader carelessly. An exported
-# `rb_load` survives into this shell and an empty `loadlib.sh` still sources
-# successfully, so without the clear the first load runs the INHERITED
-# function — and a stale loader is the one thing that can make every OTHER load
-# look clean. See loadlib.sh and issue #22.
+# The bootstrap cannot use the loader: clear and take the clear's status, define a refusing stub
+# so an empty `loadlib.sh` cannot leave `rb_load` to `PATH`, source. The first load's 127 is the stub's.
 unset -f rb_load 2>/dev/null || {
     echo "PR_FINDINGS status=error reason=loadlib_stale_definition" >&2; exit 2; }
-# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
-# is a NAME — and while a privileged interpreter means no function by that name
-# can be imported, verifying a thing by asking a second thing about it is the
-# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
-# the verification instead: the stub below is what an empty `loadlib.sh` leaves
-# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
-# itself is the answer.
-#
-# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
-# a function is looked up on `PATH` — privileged mode does not change `PATH` —
-# and an executable by that name exiting 0 would report every load successful
-# with nothing cleared and no library sourced. Defining it means the call cannot
-# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
-# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
-# because a privileged shell imports no functions. #88.
 rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "PR_FINDINGS status=error reason=loadlib_unreadable" >&2; exit 2; }
-# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
-# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
-# this arm the only trace is a bare exit status — the ordinary-looking empty
-# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
-# own refusals report their own reason and their own status.
 rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ "PR_FINDINGS status=error" var || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "PR_FINDINGS status=error reason=loadlib_empty" >&2
     exit 2; }
 
-# The shared identity parser. This 60-line block sat here byte-identical to the
-# copies in the other two helpers and in SKILL.md, so both the hostless-origin
-# and file-transport rules had to be written four times and proven twice. See
-# identitylib.sh and issue #18.
-#
-# The status is taken, like recordlib above: a helper whose identity parser
-# failed to load would fall through to an undefined function per call rather
-# than refusing clearly here.
-# THE STALE DEFINITION IS CLEARED FIRST, AND THE CLEARING IS CHECKED. Bash
-# exports functions through the environment, so a caller that had run
-# `export -f rb_identity` leaves one defined in this shell before the `.` — and a
-# library that is empty or truncated ABOVE the definition still sources
-# successfully. The `type -t` check then finds the inherited function and reports
-# the parser loaded, and the driver goes on addressing `gh` calls with whatever
-# that stale version derives.
-#
-# `|| true` on the `unset` reopened exactly that: `readonly -f rb_identity` makes
-# the unset FAIL and leaves the function installed, and the discarded status made
-# a definition that could not be cleared indistinguishable from one that never
-# existed. An `unset -f` of a name that is not defined returns 0, so the only
-# thing a non-zero status here means is that a definition survived — which is the
-# one condition this line exists to rule out.
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_FINDINGS status=error" || exit 2
 rb_identity || {
     echo "PR_FINDINGS status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 REPO_SLUG="$HOST/$OWNER/$REPO"
 
-# Every unresolved thread, paginated, with the page shape validated before any
-# of it is formatted.
 cmd_list() {
-    # `seen` is a record separator-delimited set of every cursor this walk has
-    # requested, so a cycle of ANY length is caught rather than only a cursor
-    # repeating itself immediately. RS (0x1E) cannot occur in a base64 GraphQL
-    # cursor, so it cannot make two different cursors look like one.
+    # `seen` holds every cursor this walk has requested, RS-separated (RS cannot occur in a
+    # base64 cursor), so a cycle of any length is a refusal rather than a hang.
     local pr="$1" cursor="null" page nodes has_next next
     local RS=$'\x1e' seen
     seen="${RS}null${RS}"
@@ -154,19 +42,13 @@ cmd_list() {
             echo "PR_FINDINGS pr=$pr status=error reason=fetch_failed" >&2
             return 2
         }
-        # The shape is checked before anything is printed. `jq -e` alone is not
-        # enough: string interpolation renders a missing author or body as `null`
-        # and still exits 0, so a malformed page would produce "null" finding text
-        # that the driver would reply to, resolve, and summarise against.
-        # A GraphQL 200 can carry BOTH `errors` and a structurally valid `data`.
-        # The partial data satisfies every shape check below while silently
-        # omitting threads, so a short findings list would be indistinguishable
-        # from a shorter review — and the driver replies to, resolves and
-        # summarises against exactly that list.
+        # A GraphQL 200 can carry `errors` beside structurally valid, partial `data`.
         printf '%s' "$page" | jq -e 'has("errors") | not' >/dev/null 2>&1 || {
             echo "PR_FINDINGS pr=$pr status=error reason=graphql_errors" >&2
             return 2
         }
+        # The shape before anything is printed: interpolation renders a missing author or body
+        # as `null` and still exits 0.
         nodes=$(printf '%s' "$page" | jq -e -r '
             .data.repository.pullRequest.reviewThreads.nodes as $n
             | if ($n | type) != "array"
@@ -181,16 +63,8 @@ cmd_list() {
                               or (.comments.nodes[0].databaseId | type) != "number"
                               or (.comments.nodes[0].body | type) != "string"))
               then error("malformed thread node")
-              # The thread ID is printed with every finding. path:line is not an
-              # identifier: two unresolved comments can share a line, and a fix
-              # commit shifts the lines anyway — so the driver had nothing stable
-              # to resolve against and could close the wrong thread.
-              #
-              # The COMMENT id is printed alongside it: resolving takes the
-              # thread id over GraphQL, a reaction takes the REST id of the
-              # comment, and neither substitutes for the other. Codex asks for a
-              # thumbs reaction on every finding, and that is the only signal it
-              # gets about whether a review was worth making.
+              # The thread id resolves over GraphQL and the comment id reacts over REST; path:line
+              # is not an identifier, since two comments can share a line and a fix moves it.
               else ( [ $n[] | select(.isResolved == false) ]
                      | map("### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\nthread=\(.id) comment=\(.comments.nodes[0].databaseId)\n\(.comments.nodes[0].body)\n")
                      | join("\n") )
@@ -200,9 +74,7 @@ cmd_list() {
         }
         [ -n "$nodes" ] && printf '%s\n' "$nodes"
 
-        # The pagination state is validated, not assumed: a missing or malformed
-        # `hasNextPage` read as "last page" would silently truncate the findings,
-        # and a truncated list is indistinguishable from a shorter review.
+        # A missing or malformed `hasNextPage` read as "last page" would truncate the findings silently.
         has_next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || {
             echo "PR_FINDINGS pr=$pr status=error reason=pageinfo_unreadable" >&2
             return 2
@@ -212,9 +84,6 @@ cmd_list() {
             true)  ;;
             *) echo "PR_FINDINGS pr=$pr status=error reason=hasnextpage_not_boolean" >&2; return 2 ;;
         esac
-        # The status is taken here for the same reason it is taken for
-        # hasNextPage: `jq` can print a plausible cursor and then fail, and
-        # command substitution keeps what it printed.
         next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor') || {
             echo "PR_FINDINGS pr=$pr status=error reason=cursor_unreadable" >&2
             return 2
@@ -223,13 +92,6 @@ cmd_list() {
             echo "PR_FINDINGS pr=$pr status=error reason=missing_cursor" >&2
             return 2
         }
-        # The cursor must be one this walk has NEVER requested — not merely
-        # different from the last one. Comparing against the previous cursor
-        # alone caught only an immediate self-loop: a sequence like
-        # `null → A → B → A → B …` passes that check on every step and alternates
-        # forever. A cycle of any length is still a hang, and a hang is worse
-        # than the documented failure, because nothing times out, no status is
-        # returned, and the caller waits on a command that will never answer.
         case "$seen" in
             *"$RS$next$RS"*)
                 echo "PR_FINDINGS pr=$pr status=error reason=cursor_cycle" >&2
@@ -240,13 +102,7 @@ cmd_list() {
     done
 }
 
-# The body of a CHANGES_REQUESTED review by $2 ON THIS HEAD.
-#
-# A reviewer can put the whole request in the body with no inline comment, in
-# which case the merge gate blocks while `list` shows nothing to fix — a stuck
-# loop rather than a request. Scoped to the head on purpose: a stale
-# CHANGES_REQUESTED on an older commit, already superseded by a signoff on the
-# current one, would otherwise be printed as an active finding.
+# Scoped to the head: a stale CHANGES_REQUESTED on an older commit is not an active finding.
 cmd_blocked_body() {
     local pr="$1" who="$2" head="${3:-}" raw out
     if [ -z "$head" ]; then
@@ -255,55 +111,24 @@ cmd_blocked_body() {
             return 2
         }
     fi
-    # Length as well as alphabet: `abc` is all-hex and would pass a character
-    # check, then match no commit_id at all — printing nothing with rc 0, which is
-    # indistinguishable from "no blocking body". pr_head_oid validates the same
-    # way for the same reason.
     if ! _sha_why="$(sha_reason "$head")"; then
         echo "PR_FINDINGS pr=$pr status=error reason=$_sha_why" >&2
         return 2
     fi
 
-    # Captured separately from the parse. `gh --paginate` can write a valid page
-    # and then exit non-zero, and a pipeline would report jq's success while the
-    # partial page passed for the whole answer.
+    # Captured apart from the parse: `gh --paginate` can write a valid page and then fail.
     raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews" --paginate 2>/dev/null) || {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_fetch_failed" >&2
         return 2
     }
-    # The LATEST review of this head decides, not "any CHANGES_REQUESTED record".
-    # Filtering on state alone printed a request the reviewer had already
-    # SUPERSEDED with an approval on the same head, sending the driver into
-    # another fix round after a signoff. This mirrors how pr-review-state.sh picks
-    # the authoritative review.
-    #
-    # commit_id and submitted_at are validated as a full SHA and a complete ISO
-    # timestamp because this helper FILTERS and SORTS on them: a short commit_id
-    # is silently filtered away as another head, and a junk timestamp sorts above
-    # a real one and returns stale text.
-    #
-    # The record SHAPE is validated before anything is selected. The optional
-    # selectors below would otherwise map a malformed page away and exit 0, making
-    # a parse failure indistinguishable from "this body-only CHANGES_REQUESTED has
-    # no text" — and that is the one finding the driver has to act on.
+    # The latest review of this head decides, and an unsubmitted draft dominates, as in
+    # `pr-review-state.sh`; a malformed page is an error, because empty output here means "no body".
     out=$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg head "$head" "$RECORDLIB_JQ"'
         pages_or_error
         | [ .[][] ] as $all
-          # THE SHARED VALIDATOR. This helper suppresses output for anything that
-          # is not exactly CHANGES_REQUESTED, so a record it cannot read produced
-          # empty stdout and rc 0 — indistinguishable from "this blocking review
-          # has no body", which is the one case where silence loses the only text
-          # there is. Every field it checks was also written out in two other
-          # scripts; see recordlib.sh and issue #11.
           | if any($all[]; valid_review_record | not)
             then error("malformed review record")
             else [ $all[] | select(.user.login == $who and .commit_id == $head) ] as $mine
-              # An unsubmitted draft DOMINATES, exactly as it does in the
-              # snapshot pr-review-state.sh takes. A PENDING re-review on this
-              # head after the watch saw `blocked` has a null `submitted_at`, so
-              # the sort below ignores it and returns the OLDER request — sending
-              # the driver to act on findings the in-flight pass may supersede.
-              # The two must not disagree about what a pending review means.
               | if any($mine[]; .state == "PENDING" or .submitted_at == null)
                 then error("re-review in flight")
                 else . end
