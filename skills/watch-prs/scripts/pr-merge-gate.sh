@@ -57,7 +57,8 @@ CODEX_BOT="$RB_CODEX_BOT"; COPILOT_BOT="$RB_COPILOT_BOT"
 REPO_DIR="$(git rev-parse --show-toplevel)" || {
     echo "merge blocked: could not resolve the repository root"; exit 1; }
 
-# The head is resolved once; every gate below is addressed to it, or to the head its reviewer judged.
+# Resolved once: the verdict, range and check gates are addressed to this head or to the one its
+# reviewer judged; the thread and round gates are PR-level and take no head.
 HEAD_RC=0
 HEAD_OID=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) || HEAD_RC=$?
 if [ "$HEAD_RC" -ne 0 ] || ! _head_why="$(sha_reason "$HEAD_OID")"; then
@@ -98,7 +99,8 @@ case "$CODEX_STATE" in
         CODEX_EFFECTIVE_SHA="$CODEX_SHA"
         CODEX_VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$CODEX_BOT" "$CODEX_SHA"); CODEX_RC=$? ;;
     *)
-        # Codex has judged this head, so the range below measures from it rather than the recorded sha.
+        # This head has a Codex pass, pending or judged, so the range below measures from it rather
+        # than the recorded sha.
         CODEX_EFFECTIVE_SHA="$HEAD_OID"
         CODEX_VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$CODEX_BOT" "$HEAD_OID"); CODEX_RC=$? ;;
 esac

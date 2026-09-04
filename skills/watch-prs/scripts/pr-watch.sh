@@ -47,7 +47,6 @@ REQUIRE_NONCE=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        # Digits only: the value is expanded into a `case` pattern below.
         --require-nonce) [ "$#" -ge 2 ] || { echo "$0: --require-nonce needs a value" >&2; exit 2; }
                     case "$2" in
                         ""|*[!0-9]*) echo "$0: --require-nonce needs decimal digits, and was given '$2'" >&2; exit 2 ;;
@@ -77,8 +76,8 @@ case "$PR" in
     ""|0|0*|*[!0-9]*) echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2 ;;
 esac
 [ -n "$WHO" ] || { echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2; }
-# A bad value falls back to the default: zero would spin or expire at once, a leading zero is octal,
-# and a value beyond the integer range wraps inside the arithmetic below.
+# A bad value falls back to the default: a zero interval would spin, a leading zero is octal, and a
+# value beyond the integer range wraps inside the arithmetic below; a zero timeout is kept and expires at once.
 case "$INTERVAL" in 0|0*|*[!0-9]*|""|??????????*) INTERVAL=30 ;; esac
 case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
 
@@ -213,8 +212,8 @@ if [ -n "$AFTER_REVIEW_FILE" ]; then
         printf %s "$_r" && printf x' _ "$AFTER_REVIEW_FILE")"; _bl_rc=$?
     [ "$_bl_rc" -eq 0 ] && _bl_out="${_bl_out%x}"
     case "$_bl_rc" in
-        # An empty file is a refusal and "no prior review" is spelled `none`; the terminator is checked
-        # before the value, then every trailing newline stripped; the nonce splits on the first space.
+        # An empty file is a refusal, "no prior review" being spelled `none`; a value without the writer's
+        # newline is a truncated write, however well-formed it looks.
         0) case "$_bl_out" in
                "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_after_review_file detail=$(q "$AFTER_REVIEW_FILE")" >&2
                    exit 2 ;;
@@ -286,7 +285,7 @@ waited=0
 last=""
 while :; do
     # One head per poll, resolved first and passed to both probes: two heads can share a seven-hex
-    # prefix, so pinning both replaces a comparison of the records' abbreviated fields.
+    # prefix, so the records' abbreviated fields cannot prove the probes answered about the same one.
     remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }

@@ -241,20 +241,18 @@ request_review() {
     prior="${prior:-none}"
     _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$NONCE $prior")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
-    # Copilot is requested with `--add-reviewer` and never by a mention or a push; the Codex mention
-    # carries the summary in the one comment, since a separate one is one the pass may not read.
     if [ "$WHO" = "$COPILOT_BOT" ]; then
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
             || { echo "ABORT: could not post the round summary."; return 1; }
         gh pr edit "$PR" --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot \
             || { echo "ABORT: could not re-request Copilot."; return 1; }
     else
+        # The mention and the summary share one comment: a separate summary is one the pass may not read.
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "@codex review
 
 $SUMMARY" \
             || { echo "ABORT: could not request the review that carries this round's summary."; return 1; }
     fi
-    # For the record only; the driver reads the file.
     RB_PRIOR_REVIEW="$prior"
     return 0
 }
@@ -293,8 +291,8 @@ if [ "$AUTO_REVIEW" = no ]; then
 fi
 
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
-# Only for a reviewer a push can trigger: read for Copilot, a transient failure here would stall a
-# round that needs only `--add-reviewer`.
+# Skipped for Copilot, which a push cannot trigger: a transient failure here would stall a round
+# that needs only `--add-reviewer`.
 PUSH_FROM=""
 if [ "$WHO" != "$COPILOT_BOT" ]; then
     PUSH_FROM=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
