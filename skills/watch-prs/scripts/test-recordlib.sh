@@ -586,7 +586,7 @@ for f in "$SELF_DIR"/pr-review-state.sh "$SELF_DIR"/pr-findings.sh "$SELF_DIR"/p
         && pass "…and uses them in its jq programs" \
         || die "$b sources the library but never uses RECORDLIB_JQ"
 done
-grep -qE '^[[:space:]]*rb_load .* recordlib ' "$SELF_DIR/pr-watch.sh" \
+grep -qE '^[[:space:]]*rb_load .* recordlib is_full_sha ' "$SELF_DIR/pr-watch.sh" \
     && pass "pr-watch.sh sources the shared shape rules" \
     || die "pr-watch.sh no longer sources recordlib.sh"
 grep -q 'is_full_sha' "$SELF_DIR/pr-watch.sh" \
