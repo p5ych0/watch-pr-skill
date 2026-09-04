@@ -273,7 +273,8 @@ CODEX_RECHECK=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict 
 [[ $CODEX_RECHECK_RC -eq 0 ]] \
     || { echo "ABORT: Codex is not clean on the sha being recorded ($CODEX_RECHECK) — the head moved; do not start the Copilot phase"; exit 1; }
 
-# A PR whose first review is clean never reaches a push site, and the merge gate sees only required checks.
+# A PR whose first review is clean never reaches a push site, and a verdict accepted as phase-completing has to
+# have seen the checks.
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$CODEX_SHA" || exit 1
 
 # Established before anything is published and acted on after: an unreadable count must leave nothing behind.
@@ -296,7 +297,7 @@ case "$RB_CLEAN_AT_RC" in
     0) ;;
     1) echo "ABORT: Codex is no longer clean on $CODEX_SHA; nothing posted"; exit 1 ;;
     # An unreadable time costs the cleanliness proof too, so that is asked again on its own; the field is
-    # optional, and its absence never stops the record.
+    # optional, and its absence stops the record only where a revocation has to be ordered against it.
     *) RB_VERDICT_AT=""
        echo "note: when the verdict on $CODEX_SHA landed could not be read; the signoff will not carry one"
        RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?

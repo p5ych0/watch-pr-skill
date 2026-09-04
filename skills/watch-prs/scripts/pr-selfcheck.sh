@@ -19,8 +19,8 @@ while read -r _rb_f; do
     [ -n "$_rb_f" ] || continue
     builtin unset -f -- "$_rb_f" 2>/dev/null || true
 done <<< "$(builtin compgen -A function 2>/dev/null)"
-# After the clearing, so `set` is the builtin: an inherited `SHELLOPTS=xtrace` with `BASH_XTRACEFD=1` puts the
-# trace on stdout inside every substitution below.
+# After the clearing rather than before it, since an inherited `SHELLOPTS=xtrace` with `BASH_XTRACEFD=1` puts
+# the trace on stdout inside every substitution below.
 set +x
 
 # One call through the prefix and one direct, so a forged `builtin` has to cover `declare` consistently too.
@@ -221,7 +221,7 @@ done
 [ "$untested" -eq 0 ] && ok "every helper and shared library has a matching test"
 
 # `printf … | grep -q` races under `pipefail`: `grep -q` exits on its match, `printf` takes SIGPIPE, and 141
-# becomes the pipeline's status, so a present line reads as missing. Any non-zero from the scan is its own finding.
+# becomes the pipeline's status, so a present line reads as missing. A scan that cannot run is an error, not a clean result.
 pipeq=0
 for f in "$SCRIPTS"/test-*.sh; do
     [ -e "$f" ] || continue
