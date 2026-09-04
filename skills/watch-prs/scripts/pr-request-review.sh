@@ -47,8 +47,8 @@ case "$AUTO_REVIEW" in
     "") echo "ABORT: the auto-review mode is required: 'yes' if Codex automatic review is on for this repository, 'no' if it is not" >&2; exit 1 ;;
     *) echo "ABORT: '$AUTO_REVIEW' is not an auto-review mode; expected 'yes' or 'no'" >&2; exit 1 ;;
 esac
-# On stdin, read whole and first: a file would be written by a `cat` in the driver's shell, a
-# heredoc would splice the account into shell source, and everything below must see stdin at EOF.
+# Read whole and first, so the nested helper and `gh` below see stdin at EOF; the driver redirects a
+# file written with its own tool, never a heredoc, which would splice the account into shell source.
 BODY="$(cat)" || { echo "ABORT: could not read the request body from stdin." >&2; exit 1; }
 [ -n "$BODY" ] || { echo "ABORT: the request body is empty." >&2; exit 1; }
 
