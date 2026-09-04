@@ -60,8 +60,8 @@ REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || {
     exit 1
 }
 
-# `set -C` refuses an existing regular file or symlink at a working-file path, so a planted link is
-# refused rather than truncated through; `umask 077` says who may write what the open created. `>|` is never used.
+# `set -C` refuses a working-file path that resolves to an existing regular file, so a planted link cannot
+# have one truncated through it; `umask 077` says who may write what the open created. `>|` is never used.
 umask 077
 set -C
 RB_WORK_DIR="$RB_DIR/work"

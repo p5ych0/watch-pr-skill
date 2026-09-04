@@ -190,7 +190,7 @@ clean_verdict() {
         fi
         return 1
     }
-    # The time comes from the same snapshot; `verdict` ignores the tail and `clean-at` is the tail.
+    # The time comes from the snapshot that proved the cleanliness, so no caller has to ask twice.
     printf 'clean\t%s' "$at"
     return 0
 }
