@@ -48,7 +48,6 @@ case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
 
-# Reserved-word tests throughout: `[` is a name, and these guards decide whether a signoff is recorded at all.
 if [[ $STAGE = open ]]; then
     CODEX_SHA="${2:-}"
     [[ -n $CODEX_SHA ]] \

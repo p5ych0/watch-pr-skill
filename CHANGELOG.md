@@ -6,7 +6,7 @@
   one.** `pr-copilot-phase.sh` and `pr-selfcheck.sh` held 1,384 comment lines over 570 lines of
   code: the startup and loader essays, then the history of every guard, its incidents and its refuted
   alternatives — all in `CLAUDE.md`'s What-ships row for the helper or in an earlier entry here.
-  118 lines remain, each a constraint of at most two lines beside the code it explains: why the
+  117 lines remain, each a constraint of at most two lines beside the code it explains: why the
   phase is re-proved three times before its mutations, why the readiness write is the real write and
   writes a sentinel, why a revocation is ordered against the verdict and equal refuses, why the
   self-check re-execs behind a marker rather than the evidence, why every inherited function is
