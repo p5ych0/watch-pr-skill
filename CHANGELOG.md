@@ -10,9 +10,10 @@
   constraint of at most two lines beside the code it explains: why Codex is asked about the
   current head before the recorded signoff, why a revocation is consulted for a contradiction
   and absence is not one, why `codex-only` pins the head to the signed commit, why the head
-  and baseline files are emptied before any refusal, why the baseline is read before the push
-  in automatic mode, why every probe in the watch is bounded by what is left of the deadline,
-  why a terminal state that is still the old review is not an answer. No executable text
+  and baseline files are emptied ahead of every refusal but the alias one, why the baseline is
+  read before the push on the automatic Codex path, why a probe in the watch is bounded by the
+  limit its caller took from the deadline, why a terminal state that is still the old review
+  is not an answer. No executable text
   changes: with comments stripped, the lines of each file diff empty against 2.6.1, and the
   suite passes as it did. A patch release: nothing a session does changes. #292.
 

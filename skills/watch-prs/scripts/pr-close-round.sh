@@ -12,8 +12,8 @@ set -uo pipefail
 # below, and a source with no `/` in it is this directory.
 _RB_LIB_DIR="${BASH_SOURCE[0]%/*}"
 [[ $_RB_LIB_DIR = "${BASH_SOURCE[0]}" ]] && _RB_LIB_DIR=.
-# Emptied before any refusal can happen, since the driver reads the head file after the gate's `if` and
-# a walked-past refusal would hand it a previous round's OID; reached without the loader, behind a refusing stub.
+# Emptied ahead of every refusal but the alias one, since the driver reads the head file after the gate's `if`
+# and a walked-past refusal would hand it a previous round's OID; reached without the loader, behind a refusing stub.
 if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
     _rb_eh="$(/usr/bin/env bash -p -c \
