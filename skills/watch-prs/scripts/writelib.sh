@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Write a temporary beside the target, then rename it over: `>` follows a symlink and truncates
-# its referent, `rename(2)` replaces the name. Nothing here removes anything, on any path —
-# `docs/decisions/2026-08-29-setup-leaf-cleanup.md` convicts the class.
+# Write a temporary beside the target, then rename it over: `>` follows a symlink and truncates its
+# referent, `rename(2)` replaces the name. Nothing here removes anything — `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
 
 # One open answers everything, so a FIFO swapped in after a `[[ -f ]]` cannot block the driver's
 # shell; a status rather than a value, since a value must land in a name that may be readonly.
