@@ -399,8 +399,8 @@ while :; do
                     "$PR" "$WHO" "$(q "$verdict")"
                 exit 2
             fi
-            # Value, tail and status must agree: `clean` with rc 1, or without `findings=0`, is
-            # inconsistent, and `replies-only` is decided here through the shared predicate.
+            # Value, tail and status must agree: `clean` with rc 1 or without `findings=0` is inconsistent,
+            # as is a tail declaring `replies-only` that the shared predicate rejects.
             v_replies=0
             case "$v_field/$vrc" in
                 clean/0)    [ "$v_tail" = " findings=0" ] || v_field="" ;;
