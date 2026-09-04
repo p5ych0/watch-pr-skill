@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.6.2] — 2026-09-04
+
+- **The merge gate, the round closer and the watch carry a comment only where the code looks
+  wrong without one.** `pr-merge-gate.sh`, `pr-close-round.sh` and `pr-watch.sh` held 1,666
+  comment lines over 916 lines of code: the same startup and loader essays, then the
+  history of every guard, its incidents and its refuted alternatives — all in `CLAUDE.md`'s
+  What-ships row for the helper or in an earlier entry here. 178 lines remain, each a
+  constraint of at most two lines beside the code it explains: why Codex is asked about the
+  current head before the recorded signoff, why a revocation is consulted for a contradiction
+  and absence is not one, why `codex-only` pins the head to the signed commit, why the head
+  and baseline files are emptied before any refusal, why the baseline is read before the push
+  in automatic mode, why every probe in the watch is bounded by what is left of the deadline,
+  why a terminal state that is still the old review is not an answer. No executable text
+  changes: with comments stripped, the lines of each file diff empty against 2.6.1, and the
+  suite passes as it did. A patch release: nothing a session does changes. #292.
+
 ## [2.6.1] — 2026-09-04
 
 - **Four more helpers carry a comment only where the code looks wrong without one.**

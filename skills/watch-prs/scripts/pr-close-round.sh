@@ -1,190 +1,19 @@
 #!/usr/bin/env -S bash -p
-# Close a review round: push the fixes, prove the head is green, post the summary
-# and request the next pass.
-#
-#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no> <head-file> <prior-file>
-#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file> <prior-file> <nonce>
-#
-#   `post` TAKES THE REQUEST NONCE AND `gate` REFUSES ONE — #264. `post` prefixes the baseline
-#   it writes with the nonce the driver generated for this request, the same value the driver
-#   hands to `pr-watch.sh --require-nonce`, so a baseline reached past a refusal — a previous
-#   round's, well-formed — carries the wrong nonce and is refused at the watch. `gate` writes
-#   no baseline, so a seventh argument to it is a caller confusing the stages.
-#
-# BOTH STAGES TAKE THE SAME <head-file>: `gate` writes the head it proved into it,
-# `post` reads it back. The head itself in that position is the pre-#202 form and
-# is refused by name.
-#
-# AND THE SAME <prior-file>, WHICH IS THE OTHER VALUE THAT HAS TO CROSS. `post`
-# writes the review baseline into it, and the driver's watch reads it back. It
-# travelled in the `PR_ROUND_CLOSED` record before, which meant the driving shell
-# captured this script's stdout, ran `sed` over it, checked the record was there,
-# checked it carried the field, and cut the value out with `${rec##* prior-review=}`
-# — twelve executable lines in the one shell nothing can harden, to receive a value
-# the file mechanism beside it already hands over. The driver reads the FILE now and
-# nothing else; the record still carries the baseline, for whoever is reading the
-# terminal, and it is no longer parsed by anything. #234, #235.
-#
-#   0  gated/closed — `gate`: the head is pushed and green, and the threads may
-#                     now be answered. `post`: the summary is posted and the next
-#                     review is requested
-#   1  stopped  — the reason is on stdout; the round is NOT closed
-#   3  paused   — a round boundary. NOT a refusal: the operator decides
-#
-# WHY TWO STAGES, AND WHY THE THREADS GO BETWEEN THEM
-#
-# Answering and RESOLVING the threads belongs after the checks on the pushed head
-# and before the summary — and that is not a detail of presentation, it is the
-# same irreversibility rule the auto-review ordering below is built on. A resolved
-# thread cannot be taken back. Resolve before the gate and a round that then fails
-# to push, or pushes red, has already recorded findings as answered on a commit
-# that never landed or never built; and with auto-review ON the pass the push
-# starts reads threads that are already resolved, so it re-reviews with the
-# findings marked handled and no summary saying what handled them.
-#
-# THE MODEL WRITES THOSE REPLIES, so this cannot be one process: the replies are
-# per-finding prose, the reaction is a judgement (👍/👎), and neither can be
-# derived from anything on this command line. `gate` runs the half that must
-# precede them, `post` runs the half that must follow, and `post` re-proves the
-# head has not moved in between rather than trusting that it did not.
-#
-# The recipes this replaced carried the boundary as a comment — `# reply + resolve
-# threads here`, placed after the gate in BOTH of them. Extracting them without
-# the marker left the driver's own checklist as the only ordering, and that runs
-# before the push. Restoring it is what this split is for.
-#
-# WHY THIS EXISTS AS A SCRIPT
-#
-# It was two recipes in `SKILL.md`, 56 and 191 lines, doing the same job in
-# different ORDERS — and the ordering is the whole content. Nothing executed
-# either of them. Issue #26.
-#
-# THE TWO ORDERS, AND WHY THEY DIFFER:
-#
-#   auto-review OFF — the `@codex review` mention is the trigger, so it can carry
-#     the summary in one comment. Nothing is queued until that comment is posted,
-#     which means the round can be closed before anything is requested.
-#
-#   auto-review ON — the PUSH is the trigger, so a pass starts before anything
-#     here can post or resolve. The ordering is then decided by what is
-#     IRREVERSIBLE: push first, prove the checks, and close afterwards.
-#
-#     This sequence used to close first and push last, so the pass the push
-#     started would find the threads resolved and the summary in place. That
-#     cannot be gated: by the time the checks on the pushed commit can be
-#     consulted, the threads are resolved and the summary posted, and neither can
-#     be taken back. A later "this round is not closed" comment is a record, not a
-#     retraction — and is itself a call that can fail.
-#
-#     THE COST IS REAL AND IS NOT HIDDEN: the pass the push starts reads open
-#     threads and no summary, so it can re-report findings this round already
-#     answered. It is superseded by the explicit request at the end. The trade is
-#     a wasted pass against a round that closes on a red head, and only one of
-#     those can be undone by the next round.
-#
-# `set -uo pipefail`, NOT `-e`: every probe here reports its answer as an exit
-# status and several fail as ordinary operation. See CLAUDE.md § Bash conventions.
-# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
-#
-# The shebang above is `env -S bash -p`, and that is the defence this block
-# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
-# functions from the environment, and honours an exported `SHELLOPTS` — so every
-# builtin this script uses is a name the operator's shell can replace, and each
-# one found took a review round of its own: `type`, `return`, `set`, `echo`,
-# `exit`. Privileged mode does none of the three, so there is nothing to shadow
-# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
-# a privileged shell reports both as builtins.
-#
-# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
-# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
-# that prints a forged `ABORT:` line and exits has already answered the
-# caller — no later re-exec takes that back. The interpreter has to be privileged
-# from the start, which only the shebang or the caller can arrange.
-#
-# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
-# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
-# which starts a fresh privileged interpreter whatever the driving shell is and
-# whatever that platform's `env` supports. The shebang covers the other way in —
-# executing the file directly — and needs `env -S`, which is why it is not the
-# thing relied on.
-#
-# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
-# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
-# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
-# then define `echo` or `exit`, after which `$-` contains `p` and this test
-# passes on a shell that has already executed hostile code. Nothing inside a
-# script can detect work done before its first line — so this catches the honest
-# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
-# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
-# running `set -p; echo() { :; }` prints `hpBc function`.
+# A last-resort refusal: `$-` proves the mode, not how the shell got there.
 if [[ $- != *p* ]]; then
     echo "ABORT: reason=not_privileged"
     exit 1
 fi
 
+# No `-e`: statuses are control flow here.
 set -uo pipefail
 
-# THE LIBRARY DIRECTORY IS DERIVED BY EXPANSION, BECAUSE THE CLEARING BELOW NEEDS IT AND
-# NOTHING FALLIBLE MAY COME FIRST. It was `$(cd -- "$(dirname -- …)" && pwd)`, which is two
-# commands and a substitution: `dirname` missing from `PATH` — or `cd` refusing, or the
-# substitution failing — refused ABOVE the clearing, leaving a stale 40-hex head for a
-# driving shell whose `exit` returns to accept. `${BASH_SOURCE[0]%/*}` is a parameter
-# expansion the parser performs: there is no command to be missing and no status to take.
-#
-# A SOURCE WITH NO `/` IS THIS DIRECTORY. `%/*` leaves the string unchanged when it holds no
-# slash, which is the case where the script was found on `PATH` — the driver never does that
-# (`test-pr-identity.sh` fails if any caller invokes a helper bare) but a person can.
+# A parameter expansion rather than `$(cd … && pwd)`: nothing fallible may stand above the clearing
+# below, and a source with no `/` in it is this directory.
 _RB_LIB_DIR="${BASH_SOURCE[0]%/*}"
 [[ $_RB_LIB_DIR = "${BASH_SOURCE[0]}" ]] && _RB_LIB_DIR=.
-# ── THE STALE HEAD AND BASELINE ARE CLEARED BEFORE ANYTHING ELSE, and that ordering is
-# a finding rather than a preference. The driver's head-file check is NOT inside the gate's
-# success arm — it is the next statement after it, and its own comment says why: `AND ITS
-# IDENTITY IS PROVEN BEFORE ITS CONTENT, because a refusal can be walked past`. A shadowed
-# `exit` in the driving shell walks past a failed `gate`, the content check then accepts a
-# previous round's 40-hex OID, and the operator reaches the irreversible reply-and-resolve
-# step with nothing pushed and nothing gated. So every refusal this stage can make has to
-# happen AFTER the clearing.
-#
-# IT USED TO BE A RAW `>` FOR THAT REASON, and that is the defect #263 removes. Nothing was
-# loaded here, so there was nothing to rename with — and `>` FOLLOWS A SYMLINK, as does the
-# `[[ -f ]]` in front of it, so a link at either path had the operator's file at the other
-# end truncated on every `gate` call that got this far, not only on a refusal.
-#
-# SO THE RULE IS REACHED IN A CHILD THAT SOURCES `writelib.sh` DIRECTLY, which is how both
-# orderings hold at once. `rb_load` is not used and is not needed: an emptied `loadlib.sh`
-# leaves the stub, the stub refuses, and every load below would fail — but none of that is
-# above the clearing any more, because this reaches the library without the loader.
-#
-# AND THE CHILD DEFINES A REFUSING STUB BEFORE IT SOURCES, for the reason `rb_load`'s own
-# bootstrap does. Sourcing an EMPTY `writelib.sh` succeeds — there is nothing in it to fail
-# — and leaves the name undefined, and an undefined name is then looked up on `PATH`: an
-# executable called `rb_empty_handoff` that exits 0 reported the clearing done with the
-# stale head untouched, and a later refusal was then walked past onto that head. With the
-# stub in place an empty library leaves the stub, the stub returns 127, and this refuses
-# at the clearing rather than somewhere later — the direction `rb_load` fails in, reached
-# without it. Every child that sources this library directly carries the same stub.
-#
-# WHAT REMAINS ABOVE IS THE INSTALLATION ITSELF: a `writelib.sh` that is unreadable or
-# defines nothing. Neither can be defended from inside
-# this stage — clearing without the rule is what forced the raw `>`, and an inline rename is
-# the duplicated rule `CLAUDE.md` forbids — and both are the same class as this file itself
-# being empty.
-#
-# UNBOUNDED, LIKE THE `>` IT REPLACES. `run_limited` lives in `testlib.sh` and there is no
-# loader yet; the exclusive create cannot block on a FIFO, and what remains is the pathname
-# resolution an unresponsive mount can stall, which the redirection here could stall on too.
-#
-# BEFORE `shift`, so `$1` is the stage and `$6` and `$7` are the two files.
-#
-# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test here
-# would be a second copy of the rule `recordlib.sh` owns, and the pre-#202 form puts the
-# head ITSELF in that position. A commit id contains no `/`, and every head file this loop
-# names is a path under the session's working directory, so the slash tells the two apart
-# without knowing what an OID looks like.
-#
-# AND NOT THE SUMMARY, because emptying a head file that IS the summary destroys the
-# account this stage is about to post. That refusal is below too, and this must not commit
-# the damage it exists to prevent.
+# Emptied before any refusal can happen, since the driver reads the head file after the gate's `if` and
+# a walked-past refusal would hand it a previous round's OID; reached without the loader, behind a refusing stub.
 if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
     _rb_eh="$(/usr/bin/env bash -p -c \
@@ -194,13 +23,8 @@ if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
         exit 1
     }
 fi
-# AND THE PRIOR FILE HERE TOO, FOR THE SAME REASON AND WITH THE SAME EXCEPTIONS. A refusal
-# above the write further down leaves the PREVIOUS round's baseline in place, and the
-# driver's watch takes what it finds: a review that predates this round, accepted as the
-# answer to a request this round never made. The exceptions are the summary — emptying it
-# destroys the account — and the head file, which the arm above has already emptied and
-# whose emptiness must not be mistaken for this one's. Both are refused properly further
-# down; this only declines to do damage before that refusal can be reached. #234.
+# The same for the baseline, otherwise the previous round's for the watch to accept. Both arms take only
+# an existing file whose name holds a `/`, since a commit id has none, and never the summary, whose emptying destroys the account.
 if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
    && [[ -n ${4:-} ]] && [[ ! ${7} -ef ${4} ]] \
    && { [[ -z ${6:-} ]] || [[ ! ${7} -ef ${6} ]]; }; then
@@ -212,75 +36,37 @@ if [[ ${1:-} = gate ]] && [[ -n ${7:-} ]] && [[ -f ${7} ]] && [[ ${7} = */* ]] \
     }
 fi
 
-# CANONICALISED ONLY NOW, below the clearing. Everything after this point loads libraries
-# and runs helpers by absolute path, and a relative one would break if anything later
-# changed directory — but the canonicalisation can FAIL, so it must not stand ahead of the
-# clearing, which is what put it there in the first place.
+# Canonicalised only now, below the clearing, since the canonicalisation can fail.
 _RB_SELF_DIR="$(cd -- "$_RB_LIB_DIR" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
-# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
-# is a NAME — and while a privileged interpreter means no function by that name
-# can be imported, verifying a thing by asking a second thing about it is the
-# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
-# the verification instead: the stub below is what an empty `loadlib.sh` leaves
-# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
-# itself is the answer.
-#
-# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
-# a function is looked up on `PATH` — privileged mode does not change `PATH` —
-# and an executable by that name exiting 0 would report every load successful
-# with nothing cleared and no library sourced. Defining it means the call cannot
-# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
-# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
-# because a privileged shell imports no functions. #88.
+# The bootstrap cannot use the loader. The refusing stub is what stops an empty `loadlib.sh` from
+# leaving `rb_load` to `PATH`, and the first load's 127 is the stub's rather than the loader's.
 rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || { echo "ABORT: reason=loadlib_unreadable"; exit 1; }
-# `2>&1` on each: `rb_load` reports on stderr, and everything this script says is
-# documented as stdout — a caller capturing it would otherwise get nothing for the
-# failures that happen before anything else can.
-# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
-# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
-# this arm the only trace is a bare exit status — the ordinary-looking empty
-# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
-# own refusals report their own reason and their own status.
+# `2>&1` on each: everything this stage says is stdout, and the loader reports on stderr.
 rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
     exit 1; }
-# AFTER THE FIRST LOAD, DELIBERATELY. The load above carries the `loadlib_empty`
-# diagnostic, and it does so because it is FIRST — an inherited or emptied loader is
-# named there and nowhere else. Putting this one ahead of it made that report come
-# from a bare `|| exit 1`, so the helper refused in silence and
-# `test-pr-identity.sh` caught it. The CLEARING above the bootstrap needs neither, and
-# reaches `rb_empty_handoff` without `rb_load` for exactly that reason.
+# After the first load, which is the one that names an empty loader.
 rb_load "$_RB_SELF_DIR" writelib rb_write_handoff "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" writelib rb_empty_handoff "ABORT:" 2>&1 || exit 1
 
-# BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
-# inheritable: a `recordlib.sh` truncated after the first definition passes the
-# check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
-# as library data — so this would validate a signoff from whatever account that
-# variable named. `rb_load` clears before it sources, which is the whole point.
+# Both logins through `rb_load`, or an exported one from the environment is accepted as library data.
 rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_review_trigger "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON"; exit 1; }
-# THE SESSION'S IDENTITY IS KEPT, because `rb_identity` runs again below against
-# origin's PUSH url and overwrites these. Copied here once, before anything can
-# move them, so the comparison is against what this session was pinned to rather
-# than against whatever the last parse produced.
+# Copied before `rb_identity` runs again below against origin's push URLs and overwrites these.
 RB_PIN_HOST="$HOST"; RB_PIN_OWNER="$OWNER"; RB_PIN_REPO="$REPO"
 { [ "$RB_PIN_HOST" = "$HOST" ] && [ "$RB_PIN_OWNER" = "$OWNER" ] && [ "$RB_PIN_REPO" = "$REPO" ]; } \
     || { echo "ABORT: the pinned identity could not be captured; one of RB_PIN_HOST/OWNER/REPO is readonly."; exit 1; }
 COPILOT_BOT="$RB_COPILOT_BOT"
 
-# THE STAGE IS FIRST AND HAS NO DEFAULT. A default is the whole defect back: a
-# caller that forgets which half it is running would silently get one, and the one
-# it got would be the one that skips the threads. The old four-argument form
-# lands here as a PR number in stage position and is refused by name.
+# No default: the stage a forgetful caller would get is the one that skips the threads.
 STAGE="${1:-}"
 case "$STAGE" in
     gate|post) ;;
@@ -290,123 +76,47 @@ esac
 shift
 
 PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"; PRIOR_FILE="${6:-}"; NONCE="${7:-}"
-# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
-# stages take the same path: `gate` writes the head it proved into it, and `post`
-# reads it back out. The value never enters the driving shell.
-#
-# IT WAS A STRING, AND THAT IS WHAT #202 WAS. The driver captured `gate`'s output,
-# `sed`ed the head out of the record and assigned it — `GATED_HEAD="$( … )"`, an
-# ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
-# pushed. A startup file that has made that name readonly fails it there: with
-# `errexit` the shell ends, and without it the name keeps whatever it held, so the
-# non-empty check passes on a seeded value and `post` is handed a head the gate
-# never reported. `CLAUDE.md` records that an assignment's status cannot be taken,
-# so a `||` on it catches nothing.
-#
-# A FILE HAS NO SUCH FAILURE, and it removes two more names with it: the driver no
-# longer needs a capture, and it no longer needs `sed` — which is a NAME, and one
-# that prints a plausible forty hex and exits 0 sends `post` at whatever it says.
-# It is the shape `pr-request-review.sh` uses for the review baseline and
-# `pr-origin.sh` for the origin: a path rather than a name.
-#
-# THE OLD FORM IS REFUSED BY NAME rather than ignored, because a caller still
-# passing the sha would have `gate` try to create a file called `a8ec960…` and
-# `post` try to read one — the first would succeed and the second would fail with a
-# reason about the file rather than about the caller.
+# The head crosses in a file, since an assignment in the driving shell after the push fails silently
+# on a readonly name; a sha in this position is a caller passing the head itself, refused by name.
 [ -n "$HEAD_FILE" ] \
     || { echo "ABORT: a head file is required: 'gate' writes the head it proved into it and 'post' reads it back."; exit 1; }
 if sha_reason "$HEAD_FILE" >/dev/null 2>&1; then
     echo "ABORT: the fifth argument is now the head FILE, not the head itself (got what looks like an OID: '$HEAD_FILE'). 'gate' writes the head into that file and 'post' reads it back."
     exit 1
 fi
-# AND IT IS NOT THE SUMMARY. `gate` reads the summary and then writes the head, so
-# one file serving as both means the head OVERWRITES the account: `post` then finds
-# a well-formed OID in the summary file, passes the non-empty test, and posts the
-# sha as this round's summary to the reviewer that reads it before the diff.
-#
-# BOTH IDENTITIES, because neither covers the other. Equal strings catch the plain
-# case, including before either file exists; `-ef` catches a hard link or a symlink,
-# which is the same file under two names and is what an operator with a tidy
-# scratch directory can produce by accident.
+# Both identities: equal strings catch the plain case before either file exists, `-ef` a hard link
+# or a symlink, which is the same file under two names.
 if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
     echo "ABORT: the head file and the summary file are the same file ('$HEAD_FILE'); the head would overwrite the account and be posted as this round's summary."
     exit 1
 fi
-# AND A GATE EMPTIES IT BEFORE ANY OTHER REFUSAL CAN HAPPEN — before the PR number
-# and the reviewer are validated, and before the summary is read — so that EVERY
-# refusal but the aliased one leaves it empty rather than holding the PREVIOUS
-# round's head. It sat below all of those and was reached by none of them: a
-# readonly `WHO` holding an invalid reviewer, or a library that would not load, left
-# a stale OID in place for a driver to accept. That is what lets
-# the driver's `post` step guard on the file being non-empty and have the guard
-# mean something: the STATE says whether a gate succeeded, rather than the driver's
-# obedience to an ordering.
-#
-# A STALE HEAD PASSES THE DRIVER'S GUARD, which is what makes the position matter
-# rather than being tidiness: it is refused only later, by `post`'s own re-proof —
-# after the threads have been resolved, which cannot be taken back.
-#
-# THE ALIAS CHECK STAYS AHEAD OF IT, and that ordering is forced: truncating a head
-# file that IS the summary destroys the account this stage is about to post. The
-# driver asks the file identity first for the same reason.
-# THE PRIOR FILE IS THE SAME KIND OF ARGUMENT AND GETS THE SAME CHECKS. Aliasing it
-# to the summary would have the baseline overwrite the account this stage posts;
-# aliasing it to the head file would have it overwrite the head `post` re-proves
-# against. Both are the accident an operator with a tidy scratch directory produces,
-# and both are silent without this.
+# The baseline file gets the same checks: aliased to the summary it overwrites the account, aliased
+# to the head file it overwrites what `post` re-proves against.
 [ -n "$PRIOR_FILE" ] \
     || { echo "ABORT: a prior file is required: 'post' writes the review baseline into it and the driver reads it back."; exit 1; }
 if [ "$PRIOR_FILE" = "$SUMMARY_FILE" ] || [ "$PRIOR_FILE" -ef "$SUMMARY_FILE" ] 2>/dev/null; then
     echo "ABORT: the prior file and the summary file are the same file ('$PRIOR_FILE'); the baseline would overwrite the account."
     exit 1
 fi
-# THE NONCE IS `post`'s AND ONLY `post`'s — #264. `post` prefixes the baseline it writes
-# with the nonce the driver generated for this request, the same value the driver hands
-# to `pr-watch.sh --require-nonce`, so a baseline the watch finds carrying any other nonce
-# was written by a previous round — reached past a refusal — and is refused there. `gate`
-# writes no baseline (it empties the file), so a nonce given to it is a caller confusing
-# the two stages and is refused rather than ignored: an ignored argument is how the
-# old three-argument `pr-request-review.sh` form dropped a body in silence.
+# `post` prefixes the baseline with the nonce the driver hands to `pr-watch.sh --require-nonce`;
+# `gate` writes no baseline, so a nonce given to it is a caller confusing the stages, refused below its emptyings.
 if [ "$STAGE" = post ]; then
     case "$NONCE" in
         ""|*[!0-9]*) echo "ABORT: 'post' takes a seventh argument, the request nonce, as decimal digits (got '$NONCE'); the baseline is prefixed with it and pr-watch.sh --require-nonce refuses any other."; exit 1 ;;
     esac
 fi
-# `gate`'s OWN refusal of a nonce is BELOW its emptyings, not here — see the gate block.
 if [ "$PRIOR_FILE" = "$HEAD_FILE" ] || [ "$PRIOR_FILE" -ef "$HEAD_FILE" ] 2>/dev/null; then
     echo "ABORT: the prior file and the head file are the same file ('$PRIOR_FILE'); the baseline would overwrite the head 'post' re-proves against."
     exit 1
 fi
-# EMPTIED BY THE GATE, ALONGSIDE THE HEAD. A `post` that fails after a previous
-# round wrote a baseline would otherwise leave the OLD value readable, and the
-# driver's watch would take it — accepting a review that predates this round as the
-# answer to the request this round did not make.
-#
-# AND SINCE #264 AN EMPTIED FILE IS A REFUSAL, WHICH IS STRONGER THAN WHAT THIS WAS FOR.
-# Empty used to be a legitimate baseline, so emptying here removed the stale claim and
-# left "no floor" in its place — better than the stale value and still a value the watch
-# accepts. The watch refuses an empty file now, so a `post` that fails after this gate
-# stops the round with `empty_after_review_file` instead of arming a watch against
-# nothing. Do not "fix" this by writing the `none` token here: the token means there was
-# no prior review, which this gate has not established and must not claim.
 if [ "$STAGE" = gate ]; then
-    # EMPTIED BY WRITING AN EMPTY VALUE AND RENAMING IT OVER, not by truncating the name.
-    # `>` follows a symlink, so a same-UID process that replaced either of these paths had
-    # the file it pointed at emptied instead. #263.
+    # By rename rather than `>`, which follows a symlink. Do not write the `none` token here: it
+    # claims there was no prior review, which this gate has not established.
     _rb_wh="$(rb_empty_handoff "$HEAD_FILE")" \
         || { echo "ABORT: could not empty the head file '$HEAD_FILE': $_rb_wh"; exit 1; }
     _rb_wh="$(rb_empty_handoff "$PRIOR_FILE")" \
         || { echo "ABORT: could not empty the prior file '$PRIOR_FILE': $_rb_wh"; exit 1; }
-    # AND ONLY NOW DOES `gate` REFUSE A NONCE IT WAS NOT MEANT TO TAKE. The refusal stood
-    # ABOVE these emptyings, and that was the walked-past-guard shape this file exists to
-    # avoid: a `gate` accidentally given a seventh argument refused with the previous round's
-    # OID still in the head file, and a driver whose `exit` returns then read it back through
-    # `rb_handoff_is_sha` as a proven head — reaching the irreversible thread replies with no
-    # push and no CI proof for this round. Every refusal below the clearing leaves an EMPTY
-    # head, which that read refuses. The nonce belongs to `post`, which writes the baseline;
-    # `gate` writes none, so an argument here is a caller confusing the stages, refused rather
-    # than ignored — an ignored argument is how the old three-argument `pr-request-review.sh`
-    # form dropped a body in silence.
+    # Only after the emptyings, so this refusal cannot leave a stale head for a walked-past `exit`.
     [ -z "$NONCE" ] \
         || { echo "ABORT: 'gate' takes six arguments; the request nonce ('$NONCE') belongs to 'post', which writes the baseline. 'gate' only empties it, and it has: the head and prior files are empty."; exit 1; }
 fi
@@ -414,113 +124,35 @@ fi
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
-# THE REVIEWER IS ONE OF THE TWO THIS LOOP KNOWS. Every branch below asks "is
-# this Copilot?" and treats everything else as Codex, so a typo or a third login
-# silently took the Codex path: the mention was posted, Copilot was never
-# requested, and the round waited on a pass nobody asked for.
+# Every branch below asks "is this Copilot?" and treats everything else as Codex, so a third login is refused.
 case "$WHO" in
     "$RB_CODEX_BOT"|"$RB_COPILOT_BOT") ;;
     "") echo "ABORT: a reviewer login is required"; exit 1 ;;
     *) echo "ABORT: '$WHO' is not a reviewer this loop drives (expected $RB_CODEX_BOT or $RB_COPILOT_BOT)"; exit 1 ;;
 esac
 [ -n "$SUMMARY_FILE" ] || { echo "ABORT: a summary file is required"; exit 1; }
-# WHAT `git push` WOULD PUSH IS NOT THIS PR UNLESS SOMEBODY CHECKS. A bare
-# `git push` sends whatever branch the checkout happens to be on, and this stage
-# is given a PR number and a reviewer — it was never told which branch that PR is
-# for, and never asked.
-#
-# IT PUSHED `main`. Driving #118's round from a checkout sitting on `main` — a
-# `git checkout` had failed because a second worktree held the feature branch, so
-# the shell stayed put — the gate pushed the default branch. An unreviewed commit
-# went straight to `main`, and the round was lost besides: the CI gate then waited
-# for checks on a head the PR still did not have. Two failures from one missing
-# question. #119.
-#
-# ASKED OF THE PR, ANSWERED FROM THE CHECKOUT, AND COMPARED WITH A RESERVED WORD.
-# A DETACHED HEAD HAS NO BRANCH and is refused too: `git push` from one pushes
-# nothing useful, and "nothing useful" is not a state to guess about when the next
-# step waits for a head to appear.
-# THE REFSPEC IS THE PROTECTION; THE BRANCH CHECK IS THE EXPLANATION. A bare
-# `git push` leaves BOTH destination inputs to configuration: `push.default` and
-# `branch.<n>.remote` decide the repository, and `remote.<n>.push` can supply
-# refspecs that update other refs — an ahead `main` among them — however the
-# current branch is named. So checking the name and then pushing bare is a guard
-# over a call that can still go elsewhere, which is the shape this repository
-# keeps deleting.
-#
-# `git push origin HEAD:refs/heads/<branch>` names the repository and the one ref
-# it may write, so no configuration can widen it. The branch comparison stays
-# because it is what TELLS THE OPERATOR they are in the wrong worktree — the case
-# that caused #119 — rather than pushing their work to a branch they did not mean
-# and reporting success.
-#
-# `RB_PUSH_REFSPEC` IS SET HERE AND USED AT BOTH PUSH SITES, so the two cannot
-# drift: one of them being bare is exactly the defect, and a value computed once
-# cannot be half-applied.
+# A bare `git push` sends whatever branch the checkout is on to wherever configuration says; the
+# refspec names the one ref that may be written, and the branch comparison tells the operator they are in the wrong worktree.
 rb_push_is_the_prs() {
     local _want _cross _pair _pushurl _have
-    # ONE CALL FOR BOTH FACTS, joined by a TAB. A git ref name cannot contain a
-    # space or any control character — `git check-ref-format` forbids them — so a
-    # tab cannot appear in `headRefName` and cannot shift the field. That is the
-    # test this repository applies to any delimiter, and it is why two values may
-    # share one line here where three identity fields may not.
+    # One call joined by a tab, which a ref name cannot contain.
     _pair=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefName,isCrossRepository \
         --jq '.headRefName + "\t" + (.isCrossRepository | tostring)' 2>/dev/null) \
         || { echo "ABORT: could not read the PR's head branch; refusing to push blind."; return 1; }
     _want="${_pair%%$'\t'*}"
     _cross="${_pair#*$'\t'}"
     [ -n "$_want" ] || { echo "ABORT: the PR reports no head branch; refusing to push blind."; return 1; }
-    # THE API SAYS WHETHER IT IS A FORK; THIS DOES NOT COMPARE NAMES. Comparing
-    # `headRepositoryOwner/headRepository` with `$OWNER/$REPO` was the first
-    # version and it is wrong on casing: a pinned origin whose owner or repository
-    # differs in case from what the API returns addresses the same repository, and
-    # a case-sensitive test called every such PR a fork and refused every push.
-    # Lower-casing needs a name — `tr`, or a bash 4 expansion this suite's 3.2 job
-    # does not have — so the comparison is removed rather than fixed:
-    # `isCrossRepository` is the same question asked of the thing that knows.
+    # `isCrossRepository` rather than comparing names, which differ in case without being different repositories.
     case "$_cross" in
         false) ;;
         true) echo "ABORT: PR $PR is from a fork; this loop does not push to forks."; return 1 ;;
         *) echo "ABORT: could not tell whether PR $PR is from a fork (got '$_cross'); refusing to push blind."; return 1 ;;
     esac
-    # AND `origin` HAS TO BE THE PINNED REPOSITORY, because it is a NAME the
-    # checkout resolves. `remote.origin.pushurl` can send it somewhere else
-    # entirely, and a second checkout can define `origin` as another project — so
-    # the branch and fork checks above would pass while the commit landed in a
-    # repository nobody asked about and the PR stayed unchanged.
-    #
-    # PARSED BY THE ONE PARSER, not by a second copy. `rb_identity` is what turns
-    # a remote into HOST/OWNER/REPO, and a second implementation here is the
-    # duplication this repository has already deleted four times. It runs in a
-    # SUBSHELL with the push URL pinned, so its globals cannot leak back, and the
-    # answer comes out as the subshell's STATUS rather than as three values
-    # serialised through one string — which is the delimiter problem `CLAUDE.md`
-    # records for exactly this parser.
-    # EVERY PUSH URL, NOT THE FIRST. `origin` may carry several `pushurl` entries
-    # and `git push origin` sends to ALL of them — so validating one and pushing to
-    # the name put the commit in every other configured repository too, which is
-    # the hole this check was added to close, reached by the second entry.
-    # `--all` is what returns them; the loop below refuses unless every one is the
-    # pinned repository, so a mirror of it still works and a mixed destination
-    # does not.
+    # Every push URL, since `git push origin` sends to all of them; each parsed by `rb_identity` in a
+    # subshell and compared case-insensitively, since casing is not a different repository.
     _pushurl=$(git remote get-url --push --all origin 2>/dev/null) \
         || { echo "ABORT: could not read origin's push URLs; refusing to push blind."; return 1; }
     [ -n "$_pushurl" ] || { echo "ABORT: origin has no push URL; refusing to push blind."; return 1; }
-    #
-    # COMPARED CASE-INSENSITIVELY, because casing is not a different repository: two
-    # spellings of one owner-and-repository pair differing only in case address the
-    # same thing, and a fetch URL and a push URL written with different capitalisation are one
-    # operator's inconsistency rather than a redirection. Comparing them exactly
-    # refused every push in that configuration — the same defect this round
-    # removed from the fork check, one level over.
-    #
-    # `shopt` IS SAFE HERE, and that is a fact about this file rather than a
-    # general licence: every helper starts `bash -p`, which imports no functions,
-    # so no builtin in it can be shadowed. That is what #101 and #83 settled. It
-    # is set inside the SUBSHELL, so the option does not outlive the comparison.
-    # PEELED WITH EXPANSIONS, so there is no `read` and no redirection: `--all`
-    # prints one URL per line, and a heredoc here is a temporary file that can
-    # fail — the fail-open shape #111 removed from the marker scan.
     local _rest="$_pushurl" _u _nl='
 '
     while [ -n "$_rest" ]; do
@@ -534,15 +166,7 @@ rb_push_is_the_prs() {
           rb_identity && [[ $HOST == "$RB_PIN_HOST" ]] && [[ $OWNER == "$RB_PIN_OWNER" ]] && [[ $REPO == "$RB_PIN_REPO" ]] ) \
             || { echo "ABORT: origin pushes to '$_u', which is not $RB_PIN_HOST/$RB_PIN_OWNER/$RB_PIN_REPO; refusing to push elsewhere."; return 1; }
     done
-    # THE FULL REF, STRIPPED HERE. `--short` is not the branch name: it shortens
-    # only as far as stays UNAMBIGUOUS, so a branch that shares its name with a tag
-    # comes back as `heads/release/2.0` while GitHub reports `release/2.0` — and
-    # the comparison below then refused a checkout that was already on the PR's
-    # branch, with no way to close the round at all. Reproduced on git 2.55.
-    #
-    # `refs/heads/` IS REMOVED AS A PREFIX, not matched loosely: `${_have#refs/heads/}`
-    # takes it only from the front, so a branch legitimately called
-    # `refs/heads/something` is not silently rewritten.
+    # Not `--short`, which keeps `heads/` where a tag shares the name; `refs/heads/` is removed only as a prefix.
     _have=$(git symbolic-ref --quiet HEAD 2>/dev/null) \
         || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
     case "$_have" in
@@ -557,36 +181,18 @@ rb_push_is_the_prs() {
     return 0
 }
 
-# AUTO-REVIEW DECIDES THE ORDERING, so an unrecognised value is refused rather
-# than assumed. Guessing wrong here does not fail loudly — it closes the round in
-# the wrong order, which is only visible afterwards.
+# Refused rather than assumed: a wrong guess closes the round in the wrong order, visible only afterwards.
 case "$AUTO_REVIEW" in
     yes|no) ;;
     *) echo "ABORT: auto-review must be 'yes' or 'no' (got '$AUTO_REVIEW')"; exit 1 ;;
 esac
 if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
 
-# THE SUMMARY IS READ WITH ITS STATUS TAKEN, before anything is posted or pushed.
-# `$(cat …)` inside the argument swallows the reader's status, so a partial read
-# still produced a successful `gh pr comment` — and the reviewer contract makes the
-# newest summary the thing read before the diff, so a truncated one is worse than
-# none: it looks complete. A round that cannot produce its own summary should not
-# push either.
+# Read with its status taken before anything is pushed or posted: a truncated summary looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 1; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 1; }
-# THE SUMMARY IS PROSE, AND MUST NOT BECOME A RECORD. It quotes findings, PR
-# descriptions and reviewer comments, and it is posted under an identity
-# `pr-signoff.sh` and `pr-round-count.sh` trust — so a line reproducing one of
-# their markers CREATES the record it was describing: a summary quoting a finding
-# about an acknowledgement becomes that acknowledgement, and the round boundary it
-# answers never fires again. The rule is `recordlib.sh`'s because
-# `pr-copilot-phase.sh` posts a caller-written body too.
-# AND IN A COPILOT ROUND IT MUST NOT REQUEST A CODEX PASS. A comment CONTAINING
-# `@codex review` is the trigger, and a Copilot round posts its summary on its
-# own — so a summary quoting the mention out of a finding or a PR description
-# requests Codex in the middle of the Copilot phase, which is the phase ordering
-# this loop exists to keep. In a CODEX round the mention is the request and this
-# script writes it itself, so a body that also carries one changes nothing.
+# A Copilot round's summary must not carry the Codex mention, which requests a pass on its own; in a
+# Codex round this script writes the mention itself, so a quoted one changes nothing.
 if [ "$WHO" = "$COPILOT_BOT" ]; then
     rb_review_trigger "$SUMMARY"; _trig_rc=$?
     case "$_trig_rc" in
@@ -603,15 +209,8 @@ if _marker="$(rb_reserved_marker_line "$SUMMARY")"; then
     exit 1
 fi
 
-# THE BOUNDARY IS CHECKED BEFORE ANY WAY A REVIEW CAN BE REQUESTED — which in
-# auto-review mode means before the PUSH, because there the push IS the request.
-# Placing it before the mention was not enough: a fix commit on the threshold-th
-# round moved the head and started the next review while the count had not yet
-# run, so the pause fired after the round it was meant to precede was queued.
-#
-# IN `gate` ONLY. By `post` the push has happened and the threads are answered, so
-# a pause there would stop a round that is already irreversibly half-closed — and
-# the count it would be pausing on was checked before any of that.
+# In `gate` only, before any way a review can be requested — with auto-review on the push is the
+# request; by `post` the round is irreversibly half-closed.
 if [ "$STAGE" = gate ]; then
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$WHO"; ROUNDS_RC=$?
     case "$ROUNDS_RC" in
@@ -622,123 +221,56 @@ if [ "$STAGE" = gate ]; then
     esac
 fi
 
-report_gated() {   # report_gated <head> ; writes the head to $HEAD_FILE, then reports it
-    # THE WRITE COMES FIRST AND ITS STATUS IS TAKEN. `printf` can fail on a full
-    # filesystem, and a record printed after an unchecked write leaves `post`
-    # reading a truncated or absent value while the driver has already been told
-    # the round was gated. Reporting only after the write means the record and the
-    # file agree or neither exists.
-    #
-    # THE WRITER PROVES THE BYTES AND `post` PROVES THE MEANING, which are two questions and
-    # not one. `rb_write_handoff` now reads the target back itself before returning — no
-    # follow, non-blocking, type from `fstat` on the handle — so "the value that crossed is
-    # the value asked for" is answered here, and a `0` from it is that guarantee. What it
-    # cannot answer is whether a well-formed sha is the RIGHT one, which is `post`'s job:
-    # it reads this file and validates what it finds with `sha_reason` before anything is
-    # posted. Do not read this as licence to drop the library's postcondition — it is the
-    # only thing standing between a substituted temporary and a driver that resolves threads
-    # on a head this round never gated.
+report_gated() {
+    # The write first, with its status taken: the library proves the bytes crossed, and `post`
+    # proves the sha is the right one.
     _rb_wh="$(rb_write_handoff "$HEAD_FILE" "$1")" \
         || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read: $_rb_wh"; return 1; }
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$1 mode=$_MODE"
     return 0
 }
 
-request_review() {   # request_review ; posts the summary and asks for the pass
-    # THE BASELINE IS READ IMMEDIATELY BEFORE THE REQUEST, never earlier. A
-    # baseline captured before the push accepts a pass that FINISHED during the CI
-    # wait as the answer to a request made after it — and a Codex pass on a small
-    # diff can beat the checks.
+request_review() {
+    # Read immediately before the request: a pass that finished during the CI wait must not be
+    # accepted as the answer to a request made after it.
     local prior _back
     prior=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; return 1; }
-    # AND IT IS HANDED OVER BEFORE THE REQUEST, with the write's status taken. The write is
-    # `rb_write_handoff`, which creates a temporary exclusively, writes into that handle,
-    # renames it onto this path and reads the raw bytes back before returning — so a `0`
-    # from it means the value crossed, and a non-zero one means this handoff did not happen.
-    # Taking that status only works while there is something left to refuse WITH: after the
-    # request there is not, and the round is irreversibly half-closed. So the file is written
-    # here — the read above is still immediately before the request, which is what that
-    # ordering is for — and a failure stops the stage with nothing posted and nothing queued.
-    # THE NO-FLOOR VALUE IS SPELLED `none`, NOT LEFT EMPTY — #264. An empty file used to
-    # mean "no prior review", and every writer TRUNCATED before it wrote, so a failure in
-    # between produced the legal value and a driver whose `exit` returns then armed its
-    # watch with no floor at all. The rename removed that failure mode — a write that fails
-    # leaves the previous contents — and the token stays, because `gate`'s explicit
-    # clearing still produces an empty file on purpose and that is not an answer either. `gate` still EMPTIES this file, and that is now a refusal rather than a
-    # no-floor: an emptied baseline reaching the watch is `state=error`, which is the
-    # direction that stops a round instead of announcing a pass nobody requested.
+    # Written before the request with its status taken, since after it there is nothing left to
+    # refuse with; `none` rather than empty, which the watch refuses; prefixed with the nonce.
     prior="${prior:-none}"
-    # PREFIXED WITH THE REQUEST NONCE — #264. The driver generated it for this request and
-    # requires it at the watch, so a baseline the watch finds carrying a previous round's
-    # nonce — left in place by a refusal above this write that the driver's `exit` returned
-    # from — is refused rather than waited past. The value after the space is unchanged.
     _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$NONCE $prior")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
-    # THERE IS NO SECOND READ-BACK HERE, AND ITS REMOVAL IS THE POINT. This stage used to
-    # re-prove the bytes itself, in a child, on a descriptor — `9<"$PRIOR_FILE"` — because
-    # the write above it was a `printf` that proved nothing. Since #263 the write IS the
-    # proof: `rb_write_handoff` reads the target back before it returns, comparing the raw
-    # bytes including the terminator, with `O_NOFOLLOW` so a swapped-in symlink is refused
-    # at the open and `O_NONBLOCK` and `fstat` on the handle so a swapped-in FIFO is refused
-    # rather than waited on. Every question this repeated is answered there and answered
-    # better.
-    #
-    # AND REPEATING IT WAS NOT MERELY REDUNDANT. `9<"$PRIOR_FILE"` is a plain redirection in
-    # a shell with no watchdog: a same-UID process that put a FIFO there AFTER the library
-    # returned had this open BLOCK FOREVER — and this point is past the thread replies, so
-    # the round is half-closed while it hangs. The library's own read cannot block. Removing
-    # the dependency is the fix; bounding it would have been the guard.
-    # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
-    # never triggered by a mention and never by a push — only by `--add-reviewer` —
-    # so a Copilot round that posted the Codex mention requested nothing at all,
-    # and the watch then waited past the old review indefinitely.
+    # Copilot is requested with `--add-reviewer` and never by a mention or a push; the Codex mention
+    # carries the summary in the one comment, since a separate one is one the pass may not read.
     if [ "$WHO" = "$COPILOT_BOT" ]; then
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
             || { echo "ABORT: could not post the round summary."; return 1; }
         gh pr edit "$PR" --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot \
             || { echo "ABORT: could not re-request Copilot."; return 1; }
     else
-        # ONE COMMENT, because the mention IS the trigger: the summary posted
-        # separately is a summary the pass may not have read.
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "@codex review
 
 $SUMMARY" \
             || { echo "ABORT: could not request the review that carries this round's summary."; return 1; }
     fi
-    # THE BASELINE GOES BACK TO THE CALLER, in the success record. It is read
-    # here, immediately before the request, and the driver's watch in step 3 needs
-    # exactly this value: without it the watch keeps the parent's OLDER baseline,
-    # and the terminal review this round just handled is newer than that — so it
-    # is accepted at once as the answer to a request that has not been answered.
-    # A child process cannot assign a variable in its parent; it can only say what
-    # the value was.
+    # For the record only; the driver reads the file.
     RB_PRIOR_REVIEW="$prior"
     return 0
 }
 
 if [ "$STAGE" = post ]; then
-    # ── THE THREADS ARE ANSWERED; CLOSE THE ROUND ──────────────────────────
-    # THE GATED HEAD COMES OUT OF THE FILE `gate` WROTE, with a redirection rather
-    # than a command: `$(<file)` is handled by the parser, so there is no `cat` to
-    # shadow. An unreadable or empty file is a refusal, not an empty head — this
-    # runs before anything is posted, so a refusal here costs a rerun of `post`
-    # and nothing else.
+    # `$(<file)` is a redirection the parser handles, with no `cat` to shadow; an unreadable or empty
+    # file is a refusal before anything is posted.
     GATED_HEAD="$(<"$HEAD_FILE")" \
         || { echo "ABORT: could not read the gated head from '$HEAD_FILE'; run 'gate' first."; exit 1; }
     _why="$(sha_reason "$GATED_HEAD")" \
         || { echo "ABORT: the gated head read back from '$HEAD_FILE' is not a full OID ($_why: '$GATED_HEAD')."; exit 1; }
-    # THE HEAD IS RE-PROVEN RATHER THAN ASSUMED. Answering threads takes as long
-    # as it takes, and a commit made in between — an afterthought fix, an amend —
-    # leaves the summary describing one commit while the reviewer reads another.
-    # The gate's green verdict belongs to the commit the gate saw, and only that
-    # one; carrying it forward silently is how a round closes on unproven code.
+    # Re-proven locally and on the PR: the replies take as long as they take, and a commit or a
+    # force-push in between leaves the summary describing one commit while the reviewer reads another.
     HEAD_NOW=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
     [ "$HEAD_NOW" = "$GATED_HEAD" ] \
         || { echo "ABORT: the local head is $HEAD_NOW, not the gated $GATED_HEAD; re-run the gate for what is here now."; exit 1; }
-    # AND ON THE PR, because the local head agreeing proves only that this
-    # checkout did not move. A force-push from elsewhere, or a merge into the
-    # branch, moves the head the reviewer will read while this one stands still.
     HEAD_API=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
         || { echo "ABORT: could not confirm the head before posting."; exit 1; }
     _why="$(sha_reason "$HEAD_API")" \
@@ -751,9 +283,7 @@ if [ "$STAGE" = post ]; then
 fi
 
 if [ "$AUTO_REVIEW" = no ]; then
-    # ── THE MENTION IS THE TRIGGER ─────────────────────────────────────────
-    # Nothing is queued until the comment is posted, so the push can be proven
-    # green first and the threads answered afterwards, with nothing yet requested.
+    # The mention is the trigger, so the push is proven green with nothing yet requested.
     HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
     rb_push_is_the_prs || exit 1
     git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
@@ -762,15 +292,9 @@ if [ "$AUTO_REVIEW" = no ]; then
     exit 0
 fi
 
-# ── THE PUSH IS THE TRIGGER ────────────────────────────────────────────────
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
-# ONLY WHERE IT IS USED. `PUSH_FROM` answers one question — did the push move the
-# head, and therefore did it start a pass — and a push never starts a Copilot pass.
-# Read unconditionally, a transient failure of this lookup aborted a Copilot round
-# before the push AND before the `--add-reviewer` that is the only thing such a
-# round needs: a stall with no upside, which is the same defect the baseline guard
-# below exists for. The post-push confirmation is NOT guarded: that one is about
-# whether the push landed on this PR at all, which matters for every reviewer.
+# Only for a reviewer a push can trigger: read for Copilot, a transient failure here would stall a
+# round that needs only `--add-reviewer`.
 PUSH_FROM=""
 if [ "$WHO" != "$COPILOT_BOT" ]; then
     PUSH_FROM=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
@@ -779,19 +303,8 @@ if [ "$WHO" != "$COPILOT_BOT" ]; then
         || { echo "ABORT: the pre-push head is not a full OID ($_why: '$PUSH_FROM')."; exit 1; }
 fi
 
-# THE BASELINE IS READ BEFORE THE PUSH, and this is the one ordering in the whole
-# script that runs the other way round from everything else.
-#
-# Everywhere else, later is safer: read the state as close as possible to the
-# decision that uses it. Here later is WRONG. The push starts a pass; a fast one
-# finishes while the CI gate is still settling; and a baseline taken after that
-# captures the completed pass as the thing to wait past — so `pr-watch.sh` waits
-# for a newer pass that nobody requested, times out, and the round never closes
-# despite being clean.
-#
-# Only for reviewers a push can trigger. Copilot is not one, and reading it there
-# put a `gh` call that can fail transiently in front of the `--add-reviewer` that
-# is the only thing a Copilot round needs — a stall with no upside.
+# Read before the push, the one ordering here that runs the other way: a fast pass finishes during
+# the CI wait, and a baseline taken after it waits for a newer pass nobody requested.
 PUSH_BASE=""
 if [ "$WHO" != "$COPILOT_BOT" ]; then
     PUSH_BASE=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
@@ -801,9 +314,7 @@ rb_push_is_the_prs || exit 1
 git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
 
-# THE PUSHED HEAD IS CONFIRMED, WITH RETRIES. The API can serve the previous head
-# for a moment after a push, and every check below is about the commit that was
-# pushed rather than the one the API happens to be reporting.
+# The API can serve the previous head for a moment after a push.
 HEAD_AFTER=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 1; }
 _why="$(sha_reason "$HEAD_AFTER")" \
@@ -821,22 +332,13 @@ if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
         || { echo "ABORT: the PR head is $HEAD_AFTER, not the $HEAD_BEFORE just pushed."; exit 1; }
 fi
 
-# THE PASS THE PUSH STARTED MUST FINISH FIRST — but only when there WAS one. A
-# round that ends without a new commit (a dismissal, or a finding answered rather
-# than coded around) leaves the push a no-op, so nothing was queued and waiting
-# for it would re-arm every timeout forever. Copilot is never triggered by a push
-# at all.
+# Only where the push moved the head, since a no-op push queues nothing and waiting would re-arm
+# forever; rc 4 pauses rather than aborts, since a decision is owed and nothing is wrong.
 if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-watch.sh "$PR" "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
     case "$PUSHPASS_RC" in
         0) ;;
         1) echo "ABORT: the pass the push started has not finished; its result would answer the next request."; exit 1 ;;
-        # THE PASS SAID NOTHING ANYONE CAN ACT ON. Every comment it left was a
-        # reply, so there is nothing for `pr-findings.sh` to list and it is not a
-        # signoff. Closing the round here would resolve the previous round's
-        # threads, post a summary and request another pass — past the one thing
-        # that needs to happen, which is a human reading that comment. Paused
-        # rather than aborted: nothing is wrong, a decision is owed.
         4) echo "PAUSE: the pass the push started left only replies — nothing to fix and no signoff. Read it with the operator before closing this round."
            exit 3 ;;
         *) echo "ABORT: could not observe the pass the push started (rc=$PUSHPASS_RC)"; exit 1 ;;
