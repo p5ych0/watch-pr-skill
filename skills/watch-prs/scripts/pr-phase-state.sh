@@ -51,7 +51,8 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
         1) RB_VOUCH_REASON=no_signoff; return 1 ;;
         *) RB_VOUCH_REASON=unreadable; return 2 ;;
     esac
-    # One GraphQL response carries the id and both times, so no comparison spans separate reads.
+    # One GraphQL response carries the id and both times, so the review-versus-reply order is read
+    # once; the signoff record is a separate read, ordered against that deadline below.
     _snap=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh escape-snapshot "$PR" "$1" "$2") || _src=$?
     case "$_src" in
         0) ;;
