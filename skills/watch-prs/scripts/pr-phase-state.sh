@@ -33,8 +33,8 @@ rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_PHASE status=error" var || 
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_PHASE status=error" || exit 2
 rb_identity || { echo "PR_PHASE status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 
-# 0 vouched, 1 no record answers it, 2 a probe could not be read — and 2 is not 1: folded, an
-# unreadable probe tells the operator to record a signoff they may already have recorded.
+# An unreadable probe is not "no record answers it": folded into that, the operator is told to
+# record a signoff they may already have recorded.
 RB_VOUCH_REVIEW_AT=''
 RB_VOUCH_REPLIES_AT=''
 RB_VOUCH_REVIEW_AT=''
@@ -91,7 +91,8 @@ if ! is_full_sha "$CODEX_SHA"; then
     exit 2
 fi
 
-# The record is history: the head must still be that commit, and the verdict must still stand on it.
+# The record is history: before the Copilot phase the head must still be the Codex commit, after
+# it the Copilot one, and the verdict must still stand on that head.
 HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "PR_PHASE pr=$PR status=error reason=head_unreadable" >&2; exit 2; }
 if ! is_full_sha "$HEAD"; then
@@ -117,8 +118,8 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
     # After the Copilot phase the Codex signoff is older by design; the Copilot one must stand on the head.
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); VERDICT_RC=$?
     case "$VERDICT_RC" in
-        0) # THE RECORD, NOT ONLY THE STATUS. A probe that exits 0 while printing
-           # nothing, or about another PR, reviewer or head, is not permission to continue.
+        0) # The record, not only the status: a probe that exits 0 while printing nothing, or
+           # about another PR, reviewer or head, is not permission to continue.
            if ! rb_review_record "$VERDICT" verdict; then
                echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_unparseable" >&2; exit 2
            fi
@@ -132,8 +133,8 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
            if [[ $RB_REC_TAIL != " findings=0" ]]; then
                echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_truncated" >&2; exit 2
            fi ;;
-        1) # `1` IS TWO ANSWERS. A dismissal reopens the phase; a review whose
-           # comments are all replies does not, when a recorded signoff answers it.
+        1) # Two answers: a dismissal reopens the phase, while a review whose comments are all
+           # replies does not when a recorded signoff answers it.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"; then
                rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
@@ -167,7 +168,7 @@ else
     fi
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); VERDICT_RC=$?
     case "$VERDICT_RC" in
-        0) # THE SAME THREE, on the other arm.
+        0) # The same three, on the other arm.
            if ! rb_review_record "$VERDICT" verdict; then
                echo "PR_PHASE pr=$PR status=error reason=codex_verdict_unparseable" >&2; exit 2
            fi
@@ -180,7 +181,7 @@ else
            if [[ $RB_REC_TAIL != " findings=0" ]]; then
                echo "PR_PHASE pr=$PR status=error reason=codex_verdict_truncated" >&2; exit 2
            fi ;;
-        1) # THE SAME TWO ANSWERS, on the other arm.
+        1) # The same two answers, on the other arm.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
                rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
