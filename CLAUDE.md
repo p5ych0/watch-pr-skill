@@ -960,6 +960,12 @@ driver needs a watch tool and both reviewers run in GitHub's cloud rather than
 from anything installed here. Entries explain the failure that was fixed and how it
 manifested, not just what changed.
 
+**The size of the bump says whether a session behaves differently.** A change to what
+the loop does, checks or offers is a MINOR bump (x.Y.0); a change to installed files that
+alters no behaviour — comments, `SKILL.md` prose, a changelog correction — is a PATCH
+(x.y.Z). Both are releases, because both change installed bytes; the number is what tells
+an operator whether anything they run has changed.
+
 **A release accompanies a change to what is installed** — the scripts, `SKILL.md`, or the manifests. A change confined to
 `skills/watch-prs/scripts/test-*.sh`, to authoring documentation, or to the
 reviewer instruction files produces no release, and must not bump the version.
