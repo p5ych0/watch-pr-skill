@@ -8,8 +8,8 @@
   essays as the rest, then the history of each guard, its measurements and its refuted
   alternatives — all in `CLAUDE.md`'s What-ships row for the helper or in an earlier entry
   here. 121 lines remain, each a constraint of at most two lines beside the code it
-  explains: why the setup helper removes nothing and traps `INT` alone, why `set -C` makes
-  its working files exclusive, why a signoff stands only if no revocation is newer than the
+  explains: why the setup helper removes nothing and traps `INT` alone, why `set -C` refuses
+  a planted symlink at its working files, why a signoff stands only if no revocation is newer than the
   verdict it answers, why every comment on a review counts and the clean verdict is read
   twice, why one rollup addressed by the commit replaces two paginated reads, why the
   required set is the union of two sources read twice. No executable text changes: with
