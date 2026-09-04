@@ -84,9 +84,9 @@ local path or a bare host reaches no GitHub server, and is refused rather than g
 `pr-setup.sh` writes the origin into a directory this shell names and creates the four
 working files under it; this shell reads the origin back, pins the session to it, assigns
 every other name and proves each assignment took, then proves through `pr-origin.sh pin`
-that a child sees the pin. Status 2 from either helper means the storage refused, and is
-retried once under the second parent; 1 is terminal. Nothing under `$RB_SETUP_DIR` is
-ever removed.
+that a child sees the pin. Status 2 means the storage refused: from `pr-setup.sh` it is
+retried once under the second parent, from `pin` once under a second leaf in the same
+directory; 1 is terminal for both. Nothing under `$RB_SETUP_DIR` is ever removed.
 
 ```bash
 if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
@@ -270,9 +270,10 @@ Codex pass nobody asked for. Write the mention without the `@`, or broken up.
 
 `pr-request-review.sh <pr> <auto-review: yes|no> --baseline-file <path> --nonce <digits> < <body>`
 posts the request — 0 posted, 1 stopped with nothing posted — and writes
-`<nonce> <baseline>` into `$PRIOR_FILE` for the watch: the newest review id on the manual
-path, and `none` on the automatic path, where the trigger preceded us and there is nothing
-to capture. The nonce is generated fresh before every request, as below, and the watch
+`<nonce> <baseline>` into `$PRIOR_FILE` for the watch: on the manual path the newest
+verdict's id — a review id, or `comment:<id>` where it came through the comment channel —
+and on the automatic path `none`, where the trigger preceded us and there is nothing to
+capture. The nonce is generated fresh before every request, as below, and the watch
 refuses a baseline that carries any other.
 
 ```bash
