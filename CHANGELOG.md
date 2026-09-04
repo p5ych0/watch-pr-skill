@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.6.3] — 2026-09-04
+
+- **The Copilot phase and the self-check carry a comment only where the code looks wrong without
+  one.** `pr-copilot-phase.sh` and `pr-selfcheck.sh` held 1,384 comment lines over 570 lines of
+  code: the startup and loader essays, then the history of every guard, its incidents and its refuted
+  alternatives — all in `CLAUDE.md`'s What-ships row for the helper or in an earlier entry here.
+  117 lines remain, each a constraint of at most two lines beside the code it explains: why the
+  phase is re-proved three times before its mutations, why the readiness write is the real write and
+  writes a sentinel, why a revocation is ordered against the verdict and equal refuses, why the
+  self-check re-execs behind a marker rather than the evidence, why every inherited function is
+  cleared rather than a list, why the suite records are counted by index. No executable text changes:
+  with comments stripped, the lines of each file diff empty against 2.6.2, and the suite passes as it
+  did. A patch release: nothing a session does changes. #294.
+
 ## [2.6.2] — 2026-09-04
 
 - **The merge gate, the round closer and the watch carry a comment only where the code looks
