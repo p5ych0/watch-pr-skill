@@ -363,7 +363,6 @@ else
     RB_MARKER="$(printf '**Review-Signoff:** `%s` `%s`' "$RB_CODEX_BOT" "$CODEX_SHA")" \
         || { echo "ABORT: could not compose the signoff marker."; exit 1; }
 fi
-# The body is inserted as data: a heredoc would expand a command line quoted out of a finding.
 SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_MARKER" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
