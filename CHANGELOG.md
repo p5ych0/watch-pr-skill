@@ -8,7 +8,7 @@
   the issue it came from, the alternatives refuted in review, and a restatement of what the
   line beside it does — every one of them also in `CLAUDE.md`'s What-ships row for that
   library or in an earlier entry here. Under the authoring rules a comment states a
-  non-obvious constraint in a line or two, so that is what remains, 164 lines, each beside
+  non-obvious constraint in a line or two, so that is what remains, 89 lines, each beside
   the code it explains: the `type` call `rb_load` accepts as shadowable, the twelve `?` and
   the `0?*` in the clock's width test, `O_CREAT|O_EXCL` through `perl` rather than `set -C`,
   the exact-destination rename and the one-descriptor read-back, the wrappers defined last,

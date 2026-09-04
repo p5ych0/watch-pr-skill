@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# The portable watchdog and the validated scratch directory. Sourced by every fixture, and
-# by `pr-ci-state.sh` at runtime — so nothing here may unset an exported value.
+# Ships at runtime inside `pr-ci-state.sh`, so nothing here may unset an exported value.
 
-# run_limited <seconds> <command...> ; the command's status, 124 at the limit, 125 when the
-# watchdog itself could not run. Bounded for a command that waits for its children; one that
-# backgrounds a child and exits keeps the caller's capture open until the orphan ends.
+# Bounded for a command that waits for its children; one that backgrounds a child and exits
+# keeps the caller's capture open until the orphan ends.
 run_limited() {
     local secs="$1"; shift
     if command -v timeout >/dev/null 2>&1; then
@@ -22,10 +20,8 @@ run_limited() {
             return $?
         fi
     fi
-    # Output goes to files and is replayed by this shell, because a child holding the
-    # caller's capture pipe keeps the substitution blocked past the limit; stderr stays
-    # separate because a runtime caller matches it. 125, not 2, which a bounded command can
-    # legitimately return.
+    # Output goes to files this shell replays, since a child holding the caller's capture pipe
+    # blocks the substitution past the limit; stderr apart, since a runtime caller matches it.
     local tmp
     tmp="$(mktemp 2>/dev/null)" || return 125
     local tmperr
@@ -36,7 +32,7 @@ run_limited() {
     local pid=$!
     set +m
     local waited=0
-    # A `sleep` that fails is a broken clock, not a timeout.
+    # A `sleep` that fails is a broken clock, not a timeout; 125, not 2, which a command can return.
     while [ "$waited" -lt "$secs" ]; do
         { kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; } || break
         if ! sleep 1; then
@@ -66,9 +62,8 @@ run_limited() {
     return "$rc"
 }
 
-# mktemp_d ; prints an absolute, existing directory that is not `/`, or returns 1. Never a
-# bare `mktemp -d`: it can print a plausible path and fail, and the caller's EXIT trap then
-# runs `rm -rf` over wherever `$TMP/bin` resolved to.
+# Never a bare `mktemp -d`: it can print a plausible path and fail, and the caller's EXIT
+# trap then runs `rm -rf` over wherever `$TMP/bin` resolved to.
 mktemp_d() {
     local d
     d="$(mktemp -d 2>/dev/null)" || return 1

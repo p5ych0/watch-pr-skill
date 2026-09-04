@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Which repository this checkout is, derived from `origin`. Sourced, never executed.
 
-# rb_identity ; 0 with HOST, OWNER and REPO set — 2 with RB_IDENTITY_REASON set and the three
-# untouched. It sets rather than prints: three values through one string make any delimiter
-# a value a remote can contain. `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and
-# `REVIEW_BUS_REPO` override the derivation — the caller stating the identity.
-#
-# The declaration below is read by `pr-selfcheck.sh` and proved by `test-identitylib.sh`.
+# Sets HOST, OWNER and REPO rather than printing them: three values through one string make
+# any delimiter a value a remote can contain. `REVIEW_BUS_*` is the caller stating the identity.
 # rb-assigns: HOST OWNER REPO RB_IDENTITY_REASON
 rb_identity() {
     local remote p h _host _owner _repo
@@ -23,9 +18,8 @@ rb_identity() {
     fi
     p="${remote%.git}"; _repo="${REVIEW_BUS_REPO:-${p##*/}}"; p="${p%/*}"
     _owner="${REVIEW_BUS_OWNER:-${p##*[:/]}}"
-    # Only a transport that reaches a GitHub server names an identity: a local path, a
-    # `file://` remote or a bare host defaulted to github.com would address the unrelated
-    # public repository of that name.
+    # Only a transport that reaches a GitHub server names an identity: a local path or a bare
+    # host defaulted to github.com would address the unrelated public repository of that name.
     case "$remote" in
         ssh://*|git://*|https://*|http://*|git+ssh://*)
                 h="${remote#*://}"; h="${h#*@}"; _host="${h%%[:/]*}" ;;
@@ -46,7 +40,8 @@ rb_identity() {
             RB_IDENTITY_REASON="origin_host_unparseable remote=$remote"
             return 2 ;;
     esac
-    # Assigned only once everything above has passed, so a refused origin leaves nothing behind.
+    # Assigned only once everything above has passed, so a refused origin never leaves a
+    # partial identity: the three keep whatever they held.
     HOST="$_host"; OWNER="$_owner"; REPO="$_repo"
     return 0
 }

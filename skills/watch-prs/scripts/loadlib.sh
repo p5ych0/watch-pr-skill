@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# How a shipped script loads a shared library: clear the symbol, take the clear's status,
-# source, prove the symbol arrived. Sourced, never executed. The bootstrap that loads this
-# file cannot use it and writes the same sequence out with a refusing stub in place of the
-# verification.
 
-# rb_load <dir> <lib-basename> <symbol> <error-prefix> [func|var]
-# Prints `<error-prefix> reason=<lib>_<what>` to stderr and returns 2 on any failure. The
-# prefix is the caller's whole error line, and the kind decides the clear and the check: an
-# exported value satisfies a non-empty test exactly as an exported function satisfies `type -t`.
+# The prefix is the caller's whole error line (`pr-watch.sh` says `state=`), and the kind is
+# taken rather than guessed: an exported value passes a non-empty test as an exported function passes `type -t`.
 rb_load() {
     local dir="$1" lib="$2" sym="$3" prefix="$4" kind="${5:-func}"
     case "$kind" in
