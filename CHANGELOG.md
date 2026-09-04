@@ -6,7 +6,7 @@
   `pr-origin.sh` held 960 comment lines over 151 lines of code: the header and its status
   contract, the privileged-startup essay, the cleanup history, the reservation ordering and its
   refuted alternatives, the git resolution history, and a section after `exit 0` — all in
-  `CLAUDE.md` § `pr-origin.sh`, in full, or in an earlier entry here. 52 lines remain, each
+  `CLAUDE.md` § `pr-origin.sh`, in full, or in an earlier entry here. 49 lines remain, each
   a constraint of at most two lines beside the code it explains: why the ancestry is walked by
   ownership as well as mode and twice, why the cleanup is `rmdir` alone and armed before the
   `mkdir`, what the reservation ordering does not close, why `git` runs under `env -i` with the

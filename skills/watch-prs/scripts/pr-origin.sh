@@ -73,15 +73,13 @@ _rb_walk() {
     done
     return 0
 }
-# Two facts, because neither is signal-safe alone: `RB_OWNED` is set after the `mkdir` returns and a signal
-# delivered during it is handled before that; `RB_PREEXISTED` records what `-e` saw at the name first, which a
-# dangling symlink escapes.
+# Two facts, since `RB_OWNED` is set only after the `mkdir` returns and a signal during it is handled before that;
+# `RB_PREEXISTED` records what `-e` saw at the name first, which a dangling symlink escapes.
 RB_OWNED=no
 RB_PREEXISTED=no
 [[ -e $RB_DIR ]] && RB_PREEXISTED=yes
-# `rmdir` alone, on every path out: it refuses a symlink and a non-empty directory, so a replaced reservation
-# costs at most somebody else's empty directory, and a refusal past the write leaves the leaf while the
-# reservation stays non-empty.
+# `rmdir` alone, on every path out: it refuses a symlink and a non-empty directory, so a replaced reservation costs
+# at most somebody else's empty directory, and a failed write leaves its leaf while the reservation stays non-empty.
 rb_cleanup() {
     # This run's, or not ours to remove: `-O` refuses a name another account holds, which neither flag can see.
     [[ $RB_OWNED = yes ]] \
@@ -206,6 +204,5 @@ fi
 rb_read_origin
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
-# Only `EXIT`, for the reason `pin` gives.
 trap - EXIT
 exit 0
