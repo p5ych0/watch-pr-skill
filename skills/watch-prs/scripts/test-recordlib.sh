@@ -579,14 +579,14 @@ fi
 # jq happens to do with undefined functions — per call, not here.
 for f in "$SELF_DIR"/pr-review-state.sh "$SELF_DIR"/pr-findings.sh "$SELF_DIR"/pr-round-count.sh; do
     b="$(basename "$f")"
-    grep -qE 'rb_load .* recordlib ' "$f" \
+    grep -qE '^[[:space:]]*rb_load .* recordlib ' "$f" \
         && pass "$b sources the shared validators" \
         || die "$b no longer sources recordlib.sh"
     grep -q 'RECORDLIB_JQ' "$f" \
         && pass "…and uses them in its jq programs" \
         || die "$b sources the library but never uses RECORDLIB_JQ"
 done
-grep -qE 'rb_load .* recordlib ' "$SELF_DIR/pr-watch.sh" \
+grep -qE '^[[:space:]]*rb_load .* recordlib ' "$SELF_DIR/pr-watch.sh" \
     && pass "pr-watch.sh sources the shared shape rules" \
     || die "pr-watch.sh no longer sources recordlib.sh"
 grep -q 'is_full_sha' "$SELF_DIR/pr-watch.sh" \
