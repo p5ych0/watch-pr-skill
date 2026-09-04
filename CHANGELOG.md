@@ -8,7 +8,7 @@
   code, and each opened with the same essay on privileged startup, five of them with the same
   essay on the loader bootstrap — both stated once in `CLAUDE.md` — followed by the history
   of each guard and the issue it came from. Under the authoring rules a comment states a
-  non-obvious constraint in a line or two, so 104 lines remain, each beside the code it
+  non-obvious constraint in a line or two, so 103 lines remain, each beside the code it
   explains: why `$-` is a last-resort refusal, why there is no `-e`, why the bootstrap
   defines a refusing stub, why a threshold with a leading zero falls back to the default,
   why the CI gate checks its clock before the probe as well as after it, why the round

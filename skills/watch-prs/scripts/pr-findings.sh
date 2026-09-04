@@ -5,8 +5,7 @@ if [[ $- != *p* ]]; then
     exit 2
 fi
 
-# No `-e`: statuses are control flow here. `pipefail` matters: `gh --paginate` can write a
-# valid page and then fail.
+# No `-e`: statuses are control flow here.
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {

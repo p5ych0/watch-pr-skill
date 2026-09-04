@@ -168,7 +168,7 @@ else
     fi
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); VERDICT_RC=$?
     case "$VERDICT_RC" in
-        0) # The same three, on the other arm.
+        0)
            if ! rb_review_record "$VERDICT" verdict; then
                echo "PR_PHASE pr=$PR status=error reason=codex_verdict_unparseable" >&2; exit 2
            fi
@@ -181,7 +181,7 @@ else
            if [[ $RB_REC_TAIL != " findings=0" ]]; then
                echo "PR_PHASE pr=$PR status=error reason=codex_verdict_truncated" >&2; exit 2
            fi ;;
-        1) # The same two answers, on the other arm.
+        1)
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
                rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
