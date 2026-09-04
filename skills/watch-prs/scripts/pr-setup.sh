@@ -34,7 +34,7 @@ esac
 # is trapped: delivered while this waits on a child it is survived, and a stopped session would report ready.
 trap 'trap - INT; kill -INT "$$"' INT
 
-rb_setup_stop() {   # <reason> <status>
+rb_setup_stop() {
     echo "PR_SETUP status=error reason=$1" >&2
     exit "$2"
 }

@@ -87,7 +87,7 @@ checks_msg_is_none_configured() {
 
 # One rollup addressed by the OID, over check runs and legacy statuses both, since two paginated
 # REST reads are not a snapshot. `EXPECTED` is pending; a null rollup is `none`, a null object an error.
-commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
+commit_checks_verdict() {
     local oid="$1" _left _out
     _left="$(rb_left)" || return 2
     # `-f`, not `-F`: `--field` sends a numeric-looking value as a JSON number, and the variables are
@@ -117,7 +117,7 @@ commit_checks_verdict() {   # <oid> ; prints green|failed|pending|none|malformed
 
 # The union of the branch object's classic protection and the ruleset, both readable with the `repo`
 # scope, since either can be the whole answer; `strict` is readable only on a ruleset, so the classic half is unenforced.
-required_contexts() {   # <base ref> ; prints {contexts: [{context, app}], strict: bool}
+required_contexts() {
     local base="$1" _left _branch _rules
     _left="$(rb_left)" || return 2
     _branch="$(run_limited "$_left" gh api --hostname "$HOST" \
@@ -204,7 +204,7 @@ required_contexts() {   # <base ref> ; prints {contexts: [{context, app}], stric
 
 # Both sources are read twice and unioned, since the reads are not one snapshot and a requirement
 # that moved between them would vanish; over-requiring costs a rerun, under-requiring is the merge.
-required_checks_verdict() {   # <oid> <base> ; prints green|failed|behind|pending|none|malformed
+required_checks_verdict() {
     local oid="$1" base="$2" _left _req _req2 _strict _cmp _ctx_verdict _out
     _req="$(required_contexts "$base")" || return 2
     _req2="$(required_contexts "$base")" || return 2
