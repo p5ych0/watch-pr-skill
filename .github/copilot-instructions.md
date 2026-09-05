@@ -77,6 +77,9 @@ against, restated here:
   work.
 - **A behaviour change ships its test in the same PR**, proved to fail against
   the unfixed code; an existing test is never weakened to make a change pass.
+  A fixture asserts the invariant, not the version's route to it, wherever the
+  invariant can be staged; a source-shape assertion is allowed only where the
+  required mechanism cannot be reproduced portably, beside the behavioural case.
 - **Validate at the boundaries** — argv, files crossing a process, `gh` and
   `git` output, the operator's shell — and trust a helper's stated contract
   inside them.
@@ -312,11 +315,12 @@ stock macOS lacks that is guarded with `command -v` and a fallback, as
 `testlib.sh` does for `timeout`.
 
 Both CI jobs run on every push to `main` and every pull request; a finding that
-assumes either is off is out of date. A repository with no checks configured is
-a valid state: `pr-ci-gate.sh` and `pr-merge-gate.sh` report it as the
-distinguished `none`, meaning nothing to assert, held for the grace period and
-distinct from a failed probe, and a change that reads it as fail-open would stop
-every round in a repository without CI from closing. Three limits: the clean shell is the
+assumes either is off is out of date. A head with no check suite is a valid
+state — a repository with no checks configured, or a branch pushed before its
+pull request existed, which the `push` trigger does not cover: `pr-ci-gate.sh`
+and `pr-merge-gate.sh` report it as the distinguished `none`, meaning nothing to
+assert, held for the grace period and distinct from a failed probe, and a change
+that reads it as fail-open would stop such rounds from closing. Three limits: the clean shell is the
 gate's, not the fixture's, and CI runs `bash "$t"` on a runner clean by
 construction; the gate clears functions and hook variables, not exported values,
 so a fixture whose subject is an env-driven override clears `REVIEW_BUS_REMOTE`

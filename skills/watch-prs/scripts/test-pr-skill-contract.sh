@@ -5761,6 +5761,7 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 'A change that offers the pass on an equal-sha head, or that removes the'
                 '**A guard where a removal would do is a finding.**'
                 'The author is required to say **on the thread** which of the two they took and why'
+                'asserts the invariant, not the version'
     )
     for clause in ${req_clauses+"${req_clauses[@]}"}; do
         grep -qF "$clause" <<<"$flat" \
@@ -5780,7 +5781,7 @@ if [ ! -f "$_gen" ]; then
 elif _gen_tmp="$(mktemp_d)"; then
     # Files and `cmp`, never a command substitution: an assignment drops a NUL.
     _gen_rc=0
-    "$_gen"> "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
+    "$_gen" > "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
     { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
         && pass "the Copilot copy generator runs" \
         || die "the Copilot copy generator failed or printed nothing"
@@ -5789,7 +5790,7 @@ elif _gen_tmp="$(mktemp_d)"; then
     }
     _gen_current "$ROOT/.github/copilot-instructions.md" \
         && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
-        || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh AGENTS.md .github/copilot-instructions.md"
+        || die "the Copilot copy is behind AGENTS.md; regenerate it as CLAUDE.md says"
     { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
     _gen_rc=0
     _gen_current "$_gen_tmp/nul.md" || _gen_rc=$?
@@ -5799,59 +5800,27 @@ elif _gen_tmp="$(mktemp_d)"; then
         *) die "the currentness check could not read the NUL candidate (rc=$_gen_rc); the case proves nothing" ;;
     esac
     _gen_rc=0
-    "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/installed.md" >/dev/null 2>&1 || _gen_rc=$?
-    { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/installed.md"; } \
-        && pass "…and the destination form installs the same bytes" \
-        || die "the destination form exited $_gen_rc or installed different bytes from the stdout form"
-    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'body' '' '<!-- copilot-body-end -->' 'c' > "$_gen_tmp/blank.md"
+    "$_gen" "$ROOT/AGENTS.md" extra > "$_gen_tmp/two.out" 2>/dev/null || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/two.out" ]; } \
+        && pass "…and a second argument is refused with nothing emitted" \
+        || die "a two-argument call exited $_gen_rc with output on stdout"
     _gen_rc=0
-    "$_gen" "$_gen_tmp/blank.md" > "$_gen_tmp/blank.out" 2>/dev/null || _gen_rc=$?
-    "$_gen" "$_gen_tmp/blank.md" "$_gen_tmp/blank.inst" >/dev/null 2>&1 || _gen_rc=$?
-    { [ "$_gen_rc" -eq 0 ] && cmp -s "$_gen_tmp/blank.out" "$_gen_tmp/blank.inst"; } \
-        && pass "…and a body ending in a blank line installs the same bytes the stdout form emits" \
-        || die "a body ending in a blank line installed different bytes from the stdout form (rc=$_gen_rc)"
-    cp "$_gen_tmp/out.md" "$_gen_tmp/three.dest"
-    _gen_rc=0
-    "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/three.dest" extra >/dev/null 2>&1 || _gen_rc=$?
-    { [ "$_gen_rc" -ne 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/three.dest"; } \
-        && pass "…and a third argument is refused with the destination untouched" \
-        || die "a three-argument call exited $_gen_rc or changed the destination"
-    printf '%s\n' 'the copy that was there' > "$_gen_tmp/empty.dest"
-    _gen_rc=0
-    "$_gen" "" "$_gen_tmp/empty.dest" >/dev/null 2>&1 || _gen_rc=$?
-    { [ "$_gen_rc" -ne 0 ] && [ "$(cat "$_gen_tmp/empty.dest")" = "the copy that was there" ]; } \
-        && pass "…and an empty source operand is refused with the destination untouched" \
-        || die "an empty source operand exited $_gen_rc or replaced the destination with the default source's copy"
-    cp "$ROOT/AGENTS.md" "$_gen_tmp/self.md"
-    for _gen_alias in "$_gen_tmp/self.md" "$_gen_tmp/./self.md"; do
-        _gen_rc=0
-        "$_gen" "$_gen_tmp/self.md" "$_gen_alias" >/dev/null 2>&1 || _gen_rc=$?
-        { [ "$_gen_rc" -ne 0 ] && cmp -s "$ROOT/AGENTS.md" "$_gen_tmp/self.md"; } \
-            && pass "…and a destination that is the source, spelled ${_gen_alias#"$_gen_tmp"/}, is refused with the source untouched" \
-            || die "a destination aliasing the source (${_gen_alias#"$_gen_tmp"/}) exited $_gen_rc and left the source changed; the next generation would find no markers"
-    done
+    "$_gen" "" > "$_gen_tmp/empty.out" 2>/dev/null || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/empty.out" ]; } \
+        && pass "…and an empty source operand is refused rather than read as the default" \
+        || die "an empty source operand exited $_gen_rc with output on stdout"
     mkdir -p "$_gen_tmp/dash" && cp "$ROOT/AGENTS.md" "$_gen_tmp/dash/-"
     _gen_rc=0
     (cd "$_gen_tmp/dash" && "$_gen" - > "$_gen_tmp/dash.out" 2>/dev/null) || _gen_rc=$?
     { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/dash.out"; } \
         && pass "…and a source named - is read as a file, never as stdin" \
         || die "a source named - exited $_gen_rc or emitted something other than the copy"
-    if mkfifo "$_gen_tmp/fifo.dest" 2>/dev/null; then
-        _gen_rc=0
-        "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/fifo.dest" >/dev/null 2>&1 || _gen_rc=$?
-        { [ "$_gen_rc" -ne 0 ] && [ -p "$_gen_tmp/fifo.dest" ]; } \
-            && pass "…and a FIFO destination is refused and left a FIFO" \
-            || die "a FIFO destination exited $_gen_rc and is no longer a FIFO"
-    else
-        die "could not stage a FIFO destination; the special-destination case did not run"
-    fi
-    mkdir -p "$_gen_tmp/dir.dest"
+    mkdir -p "$_gen_tmp/cdtrap/.github"
     _gen_rc=0
-    "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/dir.dest" >/dev/null 2>&1 || _gen_rc=$?
-    _gen_inside="$(ls -A "$_gen_tmp/dir.dest")" || die "could not list the directory destination; the case proves nothing"
-    { [ "$_gen_rc" -ne 0 ] && [ -z "$_gen_inside" ]; } \
-        && pass "…and a directory destination is refused with nothing moved inside it" \
-        || die "a directory destination exited $_gen_rc and left entries inside it: $_gen_inside"
+    (cd "$ROOT" && CDPATH="$_gen_tmp/cdtrap" .github/build-copilot-instructions.sh > "$_gen_tmp/cdpath.out" 2>/dev/null) || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/cdpath.out"; } \
+        && pass "…and the documented relative invocation survives a CDPATH holding another .github" \
+        || die "under a CDPATH holding another .github the relative invocation exited $_gen_rc or emitted something else"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
         '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
@@ -5862,13 +5831,6 @@ elif _gen_tmp="$(mktemp_d)"; then
         { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/$_gen_bad.out" ]; } \
             && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
             || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
-        printf '%s\n' 'the copy that was there' > "$_gen_tmp/$_gen_bad.dest"
-        cp "$_gen_tmp/$_gen_bad.dest" "$_gen_tmp/$_gen_bad.keep"
-        _gen_rc=0
-        "$_gen" "$_gen_tmp/$_gen_bad.md" "$_gen_tmp/$_gen_bad.dest" >/dev/null 2>&1 || _gen_rc=$?
-        { [ "$_gen_rc" -ne 0 ] && cmp -s "$_gen_tmp/$_gen_bad.dest" "$_gen_tmp/$_gen_bad.keep"; } \
-            && pass "…and the destination form leaves an existing copy untouched on a $_gen_bad layout" \
-            || die "the destination form exited $_gen_rc and changed an existing copy on a $_gen_bad layout"
     done
     # A FIFO gives a second open different contents, which a single read never sees.
     if mkfifo "$_gen_tmp/once" 2>/dev/null; then

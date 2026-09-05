@@ -11,8 +11,9 @@ GitHub PR review. Copilot's copy is `.github/copilot-instructions.md`, generated
 from the body of `AGENTS.md` by `.github/build-copilot-instructions.sh` because
 Copilot reads only that file and does not follow pointers; the contract test
 refuses a copy that is behind, so edit `AGENTS.md`, regenerate with
-`.github/build-copilot-instructions.sh AGENTS.md .github/copilot-instructions.md`,
-and commit both.
+`.github/build-copilot-instructions.sh > .github/copilot-instructions.md`, and
+commit both. The generator prints nothing for a malformed body, so a refused
+regeneration leaves that redirection's empty file for `git checkout` to restore.
 Both are read from the PR's **base ref** by the reviewers, so a pull request
 cannot rewrite the rules it is judged by.
 
