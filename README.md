@@ -193,16 +193,17 @@ fix carrying a `Review-Phase: copilot` trailer), all checks and the base branch'
 required checks on the merge target, no unresolved threads, and the round
 boundary. A head that moved mid-gate is refused, not merged.
 
-The merge uses `--admin` by default, because branch protection normally requires
-an approving review from another account and neither reviewer counts as one; for
-a solo maintainer with a protected default branch, dropping it removes the merge
-path rather than tightening it. The trade-off is recorded in
+The merge uses `--admin` by default, a trade accepted for one case: a branch
+that requires an approval no eligible account can provide, where neither
+reviewer counts and dropping the flag removes the merge path rather than
+tightening it. The trade-off is recorded in
 [`docs/decisions/2026-08-06-merge-admin-default.md`](docs/decisions/2026-08-06-merge-admin-default.md).
-Set `REVIEW_MERGE_STRICT=1` where the branch's rules are ones the loop can
-satisfy: GitHub then evaluates reviews, checks and conversations itself, at
-merge time. With required checks, conversation resolution, zero required
-approvals where no eligible approver exists, and bypass disallowed, that
-evaluation is atomic. If GitHub refuses, the merge does not happen and you
+Everywhere else set `REVIEW_MERGE_STRICT=1`: where the branch's rules are ones
+the loop can satisfy, and always where the branch uses a merge queue, which the
+default bypasses. GitHub then evaluates reviews, checks and conversations
+itself, at merge time. With required checks, conversation resolution, zero
+required approvals where no eligible approver exists, and bypass disallowed,
+that evaluation is atomic. If GitHub refuses, the merge does not happen and you
 decide.
 
 ## Configuration
@@ -216,7 +217,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin`, so GitHub enforces branch protection itself |
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks run |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
-| `PR_CI_GRACE` | `90` | how long a green answer must hold before it is believed, since a workflow registers a moment after the push |
+| `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |
 | `PR_CI_PROBE_TIMEOUT` | `60` | bound on each `gh` call the check probe makes |
 | `PR_WATCH_INTERVAL` | `30` | seconds between polls while waiting for a verdict |
 | `PR_WATCH_TIMEOUT` | `3600` | how long to wait for a verdict before reporting a timeout |
