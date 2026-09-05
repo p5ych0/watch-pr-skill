@@ -143,8 +143,9 @@ The loop decides nothing irreversible on its own. It stops and asks:
    so the session stops and asks you to read it. If it was a clean verdict, say
    so and a signoff is recorded for that head; if it was a finding, fix it and
    push.
-2. **A limitation it cannot test**, as above. Accepting it is your call,
-   recorded as a dated file under `docs/decisions/` by its own PR.
+2. **A limitation it cannot test**, as above. Accepting it is your call, and it
+   becomes binding as a dated record landed on the base branch by its own PR,
+   under `docs/decisions/`.
 3. **The round check-in.** Every `REVIEW_ROUND_THRESHOLD` distinct reviewed
    heads per reviewer (default 10), the session stops: continue, merge, leave
    the PR open, or abandon. Saying "continue" is recorded on the PR, so the next
