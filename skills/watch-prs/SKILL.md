@@ -364,6 +364,8 @@ PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verd
 States: `none` no review on this head · `pending` a draft is open · `reviewed` a
 submitted APPROVED/COMMENTED review · `blocked` CHANGES_REQUESTED — findings, plus its
 body in step 4 · `dismissed` the signoff was withdrawn — request again.
+`probe_stalled` is not a state of the review: a read stalled past `PR_WATCH_PROBE_TIMEOUT`
+and the watch has already killed and retried it. Nothing to do, and no re-request.
 
 **On `4` the operator's answer must become state**, or the stop is a deadlock: the watch
 returns 4 for as long as that review is the newest, there is no thread to resolve, and

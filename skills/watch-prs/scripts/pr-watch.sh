@@ -176,8 +176,7 @@ remaining_s() {
     return 0
 }
 
-# The smaller of the deadline and the per-probe bound: bounded by the deadline alone, a `gh` stalled
-# on a dead connection ran to it and the watch reported an ordinary timeout with the review already there.
+# The smaller of the deadline and the per-probe bound, so a stalled `gh` costs the bound rather than the deadline.
 LIM=0
 probe_limit() {
     remaining_s || return $?
@@ -186,11 +185,11 @@ probe_limit() {
     return 0
 }
 
-# A probe that hit its own bound short of the deadline is retried on a fresh process; one that hit
-# the deadline is the timeout.
+# Status 124 is the timeout only where the deadline has passed by the time it returns.
 stalled() {
-    [ "$LIM" -lt "$REMAINING" ] || timed_out
-    elapsed_s || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    remaining_s; _st_rc=$?
+    [ "$_st_rc" -eq 2 ] && timed_out
+    [ "$_st_rc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     waited="$ELAPSED"
     printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=probe_stalled probe=%s limit_s=%s waited_s=%s\n' \
         "$PR" "$WHO" "$1" "$LIM" "$waited"

@@ -707,35 +707,48 @@ elapsed=$(( $(date +%s) - start ))
     || die "a 5s timeout took ${elapsed}s with a hanging probe"
 
 # ── a probe that stalls short of the deadline is retried, not run to it ───
-# Bounded by the deadline alone, a `gh` stalled on a dead connection ran to it, and the
-# watch reported an ordinary timeout with the review already on the head (#281). The
-# stub stalls on its first state call only; a bounded watch kills that probe, retries on
-# a fresh process, and reaches the verdict.
-mkstub "$TMP/stall.sh" <<'SH'
-n=$(cat "$STALL_N" 2>/dev/null || echo 0)
-echo $((n + 1)) > "$STALL_N"
-if [ "$1" = "state" ] && [ "$n" -eq 0 ]; then sleep 3600; fi
-if [ "$1" = "verdict" ]; then
-    printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=findings findings=2\n' "$2" "$3"
-    exit 1
-fi
-printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "$2" "$3"
-exit 0
+# One stall per command, and the head recheck after a verdict is the head read that
+# stalls, so every probe in the loop is reached once stalled and once answered.
+cat > "$TMP/stall.sh" <<'SH'
+#!/usr/bin/env bash
+once() { [ -e "$STALL_N.$1" ] && return 1; : > "$STALL_N.$1"; return 0; }
+case "$1" in
+    head)
+        if [ -e "$STALL_N.verdict_answered" ] && once head-recheck; then sleep 3600; fi
+        printf '%s\n' "$HEAD40"; exit 0 ;;
+    state)
+        once state && sleep 3600
+        printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "$2" "$3"; exit 0 ;;
+    review-id)
+        once review-id && sleep 3600
+        printf '99\n'; exit 0 ;;
+    verdict)
+        once verdict && sleep 3600
+        : > "$STALL_N.verdict_answered"
+        printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=findings findings=2\n' "$2" "$3"; exit 1 ;;
+esac
+exit 2
 SH
-rm -f "$TMP/stall.n"
+chmod +x "$TMP/stall.sh"
+rm -f "$TMP"/stall.n.*
 start=$(date +%s)
 out="$(STALL_N="$TMP/stall.n" PR_WATCH_PROBE_TIMEOUT=1 PR_WATCH_STATE_SCRIPT="$TMP/stall.sh" \
-       run_limited 60 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 20 2>&1)"; rc=$?
+       run_limited 90 "$SCRIPT" 7 "$BOT" --after-review 5 --interval 1 --timeout 30 2>&1)"; rc=$?
 elapsed=$(( $(date +%s) - start ))
 { [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
-    && pass "a probe stalled short of the deadline is retried and the watch reaches the verdict" \
-    || die "a stalled probe gave rc=$rc after ${elapsed}s: out='$out'"
-grep -q 'state=probe_stalled probe=state limit_s=1' <<<"$out" \
-    && pass "…and the stall is reported, naming the probe and its bound" \
-    || die "no probe_stalled record for the stalled state probe: $out"
-[ "$elapsed" -le 15 ] \
+    && pass "probes stalled short of the deadline are retried and the watch reaches the verdict" \
+    || die "stalled probes gave rc=$rc after ${elapsed}s: out='$out'"
+for _p in state review-id verdict head; do
+    grep -q "state=probe_stalled probe=$_p limit_s=1" <<<"$out" \
+        && pass "…and the stalled $_p probe is reported, naming the probe and its bound" \
+        || die "no probe_stalled record for the stalled $_p probe: $out"
+done
+[ "$(grep -c 'state=probe_stalled' <<<"$out")" -eq 4 ] \
+    && pass "…once each, the head recheck being the head read that stalled" \
+    || die "expected four stall records, one per probe: $out"
+[ "$elapsed" -le 25 ] \
     && pass "…having cost the bound rather than the deadline" \
-    || die "a 1s probe bound took ${elapsed}s to recover from a stall"
+    || die "four 1s probe bounds took ${elapsed}s to recover from"
 # A stall on every call still counts against the deadline: the retry is bounded by it.
 mkstub "$TMP/stall-all.sh" <<'SH'
 sleep 3600

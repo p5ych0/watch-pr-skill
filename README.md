@@ -243,7 +243,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | `PR_CI_PROBE_TIMEOUT` | `60` | bound on each `gh` call the check probe makes |
 | `PR_WATCH_INTERVAL` | `30` | seconds between polls while waiting for a verdict |
 | `PR_WATCH_TIMEOUT` | `3600` | how long to wait for a verdict before reporting a timeout |
-| `PR_WATCH_PROBE_TIMEOUT` | `60` | bound on each `gh` call the watch makes; a call that stalls past it is retried on a fresh process rather than run to the watch's timeout |
+| `PR_WATCH_PROBE_TIMEOUT` | `60` | budget for each read the watch makes of the review state, one helper run of several `gh` calls; a read that stalls past it is retried afresh rather than run to the watch's timeout |
 | `RB_SUITE_JOBS` | `4` | how many test files the pre-push self-check runs at once (contributors) |
 | `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, `REVIEW_BUS_REPO` | derived from `origin` | override the repository identity (tests) |
 
