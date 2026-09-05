@@ -5791,24 +5791,48 @@ elif _gen_tmp="$(mktemp_d)"; then
         && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
         || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh AGENTS.md .github/copilot-instructions.md"
     { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
-    _gen_current "$_gen_tmp/nul.md" \
-        && die "a copy differing from the generated one only by an embedded NUL passes the currentness check" \
-        || pass "…and a copy differing only by an embedded NUL is behind"
+    _gen_rc=0
+    _gen_current "$_gen_tmp/nul.md" || _gen_rc=$?
+    case "$_gen_rc" in
+        1) pass "…and a copy differing only by an embedded NUL is behind" ;;
+        0) die "a copy differing from the generated one only by an embedded NUL passes the currentness check" ;;
+        *) die "the currentness check could not read the NUL candidate (rc=$_gen_rc); the case proves nothing" ;;
+    esac
     _gen_rc=0
     "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/installed.md" >/dev/null 2>&1 || _gen_rc=$?
     { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/installed.md"; } \
         && pass "…and the destination form installs the same bytes" \
         || die "the destination form exited $_gen_rc or installed different bytes from the stdout form"
-    case "$(ls -l "$_gen_tmp/installed.md")" in
-        -rw-r--r--*) pass "…with a tracked file's mode rather than the temporary's" ;;
-        *) die "the destination form installed the copy with the temporary's mode: $(ls -l "$_gen_tmp/installed.md" | cut -c1-10)" ;;
-    esac
+    cp "$ROOT/AGENTS.md" "$_gen_tmp/self.md"
+    for _gen_alias in "$_gen_tmp/self.md" "$_gen_tmp/./self.md"; do
+        _gen_rc=0
+        "$_gen" "$_gen_tmp/self.md" "$_gen_alias" >/dev/null 2>&1 || _gen_rc=$?
+        { [ "$_gen_rc" -ne 0 ] && cmp -s "$ROOT/AGENTS.md" "$_gen_tmp/self.md"; } \
+            && pass "…and a destination that is the source, spelled ${_gen_alias#"$_gen_tmp"/}, is refused with the source untouched" \
+            || die "a destination aliasing the source (${_gen_alias#"$_gen_tmp"/}) exited $_gen_rc and left the source changed; the next generation would find no markers"
+    done
+    mkdir -p "$_gen_tmp/dash" && cp "$ROOT/AGENTS.md" "$_gen_tmp/dash/-"
+    _gen_rc=0
+    (cd "$_gen_tmp/dash" && "$_gen" - > "$_gen_tmp/dash.out" 2>/dev/null) || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/dash.out"; } \
+        && pass "…and a source named - is read as a file, never as stdin" \
+        || die "a source named - exited $_gen_rc or emitted something other than the copy"
+    if mkfifo "$_gen_tmp/fifo.dest" 2>/dev/null; then
+        _gen_rc=0
+        "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/fifo.dest" >/dev/null 2>&1 || _gen_rc=$?
+        { [ "$_gen_rc" -ne 0 ] && [ -p "$_gen_tmp/fifo.dest" ]; } \
+            && pass "…and a FIFO destination is refused and left a FIFO" \
+            || die "a FIFO destination exited $_gen_rc and is no longer a FIFO"
+    else
+        die "could not stage a FIFO destination; the special-destination case did not run"
+    fi
     mkdir -p "$_gen_tmp/dir.dest"
     _gen_rc=0
     "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/dir.dest" >/dev/null 2>&1 || _gen_rc=$?
-    { [ "$_gen_rc" -ne 0 ] && [ -z "$(ls -A "$_gen_tmp/dir.dest")" ]; } \
+    _gen_inside="$(ls -A "$_gen_tmp/dir.dest")" || die "could not list the directory destination; the case proves nothing"
+    { [ "$_gen_rc" -ne 0 ] && [ -z "$_gen_inside" ]; } \
         && pass "…and a directory destination is refused with nothing moved inside it" \
-        || die "a directory destination exited $_gen_rc and left $(ls -A "$_gen_tmp/dir.dest" | wc -l | tr -d ' ') entries inside it"
+        || die "a directory destination exited $_gen_rc and left entries inside it: $_gen_inside"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
         '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
@@ -5835,9 +5859,11 @@ elif _gen_tmp="$(mktemp_d)"; then
         _gen_rc=0
         run_limited 20 "$_gen" "$_gen_tmp/once" > "$_gen_tmp/once.out" 2>/dev/null || _gen_rc=$?
         kill "$_gen_w" 2>/dev/null || true; wait "$_gen_w" 2>/dev/null || true
-        { [ "$_gen_rc" -eq 0 ] && grep -q 'one open' "$_gen_tmp/once.out" && ! grep -q 'second open' "$_gen_tmp/once.out"; } \
+        _gen_second=0
+        grep -q 'second open' "$_gen_tmp/once.out" || _gen_second=$?
+        { [ "$_gen_rc" -eq 0 ] && grep -q 'one open' "$_gen_tmp/once.out" && [ "$_gen_second" -eq 1 ]; } \
             && pass "…and the source is read once, so a source that changes between opens is emitted as validated" \
-            || die "the generator read its source more than once (rc=$_gen_rc); a source rewritten between opens is validated as one thing and emitted as another"
+            || die "the generator read its source more than once, or the probe could not read its output (rc=$_gen_rc, second-open grep rc=$_gen_second)"
     else
         die "could not stage a FIFO source; the single-read case did not run"
     fi

@@ -2,14 +2,12 @@
 # Copilot follows no pointers, so its file is generated from the body of `AGENTS.md` rather than kept by hand.
 #
 #   build-copilot-instructions.sh [source] [destination]
-#
-# With no destination the copy goes to stdout. With one, it is written whole into a temporary beside
-# the destination and renamed over it only after the layout is accepted, so a refusal leaves the
-# existing copy as it was.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 src="${1:-$root/AGENTS.md}"
 dst="${2:-}"
+# A relative name beginning with `-` is an option to awk, and `-` alone is its stdin.
+case "$src" in /*) ;; *) src="./$src" ;; esac
 # A source rewritten between two opens must not be validated as one thing and emitted as another.
 emit() {
     awk '
@@ -32,16 +30,14 @@ if [ -z "$dst" ]; then
     emit
     exit 0
 fi
-# `mv` moves a file inside a directory it resolves the destination to and reports success; `rename(2)`
-# refuses a directory, so the exact rename is asked of `perl` and a directory is refused before that.
-if [ -d "$dst" ]; then
-    echo "$0: destination '$dst' is a directory" >&2
+# Installed over its own source, the copy would strip the markers the next generation needs.
+if [ "$src" = "$dst" ] || [ "$src" -ef "$dst" ]; then
+    echo "$0: the destination '$dst' is the source" >&2
     exit 1
 fi
-tmp="$(mktemp "$(dirname -- "$dst")/.copilot-instructions.XXXXXX")"
-# `mktemp` creates the temporary 0600, which the rename would carry onto a tracked file.
-if emit > "$tmp" && [ -s "$tmp" ] && chmod 644 -- "$tmp" && perl -e 'rename $ARGV[0], $ARGV[1] or exit 1' -- "$tmp" "$dst"; then
-    exit 0
-fi
-rm -f -- "$tmp"
-exit 1
+body="$(emit)"
+# The handoff library refuses a destination that is not a regular file or a link to one, creates its
+# temporary exclusively and renames exactly; a second copy of that rule here would be the defect it removes.
+rb_write_handoff() { return 127; }
+. "$root/skills/watch-prs/scripts/writelib.sh"
+rb_write_handoff "$dst" "$body" >&2

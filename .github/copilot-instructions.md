@@ -325,14 +325,20 @@ whatever any document says, and a new defect in the same area is still a
 finding. The accepted records:
 
 - `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
-  `gh pr merge --admin` by default. The bypass is accepted only while all of
+  `gh pr merge --admin` by default. Two things are accepted there: the bypass,
+  and the race between the last client-side probe and the merge, in which a
+  review, a check or a branch requirement can change without moving the head —
+  no client-side fix closes it, and `REVIEW_MERGE_STRICT=1` is the answer where
+  it matters. The bypass is accepted only while all of
   these hold, so removing any one is a finding: the head is resolved as the
   **full 40-hex SHA**, never a **7-character prefix**; the comparison is
   **atomic with the merge** through `--match-head-commit`;
   a **review-state probe** refuses `blocked`, a **dismissed review** and a
   **body-only** `CHANGES_REQUESTED`; the **all-checks gate is addressed by that head**,
   reading the merge target's own rollup, and the **required-checks gate is**
-  **addressed by it too**, reading what the **BASE BRANCH requires** and asking that
+  **addressed by it too**, reading what the **BASE BRANCH requires** — the union
+  of classic protection's contexts and a ruleset's, each source read on its own,
+  since either can hold the whole set — and asking that
   rollup, with a required context not yet reported `pending`, a branch requiring
   nothing `none`, and a protected branch whose **protection cannot be** read an
   error; the **base branch is confirmed either side** of that read, so a retarget
