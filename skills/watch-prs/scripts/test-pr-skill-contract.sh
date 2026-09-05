@@ -5784,12 +5784,15 @@ elif _gen_tmp="$(mktemp_d)"; then
     { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
         && pass "the Copilot copy generator runs" \
         || die "the Copilot copy generator failed or printed nothing"
-    cmp -s "$_gen_tmp/out.md" "$ROOT/.github/copilot-instructions.md" \
+    _gen_current() {
+        cmp -s "$_gen_tmp/out.md" "$1"
+    }
+    _gen_current "$ROOT/.github/copilot-instructions.md" \
         && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
         || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh > .github/copilot-instructions.md"
     { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
-    cmp -s "$_gen_tmp/out.md" "$_gen_tmp/nul.md" \
-        && die "a copy differing from the generated one only by an embedded NUL compares equal" \
+    _gen_current "$_gen_tmp/nul.md" \
+        && die "a copy differing from the generated one only by an embedded NUL passes the currentness check" \
         || pass "…and a copy differing only by an embedded NUL is behind"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
         '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
