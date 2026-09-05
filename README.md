@@ -1,263 +1,64 @@
 # watch-pr-skill
 
 **A team-grade code-review rhythm for solo developers.** You write the code;
-GitHub's own reviewers — **Codex** and **Copilot** — review every pull request,
-and **Claude Code** works the fix → resolve → re-request loop until they sign
-off. The review discipline of a team, with no teammates required.
+GitHub's own reviewers, **Codex** and **Copilot**, review every pull request, and
+**Claude Code** works the fix → reply → resolve → re-request loop until they sign
+off. Then it stops and asks you before opening the second reviewer's phase, and
+again before merging.
 
-One install serves every project on your machine.
+One install serves every project on your machine. No daemon: nothing keeps
+running between sessions.
 
-## Why
+## What it does
 
-A solo developer has no one to open a PR to. This plugin gives you the missing
-half of a healthy workflow: an independent reviewer that reads every pushed head,
-posts inline findings, and holds the merge until they're addressed — so your work
-goes through the same gate a teammate's review would, automatically.
+The plugin is a driver for the native GitHub reviewers. Your session:
 
-## What it is
+1. states the task on the PR and requests a Codex review;
+2. waits for the verdict without polling by hand;
+3. reads the findings, fixes what each one names and nothing else, replies on
+   every thread, resolves it, and requests the next pass;
+4. repeats until Codex is clean, then **stops and asks** whether to merge on that
+   signoff alone or open the Copilot phase on the same head;
+5. runs the Copilot phase the same way, then **stops and asks** again;
+6. evaluates every merge gate immediately before merging, pinned to one commit.
 
-A driver for the **native** GitHub reviewers. Nothing runs on your machine.
-
-| Reviewer | Identity | Trigger |
+| Reviewer | Identity | How it is asked |
 | --- | --- | --- |
-| Codex | `chatgpt-codex-connector[bot]` | a comment containing `@codex review`, or automatically on push |
-| Copilot | `copilot-pull-request-reviewer[bot]` | `gh pr edit <PR> --add-reviewer @copilot` |
+| Codex | `chatgpt-codex-connector[bot]` | a PR comment containing `@codex review` |
+| Copilot | `copilot-pull-request-reviewer[bot]` | a review request for `@copilot` |
 
-Your session requests the reviews, reads the findings, works the fix → reply →
-resolve → re-request loop, and gates the merge. Seven small scripts answer the
-questions `gh` cannot answer safely on its own — whether a reviewer's review of
-the *current* head can carry a merge, whether everything pushed since the
-reviewed commit is a review fix, what the unresolved findings actually are, how
-many rounds this PR has had, when a verdict is ready to act on, whether the
-change about to be pushed passes its own checks *here*, and whether the commit
-that was pushed is green *there*. The last two are different questions: a suite
-that passes locally can fail on the runner, and one did — for four rounds.
+The reviewers judge relevance against what the PR says it set out to do, so the
+description is the one input the whole loop is calibrated on. Write it first.
 
-Every review establishes the PR's **intended scope** first — from its description
-and its newest round-summary comment — and uses it for *relevance only*: work the
-PR never claimed to do is not a defect of this PR, while a defect in what the PR
-did change stays a finding however the description frames it. That scope is
-untrusted context: it establishes intent and can never waive a finding.
+**Use it** when a change deserves a second pair of eyes and there is nobody to
+ask: behaviour changes, anything touching money, auth, data loss or concurrency,
+a refactor you want checked, work you will not remember the reasoning behind.
+**Skip it** for a one-line typo, generated files, formatting-only commits, or a
+spike you will throw away. If a loop runs long, that is information: rounds that
+keep finding defects in the *fixes* usually mean the change is too large.
 
-A problem the PR did not introduce has somewhere to go that is not a blocker.
-Every inline comment becomes a review thread the merge gate requires resolved, so
-an unrelated note filed inline would block a PR that is not responsible for it.
-The reviewers are told to put those in the **overall review body**, and to open a
-**GitHub issue** when the problem deserves tracking beyond the PR.
+## Requirements
 
-### What it asks of the session driving it
-
-The skill binds the model to a working discipline, because the failure mode of an
-automated fix loop is not laziness — it is enthusiasm. Each rule below exists
-because breaking it turns a three-round PR into a long one:
-
-- **Fix what the finding names, and nothing else** — where "what the finding
-  names" is the *defect*, so the same defect in another copy the PR already
-  changes is part of it, and a regression the fix itself introduces is always this
-  round's work. A round is about that round's findings. Nearby tidying, an opportunistic rename, hardening a path nobody
-  raised — all of it enlarges the diff the next review must read, and it arrives
-  bundled into a commit whose summary says "closing review comments", where a
-  reviewer has no reason to look for it.
-- **Build the smallest thing that makes the finding false.** Configuration nobody
-  asked for, an abstraction for a single call site, a general mechanism where a
-  specific fix was requested — each becomes surface that must then be reviewed and
-  maintained. If a broader fix is genuinely warranted, the session opens an issue
-  and raises it with you rather than deciding by building — and keeps that
-  discussion out of the review request, where a design proposal reads as a work
-  order.
-- **Prefer removing the dependency over guarding it.** Where a finding can be
-  answered either by adding a check or by changing the shape so the problem cannot
-  arise, the session takes the second whenever it is not larger, and says on the
-  thread which it took **and why**. A check is a name, and names can be shadowed, mis-parsed
-  or forgotten; the fixes that have actually ended a run of review rounds here
-  were the ones that removed something rather than watched it.
-- **Validate a finding before acting on it.** Reviewers can be wrong, or right
-  about a defect and wrong about its cause. The session reproduces the claim
-  first, and where it does not hold, says so in the thread with evidence instead
-  of changing code to satisfy it.
-- **Read the whole finding, not its title.** The reviewers write a one-line title
-  and then the actual argument — the triggering input, the consequence, and often
-  a note that the same defect exists elsewhere. A code suggestion attached to a
-  finding is treated as a proposal, weighed against context the reviewer could
-  not see, with the reasoning recorded in the thread if it is not taken.
-- **Prove a fix can fail, or stop.** A test that passes against the unfixed code
-  converts an unverified assumption into a green tick, so the session reverts each
-  fix and confirms the test fails for the reason it names. Where that genuinely
-  cannot be constructed, it writes the limitation at the site and **stops for
-  you** — the loop will not close on its own say-so. Accepting the limitation is
-  your call, and it becomes binding the way the `--admin` trade-off did: a dated
-  record landed on the base branch by its own PR. If a loop refuses to close and
-  the summary says a mutation could not be built, that is this rule, and that is
-  the decision it is waiting on.
-- **Say what was not done.** Anything skipped, deferred or disagreed with goes in
-  the round summary. Silence would read as "addressed", and neither you nor the
-  reviewer could tell the difference. It goes there as a past-tense disposition
-  and an issue number, not as a description of the unfixed problem: the summary
-  shares a comment with the review request, and a request that describes work to
-  be done gets treated as one.
-
-You are not expected to police this. It is in the skill contract, the reviewers
-are told what a well-formed finding contains, and the round check-in brings the
-decision back to you at a cadence you set.
-
-## When to use it
-
-**Use it when a change deserves a second pair of eyes and there is nobody to
-ask** — anything you would want reviewed if you had a colleague: behaviour
-changes, anything touching money, auth, data loss or concurrency, a refactor you
-want an independent check on, or work you will not remember the reasoning behind
-in a month. It is at its best on a PR that has a clear stated goal, because that
-is what the reviewers judge relevance against.
-
-**It is worth less on:** a one-line typo fix, generated or vendored files,
-formatting-only commits, or a spike you intend to throw away. The loop costs
-reviewer time and round-trips; a PR whose diff is not worth reading is not worth
-gating.
-
-**Do not reach for it as a substitute for knowing what you want.** The reviewers
-judge the change against what the PR says it set out to do, so a PR with no clear
-goal produces vague findings and long rounds. Write the description first; that
-is the one input the whole loop is calibrated on.
-
-**If a review loop is running long**, that is information rather than a reason to
-push through. The round check-in exists to surface exactly that — see
-[Round check-in](#round-check-in). Rounds that keep finding defects in the *fixes*
-usually mean the change is too large, and splitting the PR is the faster route.
-
-> **Upgrading from 1.x?** v1 ran its own reviewer over a file-based bus with two
-> `systemd --user` daemons. All of it is removed — see the 2.0.0 entry in
-> [`CHANGELOG.md`](CHANGELOG.md) for why, and for the teardown commands.
-
-## Prerequisites
-
-- `git`, `gh` (authenticated — `gh auth status`, `repo` scope), `jq`
-- The **Codex GitHub connector**, linked once per account at
+- **`git`, `gh`, `jq`, `perl`.** `gh` must be authenticated with the `repo` scope
+  (`gh auth status`). `perl` is a hard requirement: the helpers hand values to
+  each other in files, and the shell has no safe spelling of the exclusive create
+  and exact rename that takes. macOS ships it; on Linux, install it if your
+  distribution does not.
+- **The Codex GitHub connector**, linked once per account at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
-  Until it is linked, `@codex` replies with a setup link instead of a review —
-  that reply is the diagnostic.
-- **Copilot code review**, if you want the two-reviewer loop. It is the default
-  and the norm: the merge gate demands a clean verdict from *both* reviewers, and
-  the Copilot phase stops rather than skipping if the request cannot be made.
+  Until it is linked, `@codex` replies with a setup link instead of a review.
+- **Copilot code review** on the repository, for the two-reviewer loop. A
+  Codex-only merge is supported as a decision you make at the first stop. What
+  there is deliberately no switch for is skipping a reviewer silently: the mode
+  is chosen at the stop and passed to the merge gate by name.
+- **Claude Code.** Both reviewers run in GitHub's cloud; nothing is installed for
+  them here.
 
-  **A Codex-only merge is supported, and it is a decision rather than a switch.**
-  When the Codex phase closes, the loop stops and asks; choosing to merge there
-  runs the gate in `codex-only` mode. That mode is **narrower**, not looser: the
-  two-reviewer path tolerates a head that advanced past Codex's signoff because
-  every commit since carries a `Review-Phase: copilot` trailer, and with no Copilot
-  phase there are no such commits and nothing licenses the delta — so it requires
-  the head to *be* the commit Codex signed.
-
-  What there is deliberately no switch for is skipping a reviewer *silently*. The
-  mode is named at the stop, passed to the gate explicitly, and an unrecognised
-  value is refused rather than read as the permissive one.
-
-No daemon, no `codex` CLI, no `inotify-tools`, no systemd.
-
-### Making reviews fast
-
-A review of shell and Markdown does not need an environment. Both instruction
-files tell the reviewers so explicitly — no setup, no dependency install, no test
-runs — because the alternative is a twenty-minute pass that says what a
-three-minute pass would have said, while the author waits either way.
-
-Two settings matter as much as the instructions:
-
-- **Codex → Environments**: if this repository has a setup script or automatic
-  dependency installation configured, remove it. Nothing here needs building.
-- **Exhaustive review**: keeps looking after the first problem. Worth it on a
-  behaviour change; if you want a fast pass on a docs-only PR, turn it off for
-  that round.
-
-### Codex review settings
-
-Per-repository behaviour lives on the Codex **Code review** settings page:
-
-| Setting | Suggested | Why |
-| --- | --- | --- |
-| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, and a red head stops it before anything is resolved or posted. On, the *push* also triggers a pass — one that necessarily reads open threads and no summary, since the checks on what was pushed are what decide whether the round may close at all. The driver waits that pass out and supersedes it with an explicit mention carrying the summary, so a round costs two Codex passes instead of one. Note the per-repository column overrides this default, so check both. |
-| Review trigger | on every push | Only relevant with automatic review on. |
-| Exhaustive review | on | Keeps looking after the first problem. |
-| Credit usage | on, if you want reviews to continue past the rate limit | With it off, review simply stops when the limit is hit. |
-
-## Platform support
-
-Portable: the plugin shells out to `git`, `gh`, `jq` and — since 2.1.0 — `perl`.
-v1's Linux-only caveat is gone with the daemons it was about.
-
-`perl` is a hard requirement rather than a convenience, and the reason is below
-under **Running a helper by hand**: the file handoffs need an `O_CREAT|O_EXCL`
-create and an exact-destination rename, and a shell has a safe spelling of
-neither. macOS ships it and so does every Linux distribution this loop has run
-on; without it, every handoff refuses and says so.
-
-**The helpers run in a privileged shell**, started that way by the skill itself —
-`/usr/bin/env bash -p …`. That is what stops a `BASH_ENV` startup file, an
-exported shell function or an inherited `SHELLOPTS` from reaching them, and it
-needs nothing of your setup: the driver supplies it on every call.
-
-Running a helper **by hand** goes through its shebang instead, which is
-`#!/usr/bin/env -S bash -p`. `env -S` has been in GNU coreutils since 8.30 (2018)
-and BSD/macOS `env` supports it; on an older `env` the helper refuses to start
-rather than starting unprotected.
-
-`pr-origin.sh` is the exception, and cannot be run by hand at all: it is not
-executable, because the shell reading it has to be privileged from its first line
-and only the caller can arrange that.
-
-**`perl` must be present**, and since 2.1.0 it is a hard requirement rather than a
-convenience. The file handoffs — the gated head, the review baseline, the signed-off
-sha — are written by creating a temporary with `O_CREAT|O_EXCL` and renaming it onto
-the caller's path, and the shell has no spelling of either that is safe. `set -C`
-fails a redirection only where the existing file is **regular**, so a FIFO left at the
-temporary's name is opened and the write blocks; and `mv SRC DEST` moves the source
-*inside* `DEST` where that resolves to a directory, following a symlink to get there.
-`perl`'s `sysopen` and `rename` are the syscalls, without the exemptions. macOS ships
-`perl`, and so does every Linux distribution this loop has run on; where `mv -T` is
-available the rename uses it and saves a process. If neither exact rename can run, the
-write refuses and says so rather than falling back to something weaker.
-
-**Contributors need that `env`, users do not.** The plugin never depends on the
-shebang: the skill supplies `-p` on every call, and so does every call a helper
-makes to another helper. The test suite is the exception — it executes the
-helpers directly — so `pr-selfcheck.sh`, the mandatory pre-push gate, needs an
-`env` with `-S`.
-
-`bash skills/watch-prs/scripts/pr-…​.sh` is **not** supported either way: a startup
-file runs before the script's first line and nothing inside it can undo that.
-
-The suite is a mandatory pre-push gate, so a GNU-only construct *in the suite*
-stops a macOS contributor from closing a review round while Ubuntu CI stays green
-— invisible on the machine that introduced it. CI therefore runs the whole suite a
-second time on a machine shaped like a Mac: **bash 3.2.57 built from source — the base release with the official patch
-series applied, which is the patch level macOS ships — and first on `PATH`**, with the GNU-only tools removed. Constructs newer than 3.2 fail there
-outright, and so do the parsing differences no feature list would contain; a
-command name assembled at runtime — `_a=sha1; _b=sum; "$_a$_b"` — dies on absence,
-which no text scan can see.
-
-Three things it does not cover, stated rather than assumed: a construct on a branch
-the suite never takes; a GNU-only *flag* on a command that exists everywhere
-(`sed -i`, `readlink -f`, `grep -P`); and `\s` in a `grep` pattern, where BSD
-`grep` does not fail but matches a literal `s`. Those are review's job.
-
-**All of it is running.** `.github/workflows/tests.yml` runs both jobs on every
-push to `main` and on every pull request, so a green check means the suite passed
-on Ubuntu with bash 5 **and** on bash 3.2.57 with a mac-shaped `PATH`. A push to a
-branch with no pull request open still produces no check at all. The suite is also
-still the mandatory pre-push gate; `pr-selfcheck.sh` is unchanged, and it is what
-a contributor actually runs.
-
-Both were off, and came back separately. The normal job returned once its cost
-came down — the slowest fixture went 174s to 10s — on its record: it had never
-gone red on a correct change. `macos-shell` had, three times, each because a
-fixture required the ROUTE bash 5 takes to a defence rather than the defence
-holding. Auditing for that was done by running the job rather than by reading
-twenty-two files: nineteen passed, and the three that did not were real defects —
-a watchdog that gave its bounded command no stdin, an expansion that does not
-finish on 3.2.57, and two cases whose output the watchdog could not carry.
-
-`macos-shell` takes about twenty-five minutes against the normal job's three, and
-a hang there used to run to the six-hour default, so it bounds each file at ten
-minutes and the job at sixty.
+Works on Linux and macOS. Running one of the privileged helpers by hand goes
+through its `#!/usr/bin/env -S bash -p` shebang and needs an `env` that supports
+`-S` (GNU coreutils 8.30 or later, or BSD `env`). The skill itself never depends
+on it, `pr-selfcheck.sh` does not use it, and `pr-origin.sh` cannot be run by
+hand at all.
 
 ## Install
 
@@ -266,683 +67,7 @@ minutes and the job at sixty.
 /plugin install watch-pr-skill@p5ych0-tools
 ```
 
-Install once at user scope; it is then available in every project.
-
-**Claude Code only — and there is nothing to install for the reviewers.** v1
-shipped a Codex plugin because the review ran on this machine, through the
-`codex` CLI and a local bus. In v2 both reviewers are GitHub apps that run in
-GitHub's cloud: Codex answers an `@codex review` mention and Copilot answers a
-review request, neither of which involves anything installed here. What they read
-is committed to the repository — `AGENTS.md` and `.github/copilot-instructions.md`
-on the **base ref** — so the per-project setup below is the whole of it.
-
-What this plugin installs is the *driver*: the contract for the model running the
-loop, which watches for verdicts, closes rounds and gates the merge.
-
-## Per-project setup
-
-1. Authenticate `gh` for the repo (`repo` scope).
-2. Add review conventions the reviewers will actually read, from the base ref:
-   - **`AGENTS.md`** — Codex reads this natively, including in PR review.
-   - **`.github/copilot-instructions.md`** — Copilot reads only this file and
-     does not follow pointers, so restate the policy inline.
-
-   This repository's own copies are a working example: scope discipline, where
-   an out-of-scope problem goes, what counts as a blocking finding, and who can
-   waive one. A generic review is used if neither file exists.
-
-## Usage
-
-Invoke the skill:
-
-- Claude Code: `/watch-pr-skill:watch-prs`
-
-Then:
-
-1. **State the task on the PR.** The description says what the change does and
-   what it deliberately does not. The reviewers judge relevance against it, so
-   this is a precondition rather than paperwork.
-2. **Request the review — Codex first.** With automatic review **off** (the
-   recommended setting) that is a comment containing `@codex review`. With it
-   **on**, opening or pushing the PR has *already* queued a pass, so no mention is
-   sent — one would queue a duplicate review of the same head; post the context
-   comment without the mention and go straight to waiting. **`pr-request-review.sh`**
-   holds both, so the setting decides the ordering in one place that is tested —
-   and it refuses a body that would queue that duplicate, along with one whose
-   text would be read back as a record of the loop's own. The account is written
-   with the session's own file tool and redirected in on **stdin**, so it never
-   passes through your shell — where writing it would need `cat` or `printf`, both
-   names that shell can replace, and carrying it in a heredoc would let an account
-   containing a line equal to the delimiter end it and have the rest parsed as
-   shell. The answer comes back in a file for the same reason: a variable is a
-   name, and one your startup files have already made readonly would make the
-   capture fail silently. It STAYS in that file — the loop hands the path to
-   `pr-watch.sh --after-review-file`, which reads and validates it in a process
-   your shell cannot reach, so the review id never becomes a variable here at all.
-   The loop is *phased*:
-   Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
-   Running both every round buys a Copilot pass on every intermediate commit and
-   mixes its findings into rounds that were not about them.
-3. **Wait — without hand-polling.** `pr-watch.sh` blocks until the reviewer's
-   state is actionable and prints one line when it changes. In Claude Code it
-   runs as the session's Monitor, so the verdict surfaces into the chat by
-   itself. It is armed and re-armed as part of each round without asking you —
-   see **Watching without prompts**. An unreadable state is a stop, never
-   "no findings" — and so is an unreadable baseline file. "There is no earlier
-   review to wait past" is a real answer and is spelled `none`; an EMPTY file is a
-   refusal, because that is what a failed write used to leave — every writer truncated
-   before it wrote. Since 2.1.0 they rename instead, so a failed write leaves the
-   previous contents rather than an empty file, and the refusal stays because the
-   token is what a reader can trust either way. A failed read that quietly became the `none` token would let the
-   watch report the review the round just answered as the next one — which is why
-   the read is refused rather than degraded, and why empty is refused rather than
-   read as no floor. Since 2.2.0 the file also says WHICH REQUEST wrote it: the loop
-   generates a nonce before every review request, the writer prefixes the baseline
-   with it (`<nonce> <id>`), and the watch is told to require it. A well-formed id
-   from the PREVIOUS round — what a refusal the loop walked past leaves behind —
-   carries the previous nonce and is refused, where before it was the one stale value
-   no shape test could reject.
-
-   Every comment on the review counts as a finding, replies included. A reviewer
-   sometimes delivers a clean verdict as a reply, and that is *not* exempted:
-   the real verdict is followed by paragraphs of explanation, and a retraction is
-   also a paragraph after the verdict line, so nothing in the text separates
-   them. When a review is nothing but replies the watch reports
-   `source=replies-only` and exits **4**, and the skill **stops for you** — there
-   is nothing to fix and it is not a signoff, so one comment gets read by a human.
-   Both round-closing paths honour that status, so a push-triggered pass cannot
-   slip past it either.
-
-   **Your answer becomes state, so the stop ends.** If the comment was a clean
-   verdict, the skill records a `**Review-Signoff:**` line for that reviewer and
-   head, and the merge gate accepts it *for that shape only*. If it was a finding,
-   fix it and push — the head moves and the round is ordinary again. With no
-   signoff recorded the gate refuses and says which of the two to do.
-
-   **And a later session honours the same answer.** `pr-phase-state.sh` used to
-   report that review as a dismissal, so resuming tomorrow sent you back to
-   request a review of a head you had already read and signed off — the deadlock
-   returning one stage earlier. It applies the same rule now, and it is the same
-   rule: the signoff must name that head and be recorded **after** the
-   conversation it answers — the later of when the review landed and when the
-   newest reply did, so neither a signoff written for an earlier clean pass on an
-   unchanged head nor one predating a retracting reply can vouch for what came
-   next. Where no signoff answers it, the stop says so by name
-   rather than calling it a dismissal.
-4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
-   (`pr-selfcheck.sh`), **check the round boundary**
-   (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to
-   **`pr-close-round.sh`**, which holds both orderings so neither has to be
-   remembered, and runs in **two stages with your thread replies between them**:
-
-   - `gate <PR> <reviewer> <summary-file> <auto-review> <head-file>` pushes and
-     proves the head is green, reports it as `head=…`, and writes it into
-     `<head-file>` for the other stage. **Run it from a checkout on that
-     PR's branch**: it names the ref it may write, proves every push URL of
-     `origin` is the repository the session is pinned to, and refuses — pushing
-     nothing — if any of that does not hold.
-
-     Two kinds of refusal, and only one is worth retrying. **Wrong branch or a
-     detached HEAD** is about where you are standing: switch to the worktree
-     holding the PR's branch and run it again, nothing has happened yet. **A fork
-     PR, or an `origin` that pushes elsewhere**, is not — running it again changes
-     nothing. A fork PR is outside what this loop drives, and where `origin`
-     pushes is your configuration to settle, not the loop's;
-   - **then** reply to each thread with what changed, react 👍/👎, and resolve it;
-   - `post <PR> <reviewer> <summary-file> <auto-review> <head-file>` reads the head
-     back out of the **same file** `gate` was given, re-proves it has not moved,
-     posts the summary and requests the next pass.
-
-     The head travels in a file rather than through a variable because the value
-     is produced *after* `gate` has pushed, and a name the shell has already made
-     readonly cannot be assigned to — silently, since an assignment's status
-     cannot be taken. Passing the head itself in that position is refused by name.
-
-   The threads are answered **after** the gate because a resolve cannot be taken
-   back: resolving first means a round that then fails to push, or pushes red, has
-   already recorded its findings as answered on a commit that never landed.
-
-   The two orderings the script holds:
-
-   - **automatic review off** (the recommended setting) — the `@codex review`
-     mention *is* the request, so it carries the summary in one comment and
-     nothing is queued until that comment is posted.
-   - **automatic review on** — the *push* is the request, so the push goes first
-     and the summary is posted **after** the checks on it are known. Posting
-     first cannot be gated: by the time the checks can be consulted the summary is
-     already there and cannot be taken back. The pass the push starts reads open
-     threads and no summary, and is superseded by an explicit mention carrying the
-     summary — which is why this mode costs two Codex passes per round.
-
-   Both checks come *before the push*, because with automatic review on the push
-   itself requests the next review and a check placed after it asks you about a
-   round that has already started. The summary says what was addressed and what
-   was intentionally skipped: a resolved thread is not a record of a fix.
-5. **Codex clean → the Copilot phase**, through
-   **`pr-copilot-phase.sh`**, which runs in **three stages with your decision
-   at each boundary**. Every post they make — and `close` makes none in
-   `codex-only`, where there was no Copilot review — goes to the repository **the
-   session started in** — the origin URL is read during setup and pinned, and read a
-   second time to confirm the pin is that checkout's, so changing directory partway
-   through no longer decides which project a signoff or a revocation lands on:
-
-   - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
-     against *that exact sha*, proves its checks are green — and then proves the
-     head and the verdict **again**, immediately before writing, because the
-     checks gate waits and a push or a dismissal can land while it does. Either
-     stops the record with nothing posted. So does a **revocation newer than that
-     verdict** — somebody reopened the phase while this was proving it, and
-     recording would supersede them; a revocation *older* than the verdict is the
-     one this pass is answering, and records normally. It writes the signoff onto the PR in
-     the form `pr-signoff.sh` reads back. Then it stops
-     and asks: merge on one reviewer's signoff, or open the second phase. You
-     supply one paragraph on what the PR does and what the Codex phase changed;
-     everything a machine reads back is composed by the script;
-   - `open <PR> <sha> <baseline-file> <nonce>` runs only on the answer, and proves the phase
-     is still open before it changes anything: the head is unmoved, Codex's **live verdict**
-     on that sha is clean, and the **recorded Codex signoff** still names it. A
-     recorded signoff is history, not a current verdict — and a revocation is how a
-     phase is deliberately reopened, while GitHub keeps serving the old clean
-     verdict until the new pass reports, so neither check answers for the other.
-     It also **re-enforces the round boundary**, because the signoff is published
-     before the pause and a later session can resume straight into this stage; that
-     is why `open` can stop for you rather than proceeding. All of it runs **three
-     times** — up front, before the revocation, and again after it — because none
-     of these need the head to move, and the revocation is itself a change with the
-     request still to come. The **baseline file** is a writable path it captures the
-     current Copilot review id into, before requesting the pass; hand that same path
-     to `pr-watch.sh --after-review-file` for the rounds that follow, or the first
-     poll accepts a review made before the request. The loop uses one of the working
-     files set up at the start. **A value in that file is this round's baseline only
-     when `open` returns 0.** After a refusal the stage promises nothing about the
-     file's contents: depending on where the run stopped it may hold the previous
-     round's value, a refusal sentinel, or the id this run captured. Once past the
-     bootstrap it makes a bounded **readiness write** of `refused-no-baseline` over
-     whatever is there — and since 2.1.0 that write **renames rather than truncating**,
-     so it never opens the path you named in order to write it. A target that is not a regular file — a
-     directory, a FIFO, a device, a socket, or a symlink to any of those — stops the
-     stage before the PR is touched, and is **left exactly as it was**: nothing is
-     replaced and nothing is written through. Where the platform's `mv` takes `-T` or
-     `perl` — which covers Linux and macOS both — the rename is the exact-destination form,
-     and the two late-swap cases differ. A path swapped for an **actual directory** after
-     that check is **refused**: `rename(2)` will not put a file over a directory, so the
-     write stops and the directory is untouched. A path swapped for a **symlink to a
-     directory** is accepted, and it costs the **link** — `rename(2)` never follows a final
-     symlink, so it replaces the link and leaves the directory alone. Neither loses you
-     anything inside that directory, which is the property; only one of them is a refusal.
-     `/dev/null` named here is refused, and it is worth being exact about what that
-     saves you from: the **old** truncating write opened the device and wrote into it,
-     which is harmless. The replacement risk arrived with the rename — `rename(2)` will
-     put a regular file over any non-directory inode — and it is the type refusal, not
-     the rename, that keeps the device a device.
-     A symlink to a regular file is accepted, and the **link** is what gets replaced —
-     never the file it points at, which was the whole of the change.
-
-     What still stops the stage later rather than before the revocation is a target
-     that was fine at that moment and is not by the time the value crosses, so **do not
-     read a path-related refusal as meaning the PR was left unmodified.** Where the sentinel survives, a refusal cannot hand the watch a
-     value it would accept as "no prior review" — `pr-watch.sh` refuses the sentinel
-     and stops.
-
-     The driver aborts on a non-zero `open`, so it should never read the file then.
-     The reason the sentinel matters anyway is that it can: a shell whose `exit`
-     returns carries the refusal past the abort and into the wait step, which reads
-     this path. That fallback is real and is tested.
-
-     **What the watch refuses is decided by shape and by the request nonce, not by
-     which stage wrote the value.** Since 2.0.99 it refuses an empty file, and one whose
-     last byte is not the newline every writer ends with; it accepts `none` as "no
-     baseline", and any complete id. Since 2.2.0 it also requires the file to carry the
-     nonce the loop generated for **this** request — the writer prefixes the value with
-     it (`<nonce> <id>`), and the loop hands the same nonce to the watch. So the sentinel
-     stops it *while it survives* — the captured id overwrites it once the capture
-     succeeds — so does an empty file left by a readiness write that failed after
-     truncating, and so does the **previous round's id after a bootstrap refusal**: a
-     complete, well-formed id no shape test could reject, which before the nonce was the
-     one stale value the walked-past watch accepted and reported as this round's answer.
-     It carries the previous nonce now, and is refused. What the nonce does not change is
-     this round's own value after a **failed request**, which is not a fail-open and is the
-     one not to lump in with the rest: the file carries this round's nonce and id, and
-     `--add-reviewer` has already run, so the remote may have accepted it before the client
-     reported the error — a pass may genuinely be pending, and the watch waits for one
-     newer than the id or times out. Do not read a refusal there as "no Copilot pass is
-     coming". The rule stays the one above: the contents are authoritative only where
-     `open` returned 0, and the driver must not rely on the watch to make a refusal safe. The order is revoke → prove → baseline → request: the
-     proof as late as it can be while the Copilot baseline stays last, which it
-     must be or a pass landing in between answers a request made after it.
-     Then it revokes any earlier Copilot signoff and requests the pass. The
-     revocation is posted on **every** entry, including the first, where there is
-     no signoff to revoke: with no Copilot record at all, a head whose only clean
-     Copilot verdict is an older review merges, so that comment is the one durable
-     mark that a new pass is pending;
-   - `close <PR> <codex-sha> [both|codex-only]` is the other end of the same
-     phase. Copilot's verdict came back clean, so it re-reads the head, re-checks
-     Copilot against *that exact sha* — a push landing while the stop was parked
-     would otherwise be recorded as reviewed by someone who never saw it — writes
-     the second signoff, and stops to ask what to do with two closed phases.
-
-     **Which question it asks depends on the two shas**, which is why it needs the
-     Codex one. Where they differ, Copilot's fixes moved the head after Codex
-     looked at it, and a fault-tolerance pass over those commits is offered — with
-     the revocation that has to precede it. Where they are the **same commit**,
-     Codex has already reviewed exactly what is being merged and no pass is
-     offered: taking one there costs a revocation, a round and a reopened phase
-     for a verdict that cannot differ, and a session resuming into that reopened
-     phase reads it as a Copilot phase to run again. In `codex-only` there was no
-     Copilot review at all, so the stage records nothing and says so.
-
-   The body you supply is prose and is posted under your identity, so a line that
-   reproduces one of the record markers a reader trusts from *you* —
-   `**Review-Signoff:**`, `**Review-Signoff-Revoked:**`,
-   `**Review-Pause-Acknowledged:**` — is refused rather than published: it would
-   *create* the record it was quoting. (`**Reviewed commit:**` is not among them:
-   that one is only read from a reviewer bot's own comment, so writing it here
-   creates nothing and is left alone.) **To keep one:** indent it by four spaces
-   or quote it inline with backticks — either still says what you meant, because
-   the readers only honour these at the start of a line. A fenced block does *not*
-   help: the readers scan the raw comment body, where a line inside a fence still
-   starts at column 0.
-
-   **This applies to the opening request too**, and until 2.0.51 it did not: the
-   one body written from scratch rather than assembled from a round's findings was
-   the one posted with no rules at all.
-
-   For a related reason a body containing **`@codex review`** is refused where the
-   comment is posted on its own — the phase summary, a Copilot round's summary, and
-   the opening request with **automatic review on**, where a pass is already queued
-   and a second mention buys a duplicate over the same head. Any comment containing
-   that text requests a Codex pass, so quoting it out of a finding starts one
-   nobody asked for, in a phase that has just stopped or moved on. In a *Codex*
-   round — and in the opening request with automatic review **off** — the mention
-   is the request and the script writes it itself, so quoting it there changes
-   nothing and is allowed.
-
-   **The remedy is a different one, and indenting is not it.** This trigger is
-   matched case-insensitively *anywhere* in the body, not at the start of a line —
-   so an indented, quoted or fenced mention still requests the pass and is still
-   refused. Break it up, or write it without the `@`.
-
-   Then repeat steps 3–4 until Copilot is clean too. Fix commits here carry a
-   `Review-Phase: copilot` trailer, which is how the merge gate knows the head
-   advanced only through Copilot fixes and Codex's signoff still covers it — so
-   Codex is not re-run.
-
-   The signoff is a comment on the PR rather than a shell variable, so closing
-   the terminal or changing machine does not lose it. **`pr-phase-state.sh <PR>`**
-   is how a later session reads it back: it takes both signoffs and the head,
-   works out which stop is being resumed from, and re-validates the record that
-   has to still hold — before the Copilot phase the head must *be* the commit
-   Codex signed; after it the head has advanced through Copilot fixes by design
-   and the Copilot signoff is the one that must name it. A review dismissed after
-   the marker was written, or a push landing while the stop was parked, leaves the
-   marker untouched, and this is what notices. It answers 0 for a phase that still
-   stands, 1 with the reason for one that does not, and 2 for an answer it could
-   not read — which is neither of the first two, because reading it as "no
-   signoff" repeats a phase and reading it as a signoff skips a review nobody did.
-6. **Merge gate.** On a clean signoff from both reviewers the skill resolves the
-   head once and runs every gate before merging pinned to that head with
-   `--match-head-commit`, so a push landing mid-gate is rejected rather than merged
-   unreviewed. The gates are not all about the same thing. Each **verdict** is
-   asked about the head *that reviewer judged* — Copilot's is the head being
-   merged; Codex's is the head Codex signed, which the Copilot phase may have moved
-   past — and the **reviewed-range** gate is what licenses that delta, by proving
-   every commit between them is a Copilot fix. The **all-checks and required-checks
-   gates are both asked about the merge target**, and **unresolved threads and the
-   round boundary are questions about the pull request**.
-
-   **How the required-checks gate is bound.** It reads what the *base branch*
-   requires — the contexts under classic branch protection on the branch itself,
-   plus any a repository ruleset adds — and then asks the merge target's own check
-   rollup whether each of those passed on that commit. A required context that has
-   not reported yet is `pending`, which is the answer the all-checks gate beside it
-   cannot give: that one reads the checks which *exist* on the commit, and a
-   requirement nothing has reported has neither a check run nor a status.
-
-   **A branch that requires nothing is an answer; one whose protection cannot be
-   read is not.** An unprotected branch reports "nothing to assert" and the gate
-   passes, as before. A branch that *is* protected whose protection comes back
-   missing or misshapen blocks the merge, because the alternative is a merge gated
-   on an empty required set.
-
-   **What is still not bound.** The required set is a property of the base branch
-   rather than of a commit, so a protection rule changed between that read and the
-   merge is a race GitHub has as well. The "require branches to be up to date"
-   policy is read where it can be, and enforced there: a **ruleset** carries it in
-   a field this loop can read, so a head behind its base is refused rather than
-   merged, with a message saying to bring the base in. **Classic** branch protection keeps that
-   flag on an administrator-only endpoint, so it cannot be read at all — and on the
-   default path nothing else enforces it, since `--admin` bypasses protection. Under
-   `REVIEW_MERGE_STRICT=1` GitHub enforces both. And on the default `--admin` path the merge bypasses branch
-   protection regardless, so this gate is the client-side stand-in for it —
-   **`REVIEW_MERGE_STRICT=1` on non-bypassable protection** is still where GitHub
-   evaluates the requirement itself, at merge time, atomically.
-
-## Automatic review (opt-in per repo)
-
-There is no local hook and nothing to start. If you want a review on every push
-without asking, turn **Automatic review** on for the repository on the Codex
-**Code review** settings page. Leaving it off means each round is requested
-deliberately with `@codex review`, which is cheaper and keeps the loop under your
-control.
-
-## Configuration
-
-v2 has no reviewer knobs of its own — model, reasoning effort, exhaustiveness,
-auto-review and credit use are Codex account/repository settings, not plugin
-settings.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `REVIEW_BUS_REMOTE` | `git remote get-url origin` | override the origin URL identity is derived from (tests) |
-| `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
-| `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
-| `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
-| `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks are still running |
-| `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
-| `PR_CI_GRACE` | `90` | how long a round-closing verdict must hold before it is believed, since a workflow run is registered a moment after the head moves |
-| `PR_CI_PROBE_TIMEOUT` | `60` | per-request bound on each `gh` call the check probe makes, so a hung connection cannot outlast the gate's own timeout |
-
-### The pushed head has to be green
-
-A round is not closed until the checks on the commit it pushed have finished and
-passed. This is separate from the pre-push self-check below, and it is separate on
-purpose: that one runs the suite *here*, and cannot see a failure that only
-happens on the runner. One did, and CI stayed red for four consecutive rounds
-before anyone looked at the checks tab.
-
-A still-running check is not a pass; the gate waits, bounded by `PR_CI_TIMEOUT`
-measured as real elapsed time. A repository with no checks configured has nothing
-to be green, and says so rather than blocking.
-
-An answer that would close the round — green, or nothing configured — has to still
-be the answer `PR_CI_GRACE` seconds later. A push that starts two workflows can
-have the fast one passing before the second is registered at all, so the first
-look is green about an incomplete picture.
-
-### Self-check before the push
-
-`pr-selfcheck.sh` runs over the plugin's own sources before a round is pushed:
-every variable `SKILL.md` uses is assigned in it, every script parses, every
-helper it drives is shipped, every script has a test, no fixture pipes a `printf`
-into `grep`, and the suite passes.
-
-That middle one looks like style and is not. `printf … | grep -q` is racy under
-`pipefail`, which every fixture sets: `grep -q` exits on its first match, `printf`
-takes `SIGPIPE`, and the pipeline reports 141 — so an assertion whose line IS
-present reads as missing, intermittently. A herestring — `grep -q PATTERN
-<<<"$value"` — has no second process to kill. A line that carries the spelling as
-DATA rather than as code says so with `racy-pipeline-ok`.
-
-The gate asks three questions of a line and parses nothing: does it name `printf`,
-does it carry a pipe, does it name `grep`. Not which options make `grep` quiet, not
-which spelling of `printf` it is — deciding either means reading shell out of text,
-and seven review rounds went into rules that tried. The herestring is the fix for
-`grep -c` and `grep -v` as much as for `grep -q` and is never worse, so nothing is
-lost by asking less. The cost is the other direction: a line that names all three
-where the pipe is not the `printf`'s is reported, and says `racy-pipeline-ok` to
-clear it.
-
-The suite is the slow part, so it runs four files at a time — they share no
-state, and four at a time is ~85s where one after another is ~208s.
-
-It re-runs itself once with `BASH_ENV`, `ENV` and the tracing variables removed,
-so a startup file in your shell cannot end up talking over the channel the tests
-report through, and cannot leave behind a `readonly -f` function that the check
-would then refuse to run past. Exporting `RB_SELFCHECK_CLEAN` skips that step —
-a shell that can do so can already edit the tests, so it is a boundary rather
-than a guard.
-
-It writes nothing outside itself to do this, and every test reports back whether
-it passed, failed, or had vanished before it could run — so a runner that quietly
-ran nothing is an error rather than a clean suite, and a test that disappeared
-mid-run is neither a pass nor a failure.
-
-`RB_SUITE_JOBS` changes the degree. It takes **one to five digits, no leading
-zero**: `1` and `12` are degrees, while `0`, `00`, `01` and `soon` are not, and
-neither is a six-digit number. Anything outside that falls back to four rather
-than disabling the bound — `xargs -P 0` means *unlimited*, so a spelling of zero
-that slipped through would start every file at once, and the degree exists to be
-a load bound. Setting it in the shell you drive the skill from is enough: the
-skill exports it, along with the other knobs, because the gate runs as a child
-process.
-
-It exists because this plugin's own PR took nineteen review rounds, and almost
-none of the findings were subtle. Rounds are the expensive part of the loop —
-each is a review pass, a fix, a summary and a wait — so a finding caught before
-the push is worth several caught after it. `SKILL.md § 5a` pairs it with a short
-list of the judgement checks a script cannot make.
-
-### `REVIEW_MERGE_STRICT`
-
-The merge uses `--admin` by default, and that is a deliberate trade.
-
-Branch protection normally requires an approving review **from another account**,
-and neither reviewer here is one — a Codex or Copilot review does not count
-towards "required approvals". For a solo maintainer with a protected `main`,
-dropping `--admin` would not tighten the gate; it would remove the merge path
-entirely, on every PR.
-
-What the default costs: every gate runs in this plugin, against data fetched a
-moment earlier, and `--match-head-commit` only proves the head has not moved. A
-review can be submitted or dismissed in the window between the last check and the
-merge without changing the head, and `--admin` is precisely what tells GitHub not
-to re-evaluate that.
-
-The trade-off is recorded in
-[`docs/decisions/2026-08-06-merge-admin-default.md`](docs/decisions/2026-08-06-merge-admin-default.md).
-
-Set `REVIEW_MERGE_STRICT=1` where the repository's protection rules are ones the
-loop can actually satisfy — a team repo, or required checks with no required
-human approval. GitHub then evaluates reviews, checks and conversations itself,
-atomically, which is the only place that race can genuinely be closed. If it
-refuses, the merge does not happen and you decide what to do.
-
-**Four settings make it worth having**, and it is worth reading why before
-turning any of them on:
-
-| Setting | Value |
-| --- | --- |
-| Required status checks | on |
-| Require conversation resolution before merging | on |
-| Required approvals | **zero** only where no eligible approver exists — see below |
-| Do not allow bypassing the above settings | **on** |
-
-**Dropping `--admin` already tightens things on its own.** That flag exists to
-"merge a pull request that does not meet requirements", so without it `gh pr merge`
-refuses when a requirement is unmet at the moment GitHub evaluates it — on any
-branch with rules configured, bypassable or not. If you cannot change the branch
-settings, strict mode is still worth having.
-
-**What disallowing bypass adds is the atomic guarantee.** GitHub's
-protected-branch rules do *not* apply to administrators, or to anyone with bypass
-permission, unless bypassing is explicitly disallowed — and in the solo-maintainer
-case this plugin is built around, you *are* the administrator. Without it, the
-credential can still merge past rules that were unmet, and nothing closes the
-window between this plugin's last client-side probe and the merge itself. With it,
-GitHub is the one enforcing, at merge time. An equivalent non-bypassable ruleset
-does the same job, as does driving the loop with a credential that has no bypass
-permission.
-
-**Conversation resolution decides something narrower**: whether unresolved threads
-are one of the protections GitHub enforces. With bypass disallowed and this off,
-strict mode still enforces the required checks — it is not inert; what is missing
-is the thread gate becoming server-side and atomic. It costs nothing to turn on,
-because the loop already refuses to merge while any thread is unresolved.
-
-**Required approvals is the one to think about.** It is a branch setting — GitHub
-applies it to every PR targeting the branch, with no author condition — and what
-decides the right value is not who authored a pull request but **whether anyone
-can approve it**.
-
-Codex and Copilot are GitHub Apps whose reviews do not count towards required
-approvals, and GitHub refuses a self-approval. So a required approval is
-unsatisfiable only when there is **no other eligible approver at all** — a
-genuinely solo repository. There it removes the merge path rather than tightening
-it, which is the whole reason `--admin` is the default.
-
-**If another maintainer can approve, keep the requirement.** They can approve your
-pull requests as well as anyone else's, so it costs a wait rather than the merge
-path, and it is real human review that zero throws away.
-
-**Where the requirement stays but some pull requests cannot satisfy it**, vary the
-mode rather than the branch: `REVIEW_MERGE_STRICT` is per invocation, so run the
-pull requests whose approval you *can* get with `REVIEW_MERGE_STRICT=1` and let
-the rest fall back to the `--admin` default — the trade-off recorded in
-`docs/decisions/`, applied only where it is needed.
-
-Set required approvals to **zero** only on a repository where no eligible approver
-exists. Branch protection has no author condition, so anything finer is a separate
-policy check of your own.
-
-### Watching without prompts
-
-The whole point of `pr-watch.sh` is that you do not sit and poll, so the driver
-arms it as part of every round rather than asking you each time. In Claude Code
-that means the **`Monitor` tool**, which is *not* covered by a `Bash(…)`
-permission rule — it is a separate tool, so a session that allows every Bash
-command will still stop and ask before each watch. That turns an automatic loop
-back into a manual one, one prompt per round.
-
-Allow it once, in `.claude/settings.local.json`:
-
-```json
-{ "permissions": { "allow": ["Monitor", "TaskStop"] } }
-```
-
-`TaskStop` is what cancels a watch, so allowing one without the other leaves you
-prompted to stop what you were not prompted to start.
-
-This is deliberately **not** in the committed `.claude/settings.json`: that file
-enables the plugin for anyone who clones the repository, and granting a tool that
-runs background commands is a decision each user should make for their own
-checkout rather than inherit from a clone.
-
-A watch ends when it reports a verdict, so one arming covers one review. Re-arming
-is part of requesting the next review, not a separate question.
-
-#### The phase transitions are yours
-
-The loop does not decide how much review your change is worth. It stops twice and
-asks:
-
-- **When Codex is clean** — merge on that signoff alone, or open the Copilot
-  phase on the same head. One reviewer's clean pass is a legitimate place to stop.
-- **When Copilot is clean** — merge, or, *if the Copilot phase produced
-  commits*, ask Codex again as fault tolerance over what it changed. Where the
-  phase produced none, both signoffs name the same commit and that option is not
-  offered: Codex has already reviewed the head being merged, so the pass would
-  cost a revocation and a round for a verdict that cannot differ.
-
-Both stops are **resumable**. Each signoff is recorded on the pull request as a
-`**Review-Signoff:**` comment naming the reviewer, the exact head, and — where
-the phase could read it — the time of the verdict it answers, so a
-decision that arrives tomorrow — or on another machine — costs nothing that was
-already done. `pr-signoff.sh <pr> <reviewer>` reads it back, printing the whole
-record — reviewer, the verdict time it answers, timestamp, comment id and head —
-on standard output, exiting `0` when there is one, `1` when there is none or it
-was revoked, and `2` when it could not find out. A **revocation carries the timestamp and the id too**, so a
-caller can tell which of two came first: the fault-tolerance pass posts its
-revocation *before* requesting a review, so that record is newest when the clean
-verdict arrives and the pass is answering it, while a revocation posted *after*
-a verdict cancels it. The id is there because `createdAt` is second-resolution
-and two records made in the same second compare equal.
-
-**A signoff can also say which verdict it answers.** The marker takes an optional
-**third** backticked field — the time of the verdict being signed off — and the
-record reports it as `verdict-at=`. Readers take the *last* record, so a
-revocation posted after a signoff supersedes it whatever it was about; a signoff
-that names its verdict lets a reader order a revocation against **that** rather
-than against comment order. It is optional because every record written before it
-does not carry one, and reported as `verdict-at=none` there, so the record keeps
-one shape. A value that is present and is **not** a time is refused —
-`status=error reason=bad_verdict_at`, status `2` — in every mode, including the
-head-alone one: a record whose ordering value cannot be placed is not one to
-resume a phase on.
-
-**And the reader orders by it.** A signoff stands only if no revocation is newer
-than the verdict it answers — so a revocation posted while the phase was proving,
-and then overwritten by the signoff, still reopens the phase. A revocation in the **same second** as the verdict
-reopens it too: the timestamps cannot be ordered, and treating that as "the
-signoff stands" is the answer this rule exists to stop. Where there is nothing to
-compare — a signoff carrying no verdict time, or a revocation whose own time
-cannot be read — the last record wins exactly as it did before. Those last two are different on purpose: "asked, there is none" is an
-answer, and "could not ask" is not.
-
-`pr-signoff.sh sha <pr> <reviewer>` answers the same question with the head
-**alone** — the 40-hex commit and nothing else. Standard output carries that
-value or is empty, never a reason: with no signoff recorded, or a revoked one, or
-an unreadable API, nothing is printed there and the reason goes to standard
-error. That is what makes it safe to use in a command substitution — an empty
-answer cannot be mistaken for a commit, and the status still says which case it
-was. The statuses are the same three.
-
-## Round check-in
-
-A review loop can run many rounds, so it stays *your* decision to keep going
-rather than rubber-stamping an endless back-and-forth: every **10 distinct
-reviewed heads** on a PR, `pr-round-count.sh` exits 3 and the driver stops to ask
-— continue, stop and merge, stop and leave open, or abandon.
-
-It is counted **per reviewer**, because the Codex and Copilot phases are separate
-loops: a shared counter would let nine Codex rounds plus one Copilot round trip a
-pause that neither loop had reached. The count comes from GitHub each time, so it
-survives a new session or a new machine. Set
-`REVIEW_ROUND_THRESHOLD` to change the cadence, or `0` to disable it; a malformed
-value falls back to `10` rather than silently disabling a safety pause.
-
-**Saying "continue" is recorded on the PR.** The driver posts a comment carrying
-a `**Review-Pause-Acknowledged:** \`<reviewer>\` \`<count>\`` line, and the next
-check-in is a further `REVIEW_ROUND_THRESHOLD` heads past that number. One comment
-may carry a line per reviewer, which is the form the pause message itself prints;
-every such line is read, not just the last one in the body.
-
-The count must be that reviewer's own, which is what the pause prints beside each
-login. A number ahead of a reviewer's count is refused rather than obeyed — it is
-the disable-forever shape, reachable by a typo — and because the highest
-acknowledgement wins, a wrong one cannot be lowered by posting another. Edit or
-delete the comment instead; the count is derived from the bodies. It names
-the reviewer because the count does: the Codex and Copilot phases are separate
-loops with separate counts, and an unscoped marker acknowledging 41 Codex rounds
-is read by a Copilot phase with 5 as ahead of its count and refused permanently. Without it the gate would
-pause on every subsequent call, since it re-derives everything from GitHub and
-keeps nothing locally. Only repository owners, members and collaborators can
-write that marker, and one naming a round that has not happened yet is rejected:
-it records a decision you made, it cannot create permission on its own.
-
-The boundary is a **threshold crossed, not a multiple landed on**. It used to be
-`rounds % threshold == 0`, which silently assumes the count rises by one at a
-time — a single round can add several heads, and this repository's own PR #10 went
-from 35 to 41 across two rounds with the check-in at 40 never firing.
-
-A review record only counts as a round when GitHub reports a full commit SHA and
-a well-formed timestamp for it. If any record is unreadable the command exits 2
-and the driver stops, rather than counting the bad record as another head — an
-inflated count is the direction that sails past the boundary and skips the pause.
-
-**Nothing is recorded unless the pause was read.** The acknowledgement is written
-only where the counter reported a pause with its own distinguished status, the
-count parsed out of that report, and the parse itself succeeded — and the comment
-is posted inside the branch where all three held. Any of them failing prints an
-`ABORT:` line saying which step refused and **nothing was recorded**; the round is
-not closed and no permission exists, so the next call pauses again on the same
-count. A count of `0` is refused with the values that are not counts at all: no
-pause happens at zero rounds.
-
-That shape is deliberate rather than defensive habit. The block runs in *your*
-shell, and the earlier version refused with `|| { echo …; exit 0; }` — both names
-belong to whatever your session has defined. With `echo` and `exit` shadowed
-together the refusal ran, `exit` returned instead of stopping, and a counter that
-had *died* after printing a plausible line had its output recorded as your
-permission to continue. The acknowledgement now sits inside the branch that proved
-each step, so **shadowing `echo` or `exit` can no longer turn a refusal into an
-acknowledgement** — a shadowed `echo` costs you the diagnostic and nothing else.
-
-That is the guarantee, and not a broader one: `printf`, `sed` and `gh` are names in
-your shell too, and a function that fabricates a plausible count is indistinguishable
-from a real one. The same is true of every other command this loop runs on your
-machine.
-
-## Updating
+Install once at user scope. To update:
 
 ```
 /plugin marketplace update p5ych0-tools
@@ -950,235 +75,221 @@ machine.
 /reload-plugins
 ```
 
-Nothing to relaunch afterwards: v2 starts no background process, so the next
-session simply uses the new version.
+## Per-project setup
 
-## Tested versions
+1. Authenticate `gh` for the repository.
+2. Commit review conventions the reviewers read from the base branch:
+   - `AGENTS.md` for Codex, which reads it natively in PR review;
+   - `.github/copilot-instructions.md` for Copilot, which reads only that file
+     and follows no pointers, so restate the policy inline.
 
-Verified against Claude Code as of July 2026. **The plugin system is young and
-moving fast** — if install or invocation differs from the above, check the current
-plugin docs and open an issue.
+   This repository's own copies are a working example: scope discipline, where
+   an out-of-scope problem goes, what counts as a blocking finding, and who can
+   waive one. Without them the reviewers use a generic review.
+3. On the Codex **Code review** settings page, turn **Automatic review off** for
+   the repository. The `@codex review` mention is then the only trigger, each
+   round is requested deliberately, and a red head stops the round before
+   anything is resolved or posted. With automatic review on and its review
+   trigger set to every push, the push queues the pass, the summary has to
+   follow the push, and each round costs two Codex passes instead of one; the
+   loop supports no other automatic combination.
+
+   **Exhaustive review** keeps looking after the first problem and is worth
+   leaving on. For a repository that can be reviewed statically, as this one of
+   shell and Markdown can, a Codex environment with a setup script or dependency
+   installation only slows the pass; remove it there.
+
+### Watching without prompts
+
+The session waits for verdicts through Claude Code's `Monitor` tool, which no
+`Bash(…)` permission rule covers, so allow it once in `.claude/settings.local.json`
+or the session asks before every wait:
+
+```json
+{ "permissions": { "allow": ["Monitor", "TaskStop"] } }
+```
+
+`TaskStop` is what cancels a watch. This is deliberately not in the committed
+settings: granting a tool that runs background commands is each user's decision
+for their own checkout.
+
+## A session
+
+Invoke the skill with `/watch-pr-skill:watch-prs` from a checkout of the
+repository, on the PR's branch. The session pins itself to that repository's
+`origin` at the start, so changing directory later does not retarget anything;
+to work on another repository, start a new session. The loop drives
+same-repository pull requests only: a PR whose head is in a fork is refused at
+the first push.
+
+### The Codex phase
+
+The session posts the request, waits, and reads the findings. For each one it
+reproduces the claim before acting on it, fixes the defect the finding names
+(including the same defect in another copy the PR already changes), and prefers
+removing a dependency over guarding it. Where a finding does not hold, it says so
+on the thread with evidence rather than changing code to satisfy it. Each fix
+commit is proved to fail without the fix; where that cannot be constructed, the
+session writes the limitation at the site and **stops for you**.
+
+Before closing a round the session runs this plugin's own pre-push self-check,
+which reports "not applicable" in any other repository and checks nothing of
+your project (your CI does that), then it must check the round boundary, since
+with automatic review on the push itself is the next request. It then hands the closing to `pr-close-round.sh`, which runs in
+two stages with the thread replies between them: the push, then the CI gate,
+which waits for that head's checks on the runner and lets the round close on
+green or on no checks configured, never on red or pending; then the replies and
+resolves, then the summary comment that carries the next request. The summary says what was
+addressed and what was intentionally skipped, as a past-tense disposition and an
+issue number, because it shares a comment with the review request and a request
+that describes work to be done is treated as one.
+
+### The stops
+
+The loop stops and asks at these points:
+
+1. **A review that is only replies.** Reviewers sometimes deliver a clean
+   verdict, or a retraction, as a reply. Nothing in the text separates the two,
+   so the session stops and asks you to read it. If it was a clean verdict, say
+   so and a signoff is recorded for that head; if it was a finding, fix it and
+   push.
+2. **A limitation it cannot test**, as above. Accepting it is your call, and it
+   becomes binding as a dated record landed on the base branch by its own PR,
+   under `docs/decisions/`.
+3. **The round check-in.** Every `REVIEW_ROUND_THRESHOLD` distinct reviewed
+   heads per reviewer (default 10), the session stops: continue, merge, leave
+   the PR open, or abandon. Saying "continue" is recorded on the PR, so the next
+   check-in is a further threshold past that count.
+4. **Codex is clean.** Merge on that signoff alone, or open the Copilot phase on
+   the same head. The Codex-only merge is the narrower gate, not a looser one: it
+   requires the head to *be* the commit Codex signed.
+5. **Copilot is clean.** Merge, leave the PR open, or, only if the Copilot
+   phase produced commits, ask Codex once more as fault tolerance over what it
+   changed. Where the phase
+   produced no commits, both signoffs name the same head and the pass is not
+   offered.
+
+   The body you supply is prose and is posted under your identity, so a line
+   that reproduces one of the record markers a reader trusts from you —
+   `**Review-Signoff:**`, `**Review-Signoff-Revoked:**`,
+   `**Review-Pause-Acknowledged:**` — is refused rather than published: it would
+   create the record it quotes. Indent it by four spaces or quote it inline with
+   backticks; a fenced block does not help, since the readers scan the raw body.
+   A body containing `@codex review` is refused wherever the comment is posted
+   on its own, because any comment containing that text requests a pass.
+
+Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
+the head and, where the phase could read it, the time of the verdict it
+answers, so a decision that arrives
+tomorrow, or on another machine, costs nothing already done. A new session
+reads the records back and resumes from the right stop.
+
+### The merge gate
+
+On your word, the session resolves the head once and evaluates every gate before
+merging pinned to that head: each reviewer's verdict on the head that reviewer
+judged, the reviewed range (every commit past the Codex signoff must be a Copilot
+fix carrying a `Review-Phase: copilot` trailer), all checks and the base branch's
+required checks on the merge target, no unresolved threads, and the round
+boundary. A head that moved mid-gate is refused, not merged.
+
+The merge uses `--admin` by default, a trade accepted for one case: a branch
+that requires an approval no eligible account can provide, where neither
+reviewer counts and dropping the flag removes the merge path rather than
+tightening it. The trade-off is recorded in
+[`docs/decisions/2026-08-06-merge-admin-default.md`](docs/decisions/2026-08-06-merge-admin-default.md).
+Everywhere else set `REVIEW_MERGE_STRICT=1`: where the branch's rules are ones
+the loop can satisfy, and always where the branch uses a merge queue, which the
+default bypasses. GitHub then evaluates reviews, checks and conversations
+itself, at merge time. With required checks, conversation resolution, zero
+required approvals where no eligible approver exists, and bypass disallowed,
+that evaluation is atomic. If GitHub refuses, the merge does not happen and you
+decide.
+
+## Configuration
+
+**Export** these in the shell you start the session from. The helpers run as
+separate processes, and a value merely assigned in your shell never reaches them.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `REVIEW_ROUND_THRESHOLD` | `10` | reviewed heads per reviewer between check-ins; `0` disables the pause |
+| `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin`, so GitHub enforces branch protection itself |
+| `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks run |
+| `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
+| `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |
+| `PR_CI_PROBE_TIMEOUT` | `60` | bound on each `gh` call the check probe makes |
+| `PR_WATCH_INTERVAL` | `30` | seconds between polls while waiting for a verdict |
+| `PR_WATCH_TIMEOUT` | `3600` | how long to wait for a verdict before reporting a timeout |
+| `RB_SUITE_JOBS` | `4` | how many test files the pre-push self-check runs at once (contributors) |
+| `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, `REVIEW_BUS_REPO` | derived from `origin` | override the repository identity (tests) |
+
+There are no reviewer knobs: model, effort, exhaustiveness, automatic review and
+credit use are Codex account and repository settings.
 
 ## Troubleshooting
 
-- **Your shell traces to stdout, and the loop moves it:** if you drive with
-  `set -x` and a `BASH_XTRACEFD` that lands on standard output, setup reassigns it
-  to `2` and leaves it there — you still see every trace line, on standard error,
-  where bash sends xtrace by default, and your standard output is untouched: bash
-  closes the descriptor that variable named only when it is unset or emptied,
-  never on a reassignment. Unless you made `BASH_XTRACEFD` **readonly**, in which
-  case setup will not touch it — a readonly assignment is a fatal error in bash
-  and under `set -e` would end your shell — so the trace stays on standard output
-  and setup refuses instead, exactly as it did before any of this existed. It has to: inside `X="$(cmd)"` file
-  descriptor 1 *is* the capture, so a trace aimed there is read back as part of
-  the value, and setup would refuse a checkout that is perfectly fine. A session
-  tracing anywhere else — stderr, a log file on another descriptor — is normally
-  left exactly as it was, and so is one that has set `BASH_XTRACEFD=1` ready for a
-  later `set -x` but is not tracing yet: with no trace running there is nothing to
-  contaminate. "Normally" is doing real work in that sentence — see the false
-  positive below, which is the one case where a log-file target does get moved. Setup decides by putting one assignment inside a capture and looking
-  at what comes back, so it is the destination that matters and not how you
-  spelled it.
+- **`@codex` answers with a setup link.** The connector is not linked for this
+  account. Link it; that reply is the diagnostic, not an empty review.
+- **No review arrives.** Check `gh auth status`, that the mention is on the pull
+  request rather than an issue, and that the repository is enabled on the Codex
+  Code review settings page.
+- **The review stops with a usage message.** The account hit its rate limit.
+  Wait for the reset or turn on credit use in the Codex settings.
+- **`--add-reviewer @copilot` fails.** Copilot review is not available to the
+  repository. The session stops rather than skipping the pass; decide.
+- **The session stops on a review with no findings listed.** The review was only
+  replies. Read it and answer, as described under the stops.
+- **A round stops with "the head you just pushed is RED".** Working as intended:
+  the suite passing locally and the checks passing on the runner are different
+  claims. Fix it and push again.
+- **A round waits on pending checks.** It waits for them rather than reading
+  "still running" as a pass. Raise `PR_CI_TIMEOUT` if your CI takes longer than
+  thirty minutes, and export it.
+- **`ABORT: could not set this session up`.** The `PR_SETUP status=error
+  reason=…` line above it says why: the working directory could not be created,
+  the checkout has no usable `origin`, or the storage refused. A storage refusal
+  under `TMPDIR` is retried once under `HOME` where both are usable directories;
+  with only one usable there is one attempt and one status line. If both
+  refused, point `TMPDIR` at a filesystem with room. No such line at all means the helper never got to report: an
+  interrupted run, or an installation missing `pr-setup.sh`. `pr-setup.sh`
+  removes nothing it created, deliberately; the origin helper gives back only its
+  own empty transport directory when it refuses before writing.
+- **Setup says the pinned remote is not this checkout's origin.** The origin is
+  read twice, once to obtain it and once to confirm it, and the two disagreed:
+  `origin` or the git configuration resolving it changed mid-setup. Re-run.
+- **Reviews go to the wrong repository.** The session is pinned to the `origin`
+  of the checkout it started in. Start a new session in the intended checkout.
+- **A stale review after a push.** The merge gate refuses a moved head. Post a
+  fresh round summary and re-request.
+- **"merge queued: the PR is OPEN, not MERGED".** The base branch uses a merge
+  queue and `gh` reports success for joining it. Watch the PR until it merges.
+  This happens under `REVIEW_MERGE_STRICT=1`; the default merge bypasses the
+  queue.
 
-  If your shell has no standard error at all — `exec 2>&-` — the loop cannot help
-  you: bash refuses to aim the trace at a closed descriptor, so it stays on
-  standard output and setup refuses, which is what it did before this existed.
+## Contributing
 
-  **The one exception, and the reason for that "normally".** The check can be
-  wrong in one direction: a shell with an inherited `DEBUG` trap under `set -T`
-  that prints writes into command substitutions of its own accord, which looks the
-  same as a trace arriving, so your tracing moves to standard
-  error even though it was not in the way, log file target included. Putting it back afterwards was
-  built and removed: a startup file can make the variables that would remember it
-  `readonly` and steer the restore somewhere of its own choosing. In that shell
-  the loop cannot start regardless — whatever is writing into those captures
-  corrupts all of them, and setup refuses.
-- **`@codex` answers with a setup link instead of reviewing:** the connector is
-  not linked for this account. Link it at
-  [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
-  That reply is the diagnostic — it is not a review that found nothing.
-- **No review arrives at all:** confirm `gh auth status`, that the mention is on
-  the PR (not on an issue), and that the repository is enabled on the Codex
-  **Code review** settings page.
-- **Review stops partway with a usage message:** the account hit its rate limit.
-  Either wait for the reset, or turn on credit use in the Codex code-review
-  settings.
-- **`--add-reviewer @copilot` fails:** Copilot review is not available to the
-  repository. That is not permission to skip the pass — decide explicitly.
-- **Reviews target the wrong repo:** identity derives from
-  `git remote get-url origin` — read by `pr-origin.sh` at the start of the session
-  and pinned into `REVIEW_BUS_REMOTE` for every helper. (The read goes
-  through a helper, started as `/usr/bin/env bash -p`, rather than running `git` in
-  your shell:
-  a shell function called `git` would otherwise decide which project the session
-  posts to, and privileged mode is what stops a `BASH_ENV` startup file running
-  inside the helper at all.) So start the session in the
-  intended checkout; changing directory afterwards no longer retargets anything,
-  which is the point — the phase stages post signoffs, revocations and review
-  requests, and a `cd` into a second checkout used to send those to whatever pull
-  request of *that* repository shared the number. If you genuinely need to switch
-  repositories, start a new session rather than unsetting the pin.
-- **Setup aborts saying the pinned remote is not this checkout's origin:** the pin is
-  checked against the checkout before the session starts, so the value is read **twice**
-  — once to obtain it, once to confirm it is this repository's — and the two disagreed.
-  The ordinary cause is that origin or the git configuration that resolves it changed
-  between the two reads: a `git remote set-url`, or a `url.<base>.insteadOf` rule edited
-  mid-setup. Re-run, and the fresh read is used for both. The check exists because the
-  value crosses to the driver in a file, and a file can be replaced after it is written —
-  so a value that is not this checkout's origin stops the session instead of addressing
-  it at another repository. It compares the **fetch** URL; where a push lands is
-  validated separately, when a round closes.
-- **`ABORT: could not set this session up`:** `pr-setup.sh` refused, for any of the
-  reasons it refuses for — it could not create the private directory it works in,
-  it could not read a usable `origin` from the checkout, the origin is not one the
-  identity parser accepts, or the storage would not take the working files.
-  **The helper's own `PR_SETUP status=error reason=…` line above says which**, and
-  it is the one to read first. Several of them are things you can repair — a
-  checkout with no `origin` gets a remote added, an ancestor another account owns
-  gets a different parent — and the one documented here is the storage case, because
-  that is the one the abort itself can tell you how to get past.
+`skills/watch-prs/SKILL.md` is the driver contract, `skills/watch-prs/scripts/`
+holds the helpers, the shared libraries and one `test-<area>.sh` per file, and
+`CLAUDE.md` holds the authoring rules. Run the pre-push self-check before every
+push:
 
-  The driver's line says only that each `PR_SETUP status=error` line above it is one
-  attempt and its reason, and that is deliberate: it handed over a name and got back a
-  status. The helper's line names the reason — one per attempt — which is what tells you
-  whether the refusal was about storage, the checkout, or the path.
+```
+skills/watch-prs/scripts/pr-selfcheck.sh
+```
 
-  **`reason=dir_not_reserved` does not say which.** It is what every failed `mkdir`
-  reports, and a name somebody else had already taken and a filesystem with no room both
-  fail the same call. Nothing in the diagnostic separates them, which is why re-running is
-  the first thing to try: a squatted name is gone by the next attempt and a full
-  filesystem is not.
+It proves every variable the driver uses is assigned, every script parses and
+has a test, no fixture races a `printf` into `grep`, and the whole suite passes.
+CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
+mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the
+suite executes fails there before it reaches a macOS contributor. A path the
+suite never takes, a GNU-only flag on a command both platforms have, and `\s` in
+a `grep` pattern are review's job.
 
-  **Count those lines, not the `ABORT:` ones.** `pr-origin.sh` runs inside the helper
-  and prints its own `ABORT:` lines when the checkout or an ancestor is the problem, so
-  those do not correspond to attempts at all — there may be none, one, or two per
-  attempt. The `PR_SETUP status=error` lines are one per call *that refused*, which is
-  what the one-versus-two diagnosis below rests on.
-
-  **Zero of them is a third answer, and it is not a refusal.** It means the helper
-  never got as far as saying anything, and there are two ways that happens. It was
-  **stopped** — interrupted or killed, in which case it ends with the signal's status,
-  130 for `INT`, 143 for `TERM`, 129 for `HUP` — or it **could not run at all**, which
-  is what you see if `pr-setup.sh` is missing, unreadable, or fails before it can
-  report: the discovery above proves `pr-review-state.sh` is there and executable and
-  says nothing about the rest of the directory.
-
-  The two are told apart by the status and by what else is on the terminal — a stopped
-  run is silent, one that could not start says so in your shell's own words, naming the
-  file. Re-running fixes the first and not the second, so a second abort with no status
-  line is an installation to look at rather than a race to retry. Either way, whatever
-  had already been created is left where it is, which is the same litter a refusal
-  leaves.
-
-  **What that litter can contain, since 2.0.98.** A refused attempt may leave its
-  temporary directory with a nested transport directory inside it, holding an `origin` or
-  `pin` file. That file may be **empty, partially written, or complete**: empty or partial
-  is what a storage refusal looks like when the file was opened before the write failed,
-  and a complete one is left whenever the read succeeded and a *later* step refused — while
-  the work files were being allocated, say — or an interruption arrived after the write.
-  Nothing removes any of them.
-
-  **Completeness is not usability, and this is the case to be careful with.** A
-  well-formed `origin` or `pin` left by a refused run is indistinguishable by inspection
-  from one a successful run produced, so the file never tells you.
-
-  What does depends on which file it is. An `origin` is covered by
-  `PR_SETUP status=ready`, which is emitted after that read has been made and verified. A
-  `pin` is **not**: it is written later, by the driver's own `pr-origin.sh pin` call, and
-  setup has already reported `ready` by then — an interruption after that write leaves a
-  complete `pin` beside a `status=ready` line and the driver still aborts, because it never
-  gets to compare the pin against the remote it read. The only thing covering a `pin` is the
-  driver reaching the end of setup, past that comparison, without aborting.
-
-  So: **neither file is a result on its own, and `status=ready` is not the answer for
-  both.** If the run did not finish, discard what it left. Leave them; they are a stale temporary directory under **the parent setup
-  selected** — `TMPDIR` where that is usable, `$HOME` where it is not, and the second of
-  those two where the first attempt was retried — so look under the one the abort names
-  rather than under `TMPDIR` by assumption. Removing them by hand is the one thing the
-  loop itself refuses to do, because the path was published in `argv` and may no longer be
-  the directory that run created.
-
-  The refusals AFTER the read look different, and that is not cosmetic. Setup READS one
-  value from the helper — the repository's remote — and derives, holds or builds
-  everything else itself, so nothing the helper wrote is ever executed. The three
-  checks on what arrived — the origin is there, it is one line, it parses as an
-  identity — are parameter expansions the shell REFUSES rather than `echo` lines, so
-  they begin with your shell's name, a line number and `RB_REMOTE:`. In your own shell
-  `echo` may be a function that prints nothing, or one that forges a value and then
-  stops `exit` from working; an expansion has no command in it to shadow. What comes
-  after — the working-path check and the pin — announces itself with a plain `ABORT:`
-  line, and correctly: every one of those is an arm the block cannot walk past, so
-  position is what contains them and there is nowhere for a neutralised `exit` to
-  carry on to.
-
-  One refusal names a list of variables and says one of them is "readonly,
-  value-transforming, or aimed at another name". Those are the names setup assigns in
-  your shell, and a startup file that has fixed any of them — made it readonly, given
-  it `declare -i`, or pointed it at another variable — is what that means. Setup
-  cannot work around it: an assignment to a readonly name fails silently, and one
-  aimed elsewhere writes into whatever it was aimed at.
-
-  **Where a startup file is what declares them, edit or disable that declaration**, or
-  start a shell that does not read the file. A fresh shell is not enough on its own,
-  because it reads the same file and arrives with the same attribute. Where the name
-  was set by hand in the session you are in, a new shell is the whole fix.
-
-  Unsetting is not the way out either, and for two of the three it cannot be: bash
-  refuses to unset a readonly name at all, and `unset` on a nameref clears the variable
-  it points at rather than the nameref — leaving you with the alias, still not
-  assignable, and without whatever it aliased.
-
-  Setup tries a directory under `TMPDIR` and, where that is refused, one under
-  `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.
-  **The abort counts nothing**, deliberately: each `PR_SETUP status=error` line above
-  it is one attempt and its reason. There may be one or two, because the retry runs
-  only where the first refusal was about storage — a name it could not take on a sound
-  ancestry, or a directory it created and then could not write the value into — and
-  not where it was about the path or the checkout, which another parent does not fix.
-  The `ABORT:` lines mixed in with them come from `pr-origin.sh` running inside the
-  helper, and there may be none, one or two of those per attempt; they are not what to
-  count.
-
-  So **if they name a path setup could not create or write**, re-run
-  first: the helper creates that directory exclusively, and the same diagnostic
-  covers a name another account got to first, where the filesystem has room and
-  re-running is the whole fix.
-
-  If re-running keeps failing, **read the lines rather than the repetition**: a
-  process watching argv can contend on every run, so failing twice rules nothing out
-  — that residual cost is what
-  `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts. What the reason
-  says and how many `PR_SETUP status=error` lines there are is the evidence there is,
-  so count them.
-  **Two** means setup has already used both parents, so `unset TMPDIR` is not the
-  answer: that selects one it just tried. Point `TMPDIR` at storage with room
-  instead, on a filesystem `HOME` is not on. **One** means either that only one of
-  the two was an absolute directory setup could write to, in which case making the
-  other usable gives the retry somewhere to go, or that the refusal was not about
-  storage at all — which the line itself says. An ancestry another account owns, or an `origin`
-  the checkout does not have, is a different failure and unsetting `TMPDIR` will
-  not fix it.
-- **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
-  round summary and re-request.
-- **"merge queued: … the PR is OPEN, not MERGED":** the base branch uses a merge
-  queue. `gh` reports success for *adding* the pull request to that queue, so the
-  request was accepted but the head is not on the base branch yet and may still
-  leave the queue without landing. The session is **not** finished: watch the PR
-  until it merges. `REVIEW_MERGE_STRICT=1` is where this happens — the default
-  `--admin` merge bypasses the queue.
-- **A round stops with "the head you just pushed is RED":** working as intended.
-  The suite passing locally and the checks passing on the runner are different
-  claims — GitHub Actions ignores `SIGPIPE`, runs a different shell, and has no
-  credentials — so the round will not be closed on a commit whose CI is failing.
-  Fix it, push again, and the round continues.
-- **A round waits on "pending":** the checks start when the push lands, so it
-  waits for them rather than reading "still running" as a pass. Set
-  `PR_CI_TIMEOUT` if your CI takes longer than thirty minutes. **Export them**, or
-  set them on the command that starts the session: the CI gate is a separate
-  process, so a bare `PR_CI_TIMEOUT=3600` in your shell is invisible to it and the
-  default applies while your terminal shows the value you set. The driver exports
-  any that are already set when it starts, so `export PR_CI_TIMEOUT=3600` before
-  invoking the skill is enough.
+Every behaviour change ships its test in the same PR, proved to fail against the
+unfixed code; every change to an installed file bumps the version and adds a
+changelog entry, explaining the failure it fixes or, for a comment-only change,
+what the comment now records. One issue per PR.
 
 ## License
 
