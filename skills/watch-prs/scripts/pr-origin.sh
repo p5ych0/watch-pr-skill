@@ -81,7 +81,7 @@ RB_PREEXISTED=no
 # `rmdir` alone, on every path out: it refuses a symlink and a non-empty directory, so a replaced reservation costs
 # at most somebody else's empty directory, and a failed write leaves its leaf while the reservation stays non-empty.
 rb_cleanup() {
-    # `-O` is what refuses a name another account holds, which neither flag can see.
+    # `-O` refuses a resolved directory another account owns, which neither flag can see; a symlink is `rmdir`'s to refuse.
     [[ $RB_OWNED = yes ]] \
         || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
         || return 0
@@ -151,7 +151,7 @@ _rb_origin="${_rb_origin%x}"
 _rb_origin="${_rb_origin%'
 '}"
 [[ -n $_rb_origin ]] || rb_refuse "ABORT: origin is empty; there is no repository to pin this session to"
-# One value leaves this process: a remote holding a newline would arrive at the caller as two.
+# One line leaves this process: a remote holding a newline would cross as a multiline value, which is not one identity.
 if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
     rb_refuse "ABORT: origin contains a newline; it cannot be a single value"
