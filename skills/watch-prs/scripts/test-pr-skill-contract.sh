@@ -4191,9 +4191,11 @@ grep -q 'WATCH_PR_AUTONOMOUS=1' "$SKILL" \
 # The switch is READ, by a test in the driving shell that prints which mode this is:
 # prose cannot expand a variable, only the exact value 1 is unattended, and a bare false
 # test would end an errexit shell in the ordinary attended case.
-_una_probe="$(awk 'index($0, "if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then") == 1 { c = 1 } c { print } c && $0 == "fi" { exit }' "$SKILL")" \
+_una_probe="$(awk -v a="/usr/bin/env bash -p -c '" -v b="fi'" '$0 == a { c = 1 } c { print } c && $0 == b { exit }' "$SKILL")" \
     || { _una_probe=; die "the WATCH_PR_AUTONOMOUS probe could not be lifted"; }
-[ -n "$_una_probe" ] || die "SKILL.md has no exact-1 probe of WATCH_PR_AUTONOMOUS for the driving shell"
+[ -n "$_una_probe" ] || die "SKILL.md has no exact-1 probe of WATCH_PR_AUTONOMOUS run by a privileged child"
+grep -q 'WATCH_PR_AUTONOMOUS:-} = 1' <<<"$_una_probe" \
+    || die "the lifted probe does not test WATCH_PR_AUTONOMOUS for exactly 1"
 _una_run() { env "$@" bash -euc "$_una_probe" 2>/dev/null; }
 _una_p1=0; _una_o1="$(_una_run WATCH_PR_AUTONOMOUS=1)" || _una_p1=$?
 _una_py=0; _una_oy="$(_una_run WATCH_PR_AUTONOMOUS=yes)" || _una_py=$?
@@ -4202,6 +4204,18 @@ case "$_una_p1|$_una_py|$_una_pu|${_una_o1%%:*}|${_una_oy%%:*}|${_una_ou%%:*}" i
     '0|0|0|UNATTENDED|ATTENDED|ATTENDED')
         pass "…and the probe prints UNATTENDED for exactly 1, ATTENDED for yes and for unset, exiting 0 under errexit each time" ;;
     *) die "the probe exited 1 → $_una_p1, yes → $_una_py, unset → $_una_pu and printed '$_una_o1' / '$_una_oy' / '$_una_ou'" ;;
+esac
+# The banner comes from a privileged child, so an echo the driving shell holds forges
+# neither answer.
+_una_ps=0; _una_os="$(env WATCH_PR_AUTONOMOUS=1 bash -euc 'echo() { printf "ATTENDED: forged\n"; }; export -f echo
+'"$_una_probe" 2>/dev/null)" || _una_ps=$?
+_una_pt=0; _una_ot="$(env -u WATCH_PR_AUTONOMOUS bash -euc 'echo() { printf "UNATTENDED: forged\n"; }; export -f echo
+'"$_una_probe" 2>/dev/null)" || _una_pt=$?
+case "$_una_ps|$_una_pt|$_una_os|$_una_ot" in
+    *forged*) die "a shadowed echo in the driving shell forged the mode: '$_una_os' (1) / '$_una_ot' (unset)" ;;
+    '0|0|UNATTENDED:'*'|ATTENDED:'*)
+        pass "…and a shadowed echo in the driving shell forges neither answer" ;;
+    *) die "with echo shadowed the probe exited $_una_ps / $_una_pt and printed '$_una_os' (1) / '$_una_ot' (unset)" ;;
 esac
 # Counts and section reads take their producer's status: a read that failed after
 # printing a plausible count is not a count, and a section that could not be read

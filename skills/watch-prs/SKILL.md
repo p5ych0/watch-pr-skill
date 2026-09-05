@@ -14,14 +14,16 @@ each carries an **Unattended:** line naming its answer, taken without asking and
 on the PR as the operator's word would be. A stop that exists because something could not
 be read, proved or told apart has no such line and is never answered by it. Whether this
 session is unattended is what one test prints, run once per session — `UNATTENDED` or
-`ATTENDED` — and the value is the switch's alone, so `yes` or `true` is attended.
+`ATTENDED` — and the value is the switch's alone, so `yes` or `true` is attended. A
+privileged child prints it, inheriting no function this shell may hold under `echo`.
 
 ```bash
+/usr/bin/env bash -p -c '
 if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then
     echo "UNATTENDED: every decision stop takes its Unattended answer"
 else
     echo "ATTENDED: every decision stop asks"
-fi
+fi'
 ```
 
 | Reviewer | Login | Trigger |
