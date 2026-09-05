@@ -27,7 +27,7 @@ holds accepted limits; `README.md` is the only document written for a person.
 Files under `skills/watch-prs/scripts/` are `pr-<stage>.sh`, `<area>lib.sh`,
 `test-<area>.sh`; a function a shared library exports `rb_*`, its private implementation
 `_rb_*`; a helper's own function a plain name; a driver variable the setup fence assigns
-`RB_*`; machine records `PR_<STAGE> status=… reason=…`; decision records
+or probes `RB_*`; machine records `PR_<STAGE> status=… reason=…`; decision records
 `docs/decisions/YYYY-MM-DD-<slug>.md`.
 
 **Code style.** Match the file: its strict-mode category (§ Bash conventions), its
@@ -53,7 +53,8 @@ is a defect to delete, never prose to preserve. Fixture comments follow the same
 covers is meant to stay, a failing test means the change is wrong. A test that encodes a
 contract the change intentionally replaces is updated in the same PR, together with the
 fixture for the new contract. A behaviour change ships its test in the same PR, and a new
-test is proved to fail against the unfixed code. Assert the invariant, not the version's
+test is proved to fail against the unfixed code for the reason it names. Assert the
+invariant, not the version's
 route to it, wherever the invariant can be staged; where a required mechanism cannot be
 reproduced portably, a source assertion of the mechanism is the check, beside the
 behavioural case.
@@ -99,13 +100,13 @@ call — in a few sentences. Say what was unexpected.
 | `scripts/pr-merge-range.sh` | Whether every commit since the reviewed sha is a `Review-Phase: copilot` fix reachable from it. |
 | `scripts/pr-findings.sh` | The unresolved findings, paginated and shape-validated, and the body of a blocking review. 2 is a stop. |
 | `scripts/pr-round-count.sh` | Rounds per reviewer from GitHub, the check-in boundary, and the acknowledgement records it honours. 0, 2 unreadable, 3 pause. |
-| `scripts/pr-signoff.sh` | Which head a reviewer signed off, read from the PR's records. A record carries `at=`, `id=`, `verdict-at=` before `sha=`; a revocation newer than the verdict a signoff answers wins, and equal is not older. |
+| `scripts/pr-signoff.sh` | Which head a reviewer signed off, read from the PR's records. A record carries `at=` and `id=` before `sha=`, since callers read the sha as the tail; `verdict-at=` is optional on stored records — older ones lack it — and reported as `none` when absent. A revocation newer than the verdict a signoff answers wins, and equal is not older. |
 | `scripts/pr-ci-state.sh` | Whether a head's checks are green, running, failing or absent, from one rollup addressed by `--head`; the required set is the base branch's protection and rulesets, unioned; `behind`, `stale` and `none` are distinct answers. |
 | `scripts/pr-ci-gate.sh` | Waits until the pushed head's checks settle and says whether the round may close. |
-| `scripts/pr-close-round.sh` | `gate` pushes the PR's branch by name, proves the head green, writes it to the head file; `post` re-proves it, posts the summary, requests the next pass and writes the nonced baseline. 0, 1, 3 paused. |
-| `scripts/pr-copilot-phase.sh` | `record` proves Codex clean and writes the signoff; `open` revokes, re-proves and requests Copilot; `close` records Copilot's signoff and prints the menu. Every proof runs immediately before its mutation; a revocation is ordered against the verdict. 0, 1, 3 paused. |
+| `scripts/pr-close-round.sh` | `gate` pushes the PR's branch by name, proves the head green, writes it to the head file; the thread replies and resolutions go between the stages, after that proof and before `post`, since a resolve cannot be taken back; `post` re-proves the head, writes the nonced baseline, then posts the summary and requests the next pass. 0, 1, 3 paused. |
+| `scripts/pr-copilot-phase.sh` | `record` proves Codex clean and writes the signoff; `open` revokes, re-proves, writes the nonced baseline and then requests Copilot; `close` records Copilot's signoff and prints the menu. Every proof runs immediately before its mutation; a revocation is ordered against the verdict. 0, 1, 3 paused. |
 | `scripts/pr-merge-gate.sh` | Every gate immediately before merging, pinned to one head by `--match-head-commit`; `both` or `codex-only`; `--admin` by default (`docs/decisions/2026-08-06-merge-admin-default.md`). 0 merged, 1 blocked, 3 paused, 4 queued. |
-| `scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the head is actionable; each probe bounded by `PR_WATCH_PROBE_TIMEOUT` and retried; the baseline file carries the request nonce. 0, 1 timed out, 2 unreadable, 4 replies only. |
+| `scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the head is actionable; each probe bounded by `PR_WATCH_PROBE_TIMEOUT` and retried. The baseline file form requires `--require-nonce`, refuses an unnonced file and any other nonce, and has no compatibility arm. 0, 1 timed out, 2 unreadable, 4 replies only. |
 | `scripts/pr-origin.sh` | `read` writes the origin into a directory it creates; `pin` refuses a `REVIEW_BUS_REMOTE` that is not this checkout's origin. Not executable, started `/usr/bin/env bash -p`; every reason on stderr; cleanup is `rmdir` alone. 0, 1, 2 storage. |
 | `scripts/pr-phase-state.sh` | Which phase a PR is in, from its records, re-validating the one that must stand. 0, 1 stopped, 2 unreadable. |
 | `scripts/pr-selfcheck.sh` | The pre-push check over this plugin's sources; re-execs into a clean shell; the one helper not started privileged. |
@@ -118,9 +119,9 @@ call — in a few sentences. Say what was unexpected.
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
-Paths are under `skills/watch-prs/`. Everything else is documentation. The arguments for
-each design are in `CHANGELOG.md` and the commit history; the accepted limits in
-`docs/decisions/`.
+`scripts/` is `skills/watch-prs/scripts/`; the other paths are as written. Everything else
+is documentation. The arguments for each design are in `CHANGELOG.md` and the commit
+history; the accepted limits in `docs/decisions/`.
 
 ## The helpers are started privileged
 
@@ -238,7 +239,7 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   against staged files. The rest of the document is pinned by text, and no Markdown parser
   is built for it.
 - Every behaviour change ships its test in the same PR, proved to fail against the unfixed
-  code.
+  code for the reason it names.
 - Run the suite as CI does:
 
   ```bash
