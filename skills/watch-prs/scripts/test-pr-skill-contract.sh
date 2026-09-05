@@ -4188,41 +4188,76 @@ fi
 grep -q 'WATCH_PR_AUTONOMOUS=1' "$SKILL" \
     && pass "the skill names the unattended switch" \
     || die "SKILL.md does not name WATCH_PR_AUTONOMOUS=1"
-_una_n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || true
-[ "$_una_n" -eq 4 ] \
+# The switch is READ, by a test in the driving shell whose status is the answer: prose
+# cannot expand a variable, and only the exact value 1 is unattended.
+_una_probe="$(grep -x -F '[[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]' "$SKILL")" \
+    || die "SKILL.md has no exact-1 probe of WATCH_PR_AUTONOMOUS for the driving shell"
+_una_p1=0; env WATCH_PR_AUTONOMOUS=1 bash -uc "$_una_probe" || _una_p1=$?
+_una_py=0; env WATCH_PR_AUTONOMOUS=yes bash -uc "$_una_probe" || _una_py=$?
+_una_pu=0; env -u WATCH_PR_AUTONOMOUS bash -uc "$_una_probe" || _una_pu=$?
+{ [ -n "$_una_probe" ] && [ "$_una_p1" -eq 0 ] && [ "$_una_py" -eq 1 ] && [ "$_una_pu" -eq 1 ]; } \
+    && pass "…and the driving shell's probe is 0 for exactly 1, 1 for yes and for unset" \
+    || die "the probe answers 1 → $_una_p1, yes → $_una_py, unset → $_una_pu; only the exact value 1 may be unattended"
+# Counts and section reads take their producer's status: a read that failed after
+# printing a plausible count is not a count, and a section that could not be read
+# holds nothing forbidden.
+_una_rc=0
+_una_n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _una_rc=$?
+{ [ "$_una_rc" -le 1 ] && [ "$_una_n" -eq 4 ]; } \
     && pass "…and exactly four stops carry an unattended answer" \
-    || die "expected an unattended answer at exactly four stops, found $_una_n"
-_una_between() {
-    awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL" \
-        | grep -c '^\*\*Unattended:\*\*' || true
+    || die "expected an unattended answer at exactly four stops, found '$_una_n' (grep rc=$_una_rc)"
+_una_section() {
+    awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL"
 }
-[ "$(_una_between '## 6. ' '## 7. ')" -eq 1 ] \
-    && pass "…one at the round check-in" \
-    || die "the round check-in carries no unattended answer"
-[ "$(_una_between '**STOP — the next phase is the operator' '```bash')" -eq 1 ] \
-    && pass "…one at the Codex-clean stop, before the Copilot phase is opened" \
-    || die "the Codex-clean stop carries no unattended answer ahead of the open stage"
-[ "$(_una_between '**On the two-reviewer path, STOP.' '### Resuming after a stop')" -eq 1 ] \
-    && pass "…one at the Copilot-clean stop, naming the fault-tolerance pass" \
-    || die "the Copilot-clean stop carries no unattended answer"
-awk 'index($0, "**On the two-reviewer path, STOP.") == 1 { c = 1 } index($0, "### Resuming") == 1 { c = 0 } c' "$SKILL" \
-    | grep -q 'fault-tolerance pass' \
+_una_at() {
+    _una_sec="$(_una_section "$1" "$2")" || { die "the $3 section could not be read"; return 0; }
+    _una_rc=0
+    _una_c="$(grep -c '^\*\*Unattended:\*\*' <<<"$_una_sec")" || _una_rc=$?
+    { [ "$_una_rc" -le 1 ] && [ "$_una_c" -eq 1 ]; } \
+        && pass "…one at the $3" \
+        || die "the $3 carries no unattended answer (found '$_una_c', grep rc=$_una_rc)"
+}
+_una_at '## 6. ' '## 7. ' 'round check-in'
+_una_at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
+_una_at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
+_una_at '### Then: the gate' '## What this skill' 'merge gate'
+# The Codex-only decision reads the opening VERDICT, not the distinct-head count: a
+# finding answered on its thread and a later approval of the same head are one
+# reviewed head, and that change was sent back.
+_una_sec="$(_una_section '**STOP — the next phase is the operator' '```bash')" \
+    || { _una_sec=; die "the Codex-clean stop could not be read"; }
+grep -q 'findings=0' <<<"$_una_sec" \
+    && pass "…and the Codex-only merge is decided on the opening verdict" \
+    || die "the unattended Codex-clean answer does not read the opening verdict"
+grep -q 'pr-round-count' <<<"$_una_sec" \
+    && die "the Codex-only decision reads the distinct-head count, which a same-head re-review leaves at one" \
+    || pass "…and not on the reviewed-head count"
+_una_sec="$(_una_section '**On the two-reviewer path, STOP.' '### Resuming after a stop')" \
+    || { _una_sec=; die "the Copilot-clean stop could not be read"; }
+grep -q 'fault-tolerance pass' <<<"$_una_sec" \
     && pass "…which says what to do where the phase produced commits" \
     || die "the unattended Copilot-clean answer does not name the fault-tolerance pass"
-[ "$(_una_between '### Then: the gate' '## What this skill')" -eq 1 ] \
-    && pass "…one at the merge gate" \
-    || die "the merge gate carries no unattended answer"
+# That pass is REQUESTED, on both trigger modes: with automatic review on, the manual
+# request's mention is the only trigger, since no push precedes it.
+grep -q 'auto-review argument' <<<"$_una_sec" \
+    && grep -q 'no push precedes it' <<<"$_una_sec" \
+    && pass "…and requests it by mention whatever the trigger mode" \
+    || die "the unattended fault-tolerance pass relies on a push that never happens under automatic review"
 # The stops it must NOT answer: the replies-only review, the untestable limitation,
 # the unavailable reviewer.
-grep '^| `4` |' "$SKILL" | grep -qi 'unattended\|AUTONOMOUS' \
+_una_row="$(grep '^| `4` |' "$SKILL")" || { _una_row=; die "the watch table has no row for status 4"; }
+grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_row" \
     && die "the replies-only stop is answered unattended; a retraction would be signed off unread" \
     || pass "…and the replies-only stop is not answered unattended"
-awk 'index($0, "**On `4`") == 1 { c = 1 } index($0, "## 4.") == 1 { c = 0 } c' "$SKILL" \
-    | grep -qi 'unattended\|AUTONOMOUS' \
+_una_sec="$(_una_section '**On `4`' '## 4.')" || { _una_sec=; die "the status-4 paragraph could not be read"; }
+[ -n "$_una_sec" ] || die "the status-4 paragraph is empty"
+grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_sec" \
     && die "the replies-only stop's answer is taken unattended" \
     || pass "…nor is its answer"
-awk 'index($0, "**Prove a fix can fail.**") == 1 { c = 1 } /^$/ { c = 0 } c' "$SKILL" \
-    | grep -qi 'unattended\|AUTONOMOUS' \
+_una_sec="$(awk 'index($0, "**Prove a fix can fail.**") == 1 { c = 1 } /^$/ { c = 0 } c' "$SKILL")" \
+    || { _una_sec=; die "the prove-a-fix-can-fail paragraph could not be read"; }
+[ -n "$_una_sec" ] || die "the prove-a-fix-can-fail paragraph is empty"
+grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_sec" \
     && die "an untestable limitation is accepted unattended; acceptance is a base-ref record" \
     || pass "…nor the untestable limitation"
 grep -q 'Copilot is unavailable to the repository is not permission' "$SKILL" \

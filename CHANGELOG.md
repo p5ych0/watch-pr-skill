@@ -6,16 +6,17 @@
   than failures — the round check-in, the Codex-clean stop, the Copilot-clean stop and a merge
   gate paused at a round boundary — and an operator who is away answers each of them the same
   way every time, so a session that stopped to collect the answer made no progress until they
-  were back. With `WATCH_PR_AUTONOMOUS=1` exported, `SKILL.md` names the answer at each of
-  those stops and the session takes it, recording it on the PR as the operator's word would
-  be: acknowledge the check-in and continue; merge on the Codex signoff alone where Codex
+  were back. With `WATCH_PR_AUTONOMOUS=1` exported — read by one exact-`1` test in the driving
+  shell, once per session — `SKILL.md` names the answer at each of those stops and the session
+  takes it, recording it on the PR as the operator's word would be: acknowledge the check-in and continue; merge on the Codex signoff alone where Codex
   approved the opening request, otherwise open the Copilot phase; merge where the Copilot
   phase produced no commits, otherwise run the fault-tolerance pass and merge on its signoff,
   with no third Copilot phase over the pass's own fixes. It answers decisions and never
   readings: a review that is only replies, a limitation that cannot be tested, an unavailable
-  reviewer and every failed or unreadable gate stop as before. No helper reads the switch;
-  `README.md` documents it, and the contract test pins that the stops it does not answer carry
-  no unattended line. A minor release: what a session does at a stop changes. #302.
+  reviewer and every failed or unreadable gate stop as before. No helper reads the switch, and
+  `pr-selfcheck.sh` lists it among the driver's inputs; `README.md` documents it, and the
+  contract test pins that the stops it does not answer carry no unattended line. A minor
+  release: what a session does at a stop changes. #302.
 
 ## [2.6.4] — 2026-09-05
 
