@@ -1,7 +1,7 @@
 # Decision: a hook that runs between the driver's statements owns every value the driver holds, and that is an accepted limit
 
 **Date:** 2026-09-03
-**Status:** accepted
+**Status:** superseded by `2026-09-05-driving-shell-trusted.md`, which trusts the whole driving shell, hooks included, and retires the startup probes and read-backs this record describes as retained
 **Decided by:** the repository operator, after Codex's round-five review of PR #277
 **Closes:** the hook-rewrite half of the #264 review; #264 itself is closed by that PR
 
