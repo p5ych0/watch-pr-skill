@@ -286,7 +286,7 @@ assembled at runtime on a branch the suite never takes, and for:
 | Class | Why CI cannot see it | Examples |
 | --- | --- | --- |
 | GNU-only **flags** on commands both platforms have | The command is present, so absence proves nothing | `sed -i` with no argument, `readlink -f`, `grep -P`, `date -d`, `stat -c`, `xargs -r`, `sort -h` |
-| GNU regex escapes in a `grep`/`sed` pattern, gawk-only operators in `awk` | BSD `grep` does not fail on `\s`: it matches a literal `s`, so the suite passes and the behaviour is silently wrong | `\s`, `\S`, `\d`, `\w`, `\B`; `\b` in `grep`/`sed`; `\<`, `\>` |
+| GNU regex escapes in a `grep`/`sed` pattern, gawk-only operators in `awk` | BSD `grep` does not fail on `\s`: it matches a literal `s`, so the suite passes and the behaviour is silently wrong | `\s`, `\S`, `\d`, `\D`, `\w`, `\W`, `\B`; `\b` in `grep`/`sed`; `\<`, `\>` |
 | A construct on a branch the suite never executes | Coverage is high, not total | a post-3.2 spelling in an untaken error path |
 
 Not findings: `\s` inside a jq program (Oniguruma supports it); `\b` in awk,
@@ -322,7 +322,10 @@ finding. The accepted records:
   **addressed by it too**, reading what the **BASE BRANCH requires** and asking that
   rollup, with a required context not yet reported `pending`, a branch requiring
   nothing `none`, and a protected branch whose **protection cannot be** read an
-  error; the **reviewed-range gate** licenses every commit between the head
+  error; the **base branch is confirmed either side** of that read, so a retarget
+  is `stale` rather than an answer, and a ruleset's
+  `strict_required_status_checks_policy` is enforced, refusing a head behind its
+  base as `status=behind`; the **reviewed-range gate** licenses every commit between the head
   Codex signed and the merge head as a `Review-Phase: copilot` fix, through
   `pr-merge-range.sh`; **no unresolved thread** and the **round boundary** are
   checked on the pull request; **`REVIEW_MERGE_STRICT=1`** drops `--admin` and
