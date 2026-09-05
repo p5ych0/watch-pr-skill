@@ -66,9 +66,9 @@ grep -qF '. "$RB_SCRIPTS/identitylib.sh"' <<<"$fences" && grep -qF '&& rb_identi
 
 # ── one invocation per step: no fence defends the driving shell ────────────
 # `docs/decisions/2026-09-05-driving-shell-trusted.md` is pinned here.
-big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 12) print s ": " n; f=0 } f{n++}' "$SKILL")"
+big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 14) print s ": " n; f=0 } f{n++}' "$SKILL")"
 [ -z "$big" ] \
-    && pass "no fence is longer than the setup block's twelve lines" \
+    && pass "no fence is longer than the setup block's fourteen lines" \
     || die "a fence has grown past one invocation per step (start: lines): $big"
 shape="$(grep -nE 'RbProbe|\[\[ -n "" \]\]|\[\[ -n x \]\]|9<|/dev/fd/9|readonly|:\?|BASH_XTRACEFD|RB_NONCE_SEQ|declare |nameref' <<<"$fences" || true)"
 [ -z "$shape" ] \
@@ -153,6 +153,8 @@ hasf '`@codex review` anywhere in the body' && has 'Write the mention without th
     || die "the mention refusal is not documented"
 has 'Review-Pause-Acknowledged:** `%s` `%s`' \
     && pass "the acknowledgement names the reviewer and the count" || die "the acknowledgement template is gone"
+grep -F 'Review-Pause-Acknowledged:** `%s` `%s`' <<<"$fences" | grep -q 'ABORT: the acknowledgement was not recorded' \
+    && pass "…and a failed acknowledgement is a stop before any request or retry" || die "a failed acknowledgement has no stop"
 has 'as a past-tense disposition' \
     && pass "the summary is a record, not a work order" || die "the disposition rule is gone"
 has 'never as a work order' \
@@ -189,6 +191,33 @@ has 'mode=unattended' && has 'mode=attended' \
     && pass "setup's record says which mode the session runs in" || die "the mode is not read off setup's record"
 has 'Nothing under `$RB_SETUP_DIR` is ever removed' \
     && pass "…and nothing under the setup directory is removed" || die "the no-removal promise is gone"
+
+# ── setup's second attempt: a first parent that refuses costs one retry, not the session ──
+# `docs/decisions/2026-08-26-transport-candidate-in-argv.md` bounds a squat at that retry,
+# so the setup fence is the one fence executed here, against the real helper.
+setup_fence="$(awk '/^```bash$/{f=1; n++; next} /^```$/{f=0} f && n == 1' "$SKILL")" || setup_fence=
+if [ "$(id -u)" -eq 0 ]; then
+    pass "the setup retry case is skipped as root, whom no directory mode refuses"
+elif [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted"
+elif _sr="$(mktemp_d)" && _ro="$(mktemp_d)" && _home="$(mktemp_d)" \
+     && git -C "$_sr" init -q && git -C "$_sr" remote add origin 'git@github.com:acme/widget.git' \
+     && chmod 500 "$_ro"; then
+    _srrc=0
+    _srout="$(cd "$_sr" && CLAUDE_PLUGIN_ROOT="$ROOT" TMPDIR="$_ro" HOME="$_home" \
+        run_limited 60 bash -c "$setup_fence"$'\n''printf "%s\n" "$RB_SETUP_DIR"' 2>&1)" || _srrc=$?
+    _srdir="${_srout##*$'\n'}"
+    case "$_srrc|$_srdir" in
+        "0|$_home/watch-pr-setup-2."*)
+            [ -f "$_srdir/origin" ] \
+                && pass "a first parent that refuses costs one retry under HOME, and the session goes on" \
+                || die "the retry reported success without a setup directory: '$_srout'" ;;
+        *) die "with the first parent refusing, the setup fence exited $_srrc with: '$_srout'" ;;
+    esac
+    chmod 700 "$_ro"; rm -rf "$_sr" "$_ro" "$_home"
+else
+    die "could not stage the setup retry case"
+fi
 
 # ── the unattended switch answers the decision stops and no other ────────
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"

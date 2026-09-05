@@ -11,8 +11,9 @@
   enough to redefine `exit` can edit the helpers on disk, so those defences protected against
   nobody, and every gate and every mutation that matters runs in a privileged helper against
   GitHub's records. Each step is now one invocation with its statuses in prose. Setup is
-  twelve lines: locate the scripts, run `pr-setup.sh`, read the origin back as data, prove it
-  through the shipped identity parser, derive the working paths. `pr-setup.sh`'s ready record ends
+  fourteen lines: locate the scripts, run `pr-setup.sh` with its one retry under `HOME`,
+  read the origin back as data, prove it through the shipped identity parser, derive the
+  working paths. `pr-setup.sh`'s ready record ends
   `mode=unattended` or `mode=attended`, read from the exported `WATCH_PR_AUTONOMOUS`, so the
   privileged-child probe fence is gone with it. The nonce stays, one line per request; the
   reply, reaction and resolve are spelled as the commands they are. The contract test is
@@ -22,9 +23,10 @@
   every watch, setup's handoff read and validated rather than sourced, the unattended answers
   and the stops they leave alone, the README pins, the reviewer files naming every accepted
   record and the Copilot copy current — and drops the lifted executions against readonly
-  names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper. A minor
-  release: what a session does at setup changes, and a storage refusal is no longer retried
-  under a second parent. #306.
+  names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper; the one
+  execution it keeps is the setup fence against the real helper with the first parent
+  refusing, since the retry is the bound an accepted record rests on. A minor release: what
+  a session does at setup changes. #306.
 
 ## [2.8.0] — 2026-09-05
 

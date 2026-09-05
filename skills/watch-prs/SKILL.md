@@ -83,7 +83,9 @@ RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || { echo "ABORT: the plugin helper scripts were not found"; exit 1; }
 RB_SETUP_DIR="${TMPDIR:-$HOME}/watch-pr-setup.$$.$RANDOM$RANDOM"
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" || { echo "ABORT: setup failed; the PR_SETUP line above says why"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
+    || { [ $? -eq 2 ] && RB_SETUP_DIR="$HOME/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
+    || { echo "ABORT: setup failed; the PR_SETUP line above says why"; exit 1; }
 export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"
 . "$RB_SCRIPTS/identitylib.sh" || { echo "ABORT: the identity parser could not be loaded"; exit 1; }
 [ -n "$REVIEW_BUS_REMOTE" ] && rb_identity || { echo "ABORT: the origin read back is not a usable identity"; exit 1; }
@@ -99,8 +101,9 @@ empty working files under `$RB_SETUP_DIR/work`; its record ends `mode=unattended
 `mode=attended`. The driver reads the origin back, exports it as `REVIEW_BUS_REMOTE` — the
 pin every helper routes by whatever the current directory is — and proves it a GitHub
 identity through the parser the helpers use, which sets `HOST`, `OWNER` and `REPO`.
-Nothing under `$RB_SETUP_DIR` is ever removed; a `$TMPDIR` with no room is the operator's
-to fix.
+Status 2 means the storage refused the directory, and the one retry under `$HOME` is the
+bound `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a squat at; 1 is
+terminal. Nothing under `$RB_SETUP_DIR` is ever removed.
 
 ## 1. State the task on the PR
 
@@ -347,7 +350,7 @@ the PR before requesting the next review, with the reviewer and the count the co
 `PR_ROUND_PAUSE` line reports, or every later call pauses on the same count:
 
 ```bash
-gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" '<rounds>')"
+gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" '<rounds>')" || { echo "ABORT: the acknowledgement was not recorded; do not request a review or run the paused stage again"; exit 1; }
 ```
 
 Only OWNER, MEMBER and COLLABORATOR comments are read as acknowledgements, and one naming

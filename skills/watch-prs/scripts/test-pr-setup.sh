@@ -18,11 +18,12 @@
 # evaluated, and the quoting that made a sourced line an assignment is gone with it.
 #
 # WHAT THIS FILE IS ABOUT, and what `test-pr-skill-contract.sh` is about, are two ends
-# of one arrangement. The contract file runs the DRIVER's block against a forged helper:
-# whether a refusal is walked past, whether the value is read rather than sourced,
-# whether the pin is proved. This file runs the REAL helper: whether the directory is a
-# reservation, whether a hostile origin comes back byte-exact, whether a refusal leaves
-# anything behind. Neither can answer the other's question.
+# of one arrangement. The contract file reads the DRIVER's document — each step one
+# invocation acting on its status, setup's values read as data and validated, never
+# sourced — and executes its setup fence once against the real helper, with the first
+# parent refusing, to prove the one retry under `HOME`. This file runs the REAL helper:
+# whether the directory is a reservation, whether a hostile origin comes back byte-exact,
+# whether a refusal leaves anything behind. Neither can answer the other's question.
 #
 # THAT THE HELPER REMOVES NOTHING IS THE PART TO READ FIRST, and it is a contract rather
 # than an omission. This directory's name is published in argv, so every removal shape
@@ -118,6 +119,8 @@ dir_of() { local r="${1#*|}"; printf '%s' "${r%%|*}"; }
 out_of() { local r="${1#*|}"; printf '%s' "${r#*|}"; }
 
 # ── the ordinary run ───────────────────────────────────────────────────────
+# The switch is this fixture's subject, and an unattended session exports it into the suite.
+unset WATCH_PR_AUTONOMOUS
 r="$(run --)"
 ok_dir="$(dir_of "$r")"
 { [ "$(rc_of "$r")" = 0 ] \
