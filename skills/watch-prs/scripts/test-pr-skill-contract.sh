@@ -5785,15 +5785,12 @@ elif _gen_tmp="$(mktemp_d)"; then
     { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
         && pass "the Copilot copy generator runs" \
         || die "the Copilot copy generator failed or printed nothing"
-    _gen_current() {
-        cmp -s "$_gen_tmp/out.md" "$1"
-    }
-    _gen_current "$ROOT/.github/copilot-instructions.md" \
+    cmp -s "$_gen_tmp/out.md" "$ROOT/.github/copilot-instructions.md" \
         && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
         || die "the Copilot copy is behind AGENTS.md; regenerate it as CLAUDE.md says"
     { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
     _gen_rc=0
-    _gen_current "$_gen_tmp/nul.md" || _gen_rc=$?
+    cmp -s "$_gen_tmp/out.md" "$_gen_tmp/nul.md" || _gen_rc=$?
     case "$_gen_rc" in
         1) pass "…and a copy differing only by an embedded NUL is behind" ;;
         0) die "a copy differing from the generated one only by an embedded NUL passes the currentness check" ;;
@@ -5812,13 +5809,13 @@ elif _gen_tmp="$(mktemp_d)"; then
     mkdir -p "$_gen_tmp/dash" && cp "$ROOT/AGENTS.md" "$_gen_tmp/dash/-"
     _gen_rc=0
     (cd "$_gen_tmp/dash" && "$_gen" - > "$_gen_tmp/dash.out" 2>/dev/null) || _gen_rc=$?
-    { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/dash.out"; } \
+    { [ "$_gen_rc" -eq 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/dash.out"; } \
         && pass "…and a source named - is read as a file, never as stdin" \
         || die "a source named - exited $_gen_rc or emitted something other than the copy"
     mkdir -p "$_gen_tmp/cdtrap/.github"
     _gen_rc=0
     (cd "$ROOT" && CDPATH="$_gen_tmp/cdtrap" .github/build-copilot-instructions.sh > "$_gen_tmp/cdpath.out" 2>/dev/null) || _gen_rc=$?
-    { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/cdpath.out"; } \
+    { [ "$_gen_rc" -eq 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/cdpath.out"; } \
         && pass "…and the documented relative invocation survives a CDPATH holding another .github" \
         || die "under a CDPATH holding another .github the relative invocation exited $_gen_rc or emitted something else"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
@@ -5832,9 +5829,7 @@ elif _gen_tmp="$(mktemp_d)"; then
             && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
             || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
     done
-    # Two FIFOs behind one symlink, swapped once the first writer has closed: a second open of the
-    # pathname reaches the second FIFO, the unlinked name, or a FIFO no writer opens again, and none
-    # of those reproduces the one-open output, while a single read never meets any of them.
+    # A second open of the pathname cannot reproduce the one-open output, and a single read never makes one.
     if mkfifo "$_gen_tmp/once.a" "$_gen_tmp/once.b" 2>/dev/null && ln -s "$_gen_tmp/once.a" "$_gen_tmp/once"; then
         ( printf '%s\n' '<!-- copilot-body-start -->' 'one open' '<!-- copilot-body-end -->' > "$_gen_tmp/once.a"
           ln -sf "$_gen_tmp/once.b" "$_gen_tmp/once"
