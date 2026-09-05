@@ -60,9 +60,9 @@ grep -qF '. "$RB_SCRIPTS/identitylib.sh"' <<<"$fences" && grep -qF '&& rb_identi
     && pass "…and the document carries no parser of its own" \
     || die "SKILL.md defines rb_identity"
 
-big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 15) print s ": " n; f=0 } f{n++}' "$SKILL")"
+big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 16) print s ": " n; f=0 } f{n++}' "$SKILL")"
 [ -z "$big" ] \
-    && pass "no fence is longer than the setup block's fifteen lines" \
+    && pass "no fence is longer than the setup block's sixteen lines" \
     || die "a fence has grown past one invocation per step (start: lines): $big"
 shape="$(grep -nE 'RbProbe|\[\[ -n "" \]\]|\[\[ -n x \]\]|9<|/dev/fd/9|readonly|:\?|BASH_XTRACEFD|RB_NONCE_SEQ|declare |nameref' <<<"$fences" || true)"
 [ -z "$shape" ] \
@@ -183,6 +183,19 @@ grep -qE '(^|[^a-z])(source|\.) "\$RB_SETUP_DIR' <<<"$fences" \
     && die "a setup handoff is sourced" || pass "…and no handoff file is sourced"
 has 'mode=unattended' && has 'mode=attended' \
     && pass "setup's record says which mode the session runs in" || die "the mode is not read off setup's record"
+# A knob assigned in the session reaches the helpers only if exported before the first one runs.
+export_line="$(grep -E '^export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS$' "$TMP/fence.1" || true)"
+_exl="$(grep -n '^export REVIEW_ROUND_THRESHOLD ' "$TMP/fence.1" | head -1 | cut -d: -f1 || true)"
+_stl="$(grep -n -F 'pr-setup.sh "$RB_SETUP_DIR"' "$TMP/fence.1" | head -1 | cut -d: -f1 || true)"
+{ [ -n "$export_line" ] && [ -n "$_exl" ] && [ -n "$_stl" ] && [ "$_exl" -lt "$_stl" ]; } \
+    && pass "the configuration knobs are exported before the first helper runs" \
+    || die "the knobs README lists are not exported ahead of pr-setup.sh (export at ${_exl:-none}, setup at ${_stl:-none})"
+_ex="$(run_limited 30 bash -c 'REVIEW_MERGE_STRICT=1; PR_CI_TIMEOUT=7
+'"$export_line"'
+/usr/bin/env bash -p -c '"'"'printf "%s %s" "${REVIEW_MERGE_STRICT-unset}" "${PR_CI_TIMEOUT-unset}"'"'"'' 2>/dev/null)" || _ex="rc=$?"
+[ "$_ex" = "1 7" ] \
+    && pass "…and a value assigned in the session reaches a privileged child" \
+    || die "assigned knobs do not reach the helpers: a child saw '$_ex'"
 has 'Nothing under `$RB_SETUP_DIR` is ever removed' \
     && pass "…and nothing under the setup directory is removed" || die "the no-removal promise is gone"
 
@@ -309,6 +322,12 @@ elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
         _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
         { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
             && pass "…while a proven head is taken as the signoff sha" || die "a proven head was not taken (rc=$_src, '$_sout')"
+        # A reader that answers and then replaces the path shows whether the fence re-reads it.
+        mkdir "$_hd/race" && printf '%s\n' 'rb_handoff_is_sha() { printf "%s\n" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb > "$1"; printf "%s\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }' > "$_hd/race/writelib.sh"
+        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$_hd/race\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
+        { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
+            && pass "…and the sha is the reader's answer, not a re-read of a path replaced meanwhile" \
+            || die "the fence re-read the head path after the proof (rc=$_src, '$_sout')"
     fi
     rm -rf "$_hd"
 else

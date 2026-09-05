@@ -13,7 +13,8 @@
   enough to redefine `exit` can edit the helpers on disk, so those defences protected against
   nobody, and every gate and every mutation that matters runs in a privileged helper against
   GitHub's records. Each step is now one invocation with its statuses in prose. Setup is
-  fifteen lines: locate the scripts, run `pr-setup.sh` with its one retry under `HOME`,
+  sixteen lines: locate the scripts, export the configuration knobs `README.md` lists so a
+  value assigned in the session reaches the helpers, run `pr-setup.sh` with its one retry under `HOME`,
   read the origin back as data, prove it one line and a GitHub identity through the shipped
   parser, prove through `pr-origin.sh pin` that it is this checkout's origin, derive the
   working paths. `pr-setup.sh`'s ready record ends

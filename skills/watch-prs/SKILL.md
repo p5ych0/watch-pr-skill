@@ -82,6 +82,7 @@ Once per session, from the checkout, on the PR's branch:
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || { echo "ABORT: the plugin helper scripts were not found"; exit 1; }
+export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
 case "${TMPDIR:-}" in /*) RB_SETUP_DIR="$TMPDIR/watch-pr-setup.$$.$RANDOM$RANDOM" ;; *) RB_SETUP_DIR="$HOME/watch-pr-setup.$$.$RANDOM$RANDOM" ;; esac
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
     || { [ $? -eq 2 ] && RB_SETUP_DIR="$HOME/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
@@ -96,6 +97,8 @@ SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"; REQUEST_FILE="$RB_SETUP_DIR/work/r
 PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"; HEAD_FILE="$RB_SETUP_DIR/work/head.txt"
 ```
 
+The configuration knobs `README.md` lists are exported before the first helper runs, so a
+value assigned in this session reaches the helpers, which are separate processes.
 `pr-setup.sh` reads the origin through `pr-origin.sh`, refuses one that is not a GitHub
 network transport, writes it into `$RB_SETUP_DIR/origin` as data, and creates the four
 empty working files under `$RB_SETUP_DIR/work`; its record ends `mode=unattended` or
