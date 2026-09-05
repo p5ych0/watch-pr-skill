@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# Prints `.github/copilot-instructions.md` from the body of `AGENTS.md`: Copilot reads only its own
-# file and follows no pointers, so the policy is generated into it rather than kept by hand.
+# Copilot follows no pointers, so its file is generated from the body of `AGENTS.md` rather than kept by hand.
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+src="${1:-$root/AGENTS.md}"
 printf '%s\n' \
     '# Copilot review instructions' \
     '' \
     'Copilot reads this file and follows no pointers, so the review policy Codex reads in' \
-    '`AGENTS.md` is generated into it by `.github/build-copilot-instructions.sh`. Edit' \
-    '`AGENTS.md`, regenerate, and commit both; the contract test refuses a copy that is behind.' \
+    '`AGENTS.md` is generated into it by `.github/build-copilot-instructions.sh`; the contract' \
+    'test refuses a copy that is behind.' \
     ''
-awk '/^<!-- copilot-body-start -->$/ { p = 1; next } /^<!-- copilot-body-end -->$/ { p = 0 } p' "$root/AGENTS.md"
+# Exactly one start marker, exactly one end marker, in that order; anything else exits non-zero
+# rather than emitting a body with a silent gap.
+awk '
+    /^<!-- copilot-body-start -->$/ { s++; if (s > 1 || e > 0) bad = 1; p = 1; next }
+    /^<!-- copilot-body-end -->$/   { e++; if (e > 1 || s == 0) bad = 1; p = 0; next }
+    p { print }
+    END { if (bad || s != 1 || e != 1) exit 1 }
+' "$src"

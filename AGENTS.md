@@ -1,9 +1,10 @@
 # AGENTS.md
 
-Read by **Codex**, including its native GitHub PR review. Claude reads `CLAUDE.md`,
-which holds the authoring rules and is not restated here. Copilot reads
-`.github/copilot-instructions.md`, which `.github/build-copilot-instructions.sh`
-generates from the body below, since Copilot follows no pointers.
+Read by **Codex**, including its native GitHub PR review. Read `CLAUDE.md` as
+well: it holds the authoring rules, and the ones a reviewer applies are restated
+in the body below so that Copilot, which reads only
+`.github/copilot-instructions.md` and follows no pointers, applies them too; that
+file is generated from the body by `.github/build-copilot-instructions.sh`.
 
 <!-- copilot-body-start -->
 ## You review. You do not implement.
@@ -55,6 +56,35 @@ non-blocking, or in a GitHub **issue** when it deserves tracking; never inline,
 since every inline comment becomes a thread the merge gate requires resolved.
 Pre-existing problems in code the PR touches are in scope when it changes the
 behaviour around them, not when it merely moves lines past them.
+
+## Authoring rules a reviewer applies
+
+The authoring rules live in `CLAUDE.md`; these are the ones a review is judged
+against, restated here:
+
+- **Strict mode is per category.** Helpers use `set -uo pipefail` and `-e` is
+  forbidden there, since statuses are control flow; a one-shot command uses
+  `set -euo pipefail`. Do not ask for a script to move to a stricter mode.
+- **No new runtime dependency** without a measured defect only it removes, and
+  none where an existing one covers the case; `perl` is the precedent.
+- **No abstraction in anticipation.** A shared library or a wrapper exists for a
+  rule written more than once and then found missing from a copy; a wrapper that
+  only delegates is a finding, except the interface wrappers `writelib.sh`
+  defines last as its load verification.
+- **Scope is exactly what was asked**, one issue per pull request and one finding
+  per round: an adjacent improvement, an unbroken refactor or a second concern is
+  a finding, and a defect the PR did not introduce is filed rather than fixed. A
+  defect a fix introduced is this round's work.
+- **A behaviour change ships its test in the same PR**, proved to fail against
+  the unfixed code; an existing test is never weakened to make a change pass.
+- **Validate at the boundaries** — argv, files crossing a process, `gh` and
+  `git` output, the operator's shell — and trust a helper's stated contract
+  inside them.
+- **No tokens, credentials or `.env` files**, in fixtures included: the suite
+  stubs `gh` and runs with no credentials, and a test that reaches GitHub is
+  broken.
+- **A round fixes what the finding names and nothing else**, and the round
+  summary says what was skipped as a past-tense disposition and an issue number.
 
 ## What counts as a blocking finding
 
@@ -125,7 +155,13 @@ readonly name fails silently.
 
 The reply instructions are prose between two fences and cannot be made
 unreachable; that is a measured limit of the driving-shell design (#26, #228),
-not a deferred refactor, and not a reason for another guard.
+not a deferred refactor, and not a reason for another guard. What stays in
+`SKILL.md` is what a helper process cannot do for the driver: finding the scripts
+at all, choosing the parent directory to hand over, the read of the origin
+itself, the assignments and read-backs after it that catch a readonly name or a
+nameref defeating the driver's own assignment, and the pin, which asks whether a
+child of the driver sees this repository. Do not raise "move this into a script"
+against any of those.
 
 ### A handoff file is written by rename, never by truncation
 
@@ -168,9 +204,15 @@ truncates an operator's file outside the session. When reviewing a change there:
   fixed-width `perl` prefix with the per-session counter `RB_NONCE_SEQ` appended
   and its increment proved by read-back. A watch on an unnonced file, a writer
   dropping the prefix, a compatibility arm, or an increment without its read-back
-  is the defect;
+  is the defect. Every baseline write stays **before** its request, on every
+  request path: after the request there is nothing left to refuse with, and a
+  request that fails after the write leaves this round's nonce and id, which is
+  not a fail-open. A write moved after its request is the defect;
 - `--` precedes the operands on every attempt; a fixture stages a device of its
-  own with `mknod`, never one the system owns;
+  own with `mknod`, never one the system owns; a fixture that installs its
+  symlink before the stage starts proves nothing about the later writes, since
+  the clearing replaces it — plant it where a racer could, after the CI gate
+  returns or after the summary is posted;
 - a non-zero status means this handoff did not happen, never that the previous
   value is still readable;
 - the public wrappers are defined last in `writelib.sh`, and a child that sources
@@ -278,8 +320,11 @@ finding. The accepted records:
   **addressed by it too**, reading what the **BASE BRANCH requires** and asking that
   rollup, with a required context not yet reported `pending`, a branch requiring
   nothing `none`, and a protected branch whose **protection cannot be** read an
-  error; **`REVIEW_MERGE_STRICT=1`** drops `--admin` and reaches the gate's
-  process, **exported, not merely assigned**. The PR state
+  error; the **reviewed-range gate** licenses every commit between the head
+  Codex signed and the merge head as a `Review-Phase: copilot` fix, through
+  `pr-merge-range.sh`; **no unresolved thread** and the **round boundary** are
+  checked on the pull request; **`REVIEW_MERGE_STRICT=1`** drops `--admin` and
+  reaches the gate's process, **exported, not merely assigned**. The PR state
   **read back after the merge command**, with a PR not `MERGED`
   **reported as queued rather than merged**, is **NOT a bound** but removing it is
   still a finding. The waiver does not cover a base branch that

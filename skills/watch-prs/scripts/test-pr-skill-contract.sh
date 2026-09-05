@@ -5753,8 +5753,6 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     # — which is the regression this round fixed, passing its own check. The two
     # clauses below carry the polarity and the location inside the matched text,
     # so neither edit can be made without failing here.
-    # ONE LIST FOR BOTH FILES: the Copilot copy is generated from the body of AGENTS.md, so the
-    # two cannot differ in wording, and a clause pinned in one is pinned in the other.
     req_clauses=(
                 '**The loop trusts the `PATH` of the shell it was started from**'
                 'A `PATH` check in one helper is a defect, not a fix'
@@ -5778,10 +5776,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
 done
 
 # ── THE COPILOT COPY IS GENERATED, AND IS CURRENT ──────────────────────────
-# Copilot reads only its own file and follows no pointers, so the policy has to be in
-# both files; keeping two copies by hand is how they drifted. The copy is generated from
-# the body of AGENTS.md, and a stale copy is a reviewer judging by rules the other has
-# already lost.
+# Compared against the generator's output rather than against AGENTS.md: the header is the
+# generator's, and a body with a marker pair inside it would compare equal to itself.
 _gen="$ROOT/.github/build-copilot-instructions.sh"
 if [ -f "$_gen" ]; then
     _gen_out="$(bash "$_gen" 2>/dev/null)" || _gen_out=""
@@ -5792,6 +5788,19 @@ if [ -f "$_gen" ]; then
     [ "$_gen_out" = "$_gen_now" ] \
         && pass "…and .github/copilot-instructions.md is what it generates from AGENTS.md" \
         || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh > .github/copilot-instructions.md"
+    _gen_tmp="$(mktemp -d)" || die "could not stage a malformed AGENTS.md"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
+        '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
+    printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
+    for _gen_bad in twice unclosed reversed; do
+        _gen_rc=0
+        bash "$_gen" "$_gen_tmp/$_gen_bad.md" >/dev/null 2>&1 || _gen_rc=$?
+        [ "$_gen_rc" -ne 0 ] \
+            && pass "…and a $_gen_bad marker layout is refused rather than copied with a gap" \
+            || die "the generator emitted a body from a $_gen_bad marker layout; Copilot would read a policy with a silent gap"
+    done
+    rm -rf "$_gen_tmp"
 else
     die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
 fi
