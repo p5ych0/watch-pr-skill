@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.6.4] — 2026-09-05
+
+- **The origin helper carries a comment only where the code looks wrong without one.**
+  `pr-origin.sh` held 960 comment lines over 151 lines of code: the header and its status
+  contract, the privileged-startup essay, the cleanup history, the reservation ordering and its
+  refuted alternatives, the git resolution history, and a section after `exit 0` — all in
+  `CLAUDE.md` § `pr-origin.sh`, in full, or in an earlier entry here. 49 lines remain, each
+  a constraint of at most two lines beside the code it explains: why the ancestry is walked by
+  ownership as well as mode and twice, why the cleanup is `rmdir` alone and armed before the
+  `mkdir`, what the reservation ordering does not close, why `git` runs under `env -i` with the
+  config variables carried by prefix, why the origin is read through a sentinel, why a mismatch
+  is reported redacted and escaped. No executable text changes: with comments stripped, the
+  lines of the file diff empty against 2.6.3, and the suite passes as it did; the one fixture that
+  proves the argv limit is stated in the helper now matches the sentence-case spelling. A patch
+  release: nothing a session does changes. #296.
+
 ## [2.6.3] — 2026-09-04
 
 - **The Copilot phase and the self-check carry a comment only where the code looks wrong without
