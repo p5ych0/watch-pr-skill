@@ -7,6 +7,11 @@ if [ "$#" -gt 2 ]; then
     echo "$0: takes a source and an optional destination, not $# arguments" >&2
     exit 1
 fi
+# An empty source is a wrapper's variable that did not take, not a request for the default.
+if [ "$#" -ge 1 ] && [ -z "$1" ]; then
+    echo "$0: the source argument is empty" >&2
+    exit 1
+fi
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 src="${1:-$root/AGENTS.md}"
 dst="${2:-}"

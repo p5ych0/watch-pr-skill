@@ -5816,6 +5816,12 @@ elif _gen_tmp="$(mktemp_d)"; then
     { [ "$_gen_rc" -ne 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/three.dest"; } \
         && pass "…and a third argument is refused with the destination untouched" \
         || die "a three-argument call exited $_gen_rc or changed the destination"
+    printf '%s\n' 'the copy that was there' > "$_gen_tmp/empty.dest"
+    _gen_rc=0
+    "$_gen" "" "$_gen_tmp/empty.dest" >/dev/null 2>&1 || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && [ "$(cat "$_gen_tmp/empty.dest")" = "the copy that was there" ]; } \
+        && pass "…and an empty source operand is refused with the destination untouched" \
+        || die "an empty source operand exited $_gen_rc or replaced the destination with the default source's copy"
     cp "$ROOT/AGENTS.md" "$_gen_tmp/self.md"
     for _gen_alias in "$_gen_tmp/self.md" "$_gen_tmp/./self.md"; do
         _gen_rc=0

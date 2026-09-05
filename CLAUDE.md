@@ -1,8 +1,10 @@
 # CLAUDE.md
 
 This file owns the **authoring** rules for this plugin: how to write changes
-here. It is the single source for them, and the other instruction files cite it
-rather than restating it.
+here. It is the source for them. `AGENTS.md` restates the subset a review is
+judged against, because Copilot's generated copy can follow no pointer, and that
+restatement is kept in step by hand: a change to a rule here that a reviewer
+applies is a change to `AGENTS.md` in the same PR.
 
 Review policy lives in `AGENTS.md`, which Codex reads natively — including in its
 GitHub PR review. Copilot's copy is `.github/copilot-instructions.md`, generated

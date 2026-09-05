@@ -315,7 +315,11 @@ stock macOS lacks that is guarded with `command -v` and a fallback, as
 `testlib.sh` does for `timeout`.
 
 Both CI jobs run on every push to `main` and every pull request; a finding that
-assumes either is off is out of date. Three limits: the clean shell is the
+assumes either is off is out of date. A repository with no checks configured is
+a valid state: `pr-ci-gate.sh` and `pr-merge-gate.sh` report it as the
+distinguished `none`, meaning nothing to assert, held for the grace period and
+distinct from a failed probe, and a change that reads it as fail-open would stop
+every round in a repository without CI from closing. Three limits: the clean shell is the
 gate's, not the fixture's, and CI runs `bash "$t"` on a runner clean by
 construction; the gate clears functions and hook variables, not exported values,
 so a fixture whose subject is an env-driven override clears `REVIEW_BUS_REMOTE`
@@ -337,11 +341,15 @@ finding. The accepted records:
   review, a check or a branch requirement can change without moving the head —
   no client-side fix closes it, and `REVIEW_MERGE_STRICT=1` is the answer where
   it matters. The bypass is accepted only while all of
-  these hold, so removing any one is a finding: the head is resolved as the
-  **full 40-hex SHA**, never a **7-character prefix**; the comparison is
-  **atomic with the merge** through `--match-head-commit`;
-  a **review-state probe** refuses `blocked`, a **dismissed review** and a
-  **body-only** `CHANGES_REQUESTED`; the **all-checks gate is addressed by that head**,
+  these hold, so removing any one is a finding: the head is resolved **once**, as
+  the **full 40-hex SHA** and never a **7-character prefix**, with no client-side
+  re-read between the checks and the merge, since a second read lets every check
+  describe one commit while GitHub merges another; the comparison is
+  **atomic with the merge** through `--match-head-commit`; each
+  **review-state probe** is addressed to the commit that reviewer judged —
+  Copilot's the merge head, Codex's the effective-verdict head — never to a
+  reviewer's latest verdict wherever it landed, and it refuses `blocked`, a
+  **dismissed review** and a **body-only** `CHANGES_REQUESTED`; the **all-checks gate is addressed by that head**,
   reading the merge target's own rollup, and the **required-checks gate is**
   **addressed by it too**, reading what the **BASE BRANCH requires** — classic
   protection's contexts and a ruleset's, each source read twice and all four
@@ -371,7 +379,10 @@ finding. The accepted records:
   **requires a merge queue**: there is **no merge-queue probe**, `--admin` bypasses
   a required queue outright, and `REVIEW_MERGE_STRICT=1` is the only supported
   setting there. Do not raise `mergeStateStatus` as a fix; it was measured and
-  rejected.
+  rejected. And `REVIEW_MERGE_STRICT=1` is atomic only where GitHub enforces the
+  rules on this credential: configured protection that disallows bypass, or a
+  credential without bypass permission. Dropping `--admin` alone tightens the
+  gate and closes nothing; a claim that it closes the race is a finding.
 - `docs/decisions/2026-08-26-transport-candidate-in-argv.md`: the transport
   name is published in argv before the `mkdir` reserves it; a squatter costs a
   denial of service bounded by the second-parent retry, never a forged identity.
