@@ -279,8 +279,12 @@ and these files bump nothing.
 - **Not in a runtime helper.** Every `pr-*.sh` except `pr-selfcheck.sh` and the
   non-executable `pr-origin.sh` starts `#!/usr/bin/env -S bash -p` and refuses if
   `$-` lacks `p`; privileged mode sources no startup file, imports no function
-  and ignores `SHELLOPTS`. The `$-` test is a last resort that cannot prove
-  privileged startup, so `bash pr-x.sh` is unsupported rather than defended.
+  and ignores `SHELLOPTS`. Privileged startup is the caller's guarantee:
+  `SKILL.md` and every helper that calls another invoke it as
+  `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, never by name, since a bare call
+  leaves the kernel to process the shebang and needs an `env -S` some platforms
+  lack. The `$-` test is a last resort that cannot prove privileged startup, so
+  `bash pr-x.sh` is unsupported rather than defended.
 - **Yes in `SKILL.md`'s own bash**, which runs in the operator's shell: reserved
   words, assignments and expansions are the answer there.
 - **A poisoned `PATH` is settled and is not a finding on any file.** `command -p`
@@ -339,9 +343,10 @@ finding. The accepted records:
   a **review-state probe** refuses `blocked`, a **dismissed review** and a
   **body-only** `CHANGES_REQUESTED`; the **all-checks gate is addressed by that head**,
   reading the merge target's own rollup, and the **required-checks gate is**
-  **addressed by it too**, reading what the **BASE BRANCH requires** — the union
-  of classic protection's contexts and a ruleset's, each source read on its own,
-  since either can hold the whole set — and asking that
+  **addressed by it too**, reading what the **BASE BRANCH requires** — classic
+  protection's contexts and a ruleset's, each source read twice and all four
+  results unioned, since either can hold the whole set and a context moving
+  between them during one read would otherwise be seen by neither — and asking that
   rollup, with a required context not yet reported `pending`, a branch requiring
   nothing `none`, and a protected branch whose **protection cannot be** read an
   error; the **base branch is confirmed either side** of that read, so a retarget
@@ -353,10 +358,12 @@ finding. The accepted records:
   probe the API does not offer; a ruleset rule gating the merge on something the probe
   cannot read — `workflows`, `code_scanning`, `required_deployments` and the rest —
   refuses in both modes, `merge_queue` under strict mode being the one exception;
-  the **reviewed-range gate** licenses every commit between the head
-  Codex signed and the merge head as a `Review-Phase: copilot` fix, through
-  `pr-merge-range.sh`; **no unresolved thread** and the **round boundary** are
-  checked on the pull request; **`REVIEW_MERGE_STRICT=1`** drops `--admin` and
+  the **reviewed-range gate** licenses every commit between the commit the
+  effective Codex verdict judged — the current head where Codex has judged it,
+  the recorded signoff otherwise — and the merge head as a `Review-Phase: copilot`
+  fix, through `pr-merge-range.sh`; **no unresolved thread**, walked through
+  every page of the thread list rather than the first, and the **round boundary**
+  are checked on the pull request; **`REVIEW_MERGE_STRICT=1`** drops `--admin` and
   reaches the gate's process, **exported, not merely assigned**. The PR state
   **read back after the merge command**, with a PR not `MERGED`
   **reported as queued rather than merged**, is **NOT a bound** but removing it is

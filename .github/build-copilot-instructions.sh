@@ -3,6 +3,10 @@
 #
 #   build-copilot-instructions.sh [source] [destination]
 set -euo pipefail
+if [ "$#" -gt 2 ]; then
+    echo "$0: takes a source and an optional destination, not $# arguments" >&2
+    exit 1
+fi
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 src="${1:-$root/AGENTS.md}"
 dst="${2:-}"
@@ -35,9 +39,16 @@ if [ "$src" = "$dst" ] || [ "$src" -ef "$dst" ]; then
     echo "$0: the destination '$dst' is the source" >&2
     exit 1
 fi
-body="$(emit)"
-# The handoff library refuses a destination that is not a regular file or a link to one, creates its
-# temporary exclusively and renames exactly; a second copy of that rule here would be the defect it removes.
+# The value crosses in a shell variable, which cannot carry a NUL and drops trailing newlines: a
+# source holding a NUL is refused, and the trailing newline the library appends is the one kept back.
+if ! tr -d '\000' < "$src" | cmp -s - "$src"; then
+    echo "$0: the source holds a NUL byte, which the destination form cannot carry" >&2
+    exit 1
+fi
+body="$(emit && printf x)"
+body="${body%x}"
+body="${body%$'\n'}"
+# A second copy of the handoff rule here would be the defect the library exists to remove.
 rb_write_handoff() { return 127; }
 . "$root/skills/watch-prs/scripts/writelib.sh"
 rb_write_handoff "$dst" "$body" >&2

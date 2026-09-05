@@ -5803,6 +5803,19 @@ elif _gen_tmp="$(mktemp_d)"; then
     { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/installed.md"; } \
         && pass "…and the destination form installs the same bytes" \
         || die "the destination form exited $_gen_rc or installed different bytes from the stdout form"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'body' '' '<!-- copilot-body-end -->' 'c' > "$_gen_tmp/blank.md"
+    _gen_rc=0
+    "$_gen" "$_gen_tmp/blank.md" > "$_gen_tmp/blank.out" 2>/dev/null || _gen_rc=$?
+    "$_gen" "$_gen_tmp/blank.md" "$_gen_tmp/blank.inst" >/dev/null 2>&1 || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && cmp -s "$_gen_tmp/blank.out" "$_gen_tmp/blank.inst"; } \
+        && pass "…and a body ending in a blank line installs the same bytes the stdout form emits" \
+        || die "a body ending in a blank line installed different bytes from the stdout form (rc=$_gen_rc)"
+    cp "$_gen_tmp/out.md" "$_gen_tmp/three.dest"
+    _gen_rc=0
+    "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/three.dest" extra >/dev/null 2>&1 || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/three.dest"; } \
+        && pass "…and a third argument is refused with the destination untouched" \
+        || die "a three-argument call exited $_gen_rc or changed the destination"
     cp "$ROOT/AGENTS.md" "$_gen_tmp/self.md"
     for _gen_alias in "$_gen_tmp/self.md" "$_gen_tmp/./self.md"; do
         _gen_rc=0
