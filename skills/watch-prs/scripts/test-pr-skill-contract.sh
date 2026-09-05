@@ -5833,7 +5833,8 @@ elif _gen_tmp="$(mktemp_d)"; then
             || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
     done
     # Two FIFOs behind one symlink, swapped once the first writer has closed: a second open of the
-    # pathname reaches the second FIFO whatever the scheduler does, and a single read never does.
+    # pathname reaches the second FIFO, the unlinked name, or a FIFO no writer opens again, and none
+    # of those reproduces the one-open output, while a single read never meets any of them.
     if mkfifo "$_gen_tmp/once.a" "$_gen_tmp/once.b" 2>/dev/null && ln -s "$_gen_tmp/once.a" "$_gen_tmp/once"; then
         ( printf '%s\n' '<!-- copilot-body-start -->' 'one open' '<!-- copilot-body-end -->' > "$_gen_tmp/once.a"
           ln -sf "$_gen_tmp/once.b" "$_gen_tmp/once"
