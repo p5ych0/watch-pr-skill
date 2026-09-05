@@ -75,7 +75,7 @@ shape="$(grep -nE 'RbProbe|\[\[ -n "" \]\]|\[\[ -n x \]\]|9<|/dev/fd/9|readonly|
     && pass "…and no hostile-shell shape is left in a fence" \
     || die "a driving-shell defence is back: $shape"
 n="$(grep -c '^```bash$' "$SKILL")"
-[ "$n" -le 16 ] \
+[ "$n" -le 18 ] \
     && pass "…and the document holds $n fences" \
     || die "the document has grown to $n fences"
 i=0

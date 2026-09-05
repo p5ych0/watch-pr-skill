@@ -140,9 +140,10 @@ RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)'
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"
 ```
 
-0: posted, and `$PRIOR_FILE` holds the baseline for the watch — the newest verdict's id on
-the manual path, `none` on the automatic one, where the trigger preceded us. Anything else:
-nothing was posted, the reason is above, stop. Either way the wait step is next.
+0: posted, `$PRIOR_FILE` holds the baseline for the watch — the newest verdict's id on the
+manual path, `none` on the automatic one, where the trigger preceded us — and the wait step
+is next. Anything else: nothing was posted, the reason is above; stop, and do not enter the
+wait step.
 
 ## 3. Wait for the verdict
 
@@ -288,14 +289,17 @@ pass is recoverable; a round closed on a red head is not. `pr-close-round.sh` ta
 0: pushed, the head proved green and written into `$HEAD_FILE`. **Now answer the threads:**
 
 ```bash
-gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/N/comments/<comment-id>/replies" -f body='<what changed and why>'
-gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/comments/<comment-id>/reactions" -f content='+1'
-gh api --hostname "$HOST" graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id='<thread-id>' --jq '.data.resolveReviewThread.thread.isResolved'
+gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/N/comments/<comment-id>/replies" -f body='<what changed and why>' || { echo "ABORT: the reply was not posted; do not resolve this thread and do not post the round"; exit 1; }
+gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/comments/<comment-id>/reactions" -f content='+1' || echo "note: the reaction failed"
+[ "$(gh api --hostname "$HOST" graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id='<thread-id>' --jq '.data.resolveReviewThread.thread.isResolved')" = true ] || { echo "ABORT: the thread was not resolved; do not post the round"; exit 1; }
 ```
 
 `list` prints `comment=<id>` beside `thread=<id>` for these: the comment id replies and
 reacts over REST, the thread id resolves over GraphQL. 👍 acted on, or correct and recorded
-as accepted; 👎 only when wrong on the facts. A failed reaction is a note, not an abort.
+as accepted; 👎 only when wrong on the facts. A failed reply is a stop, and so is a resolve
+that errors or answers anything but `true`: a round posted over an unanswered or unresolved
+finding requests a pass over a thread the reviewer will raise again. Only the reaction is a
+note.
 
 3: the operator decides at a round boundary (step 6); the round did not close. Anything
 else: the round did not close and nothing has been resolved or posted; the reason is above,
@@ -377,12 +381,17 @@ writes the Codex signoff onto the PR; `$CODEX_SHA` is read back from `$HEAD_FILE
 the only record of what Codex approved.
 
 ```bash
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" "$HEAD_FILE"; CODEX_SHA="$(<"$HEAD_FILE")"
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" "$HEAD_FILE"
 ```
 
 0: recorded. 3: recorded, then paused at a round boundary — the operator decides, and
 merging on that signoff is one of the answers. Anything else: the phase did not advance and
-no signoff was recorded; the reason is above, do not retry it blind.
+no signoff was recorded; the reason is above, do not retry it blind, and do not read the
+head. On 0 or 3, and only then, read the head it signed:
+
+```bash
+CODEX_SHA="$(<"$HEAD_FILE")"
+```
 
 **STOP — the next phase is the operator's decision.** The signoff is on the PR, so either
 answer is resumable; `pr-signoff.sh` reads it back in a later session.
