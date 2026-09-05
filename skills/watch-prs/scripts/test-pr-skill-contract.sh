@@ -4181,6 +4181,68 @@ if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
         || die "README no longer rules out a silent skip"
 fi
 
+# ── THE UNATTENDED SWITCH ANSWERS THE DECISION STOPS AND NO OTHER ──────────
+# `WATCH_PR_AUTONOMOUS=1` pre-decides the four stops that are decisions. A stop that
+# exists because something could not be read or told apart carries no answer, or an
+# unattended session would record a signoff on a retraction it never read.
+grep -q 'WATCH_PR_AUTONOMOUS=1' "$SKILL" \
+    && pass "the skill names the unattended switch" \
+    || die "SKILL.md does not name WATCH_PR_AUTONOMOUS=1"
+_una_n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || true
+[ "$_una_n" -eq 4 ] \
+    && pass "…and exactly four stops carry an unattended answer" \
+    || die "expected an unattended answer at exactly four stops, found $_una_n"
+_una_between() {
+    awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL" \
+        | grep -c '^\*\*Unattended:\*\*' || true
+}
+[ "$(_una_between '## 6. ' '## 7. ')" -eq 1 ] \
+    && pass "…one at the round check-in" \
+    || die "the round check-in carries no unattended answer"
+[ "$(_una_between '**STOP — the next phase is the operator' '```bash')" -eq 1 ] \
+    && pass "…one at the Codex-clean stop, before the Copilot phase is opened" \
+    || die "the Codex-clean stop carries no unattended answer ahead of the open stage"
+[ "$(_una_between '**On the two-reviewer path, STOP.' '### Resuming after a stop')" -eq 1 ] \
+    && pass "…one at the Copilot-clean stop, naming the fault-tolerance pass" \
+    || die "the Copilot-clean stop carries no unattended answer"
+awk 'index($0, "**On the two-reviewer path, STOP.") == 1 { c = 1 } index($0, "### Resuming") == 1 { c = 0 } c' "$SKILL" \
+    | grep -q 'fault-tolerance pass' \
+    && pass "…which says what to do where the phase produced commits" \
+    || die "the unattended Copilot-clean answer does not name the fault-tolerance pass"
+[ "$(_una_between '### Then: the gate' '## What this skill')" -eq 1 ] \
+    && pass "…one at the merge gate" \
+    || die "the merge gate carries no unattended answer"
+# The stops it must NOT answer: the replies-only review, the untestable limitation,
+# the unavailable reviewer.
+grep '^| `4` |' "$SKILL" | grep -qi 'unattended\|AUTONOMOUS' \
+    && die "the replies-only stop is answered unattended; a retraction would be signed off unread" \
+    || pass "…and the replies-only stop is not answered unattended"
+awk 'index($0, "**On `4`") == 1 { c = 1 } index($0, "## 4.") == 1 { c = 0 } c' "$SKILL" \
+    | grep -qi 'unattended\|AUTONOMOUS' \
+    && die "the replies-only stop's answer is taken unattended" \
+    || pass "…nor is its answer"
+awk 'index($0, "**Prove a fix can fail.**") == 1 { c = 1 } /^$/ { c = 0 } c' "$SKILL" \
+    | grep -qi 'unattended\|AUTONOMOUS' \
+    && die "an untestable limitation is accepted unattended; acceptance is a base-ref record" \
+    || pass "…nor the untestable limitation"
+grep -q 'Copilot is unavailable to the repository is not permission' "$SKILL" \
+    && pass "…and an unavailable Copilot is still not permission to skip the pass" \
+    || die "the unavailable-reviewer stop is gone"
+grep -q 'It does not merge unattended past a failed or unreadable gate' "$SKILL" \
+    && pass "…and no failed or unreadable gate is merged past" \
+    || die "the skill no longer rules out merging unattended past a failed gate"
+if [ -f "$ROOT/README.md" ]; then
+    grep -q '^### Running unattended' "$ROOT/README.md" \
+        && pass "README documents running unattended" \
+        || die "README has no section on running unattended"
+    grep -q 'WATCH_PR_AUTONOMOUS' "$ROOT/README.md" \
+        && pass "…naming the switch" \
+        || die "README does not name WATCH_PR_AUTONOMOUS"
+    grep -q 'It answers decisions, never readings' "$ROOT/README.md" \
+        && pass "…and says which stops it leaves alone" \
+        || die "README does not say that the unattended mode answers decisions only"
+fi
+
 
 
 # ── WHY THERE IS NO MARKDOWN PARSER, AND NO LIFTED FRAGMENT, HERE ──────────
