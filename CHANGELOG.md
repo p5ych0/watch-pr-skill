@@ -11,8 +11,9 @@
   enough to redefine `exit` can edit the helpers on disk, so those defences protected against
   nobody, and every gate and every mutation that matters runs in a privileged helper against
   GitHub's records. Each step is now one invocation with its statuses in prose. Setup is
-  fourteen lines: locate the scripts, run `pr-setup.sh` with its one retry under `HOME`,
-  read the origin back as data, prove it through the shipped identity parser, derive the
+  fifteen lines: locate the scripts, run `pr-setup.sh` with its one retry under `HOME`,
+  read the origin back as data, prove it one line and a GitHub identity through the shipped
+  parser, prove through `pr-origin.sh pin` that it is this checkout's origin, derive the
   working paths. `pr-setup.sh`'s ready record ends
   `mode=unattended` or `mode=attended`, read from the exported `WATCH_PR_AUTONOMOUS`, so the
   privileged-child probe fence is gone with it. The nonce stays, one line per request; the

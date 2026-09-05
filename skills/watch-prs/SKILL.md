@@ -82,13 +82,14 @@ Once per session, from the checkout, on the PR's branch:
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || { echo "ABORT: the plugin helper scripts were not found"; exit 1; }
-RB_SETUP_DIR="${TMPDIR:-$HOME}/watch-pr-setup.$$.$RANDOM$RANDOM"
+case "${TMPDIR:-}" in /*) RB_SETUP_DIR="$TMPDIR/watch-pr-setup.$$.$RANDOM$RANDOM" ;; *) RB_SETUP_DIR="$HOME/watch-pr-setup.$$.$RANDOM$RANDOM" ;; esac
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
     || { [ $? -eq 2 ] && RB_SETUP_DIR="$HOME/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
     || { echo "ABORT: setup failed; the PR_SETUP line above says why"; exit 1; }
 export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"
 . "$RB_SCRIPTS/identitylib.sh" || { echo "ABORT: the identity parser could not be loaded"; exit 1; }
 [ -n "$REVIEW_BUS_REMOTE" ] && [[ $REVIEW_BUS_REMOTE != *$'\n'* ]] && rb_identity || { echo "ABORT: the origin read back is not a usable identity"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin" || { [ $? -eq 2 ] && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin2"; } || { echo "ABORT: the pin is not this checkout's origin; nothing is addressed until it is"; exit 1; }
 REPO_DIR="$(git rev-parse --show-toplevel)" || { echo "ABORT: not in a git checkout"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"; REQUEST_FILE="$RB_SETUP_DIR/work/request.md"
@@ -99,10 +100,13 @@ PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"; HEAD_FILE="$RB_SETUP_DIR/work/head.tx
 network transport, writes it into `$RB_SETUP_DIR/origin` as data, and creates the four
 empty working files under `$RB_SETUP_DIR/work`; its record ends `mode=unattended` or
 `mode=attended`. The driver reads the origin back, exports it as `REVIEW_BUS_REMOTE` — the
-pin every helper routes by whatever the current directory is — and proves it a GitHub
-identity through the parser the helpers use, which sets `HOST`, `OWNER` and `REPO`.
-Status 2 means the storage refused the directory, and the one retry under `$HOME` is the
-bound `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a squat at; 1 is
+pin every helper routes by whatever the current directory is — proves it a GitHub identity
+through the parser the helpers use, which sets `HOST`, `OWNER` and `REPO`, and proves
+through `pr-origin.sh pin` that a child sees the pin and that it is this checkout's origin,
+so an origin file replaced after setup addresses nothing. A relative `$TMPDIR` is not a
+parent; `$HOME` is used instead. Status 2 from either helper means the storage refused,
+and the one retry — under `$HOME`, or under a second leaf — is the bound
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a squat at; 1 is
 terminal. Nothing under `$RB_SETUP_DIR` is ever removed.
 
 ## 1. State the task on the PR
@@ -295,7 +299,7 @@ cannot be taken back and `post` refusing a bad handoff afterwards would leave th
 half-closed:
 
 ```bash
-/usr/bin/env bash -p -c '. "$1"/writelib.sh && rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE" || { echo "ABORT: $HEAD_FILE holds no proven head; do not resolve any thread"; exit 1; }
+/usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE" || { echo "ABORT: $HEAD_FILE holds no proven head; do not resolve any thread"; exit 1; }
 ```
 
 **Now answer the threads:**
@@ -399,10 +403,11 @@ the only record of what Codex approved.
 0: recorded. 3: recorded, then paused at a round boundary — the operator decides, and
 merging on that signoff is one of the answers. Anything else: the phase did not advance and
 no signoff was recorded; the reason is above, do not retry it blind, and do not read the
-head. On 0 or 3, and only then, read the head it signed:
+head. On 0 or 3, and only then, prove the file still holds the head it signed, through the
+library's one non-blocking read, and take it:
 
 ```bash
-CODEX_SHA="$(<"$HEAD_FILE")"
+/usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE" && CODEX_SHA="$(<"$HEAD_FILE")" || { echo "ABORT: $HEAD_FILE holds no usable signoff sha; step 8 would have nothing to gate on"; exit 1; }
 ```
 
 **STOP — the next phase is the operator's decision.** The signoff is on the PR, so either

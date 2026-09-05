@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Doc-regression for the driver contract: each step is one invocation, in order, its
-# statuses acted on, and nothing in the document defends the driving shell.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,9 +64,9 @@ grep -qF '. "$RB_SCRIPTS/identitylib.sh"' <<<"$fences" && grep -qF '&& rb_identi
 
 # ── one invocation per step: no fence defends the driving shell ────────────
 # `docs/decisions/2026-09-05-driving-shell-trusted.md` is pinned here.
-big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 14) print s ": " n; f=0 } f{n++}' "$SKILL")"
+big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 15) print s ": " n; f=0 } f{n++}' "$SKILL")"
 [ -z "$big" ] \
-    && pass "no fence is longer than the setup block's fourteen lines" \
+    && pass "no fence is longer than the setup block's fifteen lines" \
     || die "a fence has grown past one invocation per step (start: lines): $big"
 shape="$(grep -nE 'RbProbe|\[\[ -n "" \]\]|\[\[ -n x \]\]|9<|/dev/fd/9|readonly|:\?|BASH_XTRACEFD|RB_NONCE_SEQ|declare |nameref' <<<"$fences" || true)"
 [ -z "$shape" ] \
@@ -89,9 +87,9 @@ done < <(awk '/^```bash$/{f=1; print; next} /^```$/{ if (f) print; f=0; next } f
 for f in "$TMP"/fence.*; do
     bash -n "$f" 2>/dev/null \
         || die "fence ${f##*.} does not parse: $(bash -n "$f" 2>&1 | head -1)"
-    # One helper per fence, so a status is never another invocation's; setup's retry is the exception.
+    # One helper per fence, so a status is never another invocation's; setup's two retries are the exception.
     c="$(grep -c 'bash -p "$RB_SCRIPTS"/pr-' "$f" || true)"
-    lim=1; [ "${f##*.}" -eq 1 ] && lim=2
+    lim=1; [ "${f##*.}" -eq 1 ] && lim=4
     [ "$c" -le "$lim" ] || die "fence ${f##*.} invokes $c helpers; one per step"
 done
 pass "every fence parses, and none but setup invokes more than one helper"
@@ -226,8 +224,25 @@ else
     die "could not stage the setup retry case"
 fi
 
+# ── a relative TMPDIR is not a parent: HOME is used before any candidate is formed ─
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the relative-TMPDIR case"
+elif _sr3="$(mktemp_d)" && _home3="$(mktemp_d)" \
+     && git -C "$_sr3" init -q && git -C "$_sr3" remote add origin 'git@github.com:acme/widget.git'; then
+    _rrc=0
+    _rout="$(cd "$_sr3" && CLAUDE_PLUGIN_ROOT="$ROOT" TMPDIR=relative/dir HOME="$_home3" \
+        run_limited 60 bash -c "$setup_fence"$'\n''printf "%s\n" "$RB_SETUP_DIR"' 2>&1)" || _rrc=$?
+    _rdir="${_rout##*$'\n'}"
+    case "$_rrc|$_rdir" in
+        "0|$_home3/watch-pr-setup."*) pass "a relative TMPDIR sends setup under HOME on the first attempt" ;;
+        *) die "with a relative TMPDIR the setup fence exited $_rrc with: '$_rout'" ;;
+    esac
+    rm -rf "$_sr3" "$_home3"
+else
+    die "could not stage the relative-TMPDIR case"
+fi
+
 # ── a handoff altered between the helper and the read is refused ──────────
-# A stub setup hands over a two-line origin; the fence must refuse it, not pin its second line.
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the altered-handoff case"
 elif _st="$(mktemp_d)" && mkdir -p "$_st/skills/watch-prs/scripts" \
@@ -249,12 +264,43 @@ else
     die "could not stage the altered-handoff case"
 fi
 
+# ── a valid origin that is not this checkout's is refused by the pin ──────
+# The stub hands over another repository under the same owner; the real pin re-reads the checkout.
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the replaced-origin case"
+elif _sw="$(mktemp_d)" && mkdir -p "$_sw/skills/watch-prs/scripts" \
+     && cp "$SCRIPT_DIR"/*lib.sh "$SCRIPT_DIR/pr-origin.sh" "$_sw/skills/watch-prs/scripts/" \
+     && printf '%s\n' '#!/usr/bin/env bash' 'mkdir -p "$1/work" && printf "%s\n" "git@github.com:acme/other.git" > "$1/origin"' \
+        > "$_sw/skills/watch-prs/scripts/pr-setup.sh" \
+     && chmod +x "$_sw/skills/watch-prs/scripts/pr-setup.sh" \
+     && _swh="$(mktemp_d)" && _swr="$(mktemp_d)" && git -C "$_swr" init -q \
+     && git -C "$_swr" remote add origin 'git@github.com:acme/widget.git'; then
+    _wrc=0
+    _wout="$(cd "$_swr" && CLAUDE_PLUGIN_ROOT="$_sw" TMPDIR="$_swh" HOME="$_swh" \
+        run_limited 60 bash -c "$setup_fence"$'\n''printf "PINNED %s\n" "$REVIEW_BUS_REMOTE"' 2>&1)" || _wrc=$?
+    case "$_wrc|$_wout" in
+        0*) die "an origin that is not this checkout's was pinned: '$_wout'" ;;
+        *'not this checkout'*) pass "a valid origin that is not this checkout's is refused by the pin" ;;
+        *) die "a replaced origin gave rc=$_wrc with: '$_wout'" ;;
+    esac
+    rm -rf "$_sw" "$_swh" "$_swr"
+else
+    die "could not stage the replaced-origin case"
+fi
+
 # ── the proved head is validated through one non-blocking read before any thread is touched ─
-hp="$(grep -F 'rb_handoff_is_sha' <<<"$fences" || true)"
+hp="$(grep -F 'rb_handoff_is_sha "$2"' <<<"$fences" | grep -v 'CODEX_SHA=' || true)"
 if [ -z "$hp" ]; then
     die "the gated head is not proved through rb_handoff_is_sha before the thread replies"
+elif ! grep -qF 'rb_handoff_is_sha() { return 127; }' <<<"$hp"; then
+    die "the head proof sources writelib.sh with no refusing stub ahead of it"
 elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
-    pass "the head proof precedes the thread replies"
+    pass "the head proof precedes the thread replies, behind a refusing stub"
+    mkdir "$_hd/lib" && : > "$_hd/lib/writelib.sh"
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$_hd/good"
+    _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$_hd/lib\"; HEAD_FILE=\"$_hd/good\"; $hp" >/dev/null 2>&1 || _hrc=$?
+    [ "$_hrc" -ne 0 ] \
+        && pass "…an emptied writelib.sh refuses rather than passing a proven head" || die "an emptied library passed the head proof"
     printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n' > "$_hd/bad"
     _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/bad\"; $hp" >/dev/null 2>&1 || _hrc=$?
     [ "$_hrc" -ne 0 ] \
@@ -264,10 +310,22 @@ elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
         { [ "$_hrc" -ne 0 ] && [ "$_hrc" -ne 124 ]; } \
             && pass "…a FIFO at the head path is refused rather than waited on" || die "a FIFO at the head path gave rc=$_hrc (124 = hung)"
     fi
-    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$_hd/good"
     _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $hp" >/dev/null 2>&1 || _hrc=$?
     [ "$_hrc" -eq 0 ] \
         && pass "…while a proven head passes" || die "a 40-hex head was refused (rc=$_hrc)"
+    # The signoff read after record is the same proof, and the value is taken only past it.
+    sp="$(grep -F 'CODEX_SHA="$(<"$HEAD_FILE")"' <<<"$fences" || true)"
+    if [ -z "$sp" ] || ! grep -qF 'rb_handoff_is_sha() { return 127; }' <<<"$sp"; then
+        die "the signoff sha is read from the head file without the head proof ahead of it"
+    else
+        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/bad\"; $sp; printf '%s' \"\${CODEX_SHA-unset}\"" 2>/dev/null)" || _src=$?
+        { [ "$_src" -ne 0 ] && [ "$_sout" != "$(cat "$_hd/bad")" ]; } \
+            && pass "…and a head file corrupted after record is refused before the decision stop" \
+            || die "a corrupt head file was taken as the signoff sha (rc=$_src, '$_sout')"
+        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
+        { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
+            && pass "…while a proven head is taken as the signoff sha" || die "a proven head was not taken (rc=$_src, '$_sout')"
+    fi
     rm -rf "$_hd"
 else
     die "the head proof does not precede the thread replies, or the case could not be staged"
