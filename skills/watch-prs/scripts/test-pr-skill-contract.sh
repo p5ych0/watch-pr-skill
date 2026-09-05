@@ -4221,6 +4221,17 @@ _una_at '## 6. ' '## 7. ' 'round check-in'
 _una_at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 _una_at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
 _una_at '### Then: the gate' '## What this skill' 'merge gate'
+# A 3 is the boundary only where the stage said so: `gate` reports a replies-only pass
+# as 3 too, and re-running it after a no-op push skips the watch. And `record` has
+# written its signoff before it pauses, so running it again records two.
+_una_sec="$(_una_section '## 6. ' '## 7. ')" || { _una_sec=; die "the round check-in could not be read"; }
+grep -q 'PR_ROUND_PAUSE' <<<"$_una_sec" \
+    && grep -q 'left only replies' <<<"$_una_sec" \
+    && pass "…and the check-in answer keys on the PR_ROUND_PAUSE line, leaving the gate's replies-only 3 a stop" \
+    || die "the unattended check-in answers every 3, including the gate's replies-only pause"
+grep -q 'running it twice records two signoffs' <<<"$_una_sec" \
+    && pass "…and does not run record again after its signoff is written" \
+    || die "the unattended check-in re-runs record, which posts a second signoff"
 # The Codex-only decision reads the opening VERDICT, not the distinct-head count: a
 # finding answered on its thread and a later approval of the same head are one
 # reviewed head, and that change was sent back.
@@ -4232,6 +4243,18 @@ grep -q 'findings=0' <<<"$_una_sec" \
 grep -q 'pr-round-count' <<<"$_una_sec" \
     && die "the Codex-only decision reads the distinct-head count, which a same-head re-review leaves at one" \
     || pass "…and not on the reviewed-head count"
+# Resuming, the opening verdict is the oldest review's STATE: a body-only
+# CHANGES_REQUESTED carries no comment and is a finding.
+grep -q 'CHANGES_REQUESTED' <<<"$_una_sec" \
+    && pass "…and a resumed session reads the oldest review's state, not its comment count alone" \
+    || die "a resumed unattended session reads comment absence as an opening clean verdict"
+# A standing Copilot signoff means the phase happened and this signoff is the
+# fault-tolerance pass's; a resumed session must not open Copilot a second time.
+grep -q 'signoff already stands' <<<"$_una_sec" \
+    && grep -qF '$COPILOT_BOT' <<<"$_una_sec" \
+    && grep -q 'open nothing' <<<"$_una_sec" \
+    && pass "…and after a fault-tolerance pass a resumed session merges rather than opening Copilot again" \
+    || die "a resumed session after a moved-head fault-tolerance pass opens a third phase"
 _una_sec="$(_una_section '**On the two-reviewer path, STOP.' '### Resuming after a stop')" \
     || { _una_sec=; die "the Copilot-clean stop could not be read"; }
 grep -q 'fault-tolerance pass' <<<"$_una_sec" \
@@ -4243,8 +4266,6 @@ grep -q 'auto-review argument' <<<"$_una_sec" \
     && grep -q 'no push precedes it' <<<"$_una_sec" \
     && pass "…and requests it by mention whatever the trigger mode" \
     || die "the unattended fault-tolerance pass relies on a push that never happens under automatic review"
-# The stops it must NOT answer: the replies-only review, the untestable limitation,
-# the unavailable reviewer.
 _una_row="$(grep '^| `4` |' "$SKILL")" || { _una_row=; die "the watch table has no row for status 4"; }
 grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_row" \
     && die "the replies-only stop is answered unattended; a retraction would be signed off unread" \

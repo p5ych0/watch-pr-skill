@@ -621,13 +621,17 @@ derived from GitHub each time, so it survives a new session.
   naming a round that has not happened yet is refused. `REVIEW_ROUND_THRESHOLD=0` disables
   the check-in entirely.
 
-**Unattended:** continue. Wherever a stage reports 3 — this counter, `gate`, `record`,
-`open` or the merge gate — the boundary belongs to the reviewer that stage counted: `$WHO`
-at the counter and `gate`, Codex at `record` and `open`, Copilot at the merge gate; the
-template line the counter prints names it. Record the acknowledgement above with that login
-in place of `$WHO`, say in the round summary what the rounds have been about, and run the
-stage again. The count stays on the PR, where `REVIEW_ROUND_THRESHOLD=0` would leave no
-record that the loop ran long.
+**Unattended:** continue — where the 3 is this boundary, which the stage's output says
+with a `PR_ROUND_PAUSE` line. `gate`'s `PAUSE: the pass the push started left only replies`
+is step 3's status 4 by another route, carries no such line, and stays a stop. Wherever a
+stage reports the boundary — this counter, `gate`, `record`, `open` or the merge gate — it
+belongs to the reviewer that stage counted: `$WHO` at the counter and `gate`, Codex at
+`record` and `open`, Copilot at the merge gate; the template line the counter prints names
+it. Record the acknowledgement above with that login in place of `$WHO`, say in the round
+summary what the rounds have been about, and run the stage again — except `record`, which
+pauses after its signoff is written and read back: go on to step 7's answer, since
+running it twice records two signoffs. The count stays on the PR, where
+`REVIEW_ROUND_THRESHOLD=0` would leave no record that the loop ran long.
 
 ## 7. Codex is clean — now the Copilot phase
 
@@ -689,9 +693,14 @@ answer is resumable; `pr-signoff.sh` reads it back in a later session.
 
 **Unattended:** merge now where Codex's first verdict on this PR was clean — the opening
 request's watch reported `verdict=clean findings=0`, or, resuming, Codex's oldest review
-on the PR has no comment — and open the Copilot phase otherwise: a change Codex sent back
-gets the second reviewer, even where the answer on its thread left the head unchanged, and
-a change it passed is merged on that signoff.
+on the PR is an APPROVED or COMMENTED one carrying no comment, a body-only
+`CHANGES_REQUESTED` being a finding with none — and open the Copilot phase otherwise: a
+change Codex sent back gets the second reviewer, even where the answer on its thread left
+the head unchanged, and a change it passed is merged on that signoff. Where a Copilot
+signoff already stands — `pr-signoff.sh`, asked as in the resume recipe but for
+`$COPILOT_BOT`, reports one — the Copilot phase has happened and the signoff just recorded
+is the fault-tolerance pass's, whatever the opening verdict was: merge now, `codex-only`
+where the head is past the Copilot signoff and `both` where it is that head; open nothing.
 
 Ask, then stop, unless unattended. Only on the second answer:
 
