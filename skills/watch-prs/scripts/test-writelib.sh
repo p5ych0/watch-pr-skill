@@ -781,13 +781,12 @@ rm -rf "$_wh"
 # is not safely acquirable in the driver's bash), and the attacker is a same-UID process that
 # already has arbitrary code execution as the operator.
 #
-# THIS CASE PINS THE LIMIT, AND IT DISTINGUISHES WHICH INODE WAS READ. `rb_handoff_is_sha`
-# answers only a STATUS, so both a real and a forged 40-hex value would return 0 and the case
-# could not tell a name-following read from an anchored one. So the ORIGINAL `work/head.txt`
-# is NOT a commit id and the substituted one IS: a status of 0 then means the read followed
-# the substituted parent to the valid forged head — the accepted limit — while an anchored
-# read that reached the original inode would read the invalid value and return non-zero,
-# failing this case and forcing the record to be revisited.
+# THIS CASE PINS THE LIMIT, AND IT DISTINGUISHES WHICH INODE WAS READ by the status alone,
+# so it holds whatever the reader prints: the ORIGINAL `work/head.txt` is NOT a commit id
+# and the substituted one IS, so a status of 0 means the read followed the substituted
+# parent to the valid forged head — the accepted limit — while an anchored read that reached
+# the original inode would read the invalid value and return non-zero, failing this case and
+# forcing the record to be revisited.
 _wl_p="$TMP/parentsub"; rm -rf "$_wl_p"; mkdir -p "$_wl_p/work"
 printf '%s\n' 'not-a-commit-id' > "$_wl_p/work/head.txt"
 mkdir -p "$_wl_p/attacker"
