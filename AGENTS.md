@@ -174,8 +174,8 @@ proven.
 The reply instructions are prose between two fences; the driver acts on the
 gate's status, which is what `docs/decisions/2026-09-05-driving-shell-trusted.md`
 relies on. What stays in `SKILL.md` is what a child process cannot do for the
-driver — locate the scripts, take the values setup hands over as data, read and
-then validated, never sourced, since a file crossing from another process is a
+driver — locate the scripts; read and validate the values setup hands over as
+data, never source them, since a file crossing from another process is a
 boundary whatever the shell is; act on each helper's status — as one invocation
 per step. Do not raise "move this into a
 script" against those, and do not raise a defence for the driving shell.
