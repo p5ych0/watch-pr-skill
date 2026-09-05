@@ -245,9 +245,10 @@ reason for a change by its changelog entry or its commit message.
 ### Releases
 
 A change to an installed file — the scripts, `SKILL.md`, the manifests — bumps
-the version and adds a changelog entry: a behaviour change is a minor bump whose
-entry explains the failure fixed; a comment-only or prose-only change is a patch
-whose entry says what the comment now records. Tests, authoring documentation
+the version and adds a changelog entry: a change to what the loop does, checks
+or offers is a minor bump whose entry explains the failure fixed; a change that
+alters no behaviour — comments, `SKILL.md` prose, a changelog correction — is a
+patch whose entry says what the text now records. Tests, authoring documentation
 and these files bump nothing.
 
 ## Shadowable names: where a finding is, and is not
@@ -276,7 +277,7 @@ and these files bump nothing.
 `macos-shell` runs the suite on a bash 3.2.57 built from source and first on
 `PATH`, with the GNU-only tools removed, but only for the lines the suite
 executes. Read for a `[[ … =~ … ]]` pattern with a parenthesis, `${var^^}`,
-`declare -A`, `mapfile`, `&>>`, negative array indices, or a command name
+`declare -A`, `mapfile`/`readarray`, `&>>`, negative array indices, or a command name
 assembled at runtime on a branch the suite never takes, and for:
 
 | Class | Why CI cannot see it | Examples |
