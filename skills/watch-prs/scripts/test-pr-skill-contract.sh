@@ -23,7 +23,6 @@ fi
 TMP="$(mktemp_d)" || { die "no scratch directory"; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
-# Read once, with the status; a document that cannot be read pins nothing.
 fences="$(awk '/^```bash$/{f=1; next} /^```$/{f=0} f' "$SKILL")" \
     || { die "SKILL.md could not be read"; echo "RESULT: FAIL"; exit 1; }
 [ -n "$fences" ] || { die "SKILL.md has no bash fences"; echo "RESULT: FAIL"; exit 1; }
@@ -38,7 +37,6 @@ before() {
 has()  { grep -q -F -- "$1" "$SKILL"; }
 hasf() { grep -q -F -- "$1" <<<"$flat"; }
 
-# ── every helper is started privileged, by path, and every one is used ─────
 bad="$(grep -oE '[^ ]*pr-[a-z-]+\.sh"?' <<<"$fences" | grep -vE '^"\$RB_SCRIPTS"?/pr-[a-z-]+\.sh"?$' || true)"
 [ -z "$bad" ] \
     && pass "every helper is named through \$RB_SCRIPTS" \
@@ -62,7 +60,6 @@ grep -qF '. "$RB_SCRIPTS/identitylib.sh"' <<<"$fences" && grep -qF '&& rb_identi
     && pass "…and the document carries no parser of its own" \
     || die "SKILL.md defines rb_identity"
 
-# ── one invocation per step: no fence defends the driving shell ────────────
 # `docs/decisions/2026-09-05-driving-shell-trusted.md` is pinned here.
 big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 15) print s ": " n; f=0 } f{n++}' "$SKILL")"
 [ -z "$big" ] \
@@ -94,7 +91,6 @@ for f in "$TMP"/fence.*; do
 done
 pass "every fence parses, and none but setup invokes more than one helper"
 
-# ── the steps are in order ────────────────────────────────────────────────
 before 'pr-setup.sh "$RB_SETUP_DIR"' 'pr-request-review.sh N' \
     && pass "setup precedes the request" || die "the request precedes setup"
 before 'pr-request-review.sh N' 'pr-watch.sh N' \
@@ -119,7 +115,6 @@ hasf 'do not run the merge gate until the operator has answered' \
 hasf 'In `codex-only` there is no second question' && hasf 'Go straight to the merge gate' \
     && pass "…with codex-only exempted by name and sent to the gate" || die "codex-only waits for a menu never printed"
 
-# ── every status is acted on ──────────────────────────────────────────────
 for row in '| `0` |' '| `1` |' '| `2` |' '| `4` |'; do
     has "$row" && pass "the watch status $row is tabled" || die "the watch table lacks $row"
 done
@@ -146,7 +141,6 @@ has 'It does not merge unattended past a failed or unreadable gate' \
 has 'It does not run a reviewer' \
     && pass "the loop runs no reviewer of its own" || die "the no-local-reviewer promise is gone"
 
-# ── the bodies this loop writes ───────────────────────────────────────────
 for m in '**Review-Signoff:**' '**Review-Signoff-Revoked:**' '**Review-Pause-Acknowledged:**'; do
     has "$m" && pass "the marker $m is named as refused" || die "the marker $m is not documented"
 done
@@ -163,19 +157,16 @@ has 'as a past-tense disposition' \
 has 'never as a work order' \
     && pass "…and says why" || die "the incident behind the disposition rule is gone"
 
-# ── the thread is answered, reacted to and resolved, and the resolve is read ─
 grep -q '/replies" -f body=' <<<"$fences" && grep -q "/reactions\" -f content='+1'" <<<"$fences" \
     && grep -q 'resolveReviewThread' <<<"$fences" && grep -q 'isResolved' <<<"$fences" \
     && pass "reply, react and resolve are commands, and the resolve is read back" \
     || die "the thread answer is not spelled out"
 
-# ── the phase trailer is documented as a trailer ──────────────────────────
 trailer="$(grep -A1 -F 'Review-Phase: copilot' "$SKILL" || true)"
 grep -q 'Co-Authored-By' <<<"$trailer" \
     && pass "the trailer sits in the last paragraph beside Co-Authored-By" \
     || die "the trailer is not shown in a trailer block"
 
-# ── the request nonce travels with every request and every watch ──────────
 bad="$(grep -F 'pr-watch.sh N' <<<"$fences" | grep -v -F -- '--after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"' || true)"
 [ -z "$bad" ] && pass "every watch carries the baseline file and the nonce" || die "a watch runs without its baseline or nonce: $bad"
 [ "$(grep -c -F 'RB_NONCE="$(perl -e' <<<"$fences")" -ge 3 ] \
@@ -185,7 +176,6 @@ odd="$(grep -F -- '--nonce' <<<"$fences" | grep -v -F -- '--nonce "$RB_NONCE"' |
     && die "a nonce is passed as something other than \$RB_NONCE: $odd" \
     || pass "…and only \$RB_NONCE is ever passed"
 
-# ── setup hands over data, and the driver validates it ────────────────────
 grep -qF 'export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"' <<<"$fences" \
     && pass "the origin is read as data and exported as the pin" || die "the pin is not read from setup's origin file"
 grep -qE '^\[ -n "\$REVIEW_BUS_REMOTE" \] && \[\[ \$REVIEW_BUS_REMOTE != \*\$'"'"'\\n'"'"'\* \]\] && rb_identity' <<<"$fences" \
@@ -197,7 +187,6 @@ has 'mode=unattended' && has 'mode=attended' \
 has 'Nothing under `$RB_SETUP_DIR` is ever removed' \
     && pass "…and nothing under the setup directory is removed" || die "the no-removal promise is gone"
 
-# ── setup's second attempt: a first parent that refuses costs one retry, not the session ──
 # `docs/decisions/2026-08-26-transport-candidate-in-argv.md` bounds a squat at that retry,
 # so the setup fence is the one fence executed here, against the real helper.
 setup_fence="$(awk '/^```bash$/{f=1; n++; next} /^```$/{f=0} f && n == 1' "$SKILL")" || setup_fence=
@@ -224,7 +213,6 @@ else
     die "could not stage the setup retry case"
 fi
 
-# ── a relative TMPDIR is not a parent: HOME is used before any candidate is formed ─
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the relative-TMPDIR case"
 elif _sr3="$(mktemp_d)" && _home3="$(mktemp_d)" \
@@ -242,7 +230,6 @@ else
     die "could not stage the relative-TMPDIR case"
 fi
 
-# ── a handoff altered between the helper and the read is refused ──────────
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the altered-handoff case"
 elif _st="$(mktemp_d)" && mkdir -p "$_st/skills/watch-prs/scripts" \
@@ -264,7 +251,6 @@ else
     die "could not stage the altered-handoff case"
 fi
 
-# ── a valid origin that is not this checkout's is refused by the pin ──────
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the replaced-origin case"
 elif _sw="$(mktemp_d)" && mkdir -p "$_sw/skills/watch-prs/scripts" \
@@ -287,7 +273,6 @@ else
     die "could not stage the replaced-origin case"
 fi
 
-# ── the proved head is validated through one non-blocking read before any thread is touched ─
 hp="$(grep -F 'rb_handoff_is_sha "$2"' <<<"$fences" | grep -v 'CODEX_SHA=' || true)"
 if [ -z "$hp" ]; then
     die "the gated head is not proved through rb_handoff_is_sha before the thread replies"
@@ -312,7 +297,6 @@ elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
     _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $hp" >/dev/null 2>&1 || _hrc=$?
     [ "$_hrc" -eq 0 ] \
         && pass "…while a proven head passes" || die "a 40-hex head was refused (rc=$_hrc)"
-    # The signoff read after record is the same proof, and the value is taken only past it.
     sp="$(grep -F 'CODEX_SHA="$(<"$HEAD_FILE")"' <<<"$fences" || true)"
     if [ -z "$sp" ] || ! grep -qF 'rb_handoff_is_sha() { return 127; }' <<<"$sp"; then
         die "the signoff sha is read from the head file without the head proof ahead of it"
@@ -330,7 +314,6 @@ else
     die "the head proof does not precede the thread replies, or the case could not be staged"
 fi
 
-# ── the unattended switch answers the decision stops and no other ────────
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
 { [ "$_rc" -le 1 ] && [ "$_n" -eq 4 ]; } \
@@ -371,7 +354,6 @@ hasf 'Copilot is unavailable to the repository is not permission' \
 has 'answers none of them' \
     && pass "…and no failed gate is answered by the switch" || die "the switch's limit is not stated"
 
-# ── the operator-facing README agrees with the document ───────────────────
 if [ -f "$README" ]; then
     grep -qi 'codex-only' "$README" && grep -qiE 'narrower|not looser' "$README" && grep -qi 'no switch for is skipping a reviewer' "$README" \
         && pass "README documents the Codex-only merge as narrower, and rules out a silent skip" \
