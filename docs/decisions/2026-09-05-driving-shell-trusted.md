@@ -62,9 +62,12 @@ The document is read on every invocation.
 
 A helper invoked by name rather than by path, `pr-selfcheck.sh` excepted; a status not
 acted on; a value cut out of a record where a file carries it, or a handoff file sourced
-rather than read as data and validated; a step out of order; a request, summary or phase
-body posted with a reserved marker or a mention — the check-in acknowledgement is the one
-body the driver writes with a marker on purpose.
+rather than read as data and validated; a step out of order, the thread replies and
+resolutions ahead of the gate that proved the pushed head among them; a request, summary or
+phase body written with a reserved marker, or with a mention where a pass is already queued
+or another reviewer's round is being closed — the check-in acknowledgement is the one body
+the driver writes with a marker on purpose, and the mention `pr-request-review.sh` and
+`pr-close-round.sh` add themselves on the manual path is the trigger, not a finding.
 
 ## Supersedes
 

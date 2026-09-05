@@ -160,6 +160,9 @@ proven.
 - A captured head — `GATED_HEAD="$( … )"`, or a `sed` over the record — is a
   regression: the record is for a reader, the file is the contract.
 - The head file may not be the summary file, refused by path **and** by `-ef`.
+- The thread replies and resolutions follow `gate`, which pushed and proved the
+  head green: a resolve cannot be taken back, so a failed push or check must
+  leave no thread resolved. Moving them ahead of the gate is a regression.
 - Every non-alias refusal must leave the file empty; the alias refusal stays
   ahead of the emptying, because emptying a head file that is the summary
   destroys the account.
@@ -244,8 +247,11 @@ invoked by name rather than as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
 `pr-selfcheck.sh` excepted since it is run directly and re-execs into a clean
 shell itself; a status not acted on; a value cut out of a record where a file
 carries it; a step out of order; a request, summary or phase body that may carry
-a reserved marker or a mention — the check-in acknowledgement is the one body
-the driver writes with a marker on purpose.
+a reserved marker, or a mention where a pass is already queued or another
+reviewer's round is being closed — the check-in acknowledgement is the one body
+the driver writes with a marker on purpose, and the mention the request and
+round-closing helpers add themselves on the manual path is the trigger, not a
+finding.
 
 ### Comments, claims and prose
 
