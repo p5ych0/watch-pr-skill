@@ -271,10 +271,9 @@ credit use are Codex account and repository settings.
   thirty minutes, and export it.
 - **`ABORT: could not set this session up`.** The `PR_SETUP status=error
   reason=…` line above it says why: the working directory could not be created,
-  the checkout has no usable `origin`, or the storage refused. A storage refusal
-  under `TMPDIR` is retried once under `HOME` where both are usable directories;
-  with only one usable there is one attempt and one status line. If both
-  refused, point `TMPDIR` at a filesystem with room. No such line at all means the helper never got to report: an
+  the checkout has no usable `origin`, or the storage refused. If the storage
+  refused, point `TMPDIR` at a filesystem with room; there is no retry under
+  another parent. No such line at all means the helper never got to report: an
   interrupted run, or an installation missing `pr-setup.sh`. `pr-setup.sh`
   removes nothing it created, deliberately; the origin helper gives back only its
   own empty transport directory when it refuses before writing.

@@ -137,6 +137,21 @@ case "$_mode" in
     drwx------) pass "…at mode 700, so nothing else on the machine reads the session's files" ;;
     *) die "the setup directory is $_mode, not drwx------" ;;
 esac
+# ── the record says which mode the session runs in ────────────────────────
+case "$(out_of "$r")" in
+    *" mode=attended"*) pass "…and with the switch unset the record says mode=attended" ;;
+    *) die "no mode=attended on the ready record: '$r'" ;;
+esac
+r_un="$(WATCH_PR_AUTONOMOUS=1 run --)"
+case "$(out_of "$r_un")" in
+    *" mode=unattended"*) pass "an exported WATCH_PR_AUTONOMOUS=1 gives mode=unattended" ;;
+    *) die "no mode=unattended with the switch exported: '$r_un'" ;;
+esac
+r_yes="$(WATCH_PR_AUTONOMOUS=yes run --)"
+case "$(out_of "$r_yes")" in
+    *" mode=attended"*) pass "…and any other value is attended" ;;
+    *) die "WATCH_PR_AUTONOMOUS=yes was not read as attended: '$r_yes'" ;;
+esac
 
 # ── what the driver gets back ──────────────────────────────────────────────
 # ONE VALUE, READ AS DATA. This wrote a file of twelve assignments the driver SOURCED,
@@ -692,7 +707,7 @@ esac
 _od="$(mktemp -d "$TMP/od.XXXXXX")/dir"
 _out_only="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_od" 2>/dev/null)" || true
 case "$_out_only" in
-    "PR_SETUP status=ready origin=$_od/origin work=$_od/work") pass "stdout carries the ready line and nothing else" ;;
+    "PR_SETUP status=ready origin=$_od/origin work=$_od/work mode=attended") pass "stdout carries the ready line and nothing else" ;;
     *) die "stdout carried something other than the ready line: '$_out_only'" ;;
 esac
 _err_d="$(mktemp -d "$TMP/ed.XXXXXX")/dir"

@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.9.0] — 2026-09-05
+
+- **`SKILL.md` is one command per step.** The document the driver reads on every invocation
+  carried 320 lines of fenced bash in 880, 138 of them the setup block alone, and 92 of them
+  defences against the operator's own shell: names probed for readonly and nameref
+  attributes, containment arms after every `exit`, values read through a held descriptor, a
+  trace diversion, a nonce counter proved by read-back, a two-parent retry and a pin proof.
+  `docs/decisions/2026-09-05-driving-shell-trusted.md` retired that class: a shell hostile
+  enough to redefine `exit` can edit the helpers on disk, so those defences protected against
+  nobody, and every gate and every mutation that matters runs in a privileged helper against
+  GitHub's records. Each step is now one invocation with its statuses in prose. Setup is
+  twelve lines: locate the scripts, run `pr-setup.sh`, read the origin back as data, prove it
+  through the shipped identity parser, derive the working paths. `pr-setup.sh`'s ready record ends
+  `mode=unattended` or `mode=attended`, read from the exported `WATCH_PR_AUTONOMOUS`, so the
+  privileged-child probe fence is gone with it. The nonce stays, one line per request; the
+  reply, reaction and resolve are spelled as the commands they are. The contract test is
+  rewritten around what still matters — every helper started privileged by path and every one
+  used, no fence past one invocation and no hostile-shell shape in any, every fence parsing,
+  the steps in order, every status acted on, the reserved markers, the trailer, the nonce on
+  every watch, setup's handoff read and validated rather than sourced, the unattended answers
+  and the stops they leave alone, the README pins, the reviewer files naming every accepted
+  record and the Copilot copy current — and drops the lifted executions against readonly
+  names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper. A minor
+  release: what a session does at setup changes, and a storage refusal is no longer retried
+  under a second parent. #306.
+
 ## [2.8.0] — 2026-09-05
 
 - **Each probe the watch makes is bounded on its own, and a stalled one is retried.** A watch
