@@ -35,6 +35,7 @@ STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"
 
 INTERVAL="${PR_WATCH_INTERVAL:-30}"
 TIMEOUT="${PR_WATCH_TIMEOUT:-3600}"
+PROBE_TIMEOUT="${PR_WATCH_PROBE_TIMEOUT:-60}"
 PR=""
 WHO=""
 AFTER_REVIEW=""
@@ -79,6 +80,7 @@ esac
 # value beyond the integer range wraps inside the arithmetic below; a zero timeout is kept and expires at once.
 case "$INTERVAL" in 0|0*|*[!0-9]*|""|??????????*) INTERVAL=30 ;; esac
 case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
+case "$PROBE_TIMEOUT" in 0|0*|*[!0-9]*|""|??????????*) PROBE_TIMEOUT=60 ;; esac
 
 # `%q` folds newlines, so nothing a helper prints can forge a `PR_REVIEW_READY` line of its own.
 q() { printf '%q' "$1"; }
@@ -102,8 +104,8 @@ elapsed_s() {
     return 0
 }
 
-# Bounded by the limit the caller took from the deadline, in its own process group so the kill
-# reaches what `gh` spawned; `mktemp`, since a predictable name under `/tmp` can be pre-linked.
+# Bounded by the limit the caller took from the deadline and the per-probe bound, in its own process
+# group so the kill reaches what `gh` spawned; `mktemp`, since a predictable name under `/tmp` can be pre-linked.
 probe() {
     local limit="$1"; shift
     [ "$limit" -gt 0 ] || limit=1
@@ -172,6 +174,27 @@ remaining_s() {
     [ "$r" -lt 1 ] && return 2
     REMAINING="$r"
     return 0
+}
+
+# The smaller of the deadline and the per-probe bound: bounded by the deadline alone, a `gh` stalled
+# on a dead connection ran to it and the watch reported an ordinary timeout with the review already there.
+LIM=0
+probe_limit() {
+    remaining_s || return $?
+    LIM="$REMAINING"
+    [ "$PROBE_TIMEOUT" -lt "$LIM" ] && LIM="$PROBE_TIMEOUT"
+    return 0
+}
+
+# A probe that hit its own bound short of the deadline is retried on a fresh process; one that hit
+# the deadline is the timeout.
+stalled() {
+    [ "$LIM" -lt "$REMAINING" ] || timed_out
+    elapsed_s || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    waited="$ELAPSED"
+    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=probe_stalled probe=%s limit_s=%s waited_s=%s\n' \
+        "$PR" "$WHO" "$1" "$LIM" "$waited"
+    last=""
 }
 
 # Both spellings at once is a refusal rather than a precedence; the file form requires the nonce
@@ -285,11 +308,11 @@ last=""
 while :; do
     # One head per poll, resolved first and passed to both probes: two heads can share a seven-hex
     # prefix, so the records' abbreviated fields cannot prove the probes answered about the same one.
-    remaining_s; rrc=$?; rem="$REMAINING"
+    probe_limit; rrc=$?
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    head="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; hrc=$?
-    [ "$hrc" -eq 124 ] && timed_out
+    head="$(probe "$LIM" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; hrc=$?
+    [ "$hrc" -eq 124 ] && { stalled head; continue; }
     [ "$hrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$hrc" -ne 0 ] || ! is_full_sha "$head"; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_unresolvable rc=%s detail=%s\n' \
@@ -297,11 +320,11 @@ while :; do
         exit 2
     fi
 
-    remaining_s; rrc=$?; rem="$REMAINING"
+    probe_limit; rrc=$?
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    line="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
-    [ "$rc" -eq 124 ] && timed_out
+    line="$(probe "$LIM" /usr/bin/env bash -p "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
+    [ "$rc" -eq 124 ] && { stalled state; continue; }
     [ "$rc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     # Any non-zero status is unreadable, not "still waiting": a missing helper exits 126 or 127.
     if [ "$rc" -ne 0 ]; then
@@ -340,11 +363,11 @@ while :; do
     if [ -n "$AFTER_REVIEW" ]; then
         case "$state" in
             reviewed|blocked|dismissed)
-                remaining_s; rrc=$?; rem="$REMAINING"
+                probe_limit; rrc=$?
                 [ "$rrc" -eq 2 ] && timed_out
                 [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-                cur="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
-                [ "$crc2" -eq 124 ] && timed_out
+                cur="$(probe "$LIM" /usr/bin/env bash -p "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
+                [ "$crc2" -eq 124 ] && { stalled review-id; continue; }
                 [ "$crc2" -ne 0 ] && { echo "PR_REVIEW_WATCH state=error reason=review_id_unreadable" >&2; exit 2; }
                 case "$cur" in
                     "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_review_id" >&2
@@ -375,11 +398,11 @@ while :; do
     fi
     case "$state" in
         reviewed|blocked|dismissed)
-            remaining_s; rrc=$?; rem="$REMAINING"
-    [ "$rrc" -eq 2 ] && timed_out
-    [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-            verdict="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
-            [ "$vrc" -eq 124 ] && timed_out
+            probe_limit; rrc=$?
+            [ "$rrc" -eq 2 ] && timed_out
+            [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+            verdict="$(probe "$LIM" /usr/bin/env bash -p "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
+            [ "$vrc" -eq 124 ] && { stalled verdict; continue; }
             [ "$vrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             # Only 0 and 1 are answers; `PR_REVIEW_READY` is the signal under Monitor, so it is
             # withheld on anything else, whatever the exit status says.
@@ -450,11 +473,11 @@ while :; do
             fi
             # Re-resolved after the verdict: a push landing after the head probe leaves both probes
             # describing the old head, and READY on it advances the driver on a review of code that is gone.
-            remaining_s; rrc=$?; rem="$REMAINING"
-    [ "$rrc" -eq 2 ] && timed_out
-    [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-            head_now="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; nrc=$?
-            [ "$nrc" -eq 124 ] && timed_out
+            probe_limit; rrc=$?
+            [ "$rrc" -eq 2 ] && timed_out
+            [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+            head_now="$(probe "$LIM" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; nrc=$?
+            [ "$nrc" -eq 124 ] && { stalled head; continue; }
             [ "$nrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             if [ "$nrc" -ne 0 ] || ! is_full_sha "$head_now"; then
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_recheck_failed rc=%s detail=%s\n' \

@@ -706,6 +706,54 @@ elapsed=$(( $(date +%s) - start ))
     && pass "…within the configured bound" \
     || die "a 5s timeout took ${elapsed}s with a hanging probe"
 
+# ── a probe that stalls short of the deadline is retried, not run to it ───
+# Bounded by the deadline alone, a `gh` stalled on a dead connection ran to it, and the
+# watch reported an ordinary timeout with the review already on the head (#281). The
+# stub stalls on its first state call only; a bounded watch kills that probe, retries on
+# a fresh process, and reaches the verdict.
+mkstub "$TMP/stall.sh" <<'SH'
+n=$(cat "$STALL_N" 2>/dev/null || echo 0)
+echo $((n + 1)) > "$STALL_N"
+if [ "$1" = "state" ] && [ "$n" -eq 0 ]; then sleep 3600; fi
+if [ "$1" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=findings findings=2\n' "$2" "$3"
+    exit 1
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "$2" "$3"
+exit 0
+SH
+rm -f "$TMP/stall.n"
+start=$(date +%s)
+out="$(STALL_N="$TMP/stall.n" PR_WATCH_PROBE_TIMEOUT=1 PR_WATCH_STATE_SCRIPT="$TMP/stall.sh" \
+       run_limited 60 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 20 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+{ [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
+    && pass "a probe stalled short of the deadline is retried and the watch reaches the verdict" \
+    || die "a stalled probe gave rc=$rc after ${elapsed}s: out='$out'"
+grep -q 'state=probe_stalled probe=state limit_s=1' <<<"$out" \
+    && pass "…and the stall is reported, naming the probe and its bound" \
+    || die "no probe_stalled record for the stalled state probe: $out"
+[ "$elapsed" -le 15 ] \
+    && pass "…having cost the bound rather than the deadline" \
+    || die "a 1s probe bound took ${elapsed}s to recover from a stall"
+# A stall on every call still counts against the deadline: the retry is bounded by it.
+mkstub "$TMP/stall-all.sh" <<'SH'
+sleep 3600
+SH
+start=$(date +%s)
+out="$(PR_WATCH_PROBE_TIMEOUT=1 PR_WATCH_STATE_SCRIPT="$TMP/stall-all.sh" \
+       run_limited 60 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
+    && pass "…and a probe that stalls on every retry still reaches the timeout" \
+    || die "retried stalls escaped the deadline: rc=$rc after ${elapsed}s out='$out'"
+grep -q 'state=probe_stalled' <<<"$out" \
+    && pass "…with the stalls on record" \
+    || die "the stalls before the timeout were not reported: $out"
+[ "$elapsed" -le 15 ] \
+    && pass "…within the configured bound" \
+    || die "a 3s timeout took ${elapsed}s with stalling probes"
+
 # ── a clock that prints and then fails is not a clock ─────────────────────
 # `date` can print a plausible epoch and then exit non-zero, and the elapsed
 # calculation hid that behind its own success — so elapsed time could stay
