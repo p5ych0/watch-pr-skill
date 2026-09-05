@@ -706,6 +706,82 @@ elapsed=$(( $(date +%s) - start ))
     && pass "…within the configured bound" \
     || die "a 5s timeout took ${elapsed}s with a hanging probe"
 
+# ── a probe that stalls short of the deadline is retried, not run to it ───
+cat > "$TMP/stall.sh" <<'SH'
+#!/usr/bin/env bash
+once() { [ -e "$STALL_N.$1" ] && return 1; : > "$STALL_N.$1"; return 0; }
+case "$1" in
+    head)
+        if [ -e "$STALL_N.verdict_answered" ] && once head-recheck; then sleep 3600; fi
+        printf '%s\n' "$HEAD40"; exit 0 ;;
+    state)
+        once state && sleep 3600
+        printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "$2" "$3"; exit 0 ;;
+    review-id)
+        once review-id && sleep 3600
+        printf '99\n'; exit 0 ;;
+    verdict)
+        once verdict && sleep 3600
+        : > "$STALL_N.verdict_answered"
+        printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=findings findings=2\n' "$2" "$3"; exit 1 ;;
+esac
+exit 2
+SH
+chmod +x "$TMP/stall.sh"
+rm -f "$TMP"/stall.n.*
+start=$(date +%s)
+out="$(STALL_N="$TMP/stall.n" PR_WATCH_PROBE_TIMEOUT=1 PR_WATCH_STATE_SCRIPT="$TMP/stall.sh" \
+       run_limited 90 "$SCRIPT" 7 "$BOT" --after-review 5 --interval 1 --timeout 30 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+{ [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
+    && pass "probes stalled short of the deadline are retried and the watch reaches the verdict" \
+    || die "stalled probes gave rc=$rc after ${elapsed}s: out='$out'"
+for _p in state review-id verdict head; do
+    grep -q "state=probe_stalled probe=$_p limit_s=1" <<<"$out" \
+        && pass "…and the stalled $_p probe is reported, naming the probe and its bound" \
+        || die "no probe_stalled record for the stalled $_p probe: $out"
+done
+[ "$(grep -c 'state=probe_stalled' <<<"$out")" -eq 4 ] \
+    && pass "…once each, the head recheck being the head read that stalled" \
+    || die "expected four stall records, one per probe: $out"
+[ "$elapsed" -le 25 ] \
+    && pass "…having cost the bound rather than the deadline" \
+    || die "four 1s probe bounds took ${elapsed}s to recover from"
+# A stall on every call still counts against the deadline: the retry is bounded by it.
+mkstub "$TMP/stall-all.sh" <<'SH'
+sleep 3600
+SH
+start=$(date +%s)
+out="$(PR_WATCH_PROBE_TIMEOUT=1 PR_WATCH_STATE_SCRIPT="$TMP/stall-all.sh" \
+       run_limited 60 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
+    && pass "…and a probe that stalls on every retry still reaches the timeout" \
+    || die "retried stalls escaped the deadline: rc=$rc after ${elapsed}s out='$out'"
+grep -q 'state=probe_stalled' <<<"$out" \
+    && pass "…with the stalls on record" \
+    || die "the stalls before the timeout were not reported: $out"
+[ "$elapsed" -le 15 ] \
+    && pass "…within the configured bound" \
+    || die "a 3s timeout took ${elapsed}s with stalling probes"
+# ── a capped probe that crosses the deadline is the timeout, not a stall ──
+cat > "$TMP/cross.sh" <<SH
+#!/usr/bin/env bash
+[ "\$1" = head ] && { printf '%s\\n' "\$HEAD40"; exit 0; }
+sleep 5
+exec "$REAL_SLEEP" 3600
+SH
+chmod +x "$TMP/cross.sh"
+printf '1754000000\n' > "$TMP/now"
+out="$(run_limited 60 env PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" PR_WATCH_PROBE_TIMEOUT=1 \
+       PR_WATCH_STATE_SCRIPT="$TMP/cross.sh" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
+    && pass "a capped probe that returns with the deadline passed is the timeout" \
+    || die "a probe crossing the deadline gave rc=$rc: out='$out'"
+grep -q 'probe_stalled' <<<"$out" \
+    && die "a probe that crossed the deadline was reported as a stall to retry: $out" \
+    || pass "…and is not reported as a stall first"
+
 # ── a clock that prints and then fails is not a clock ─────────────────────
 # `date` can print a plausible epoch and then exit non-zero, and the elapsed
 # calculation hid that behind its own success — so elapsed time could stay

@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.8.0] — 2026-09-05
+
+- **Each probe the watch makes is bounded on its own, and a stalled one is retried.** A watch
+  on a head that already carried a Codex review reported `state=none` and then an ordinary
+  timeout, twice in a row, while a direct verdict probe on the same head saw the review (#281).
+  Every `gh` call inside the poll loop was bounded only by what remained of the watch's
+  deadline, so a call stalled on a dead connection ran to that deadline and was
+  indistinguishable from a reviewer that had not answered; a propagation lag on GitHub's side
+  would have produced the same output, and the two cannot be told apart in what was recorded.
+  The stall is the one mechanism in the watch that produces exactly that output, and it is
+  closed: each probe — one run of the state helper, which makes several `gh` calls — is now
+  bounded by the smaller of the remaining deadline and `PR_WATCH_PROBE_TIMEOUT` (default 60
+  seconds, a budget for the whole run, the CI gate's precedent), a probe that hits its own
+  bound short of the deadline is killed and retried afresh, and the retry is printed as
+  `state=probe_stalled probe=<which> limit_s=<bound>`, so a stall and a lag read differently
+  next time; `SKILL.md`'s wait step says that line is transient and asks for nothing. A probe
+  after which the deadline has passed is still the timeout, and retried stalls still count
+  against it. `test-pr-watch.sh` stages a helper that stalls once on each of the four probes,
+  the head recheck included, and proves the watch reaches the verdict at the cost of the
+  bounds, and one that stalls on every call and proves it still reaches the timeout. #281.
+
 ## [2.7.0] — 2026-09-05
 
 - **An unattended mode.** The loop stops and asks at four points that are decisions rather
