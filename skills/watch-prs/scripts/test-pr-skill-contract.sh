@@ -5753,9 +5753,9 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     # — which is the regression this round fixed, passing its own check. The two
     # clauses below carry the polarity and the location inside the matched text,
     # so neither edit can be made without failing here.
-    case "$name" in
-        AGENTS.md)
-            req_clauses=(
+    # ONE LIST FOR BOTH FILES: the Copilot copy is generated from the body of AGENTS.md, so the
+    # two cannot differ in wording, and a clause pinned in one is pinned in the other.
+    req_clauses=(
                 '**The loop trusts the `PATH` of the shell it was started from**'
                 'A `PATH` check in one helper is a defect, not a fix'
                 'the input or state that triggers it** — the concrete case, not the category'
@@ -5766,22 +5766,7 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 'A change that offers the pass on an equal-sha head, or that removes the'
                 '**A guard where a removal would do is a finding.**'
                 'The author is required to say **on the thread** which of the two they took and why'
-            ) ;;
-        copilot-instructions.md)
-            req_clauses=(
-                '**The loop trusts the `PATH` of the shell it was started from**'
-                'A `PATH` check in one helper is a defect, not a fix'
-                'Include the input or state that triggers it — **the concrete case, not the category**'
-                'the **consequence** in terms of what this tool does'
-                'the author is expected to assert that consequence in a test'
-                'naming any second copy of the same defect **that this PR also changes**'
-                '**The fault-tolerance pass needs commits to review.**'
-                'A change that offers the pass on an equal-sha head, or that removes the'
-                '**A guard where a removal would do is a finding.**'
-                'The author is required to say **on the thread** which of the two they took and why'
-            ) ;;
-        *) req_clauses=() ;;
-    esac
+    )
     for clause in ${req_clauses+"${req_clauses[@]}"}; do
         grep -qF "$clause" <<<"$flat" \
             && pass "$name: states verbatim — ${clause:0:52}…" \
@@ -5791,6 +5776,25 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
         && pass "$name: a code suggestion is a proposal, not the finding" \
         || die "$name: does not say a code suggestion is only a proposal"
 done
+
+# ── THE COPILOT COPY IS GENERATED, AND IS CURRENT ──────────────────────────
+# Copilot reads only its own file and follows no pointers, so the policy has to be in
+# both files; keeping two copies by hand is how they drifted. The copy is generated from
+# the body of AGENTS.md, and a stale copy is a reviewer judging by rules the other has
+# already lost.
+_gen="$ROOT/.github/build-copilot-instructions.sh"
+if [ -f "$_gen" ]; then
+    _gen_out="$(bash "$_gen" 2>/dev/null)" || _gen_out=""
+    [ -n "$_gen_out" ] \
+        && pass "the Copilot copy generator runs" \
+        || die "the Copilot copy generator failed or printed nothing"
+    _gen_now="$(cat "$ROOT/.github/copilot-instructions.md" 2>/dev/null)" || _gen_now=""
+    [ "$_gen_out" = "$_gen_now" ] \
+        && pass "…and .github/copilot-instructions.md is what it generates from AGENTS.md" \
+        || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh > .github/copilot-instructions.md"
+else
+    die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
+fi
 
 # ── A DRIVER TRACING TO STDOUT DOES NOT REACH A CAPTURE ────────────────────
 #

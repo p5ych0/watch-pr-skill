@@ -5,11 +5,12 @@ here. It is the single source for them, and the other instruction files cite it
 rather than restating it.
 
 Review policy lives in `AGENTS.md`, which Codex reads natively — including in its
-GitHub PR review. Copilot's copy is `.github/copilot-instructions.md`; it
-restates the policy inline because Copilot reads only that file and does not
-follow pointers. That restatement is the one deliberate duplicate in this
-repository. Both are read from the PR's **base ref** by the reviewers, so a pull
-request cannot rewrite the rules it is judged by.
+GitHub PR review. Copilot's copy is `.github/copilot-instructions.md`, generated
+from the body of `AGENTS.md` by `.github/build-copilot-instructions.sh` because
+Copilot reads only that file and does not follow pointers; the contract test
+refuses a copy that is behind, so edit `AGENTS.md`, regenerate, and commit both.
+Both are read from the PR's **base ref** by the reviewers, so a pull request
+cannot rewrite the rules it is judged by.
 
 ## Working rules
 
@@ -944,8 +945,8 @@ rediscovering them.
 
 Three layers, each with one reader, and a behaviour change updates the ones that
 describe it: `SKILL.md` (read by the driving model — the sequence and its stops),
-`AGENTS.md` (read by the reviewers; `.github/copilot-instructions.md` is its copy,
-kept identical in body because Copilot follows no pointers), and `README.md` (the
+`AGENTS.md` (read by the reviewers; `.github/copilot-instructions.md` is generated
+from its body because Copilot follows no pointers), and `README.md` (the
 only document written for a person: what to install, configure, expect and do at
 each stop). Script comments are NOT a documentation layer — they state constraints
 (§ Working rules → Comments); the argument for a change lives in `CHANGELOG.md`,
