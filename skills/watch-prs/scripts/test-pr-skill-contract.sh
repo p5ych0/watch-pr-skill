@@ -5788,19 +5788,22 @@ if [ -f "$_gen" ]; then
     [ "$_gen_out" = "$_gen_now" ] \
         && pass "…and .github/copilot-instructions.md is what it generates from AGENTS.md" \
         || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh > .github/copilot-instructions.md"
-    _gen_tmp="$(mktemp -d)" || die "could not stage a malformed AGENTS.md"
-    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
-        '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
-    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
-    printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
-    for _gen_bad in twice unclosed reversed; do
-        _gen_rc=0
-        bash "$_gen" "$_gen_tmp/$_gen_bad.md" >/dev/null 2>&1 || _gen_rc=$?
-        [ "$_gen_rc" -ne 0 ] \
-            && pass "…and a $_gen_bad marker layout is refused rather than copied with a gap" \
-            || die "the generator emitted a body from a $_gen_bad marker layout; Copilot would read a policy with a silent gap"
-    done
-    rm -rf "$_gen_tmp"
+    if _gen_tmp="$(mktemp_d)"; then
+        printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
+            '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
+        printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
+        printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
+        for _gen_bad in twice unclosed reversed; do
+            _gen_rc=0
+            bash "$_gen" "$_gen_tmp/$_gen_bad.md" >/dev/null 2>&1 || _gen_rc=$?
+            [ "$_gen_rc" -ne 0 ] \
+                && pass "…and a $_gen_bad marker layout is refused rather than copied with a gap" \
+                || die "the generator emitted a body from a $_gen_bad marker layout; Copilot would read a policy with a silent gap"
+        done
+        rm -rf "$_gen_tmp"
+    else
+        die "could not stage a malformed AGENTS.md; the marker-layout cases did not run"
+    fi
 else
     die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
 fi

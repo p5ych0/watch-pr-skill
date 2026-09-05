@@ -68,10 +68,11 @@ against, restated here:
   rule written more than once and then found missing from a copy; a wrapper that
   only delegates is a finding, except the interface wrappers `writelib.sh`
   defines last as its load verification.
-- **Scope is exactly what was asked**, one issue per pull request and one finding
-  per round: an adjacent improvement, an unbroken refactor or a second concern is
-  a finding, and a defect the PR did not introduce is filed rather than fixed. A
-  defect a fix introduced is this round's work.
+- **Scope is exactly what was asked**, one issue per pull request, and a round
+  answers what its findings name and nothing more: an adjacent improvement, an
+  unbroken refactor or a second concern is a finding, and a defect the PR did not
+  introduce is filed rather than fixed. A defect a fix introduced is this round's
+  work.
 - **A behaviour change ships its test in the same PR**, proved to fail against
   the unfixed code; an existing test is never weakened to make a change pass.
 - **Validate at the boundaries** — argv, files crossing a process, `gh` and
