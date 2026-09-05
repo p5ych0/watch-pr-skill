@@ -87,7 +87,8 @@ against, restated here:
 - **A round fixes what the finding names and nothing else**, and the round
   summary says what was skipped as a past-tense disposition and an issue number.
 - **Naming applies to new names only**; an established name keeps its spelling.
-  A new file is `pr-<stage>.sh`, `<area>lib.sh` or `test-<area>.sh`; a function
+  A new file under `skills/watch-prs/scripts/` is `pr-<stage>.sh`,
+  `<area>lib.sh` or `test-<area>.sh`; a function
   a shared library exports is `rb_*` and its private implementation `_rb_*`; a
   helper's own function is a plain name; a driver variable the setup block
   assigns is `RB_*`; a machine record is `PR_<STAGE> status=… reason=…`; a

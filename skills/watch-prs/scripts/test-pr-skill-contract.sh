@@ -5776,33 +5776,52 @@ done
 # Compared against the generator's output rather than against AGENTS.md: the header is the
 # generator's, and a body with a marker pair inside it would compare equal to itself.
 _gen="$ROOT/.github/build-copilot-instructions.sh"
-if [ -f "$_gen" ]; then
-    _gen_out="$(bash "$_gen" 2>/dev/null)" || _gen_out=""
-    [ -n "$_gen_out" ] \
+if [ ! -f "$_gen" ]; then
+    die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
+elif _gen_tmp="$(mktemp_d)"; then
+    # Files and `cmp`, never a command substitution: an assignment drops a NUL, so a copy
+    # differing only by one would compare equal, and a size is what says "nothing emitted".
+    _gen_rc=0
+    bash "$_gen" > "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
         && pass "the Copilot copy generator runs" \
         || die "the Copilot copy generator failed or printed nothing"
-    _gen_now="$(cat "$ROOT/.github/copilot-instructions.md" 2>/dev/null)" || _gen_now=""
-    [ "$_gen_out" = "$_gen_now" ] \
-        && pass "…and .github/copilot-instructions.md is what it generates from AGENTS.md" \
+    cmp -s "$_gen_tmp/out.md" "$ROOT/.github/copilot-instructions.md" \
+        && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
         || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh > .github/copilot-instructions.md"
-    if _gen_tmp="$(mktemp_d)"; then
-        printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
-            '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
-        printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
-        printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
-        for _gen_bad in twice unclosed reversed; do
-            _gen_rc=0
-            _gen_bad_out="$(bash "$_gen" "$_gen_tmp/$_gen_bad.md" 2>/dev/null)" || _gen_rc=$?
-            { [ "$_gen_rc" -ne 0 ] && [ -z "$_gen_bad_out" ]; } \
-                && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
-                || die "a $_gen_bad marker layout exited $_gen_rc with ${#_gen_bad_out} bytes on stdout; redirected, that overwrites the Copilot copy with a partial policy"
-        done
-        rm -rf "$_gen_tmp"
+    { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
+    cmp -s "$_gen_tmp/out.md" "$_gen_tmp/nul.md" \
+        && die "a copy differing from the generated one only by an embedded NUL compares equal" \
+        || pass "…and a copy differing only by an embedded NUL is behind"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
+        '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
+    printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
+    for _gen_bad in twice unclosed reversed; do
+        _gen_rc=0
+        bash "$_gen" "$_gen_tmp/$_gen_bad.md" > "$_gen_tmp/$_gen_bad.out" 2>/dev/null || _gen_rc=$?
+        { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/$_gen_bad.out" ]; } \
+            && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
+            || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
+    done
+    # A FIFO hands a well-formed source to the first open and something else to a second, so a
+    # generator that validates on one read and emits from another emits the wrong thing.
+    if mkfifo "$_gen_tmp/once" 2>/dev/null; then
+        ( printf '%s\n' '<!-- copilot-body-start -->' 'one open' '<!-- copilot-body-end -->' > "$_gen_tmp/once"
+          printf '%s\n' 'second open' > "$_gen_tmp/once" ) 2>/dev/null &
+        _gen_w=$!
+        _gen_rc=0
+        run_limited 20 bash "$_gen" "$_gen_tmp/once" > "$_gen_tmp/once.out" 2>/dev/null || _gen_rc=$?
+        kill "$_gen_w" 2>/dev/null || true; wait "$_gen_w" 2>/dev/null || true
+        { [ "$_gen_rc" -eq 0 ] && grep -q 'one open' "$_gen_tmp/once.out" && ! grep -q 'second open' "$_gen_tmp/once.out"; } \
+            && pass "…and the source is read once, so a source that changes between opens is emitted as validated" \
+            || die "the generator read its source more than once (rc=$_gen_rc); a source rewritten between opens is validated as one thing and emitted as another"
     else
-        die "could not stage a malformed AGENTS.md; the marker-layout cases did not run"
+        die "could not stage a FIFO source; the single-read case did not run"
     fi
+    rm -rf "$_gen_tmp"
 else
-    die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
+    die "could not stage the generator cases; none of them ran"
 fi
 
 # ── A DRIVER TRACING TO STDOUT DOES NOT REACH A CAPTURE ────────────────────

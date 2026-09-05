@@ -32,7 +32,8 @@ below is the long form.
 **Naming — for NEW names only.** Established names keep their spelling whatever it is
 (§ Code style): `sha_reason`, `run_limited`, `rb_setup_stop`, `CODEX_BOT` are all correct
 as they stand, and this rule never asks for a rename. For a name that does not exist yet:
-files `pr-<stage>.sh`, `<area>lib.sh`, `test-<area>.sh`; a function a shared library
+files under `skills/watch-prs/scripts/` are `pr-<stage>.sh`, `<area>lib.sh`,
+`test-<area>.sh`; a function a shared library
 exports `rb_*`, its private implementation `_rb_*`; a helper's own function a plain name;
 a driver variable the setup block assigns and probes `RB_*`; machine records
 `PR_<STAGE> status=… reason=…`; decision records `docs/decisions/YYYY-MM-DD-<slug>.md`.
