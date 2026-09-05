@@ -211,9 +211,12 @@ truncates an operator's file outside the session. When reviewing a change there:
   walked-past refusal is refused. The nonce is distinct by construction: a
   `perl` prefix whose width every generation path validates as twenty-three
   digits, with the per-session counter `RB_NONCE_SEQ` appended and its increment
-  proved by read-back. A watch on an unnonced file, a writer dropping the prefix,
-  a compatibility arm, a source without the width check, or an increment without
-  its read-back is the defect. Every baseline write stays **before** its request, on every
+  proved by read-back; `RB_NONCE` and `RB_NONCE_SEQ` are probed at setup like
+  every name the driver assigns, since a readonly `RB_NONCE` predefined by a
+  startup file would serve one nonce to every round. A watch on an unnonced
+  file, a writer dropping the prefix, a compatibility arm, a source without the
+  width check, a nonce name without its setup probe, or an increment without its
+  read-back is the defect. Every baseline write stays **before** its request, on every
   request path: after the request there is nothing left to refuse with, and a
   request that fails after the write leaves this round's nonce and id, which is
   not a fail-open. A write moved after its request is the defect;
@@ -333,7 +336,10 @@ finding. The accepted records:
   error; the **base branch is confirmed either side** of that read, so a retarget
   is `stale` rather than an answer, and a ruleset's
   `strict_required_status_checks_policy` is enforced, refusing a head behind its
-  base as `status=behind`; a ruleset rule gating the merge on something the probe
+  base as `status=behind`, while classic protection keeps `strict` on the
+  admin-only endpoint, so there it cannot be read and the default path does not
+  enforce it — an accepted gap whose answer is `REVIEW_MERGE_STRICT=1`, not a
+  probe the API does not offer; a ruleset rule gating the merge on something the probe
   cannot read — `workflows`, `code_scanning`, `required_deployments` and the rest —
   refuses in both modes, `merge_queue` under strict mode being the one exception;
   the **reviewed-range gate** licenses every commit between the head
@@ -356,7 +362,10 @@ finding. The accepted records:
   directory, lost or left behind.
 - `docs/decisions/2026-08-29-setup-leaf-cleanup.md`: `pr-setup.sh` removes
   nothing, since every removal resolves a name after the check that preceded it;
-  a fixture asserts the file contains no removal. `pr-origin.sh read` gives back
+  a fixture asserts the file contains no removal. The one handler that stays is
+  an `INT` re-raise, which removes nothing and must: without it a non-interactive
+  shell survives an interrupt delivered while it waits on a child and publishes
+  `status=ready` for a run the operator stopped. `pr-origin.sh read` gives back
   only its own empty transport directory on its own refusal.
 - `docs/decisions/2026-09-01-origin-cleanup-races.md`: `pr-origin.sh`'s cleanup
   is `rmdir` alone, so a refusal leaves a non-empty reservation behind; nothing

@@ -5789,11 +5789,16 @@ elif _gen_tmp="$(mktemp_d)"; then
     }
     _gen_current "$ROOT/.github/copilot-instructions.md" \
         && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
-        || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh > .github/copilot-instructions.md"
+        || die "the Copilot copy is behind AGENTS.md; run .github/build-copilot-instructions.sh AGENTS.md .github/copilot-instructions.md"
     { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
     _gen_current "$_gen_tmp/nul.md" \
         && die "a copy differing from the generated one only by an embedded NUL passes the currentness check" \
         || pass "…and a copy differing only by an embedded NUL is behind"
+    _gen_rc=0
+    bash "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/installed.md" >/dev/null 2>&1 || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/installed.md"; } \
+        && pass "…and the destination form installs the same bytes" \
+        || die "the destination form exited $_gen_rc or installed different bytes from the stdout form"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
         '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
@@ -5804,6 +5809,13 @@ elif _gen_tmp="$(mktemp_d)"; then
         { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/$_gen_bad.out" ]; } \
             && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
             || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
+        printf '%s\n' 'the copy that was there' > "$_gen_tmp/$_gen_bad.dest"
+        cp "$_gen_tmp/$_gen_bad.dest" "$_gen_tmp/$_gen_bad.keep"
+        _gen_rc=0
+        bash "$_gen" "$_gen_tmp/$_gen_bad.md" "$_gen_tmp/$_gen_bad.dest" >/dev/null 2>&1 || _gen_rc=$?
+        { [ "$_gen_rc" -ne 0 ] && cmp -s "$_gen_tmp/$_gen_bad.dest" "$_gen_tmp/$_gen_bad.keep"; } \
+            && pass "…and the destination form leaves an existing copy untouched on a $_gen_bad layout" \
+            || die "the destination form exited $_gen_rc and changed an existing copy on a $_gen_bad layout"
     done
     # A FIFO gives a second open different contents, which a single read never sees.
     if mkfifo "$_gen_tmp/once" 2>/dev/null; then

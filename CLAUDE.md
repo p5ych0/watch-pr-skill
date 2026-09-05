@@ -8,7 +8,9 @@ Review policy lives in `AGENTS.md`, which Codex reads natively — including in 
 GitHub PR review. Copilot's copy is `.github/copilot-instructions.md`, generated
 from the body of `AGENTS.md` by `.github/build-copilot-instructions.sh` because
 Copilot reads only that file and does not follow pointers; the contract test
-refuses a copy that is behind, so edit `AGENTS.md`, regenerate, and commit both.
+refuses a copy that is behind, so edit `AGENTS.md`, regenerate with
+`.github/build-copilot-instructions.sh AGENTS.md .github/copilot-instructions.md`,
+and commit both.
 Both are read from the PR's **base ref** by the reviewers, so a pull request
 cannot rewrite the rules it is judged by.
 
