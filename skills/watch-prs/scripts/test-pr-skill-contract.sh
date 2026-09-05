@@ -5707,10 +5707,7 @@ for doc in "$SKILL" "$SCRIPT_DIR/../../../CLAUDE.md" "$SCRIPT_DIR/../../../READM
 done
 
 # ── both reviewer files carry the same context and finding-quality rules ───
-# `.github/copilot-instructions.md` restates the policy inline because Copilot
-# reads only that file and does not follow pointers, so a rule added to AGENTS.md
-# alone reaches one reviewer of two. That asymmetry is the documented reason the
-# duplicate exists, which makes it exactly the thing that drifts.
+# A clause outside the generated body of AGENTS.md reaches one reviewer of two.
 for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilot-instructions.md"; do
     [ -f "$doc" ] || { die "missing reviewer instruction file: $doc"; continue; }
     name="$(basename "$doc")"
@@ -5753,9 +5750,7 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     # — which is the regression this round fixed, passing its own check. The two
     # clauses below carry the polarity and the location inside the matched text,
     # so neither edit can be made without failing here.
-    case "$name" in
-        AGENTS.md)
-            req_clauses=(
+    req_clauses=(
                 '**The loop trusts the `PATH` of the shell it was started from**'
                 'A `PATH` check in one helper is a defect, not a fix'
                 'the input or state that triggers it** — the concrete case, not the category'
@@ -5766,22 +5761,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 'A change that offers the pass on an equal-sha head, or that removes the'
                 '**A guard where a removal would do is a finding.**'
                 'The author is required to say **on the thread** which of the two they took and why'
-            ) ;;
-        copilot-instructions.md)
-            req_clauses=(
-                '**The loop trusts the `PATH` of the shell it was started from**'
-                'A `PATH` check in one helper is a defect, not a fix'
-                'Include the input or state that triggers it — **the concrete case, not the category**'
-                'the **consequence** in terms of what this tool does'
-                'the author is expected to assert that consequence in a test'
-                'naming any second copy of the same defect **that this PR also changes**'
-                '**The fault-tolerance pass needs commits to review.**'
-                'A change that offers the pass on an equal-sha head, or that removes the'
-                '**A guard where a removal would do is a finding.**'
-                'The author is required to say **on the thread** which of the two they took and why'
-            ) ;;
-        *) req_clauses=() ;;
-    esac
+                'asserts the invariant, not the version'
+    )
     for clause in ${req_clauses+"${req_clauses[@]}"}; do
         grep -qF "$clause" <<<"$flat" \
             && pass "$name: states verbatim — ${clause:0:52}…" \
@@ -5791,6 +5772,84 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
         && pass "$name: a code suggestion is a proposal, not the finding" \
         || die "$name: does not say a code suggestion is only a proposal"
 done
+
+# ── THE COPILOT COPY IS GENERATED, AND IS CURRENT ──────────────────────────
+# Compared against the generator's output, since the header is the generator's and not AGENTS.md's.
+_gen="$ROOT/.github/build-copilot-instructions.sh"
+if [ ! -f "$_gen" ]; then
+    die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
+elif _gen_tmp="$(mktemp_d)"; then
+    # Files and `cmp`, never a command substitution: an assignment drops a NUL.
+    _gen_rc=0
+    "$_gen" > "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
+        && pass "the Copilot copy generator runs" \
+        || die "the Copilot copy generator failed or printed nothing"
+    cmp -s "$_gen_tmp/out.md" "$ROOT/.github/copilot-instructions.md" \
+        && pass "…and .github/copilot-instructions.md is byte-for-byte what it generates from AGENTS.md" \
+        || die "the Copilot copy is behind AGENTS.md; regenerate it as CLAUDE.md says"
+    { cat "$_gen_tmp/out.md"; printf '\0'; } > "$_gen_tmp/nul.md"
+    _gen_rc=0
+    cmp -s "$_gen_tmp/out.md" "$_gen_tmp/nul.md" || _gen_rc=$?
+    case "$_gen_rc" in
+        1) pass "…and a copy differing only by an embedded NUL is behind" ;;
+        0) die "a copy differing from the generated one only by an embedded NUL passes the currentness check" ;;
+        *) die "the currentness check could not read the NUL candidate (rc=$_gen_rc); the case proves nothing" ;;
+    esac
+    _gen_rc=0
+    "$_gen" "$ROOT/AGENTS.md" extra > "$_gen_tmp/two.out" 2>/dev/null || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/two.out" ]; } \
+        && pass "…and a second argument is refused with nothing emitted" \
+        || die "a two-argument call exited $_gen_rc with output on stdout"
+    _gen_rc=0
+    "$_gen" "" > "$_gen_tmp/empty.out" 2>/dev/null || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/empty.out" ]; } \
+        && pass "…and an empty source operand is refused rather than read as the default" \
+        || die "an empty source operand exited $_gen_rc with output on stdout"
+    mkdir -p "$_gen_tmp/dash" && cp "$ROOT/AGENTS.md" "$_gen_tmp/dash/-"
+    _gen_rc=0
+    (cd "$_gen_tmp/dash" && "$_gen" - > "$_gen_tmp/dash.out" 2>/dev/null) || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/dash.out"; } \
+        && pass "…and a source named - is read as a file, never as stdin" \
+        || die "a source named - exited $_gen_rc or emitted something other than the copy"
+    mkdir -p "$_gen_tmp/cdtrap/.github"
+    _gen_rc=0
+    (cd "$ROOT" && CDPATH="$_gen_tmp/cdtrap" .github/build-copilot-instructions.sh > "$_gen_tmp/cdpath.out" 2>/dev/null) || _gen_rc=$?
+    { [ "$_gen_rc" -eq 0 ] && cmp -s "$_gen_tmp/out.md" "$_gen_tmp/cdpath.out"; } \
+        && pass "…and the documented relative invocation survives a CDPATH holding another .github" \
+        || die "under a CDPATH holding another .github the relative invocation exited $_gen_rc or emitted something else"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
+        '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
+    printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
+    printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
+    for _gen_bad in twice unclosed reversed; do
+        _gen_rc=0
+        "$_gen" "$_gen_tmp/$_gen_bad.md" > "$_gen_tmp/$_gen_bad.out" 2>/dev/null || _gen_rc=$?
+        { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/$_gen_bad.out" ]; } \
+            && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
+            || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
+    done
+    # A second open of the pathname cannot reproduce the one-open output, and a single read never makes one.
+    if mkfifo "$_gen_tmp/once.a" "$_gen_tmp/once.b" 2>/dev/null && ln -s "$_gen_tmp/once.a" "$_gen_tmp/once"; then
+        ( printf '%s\n' '<!-- copilot-body-start -->' 'one open' '<!-- copilot-body-end -->' > "$_gen_tmp/once.a"
+          ln -sf "$_gen_tmp/once.b" "$_gen_tmp/once"
+          printf '%s\n' 'second open' > "$_gen_tmp/once.b" ) 2>/dev/null &
+        _gen_w=$!
+        _gen_rc=0
+        run_limited 20 "$_gen" "$_gen_tmp/once" > "$_gen_tmp/once.out" 2>/dev/null || _gen_rc=$?
+        kill "$_gen_w" 2>/dev/null || true; wait "$_gen_w" 2>/dev/null || true
+        _gen_second=0
+        grep -q 'second open' "$_gen_tmp/once.out" || _gen_second=$?
+        { [ "$_gen_rc" -eq 0 ] && grep -q 'one open' "$_gen_tmp/once.out" && [ "$_gen_second" -eq 1 ]; } \
+            && pass "…and the source is read once, so a source that changes between opens is emitted as validated" \
+            || die "the generator read its source more than once, or the probe could not read its output (rc=$_gen_rc, second-open grep rc=$_gen_second)"
+    else
+        die "could not stage a FIFO source; the single-read case did not run"
+    fi
+    rm -rf "$_gen_tmp"
+else
+    die "could not stage the generator cases; none of them ran"
+fi
 
 # ── A DRIVER TRACING TO STDOUT DOES NOT REACH A CAPTURE ────────────────────
 #
