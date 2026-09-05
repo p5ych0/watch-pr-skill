@@ -42,7 +42,8 @@ keep finding defects in the *fixes* usually mean the change is too large.
 - **`git`, `gh`, `jq`, `perl`.** `gh` must be authenticated with the `repo` scope
   (`gh auth status`). `perl` is a hard requirement: the helpers hand values to
   each other in files, and the shell has no safe spelling of the exclusive create
-  and exact rename that takes. macOS and every common Linux distribution ship it.
+  and exact rename that takes. macOS ships it; on Linux, install it if your
+  distribution does not.
 - **The Codex GitHub connector**, linked once per account at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
   Until it is linked, `@codex` replies with a setup link instead of a review.
@@ -88,9 +89,10 @@ Install once at user scope. To update:
 3. On the Codex **Code review** settings page, turn **Automatic review off** for
    the repository. The `@codex review` mention is then the only trigger, each
    round is requested deliberately, and a red head stops the round before
-   anything is resolved or posted. With automatic review on, every push also
-   queues a pass, the summary has to follow the push, and each round costs
-   two Codex passes instead of one.
+   anything is resolved or posted. With automatic review on and its review
+   trigger set to every push, the push queues the pass, the summary has to
+   follow the push, and each round costs two Codex passes instead of one; the
+   loop supports no other automatic combination.
 
    **Exhaustive review** keeps looking after the first problem and is worth
    leaving on. For a repository that can be reviewed statically, as this one of
@@ -116,7 +118,9 @@ for their own checkout.
 Invoke the skill with `/watch-pr-skill:watch-prs` from a checkout of the
 repository, on the PR's branch. The session pins itself to that repository's
 `origin` at the start, so changing directory later does not retarget anything;
-to work on another repository, start a new session.
+to work on another repository, start a new session. The loop drives
+same-repository pull requests only: a PR whose head is in a fork is refused at
+the first push.
 
 ### The Codex phase
 
@@ -128,9 +132,10 @@ on the thread with evidence rather than changing code to satisfy it. Each fix
 commit is proved to fail without the fix; where that cannot be constructed, the
 session writes the limitation at the site and **stops for you**.
 
-Before closing a round the session runs the pre-push self-check, then it must
-check the round boundary, since with automatic review on the push itself is the
-next request. It then hands the closing to `pr-close-round.sh`, which runs in
+Before closing a round the session runs this plugin's own pre-push self-check,
+which reports "not applicable" in any other repository and checks nothing of
+your project (your CI does that), then it must check the round boundary, since
+with automatic review on the push itself is the next request. It then hands the closing to `pr-close-round.sh`, which runs in
 two stages with the thread replies between them: the push, then the CI gate,
 which waits for that head's checks on the runner and lets the round close on
 green or on no checks configured, never on red or pending; then the replies and
@@ -158,8 +163,9 @@ The loop stops and asks at these points:
 4. **Codex is clean.** Merge on that signoff alone, or open the Copilot phase on
    the same head. The Codex-only merge is the narrower gate, not a looser one: it
    requires the head to *be* the commit Codex signed.
-5. **Copilot is clean.** Merge, or, only if the Copilot phase produced commits,
-   ask Codex once more as fault tolerance over what it changed. Where the phase
+5. **Copilot is clean.** Merge, leave the PR open, or, only if the Copilot
+   phase produced commits, ask Codex once more as fault tolerance over what it
+   changed. Where the phase
    produced no commits, both signoffs name the same head and the pass is not
    offered.
 
