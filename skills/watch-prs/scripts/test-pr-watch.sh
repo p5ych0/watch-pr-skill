@@ -707,8 +707,6 @@ elapsed=$(( $(date +%s) - start ))
     || die "a 5s timeout took ${elapsed}s with a hanging probe"
 
 # ── a probe that stalls short of the deadline is retried, not run to it ───
-# One stall per command, and the head recheck after a verdict is the head read that
-# stalls, so every probe in the loop is reached once stalled and once answered.
 cat > "$TMP/stall.sh" <<'SH'
 #!/usr/bin/env bash
 once() { [ -e "$STALL_N.$1" ] && return 1; : > "$STALL_N.$1"; return 0; }
@@ -766,6 +764,25 @@ grep -q 'state=probe_stalled' <<<"$out" \
 [ "$elapsed" -le 15 ] \
     && pass "…within the configured bound" \
     || die "a 3s timeout took ${elapsed}s with stalling probes"
+# ── a capped probe that crosses the deadline is the timeout, not a stall ──
+# The stub moves the fake clock past the deadline and then holds the probe to its cap
+# with the real sleep, so the 124 comes back with the watch already expired.
+cat > "$TMP/cross.sh" <<SH
+#!/usr/bin/env bash
+[ "\$1" = head ] && { printf '%s\\n' "\$HEAD40"; exit 0; }
+sleep 5
+exec "$REAL_SLEEP" 3600
+SH
+chmod +x "$TMP/cross.sh"
+printf '1754000000\n' > "$TMP/now"
+out="$(run_limited 60 env PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" PR_WATCH_PROBE_TIMEOUT=1 \
+       PR_WATCH_STATE_SCRIPT="$TMP/cross.sh" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
+    && pass "a capped probe that returns with the deadline passed is the timeout" \
+    || die "a probe crossing the deadline gave rc=$rc: out='$out'"
+grep -q 'probe_stalled' <<<"$out" \
+    && die "a probe that crossed the deadline was reported as a stall to retry: $out" \
+    || pass "…and is not reported as a stall first"
 
 # ── a clock that prints and then fails is not a clock ─────────────────────
 # `date` can print a plausible epoch and then exit non-zero, and the elapsed
