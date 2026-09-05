@@ -5707,10 +5707,7 @@ for doc in "$SKILL" "$SCRIPT_DIR/../../../CLAUDE.md" "$SCRIPT_DIR/../../../READM
 done
 
 # ── both reviewer files carry the same context and finding-quality rules ───
-# `.github/copilot-instructions.md` is generated from the body of AGENTS.md, because
-# Copilot reads only its own file and follows no pointers. Both are inspected here
-# because each reviewer reads only one of them: a clause outside the generated body
-# reaches one reviewer of two.
+# A clause outside the generated body of AGENTS.md reaches one reviewer of two.
 for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilot-instructions.md"; do
     [ -f "$doc" ] || { die "missing reviewer instruction file: $doc"; continue; }
     name="$(basename "$doc")"
