@@ -3,10 +3,11 @@
 **A team-grade code-review rhythm for solo developers.** You write the code;
 GitHub's own reviewers, **Codex** and **Copilot**, review every pull request, and
 **Claude Code** works the fix → reply → resolve → re-request loop until they sign
-off. Then it stops and asks you before anything irreversible: opening the second
-reviewer's phase, and merging.
+off. Then it stops and asks you before opening the second reviewer's phase, and
+again before merging.
 
-One install serves every project on your machine. Nothing runs in the background.
+One install serves every project on your machine. No daemon: nothing keeps
+running between sessions.
 
 ## What it does
 
@@ -52,9 +53,11 @@ keep finding defects in the *fixes* usually mean the change is too large.
 - **Claude Code.** Both reviewers run in GitHub's cloud; nothing is installed for
   them here.
 
-Works on Linux and macOS. Running a helper by hand needs an `env` that supports
-`-S` (GNU coreutils 8.30 or later, or BSD `env`); the skill itself never depends
-on it.
+Works on Linux and macOS. Running one of the privileged helpers by hand goes
+through its `#!/usr/bin/env -S bash -p` shebang and needs an `env` that supports
+`-S` (GNU coreutils 8.30 or later, or BSD `env`). The skill itself never depends
+on it, `pr-selfcheck.sh` does not use it, and `pr-origin.sh` cannot be run by
+hand at all.
 
 ## Install
 
@@ -90,8 +93,9 @@ Install once at user scope. To update:
    two Codex passes instead of one.
 
    **Exhaustive review** keeps looking after the first problem and is worth
-   leaving on. If the repository has a Codex environment with a setup script or
-   dependency installation, remove it: a review of source needs no build.
+   leaving on. For a repository that can be reviewed statically, as this one of
+   shell and Markdown can, a Codex environment with a setup script or dependency
+   installation only slows the pass; remove it there.
 
 ### Watching without prompts
 
@@ -127,16 +131,17 @@ session writes the limitation at the site and **stops for you**.
 Before closing a round the session runs the pre-push self-check, then it must
 check the round boundary, since with automatic review on the push itself is the
 next request. It then hands the closing to `pr-close-round.sh`, which runs in
-two stages with the thread replies between them: the push, then the CI gate
-proving that head green on the runner, then the replies and resolves, then the
-summary comment that carries the next request. The summary says what was
+two stages with the thread replies between them: the push, then the CI gate,
+which waits for that head's checks on the runner and lets the round close on
+green or on no checks configured, never on red or pending; then the replies and
+resolves, then the summary comment that carries the next request. The summary says what was
 addressed and what was intentionally skipped, as a past-tense disposition and an
 issue number, because it shares a comment with the review request and a request
 that describes work to be done is treated as one.
 
 ### The stops
 
-The loop decides nothing irreversible on its own. It stops and asks:
+The loop stops and asks at these points:
 
 1. **A review that is only replies.** Reviewers sometimes deliver a clean
    verdict, or a retraction, as a reply. Nothing in the text separates the two,
@@ -168,7 +173,8 @@ The loop decides nothing irreversible on its own. It stops and asks:
    on its own, because any comment containing that text requests a pass.
 
 Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
-the head and the time of the verdict it answers, so a decision that arrives
+the head and, where the phase could read it, the time of the verdict it
+answers, so a decision that arrives
 tomorrow, or on another machine, costs nothing already done. A new session
 reads the records back and resumes from the right stop.
 
@@ -195,8 +201,8 @@ decide.
 
 ## Configuration
 
-Set these in the shell you start the session from; the driver exports them to the
-helpers, which run as separate processes.
+**Export** these in the shell you start the session from. The helpers run as
+separate processes, and a value merely assigned in your shell never reaches them.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -237,7 +243,10 @@ credit use are Codex account and repository settings.
   reason=…` line above it says why: the working directory could not be created,
   the checkout has no usable `origin`, or the storage refused. A storage refusal
   is retried once under `HOME`; if both refused, point `TMPDIR` at a filesystem
-  with room. Whatever a refused run created is left where it is, deliberately.
+  with room. No such line at all means the helper never got to report: an
+  interrupted run, or an installation missing `pr-setup.sh`. `pr-setup.sh`
+  removes nothing it created, deliberately; the origin helper gives back only its
+  own empty transport directory when it refuses before writing.
 - **Setup says the pinned remote is not this checkout's origin.** The origin is
   read twice, once to obtain it and once to confirm it, and the two disagreed:
   `origin` or the git configuration resolving it changed mid-setup. Re-run.
@@ -264,12 +273,15 @@ skills/watch-prs/scripts/pr-selfcheck.sh
 It proves every variable the driver uses is assigned, every script parses and
 has a test, no fixture races a `printf` into `grep`, and the whole suite passes.
 CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
-mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool fails there
-before it reaches a macOS contributor.
+mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the
+suite executes fails there before it reaches a macOS contributor. A path the
+suite never takes, a GNU-only flag on a command both platforms have, and `\s` in
+a `grep` pattern are review's job.
 
 Every behaviour change ships its test in the same PR, proved to fail against the
 unfixed code; every change to an installed file bumps the version and adds a
-changelog entry explaining the failure it fixes. One issue per PR.
+changelog entry, explaining the failure it fixes or, for a comment-only change,
+what the comment now records. One issue per PR.
 
 ## License
 
