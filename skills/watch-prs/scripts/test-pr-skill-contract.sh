@@ -265,7 +265,6 @@ else
 fi
 
 # ── a valid origin that is not this checkout's is refused by the pin ──────
-# The stub hands over another repository under the same owner; the real pin re-reads the checkout.
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the replaced-origin case"
 elif _sw="$(mktemp_d)" && mkdir -p "$_sw/skills/watch-prs/scripts" \

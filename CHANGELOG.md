@@ -6,7 +6,9 @@
   carried 320 lines of fenced bash in 880, 138 of them the setup block alone, and 92 of them
   defences against the operator's own shell: names probed for readonly and nameref
   attributes, containment arms after every `exit`, values read through a held descriptor, a
-  trace diversion, a nonce counter proved by read-back, a two-parent retry and a pin proof.
+  trace diversion, a nonce counter proved by read-back. The retry under `HOME` and the pin
+  proof stay, each one line now: they answer the working directory and the checkout, not
+  the shell.
   `docs/decisions/2026-09-05-driving-shell-trusted.md` retired that class: a shell hostile
   enough to redefine `exit` can edit the helpers on disk, so those defences protected against
   nobody, and every gate and every mutation that matters runs in a privileged helper against

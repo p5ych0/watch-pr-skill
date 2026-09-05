@@ -279,8 +279,12 @@ credit use are Codex account and repository settings.
   deliberately; the origin helper gives back only its own empty transport
   directory when it refuses before writing.
 - **`ABORT: the origin read back is not a usable identity`.** Setup wrote the
-  origin, but it is not a GitHub network transport the loop can address. Fix
-  `origin` and re-run.
+  origin, but it is not a GitHub network transport the loop can address, or it
+  spans more than one line. Fix `origin` and re-run.
+- **`ABORT: the pin is not this checkout's origin`.** The origin read back from
+  setup's file and the checkout's `origin` disagree: `origin` or the git
+  configuration resolving it changed mid-setup, or the file was replaced after
+  setup wrote it. Nothing was addressed. Re-run.
 - **Reviews go to the wrong repository.** The session is pinned to the `origin`
   of the checkout it started in. Start a new session in the intended checkout.
 - **A stale review after a push.** The merge gate refuses a moved head. Post a
