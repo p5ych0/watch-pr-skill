@@ -75,7 +75,7 @@ shape="$(grep -nE 'RbProbe|\[\[ -n "" \]\]|\[\[ -n x \]\]|9<|/dev/fd/9|readonly|
     && pass "…and no hostile-shell shape is left in a fence" \
     || die "a driving-shell defence is back: $shape"
 n="$(grep -c '^```bash$' "$SKILL")"
-[ "$n" -le 18 ] \
+[ "$n" -le 20 ] \
     && pass "…and the document holds $n fences" \
     || die "the document has grown to $n fences"
 i=0
@@ -89,8 +89,12 @@ done < <(awk '/^```bash$/{f=1; print; next} /^```$/{ if (f) print; f=0; next } f
 for f in "$TMP"/fence.*; do
     bash -n "$f" 2>/dev/null \
         || die "fence ${f##*.} does not parse: $(bash -n "$f" 2>&1 | head -1)"
+    # One helper per fence, so a status is never another invocation's; setup's retry is the exception.
+    c="$(grep -c 'bash -p "$RB_SCRIPTS"/pr-' "$f" || true)"
+    lim=1; [ "${f##*.}" -eq 1 ] && lim=2
+    [ "$c" -le "$lim" ] || die "fence ${f##*.} invokes $c helpers; one per step"
 done
-pass "every fence parses"
+pass "every fence parses, and none but setup invokes more than one helper"
 
 # ── the steps are in order ────────────────────────────────────────────────
 before 'pr-setup.sh "$RB_SETUP_DIR"' 'pr-request-review.sh N' \
@@ -153,7 +157,8 @@ hasf '`@codex review` anywhere in the body' && has 'Write the mention without th
     || die "the mention refusal is not documented"
 has 'Review-Pause-Acknowledged:** `%s` `%s`' \
     && pass "the acknowledgement names the reviewer and the count" || die "the acknowledgement template is gone"
-grep -F 'Review-Pause-Acknowledged:** `%s` `%s`' <<<"$fences" | grep -q 'ABORT: the acknowledgement was not recorded' \
+ack="$(grep -F 'Review-Pause-Acknowledged:** `%s` `%s`' <<<"$fences" || true)"
+grep -q 'ABORT: the acknowledgement was not recorded' <<<"$ack" \
     && pass "…and a failed acknowledgement is a stop before any request or retry" || die "a failed acknowledgement has no stop"
 has 'as a past-tense disposition' \
     && pass "the summary is a record, not a work order" || die "the disposition rule is gone"
@@ -167,7 +172,8 @@ grep -q '/replies" -f body=' <<<"$fences" && grep -q "/reactions\" -f content='+
     || die "the thread answer is not spelled out"
 
 # ── the phase trailer is documented as a trailer ──────────────────────────
-grep -A1 -F 'Review-Phase: copilot' "$SKILL" | grep -q 'Co-Authored-By' \
+trailer="$(grep -A1 -F 'Review-Phase: copilot' "$SKILL" || true)"
+grep -q 'Co-Authored-By' <<<"$trailer" \
     && pass "the trailer sits in the last paragraph beside Co-Authored-By" \
     || die "the trailer is not shown in a trailer block"
 
@@ -176,15 +182,16 @@ bad="$(grep -F 'pr-watch.sh N' <<<"$fences" | grep -v -F -- '--after-review-file
 [ -z "$bad" ] && pass "every watch carries the baseline file and the nonce" || die "a watch runs without its baseline or nonce: $bad"
 [ "$(grep -c -F 'RB_NONCE="$(perl -e' <<<"$fences")" -ge 3 ] \
     && pass "…and the nonce is generated afresh before each request" || die "a request reuses a nonce"
-grep -F -- '--nonce' <<<"$fences" | grep -v -F -- '--nonce "$RB_NONCE"' | grep -v -F -- '--require-nonce "$RB_NONCE"' | grep -q . \
-    && die "a nonce is passed as something other than \$RB_NONCE" \
+odd="$(grep -F -- '--nonce' <<<"$fences" | grep -v -F -- '--nonce "$RB_NONCE"' | grep -v -F -- '--require-nonce "$RB_NONCE"' || true)"
+[ -n "$odd" ] \
+    && die "a nonce is passed as something other than \$RB_NONCE: $odd" \
     || pass "…and only \$RB_NONCE is ever passed"
 
 # ── setup hands over data, and the driver validates it ────────────────────
 grep -qF 'export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"' <<<"$fences" \
     && pass "the origin is read as data and exported as the pin" || die "the pin is not read from setup's origin file"
-grep -qE '^\[ -n "\$REVIEW_BUS_REMOTE" \] && rb_identity' <<<"$fences" \
-    && pass "…and validated by the parser before anything uses it" || die "the origin is used unvalidated"
+grep -qE '^\[ -n "\$REVIEW_BUS_REMOTE" \] && \[\[ \$REVIEW_BUS_REMOTE != \*\$'"'"'\\n'"'"'\* \]\] && rb_identity' <<<"$fences" \
+    && pass "…and validated as one line by the parser before anything uses it" || die "the origin is used unvalidated, or a second line is not refused"
 grep -qE '(^|[^a-z])(source|\.) "\$RB_SETUP_DIR' <<<"$fences" \
     && die "a setup handoff is sourced" || pass "…and no handoff file is sourced"
 has 'mode=unattended' && has 'mode=attended' \
@@ -217,6 +224,53 @@ elif _sr="$(mktemp_d)" && _ro="$(mktemp_d)" && _home="$(mktemp_d)" \
     chmod 700 "$_ro"; rm -rf "$_sr" "$_ro" "$_home"
 else
     die "could not stage the setup retry case"
+fi
+
+# ── a handoff altered between the helper and the read is refused ──────────
+# A stub setup hands over a two-line origin; the fence must refuse it, not pin its second line.
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the altered-handoff case"
+elif _st="$(mktemp_d)" && mkdir -p "$_st/skills/watch-prs/scripts" \
+     && cp "$SCRIPT_DIR/identitylib.sh" "$_st/skills/watch-prs/scripts/" \
+     && printf '%s\n' '#!/usr/bin/env bash' 'mkdir -p "$1/work" && printf "%s\n" "git@github.com:acme/widget.git" "git@github.com:acme/other.git" > "$1/origin"' \
+        > "$_st/skills/watch-prs/scripts/pr-setup.sh" \
+     && chmod +x "$_st/skills/watch-prs/scripts/pr-setup.sh" \
+     && _sh="$(mktemp_d)" && _sr2="$(mktemp_d)" && git -C "$_sr2" init -q; then
+    _mrc=0
+    _mout="$(cd "$_sr2" && CLAUDE_PLUGIN_ROOT="$_st" TMPDIR="$_sh" HOME="$_sh" \
+        run_limited 60 bash -c "$setup_fence"$'\n''printf "PINNED %s\n" "$REVIEW_BUS_REMOTE"' 2>&1)" || _mrc=$?
+    case "$_mrc|$_mout" in
+        0*) die "a two-line origin handed over was pinned: '$_mout'" ;;
+        *'not a usable identity'*) pass "a two-line origin handed over is refused before anything is pinned" ;;
+        *) die "a two-line origin gave rc=$_mrc with: '$_mout'" ;;
+    esac
+    rm -rf "$_st" "$_sh" "$_sr2"
+else
+    die "could not stage the altered-handoff case"
+fi
+
+# ── the proved head is validated through one non-blocking read before any thread is touched ─
+hp="$(grep -F 'rb_handoff_is_sha' <<<"$fences" || true)"
+if [ -z "$hp" ]; then
+    die "the gated head is not proved through rb_handoff_is_sha before the thread replies"
+elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
+    pass "the head proof precedes the thread replies"
+    printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n' > "$_hd/bad"
+    _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/bad\"; $hp" >/dev/null 2>&1 || _hrc=$?
+    [ "$_hrc" -ne 0 ] \
+        && pass "…a head file of forty non-hex bytes is refused" || die "a corrupt head file passed the proof"
+    if mkfifo "$_hd/fifo" 2>/dev/null; then
+        _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/fifo\"; $hp" >/dev/null 2>&1 || _hrc=$?
+        { [ "$_hrc" -ne 0 ] && [ "$_hrc" -ne 124 ]; } \
+            && pass "…a FIFO at the head path is refused rather than waited on" || die "a FIFO at the head path gave rc=$_hrc (124 = hung)"
+    fi
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$_hd/good"
+    _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $hp" >/dev/null 2>&1 || _hrc=$?
+    [ "$_hrc" -eq 0 ] \
+        && pass "…while a proven head passes" || die "a 40-hex head was refused (rc=$_hrc)"
+    rm -rf "$_hd"
+else
+    die "the head proof does not precede the thread replies, or the case could not be staged"
 fi
 
 # ── the unattended switch answers the decision stops and no other ────────

@@ -20,7 +20,9 @@
   rewritten around what still matters — every helper started privileged by path and every one
   used, no fence past one invocation and no hostile-shell shape in any, every fence parsing,
   the steps in order, every status acted on, the reserved markers, the trailer, the nonce on
-  every watch, setup's handoff read and validated rather than sourced, the unattended answers
+  every watch, setup's handoff read as one line and validated rather than sourced, the gated
+  head proved through the library's non-blocking read before any thread is resolved, the
+  unattended answers
   and the stops they leave alone, the README pins, the reviewer files naming every accepted
   record and the Copilot copy current — and drops the lifted executions against readonly
   names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper; the one

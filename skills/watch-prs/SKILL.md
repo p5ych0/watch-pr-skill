@@ -88,7 +88,7 @@ RB_SETUP_DIR="${TMPDIR:-$HOME}/watch-pr-setup.$$.$RANDOM$RANDOM"
     || { echo "ABORT: setup failed; the PR_SETUP line above says why"; exit 1; }
 export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"
 . "$RB_SCRIPTS/identitylib.sh" || { echo "ABORT: the identity parser could not be loaded"; exit 1; }
-[ -n "$REVIEW_BUS_REMOTE" ] && rb_identity || { echo "ABORT: the origin read back is not a usable identity"; exit 1; }
+[ -n "$REVIEW_BUS_REMOTE" ] && [[ $REVIEW_BUS_REMOTE != *$'\n'* ]] && rb_identity || { echo "ABORT: the origin read back is not a usable identity"; exit 1; }
 REPO_DIR="$(git rev-parse --show-toplevel)" || { echo "ABORT: not in a git checkout"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"; REQUEST_FILE="$RB_SETUP_DIR/work/request.md"
@@ -289,7 +289,16 @@ pass is recoverable; a round closed on a red head is not. `pr-close-round.sh` ta
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"
 ```
 
-0: pushed, the head proved green and written into `$HEAD_FILE`. **Now answer the threads:**
+0: pushed, the head proved green and written into `$HEAD_FILE`. Prove the file holds it
+before any thread is touched, through the library's one non-blocking read, since a resolve
+cannot be taken back and `post` refusing a bad handoff afterwards would leave the round
+half-closed:
+
+```bash
+/usr/bin/env bash -p -c '. "$1"/writelib.sh && rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE" || { echo "ABORT: $HEAD_FILE holds no proven head; do not resolve any thread"; exit 1; }
+```
+
+**Now answer the threads:**
 
 ```bash
 gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/N/comments/<comment-id>/replies" -f body='<what changed and why>' || { echo "ABORT: the reply was not posted; do not resolve this thread and do not post the round"; exit 1; }
@@ -484,11 +493,16 @@ A later session has none of the variables the stop was reached with. Run this be
 8, or before continuing into the Copilot phase. `pr-phase-state.sh` reads the phase off the
 PR's own records and re-validates the one that has to stand: 0 readable and standing; 1
 stopped — no signoff, a moved head, or a verdict that no longer stands, and its record says
-which; 2 unreadable, which is not "no signoff". Only on 0 is the signoff read back, and it
-must read back as a 40-hex sha.
+which; 2 unreadable, which is not "no signoff".
 
 ```bash
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N && CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N
+```
+
+Only on 0, read the Codex signoff back; it must read back as a 40-hex sha:
+
+```bash
+CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")" && [ "${#CODEX_SHA}" -eq 40 ] && [ -z "${CODEX_SHA//[0-9a-f]/}" ] || { echo "ABORT: the recorded Codex signoff did not read back as a sha"; exit 1; }
 ```
 
 ### Then: the gate
