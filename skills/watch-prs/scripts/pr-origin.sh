@@ -14,8 +14,8 @@ case "$MODE" in
     "") echo "ABORT: a mode is required: 'read' (origin's URL) or 'pin' (REVIEW_BUS_REMOTE as a child sees it)" >&2; exit 1 ;;
     *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
-# A directory this script creates, not a file the caller made a place for: the exclusion has to run where
-# no shell function or variable attribute of the caller's reaches it.
+# A directory this script creates, not a file the caller made a place for: the exclusion has to run where no
+# function of the caller's, and no readonly, nameref, integer or case-converting attribute on the name, reaches it.
 RB_DIR="${2-}"
 [[ -n $RB_DIR ]] \
     || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
