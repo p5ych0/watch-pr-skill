@@ -3,7 +3,7 @@
 # referent, `rename(2)` replaces the name. Nothing here removes anything — `docs/decisions/2026-08-29-setup-leaf-cleanup.md`.
 
 # One open answers everything, so a FIFO swapped in after a `[[ -f ]]` cannot block the driver's
-# shell; a status rather than a value, since a value must land in a name that may be readonly.
+# shell, and the value comes back from that same read, so a caller never opens the path again.
 rb_handoff_is_sha() {
     /usr/bin/env -i PATH="$PATH" perl -e '
         use Fcntl qw(O_RDONLY O_NONBLOCK O_NOFOLLOW);
@@ -18,6 +18,7 @@ rb_handoff_is_sha() {
             $got .= $buf;
         }
         exit 5 unless $got =~ /\A[0-9a-f]{40}\n\z/;
+        print $got or exit 7;
         exit 0;
     ' -- "$1" 2>/dev/null
 }

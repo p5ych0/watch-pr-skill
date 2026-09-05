@@ -1,5 +1,42 @@
 # Changelog
 
+## [2.9.0] — 2026-09-05
+
+- **`SKILL.md` is one command per step.** The document the driver reads on every invocation
+  carried 320 lines of fenced bash in 880, 138 of them the setup block alone, and 92 of them
+  defences against the operator's own shell: names probed for readonly and nameref
+  attributes, containment arms after every `exit`, values read through a held descriptor, a
+  trace diversion, a nonce counter proved by read-back. The retry under `HOME` and the pin
+  proof stay, each one line now: they answer the working directory and the checkout, not
+  the shell.
+  `docs/decisions/2026-09-05-driving-shell-trusted.md` retired that class: a shell hostile
+  enough to redefine `exit` can edit the helpers on disk, so those defences protected against
+  nobody, and every gate and every mutation that matters runs in a privileged helper against
+  GitHub's records. Each step is now one invocation with its statuses in prose. Setup is
+  sixteen lines: locate the scripts, export the configuration knobs `README.md` lists so a
+  value assigned in the session reaches the helpers, run `pr-setup.sh` with its one retry under `HOME`,
+  read the origin back as data, prove it one line and a GitHub identity through the shipped
+  parser, prove through `pr-origin.sh pin` that it is this checkout's origin, derive the
+  working paths. `pr-setup.sh`'s ready record ends
+  `mode=unattended` or `mode=attended`, read from the exported `WATCH_PR_AUTONOMOUS`, so the
+  privileged-child probe fence is gone with it. The nonce stays, one line per request; the
+  reply, reaction and resolve are spelled as the commands they are. The contract test is
+  rewritten around what still matters — every helper started privileged by path and every one
+  used, no fence past one invocation and no hostile-shell shape in any, every fence parsing,
+  the steps in order, every status acted on, the reserved markers, the trailer, the nonce on
+  every watch, setup's handoff read as one line and validated rather than sourced, the gated
+  head proved through the library's non-blocking read before any thread is resolved and the
+  signoff sha taken from that same read — `rb_handoff_is_sha` now prints the value it
+  validated, so the driver never opens the head file a second time — the unattended answers
+  and the stops they leave alone, the README pins, the reviewer files naming every accepted
+  record and the Copilot copy current — and drops the lifted executions against readonly
+  names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper. What it still
+  executes: the setup fence, against the real helper with the first parent refusing and with
+  a relative `TMPDIR`, since the retry is the bound an accepted record rests on, and against
+  stub setups handing over a two-line origin and a foreign one; and the head-proof and
+  signoff-read fences, against corrupt, FIFO, emptied-library and replaced-path cases. A
+  minor release: what a session does at setup changes. #306.
+
 ## [2.8.0] — 2026-09-05
 
 - **Each probe the watch makes is bounded on its own, and a stalled one is retried.** A watch

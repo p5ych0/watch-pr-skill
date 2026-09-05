@@ -714,10 +714,17 @@ _wh_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # THE VALUE THE WRITER PRODUCES IS ACCEPTED, which is the case that has to pass or the driver
 # never proceeds — and it is written by the library rather than by hand, so the two halves
 # cannot drift apart on the terminator.
+_wh_out=""
 rb_write_handoff "$_wh/head" "$_wh_sha" >/dev/null 2>&1 \
-    && rb_handoff_is_sha "$_wh/head" \
-    && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha" \
-    || die "the value this library writes is not accepted by its own reader"
+    && _wh_out="$(rb_handoff_is_sha "$_wh/head")" && [ "$_wh_out" = "$_wh_sha" ] \
+    && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha, which hands the value back from the read that validated it" \
+    || die "the value this library writes is not accepted by its own reader, or does not come back from it"
+# The status travels with the value: a reader that printed the sha and failed is a refusal.
+_wh_lying() { printf '%s\n' "$_wh_sha"; return 1; }
+_wh_out=""
+{ _wh_out="$(_wh_lying)" && [ "$_wh_out" = "$_wh_sha" ]; } \
+    && die "a reader that prints the value and returns non-zero passed the value assertion" \
+    || pass "…and the assertion refuses a value that arrives with a non-zero status"
 # AND THE SHAPES THAT MUST NOT BE. A short id, a long one, uppercase, non-hex, empty, and a
 # 40-hex value with anything after it — the last being what a stopping reader would accept.
 for _wh_bad in "" "aaaaaaaa" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
@@ -781,13 +788,8 @@ rm -rf "$_wh"
 # is not safely acquirable in the driver's bash), and the attacker is a same-UID process that
 # already has arbitrary code execution as the operator.
 #
-# THIS CASE PINS THE LIMIT, AND IT DISTINGUISHES WHICH INODE WAS READ. `rb_handoff_is_sha`
-# answers only a STATUS, so both a real and a forged 40-hex value would return 0 and the case
-# could not tell a name-following read from an anchored one. So the ORIGINAL `work/head.txt`
-# is NOT a commit id and the substituted one IS: a status of 0 then means the read followed
-# the substituted parent to the valid forged head — the accepted limit — while an anchored
-# read that reached the original inode would read the invalid value and return non-zero,
-# failing this case and forcing the record to be revisited.
+# The original head is not a commit id and the substituted one is, so the status alone says
+# which inode was read, whatever the reader prints.
 _wl_p="$TMP/parentsub"; rm -rf "$_wl_p"; mkdir -p "$_wl_p/work"
 printf '%s\n' 'not-a-commit-id' > "$_wl_p/work/head.txt"
 mkdir -p "$_wl_p/attacker"

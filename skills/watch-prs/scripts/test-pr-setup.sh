@@ -17,13 +17,6 @@
 # driver named. So the transport is one value now, nothing the helper writes is
 # evaluated, and the quoting that made a sourced line an assignment is gone with it.
 #
-# WHAT THIS FILE IS ABOUT, and what `test-pr-skill-contract.sh` is about, are two ends
-# of one arrangement. The contract file runs the DRIVER's block against a forged helper:
-# whether a refusal is walked past, whether the value is read rather than sourced,
-# whether the pin is proved. This file runs the REAL helper: whether the directory is a
-# reservation, whether a hostile origin comes back byte-exact, whether a refusal leaves
-# anything behind. Neither can answer the other's question.
-#
 # THAT THE HELPER REMOVES NOTHING IS THE PART TO READ FIRST, and it is a contract rather
 # than an omission. This directory's name is published in argv, so every removal shape
 # resolves a name a same-UID process may have substituted in the meantime — and shell has
@@ -118,6 +111,8 @@ dir_of() { local r="${1#*|}"; printf '%s' "${r%%|*}"; }
 out_of() { local r="${1#*|}"; printf '%s' "${r#*|}"; }
 
 # ── the ordinary run ───────────────────────────────────────────────────────
+# The switch is this fixture's subject, and an unattended session exports it into the suite.
+unset WATCH_PR_AUTONOMOUS
 r="$(run --)"
 ok_dir="$(dir_of "$r")"
 { [ "$(rc_of "$r")" = 0 ] \
@@ -136,6 +131,20 @@ _mode="$(ls -ld "$ok_dir" 2>/dev/null | cut -c1-10)" || _mode=""
 case "$_mode" in
     drwx------) pass "…at mode 700, so nothing else on the machine reads the session's files" ;;
     *) die "the setup directory is $_mode, not drwx------" ;;
+esac
+case "$(out_of "$r")" in
+    *" mode=attended"*) pass "…and with the switch unset the record says mode=attended" ;;
+    *) die "no mode=attended on the ready record: '$r'" ;;
+esac
+r_un="$(WATCH_PR_AUTONOMOUS=1 run --)"
+case "$(out_of "$r_un")" in
+    *" mode=unattended"*) pass "an exported WATCH_PR_AUTONOMOUS=1 gives mode=unattended" ;;
+    *) die "no mode=unattended with the switch exported: '$r_un'" ;;
+esac
+r_yes="$(WATCH_PR_AUTONOMOUS=yes run --)"
+case "$(out_of "$r_yes")" in
+    *" mode=attended"*) pass "…and any other value is attended" ;;
+    *) die "WATCH_PR_AUTONOMOUS=yes was not read as attended: '$r_yes'" ;;
 esac
 
 # ── what the driver gets back ──────────────────────────────────────────────
@@ -692,7 +701,7 @@ esac
 _od="$(mktemp -d "$TMP/od.XXXXXX")/dir"
 _out_only="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_od" 2>/dev/null)" || true
 case "$_out_only" in
-    "PR_SETUP status=ready origin=$_od/origin work=$_od/work") pass "stdout carries the ready line and nothing else" ;;
+    "PR_SETUP status=ready origin=$_od/origin work=$_od/work mode=attended") pass "stdout carries the ready line and nothing else" ;;
     *) die "stdout carried something other than the ready line: '$_out_only'" ;;
 esac
 _err_d="$(mktemp -d "$TMP/ed.XXXXXX")/dir"

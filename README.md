@@ -269,18 +269,22 @@ credit use are Codex account and repository settings.
 - **A round waits on pending checks.** It waits for them rather than reading
   "still running" as a pass. Raise `PR_CI_TIMEOUT` if your CI takes longer than
   thirty minutes, and export it.
-- **`ABORT: could not set this session up`.** The `PR_SETUP status=error
-  reason=…` line above it says why: the working directory could not be created,
-  the checkout has no usable `origin`, or the storage refused. A storage refusal
-  under `TMPDIR` is retried once under `HOME` where both are usable directories;
-  with only one usable there is one attempt and one status line. If both
-  refused, point `TMPDIR` at a filesystem with room. No such line at all means the helper never got to report: an
-  interrupted run, or an installation missing `pr-setup.sh`. `pr-setup.sh`
-  removes nothing it created, deliberately; the origin helper gives back only its
-  own empty transport directory when it refuses before writing.
-- **Setup says the pinned remote is not this checkout's origin.** The origin is
-  read twice, once to obtain it and once to confirm it, and the two disagreed:
-  `origin` or the git configuration resolving it changed mid-setup. Re-run.
+- **`ABORT: setup failed`.** The `PR_SETUP status=error reason=…` line above it
+  says why: the working directory could not be created, the checkout has no
+  usable `origin`, or the storage refused. A storage refusal under `TMPDIR` is
+  retried once under `HOME`; if both refused, point `TMPDIR` at a filesystem
+  with room. No such
+  line at all means the helper never got to report: an interrupted run, or an
+  installation missing `pr-setup.sh`. `pr-setup.sh` removes nothing it created,
+  deliberately; the origin helper gives back only its own empty transport
+  directory when it refuses before writing.
+- **`ABORT: the origin read back is not a usable identity`.** Setup wrote the
+  origin, but it is not a GitHub network transport the loop can address, or it
+  spans more than one line. Fix `origin` and re-run.
+- **`ABORT: the pin is not this checkout's origin`.** The origin read back from
+  setup's file and the checkout's `origin` disagree: `origin` or the git
+  configuration resolving it changed mid-setup, or the file was replaced after
+  setup wrote it. Nothing was addressed. Re-run.
 - **Reviews go to the wrong repository.** The session is pinned to the `origin`
   of the checkout it started in. Start a new session in the intended checkout.
 - **A stale review after a push.** The merge gate refuses a moved head. Post a
