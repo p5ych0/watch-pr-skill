@@ -183,7 +183,6 @@ grep -qE '(^|[^a-z])(source|\.) "\$RB_SETUP_DIR' <<<"$fences" \
     && die "a setup handoff is sourced" || pass "…and no handoff file is sourced"
 has 'mode=unattended' && has 'mode=attended' \
     && pass "setup's record says which mode the session runs in" || die "the mode is not read off setup's record"
-# A knob assigned in the session reaches the helpers only if exported before the first one runs.
 export_line="$(grep -E '^export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS$' "$TMP/fence.1" || true)"
 _exl="$(grep -n '^export REVIEW_ROUND_THRESHOLD ' "$TMP/fence.1" | head -1 | cut -d: -f1 || true)"
 _stl="$(grep -n -F 'pr-setup.sh "$RB_SETUP_DIR"' "$TMP/fence.1" | head -1 | cut -d: -f1 || true)"
@@ -322,7 +321,6 @@ elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
         _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
         { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
             && pass "…while a proven head is taken as the signoff sha" || die "a proven head was not taken (rc=$_src, '$_sout')"
-        # A reader that answers and then replaces the path shows whether the fence re-reads it.
         mkdir "$_hd/race" && printf '%s\n' 'rb_handoff_is_sha() { printf "%s\n" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb > "$1"; printf "%s\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }' > "$_hd/race/writelib.sh"
         _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$_hd/race\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
         { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
