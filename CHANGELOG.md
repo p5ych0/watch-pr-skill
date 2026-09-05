@@ -30,10 +30,12 @@
   validated, so the driver never opens the head file a second time — the unattended answers
   and the stops they leave alone, the README pins, the reviewer files naming every accepted
   record and the Copilot copy current — and drops the lifted executions against readonly
-  names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper; the one
-  execution it keeps is the setup fence against the real helper with the first parent
-  refusing, since the retry is the bound an accepted record rests on. A minor release: what
-  a session does at setup changes. #306.
+  names, namerefs, a shadowed `exit`, a neutralised `echo` and a forged helper. What it still
+  executes: the setup fence, against the real helper with the first parent refusing and with
+  a relative `TMPDIR`, since the retry is the bound an accepted record rests on, and against
+  stub setups handing over a two-line origin and a foreign one; and the head-proof and
+  signoff-read fences, against corrupt, FIFO, emptied-library and replaced-path cases. A
+  minor release: what a session does at setup changes. #306.
 
 ## [2.8.0] — 2026-09-05
 

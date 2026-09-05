@@ -198,8 +198,7 @@ _ex="$(run_limited 30 bash -c 'REVIEW_MERGE_STRICT=1; PR_CI_TIMEOUT=7
 has 'Nothing under `$RB_SETUP_DIR` is ever removed' \
     && pass "…and nothing under the setup directory is removed" || die "the no-removal promise is gone"
 
-# `docs/decisions/2026-08-26-transport-candidate-in-argv.md` bounds a squat at that retry,
-# so the setup fence is the one fence executed here, against the real helper.
+# `docs/decisions/2026-08-26-transport-candidate-in-argv.md` bounds a squat at that retry.
 setup_fence="$(awk '/^```bash$/{f=1; n++; next} /^```$/{f=0} f && n == 1' "$SKILL")" || setup_fence=
 if [ "$(id -u)" -eq 0 ]; then
     pass "the setup retry case is skipped as root, whom no directory mode refuses"
