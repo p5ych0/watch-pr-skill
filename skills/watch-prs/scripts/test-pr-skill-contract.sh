@@ -5773,14 +5773,12 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
 done
 
 # ── THE COPILOT COPY IS GENERATED, AND IS CURRENT ──────────────────────────
-# Compared against the generator's output rather than against AGENTS.md: the header is the
-# generator's, and a body with a marker pair inside it would compare equal to itself.
+# Compared against the generator's output, since the header is the generator's and not AGENTS.md's.
 _gen="$ROOT/.github/build-copilot-instructions.sh"
 if [ ! -f "$_gen" ]; then
     die "the Copilot copy generator is missing: .github/build-copilot-instructions.sh"
 elif _gen_tmp="$(mktemp_d)"; then
-    # Files and `cmp`, never a command substitution: an assignment drops a NUL, so a copy
-    # differing only by one would compare equal, and a size is what says "nothing emitted".
+    # Files and `cmp`, never a command substitution: an assignment drops a NUL.
     _gen_rc=0
     bash "$_gen" > "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
     { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
@@ -5804,8 +5802,7 @@ elif _gen_tmp="$(mktemp_d)"; then
             && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
             || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
     done
-    # A FIFO hands a well-formed source to the first open and something else to a second, so a
-    # generator that validates on one read and emits from another emits the wrong thing.
+    # A FIFO gives a second open different contents, which a single read never sees.
     if mkfifo "$_gen_tmp/once" 2>/dev/null; then
         ( printf '%s\n' '<!-- copilot-body-start -->' 'one open' '<!-- copilot-body-end -->' > "$_gen_tmp/once"
           printf '%s\n' 'second open' > "$_gen_tmp/once" ) 2>/dev/null &

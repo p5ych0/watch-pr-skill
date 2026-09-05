@@ -3,9 +3,7 @@
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 src="${1:-$root/AGENTS.md}"
-# One read of the source, buffered, and nothing printed until the marker layout has been accepted:
-# a malformed source exits non-zero with an empty stdout, and a source rewritten between two opens
-# cannot be validated as one thing and emitted as another.
+# A source rewritten between two opens must not be validated as one thing and emitted as another.
 awk '
     { line[NR] = $0 }
     $0 == "<!-- copilot-body-start -->" { s++; if (s > 1 || e > 0) bad = 1; start = NR }

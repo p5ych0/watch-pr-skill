@@ -67,10 +67,10 @@ against, restated here:
   `set -euo pipefail`. Do not ask for a script to move to a stricter mode.
 - **No new runtime dependency** without a measured defect only it removes, and
   none where an existing one covers the case; `perl` is the precedent.
-- **No abstraction in anticipation.** A shared library or a wrapper exists for a
-  rule written more than once and then found missing from a copy; a wrapper that
-  only delegates is a finding, except the interface wrappers `writelib.sh`
-  defines last as its load verification.
+- **No abstraction in anticipation.** A shared library or a new helper exists
+  only for a rule written more than once and then found missing from a copy; a
+  wrapper that only delegates is a finding, except the interface wrappers
+  `writelib.sh` defines last as its load verification.
 - **Scope is exactly what was asked**, one issue per pull request, and a round
   answers what its findings name and nothing more: an adjacent improvement, an
   unbroken refactor or a second concern is a finding, and a defect the PR did not
@@ -81,9 +81,9 @@ against, restated here:
 - **Validate at the boundaries** — argv, files crossing a process, `gh` and
   `git` output, the operator's shell — and trust a helper's stated contract
   inside them.
-- **No tokens, credentials or `.env` files**, in fixtures included: the suite
-  stubs `gh` and runs with no credentials, and a test that reaches GitHub is
-  broken.
+- **No tokens, credentials or `.env` files**, committed, echoed or logged —
+  records and abort messages included — and none in fixtures: the suite stubs
+  `gh` and runs with no credentials, and a test that reaches GitHub is broken.
 - **A round fixes what the finding names and nothing else**, and the round
   summary says what was skipped as a past-tense disposition and an issue number.
 - **Naming applies to new names only**; an established name keeps its spelling.
@@ -212,10 +212,11 @@ truncates an operator's file outside the session. When reviewing a change there:
 - the baseline file carries the request nonce — `<nonce> <value>`, required by
   `pr-watch.sh --require-nonce` — so a previous round's well-formed id left by a
   walked-past refusal is refused. The nonce is distinct by construction: a
-  fixed-width `perl` prefix with the per-session counter `RB_NONCE_SEQ` appended
-  and its increment proved by read-back. A watch on an unnonced file, a writer
-  dropping the prefix, a compatibility arm, or an increment without its read-back
-  is the defect. Every baseline write stays **before** its request, on every
+  `perl` prefix whose width every generation path validates as twenty-three
+  digits, with the per-session counter `RB_NONCE_SEQ` appended and its increment
+  proved by read-back. A watch on an unnonced file, a writer dropping the prefix,
+  a compatibility arm, a source without the width check, or an increment without
+  its read-back is the defect. Every baseline write stays **before** its request, on every
   request path: after the request there is nothing left to refuse with, and a
   request that fails after the write leaves this round's nonce and id, which is
   not a fail-open. A write moved after its request is the defect;
@@ -335,7 +336,10 @@ finding. The accepted records:
   error; the **base branch is confirmed either side** of that read, so a retarget
   is `stale` rather than an answer, and a ruleset's
   `strict_required_status_checks_policy` is enforced, refusing a head behind its
-  base as `status=behind`; the **reviewed-range gate** licenses every commit between the head
+  base as `status=behind`; a ruleset rule gating the merge on something the probe
+  cannot read — `workflows`, `code_scanning`, `required_deployments` and the rest —
+  refuses in both modes, `merge_queue` under strict mode being the one exception;
+  the **reviewed-range gate** licenses every commit between the head
   Codex signed and the merge head as a `Review-Phase: copilot` fix, through
   `pr-merge-range.sh`; **no unresolved thread** and the **round boundary** are
   checked on the pull request; **`REVIEW_MERGE_STRICT=1`** drops `--admin` and
