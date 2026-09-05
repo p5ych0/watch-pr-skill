@@ -403,11 +403,11 @@ the only record of what Codex approved.
 0: recorded. 3: recorded, then paused at a round boundary — the operator decides, and
 merging on that signoff is one of the answers. Anything else: the phase did not advance and
 no signoff was recorded; the reason is above, do not retry it blind, and do not read the
-head. On 0 or 3, and only then, prove the file still holds the head it signed, through the
-library's one non-blocking read, and take it:
+head. On 0 or 3, and only then, take the head it signed from the library's one non-blocking
+read, which validates what it hands back:
 
 ```bash
-/usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE" && CODEX_SHA="$(<"$HEAD_FILE")" || { echo "ABORT: $HEAD_FILE holds no usable signoff sha; step 8 would have nothing to gate on"; exit 1; }
+CODEX_SHA="$(/usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE")" && [ "${#CODEX_SHA}" -eq 40 ] || { echo "ABORT: $HEAD_FILE holds no usable signoff sha; step 8 would have nothing to gate on"; exit 1; }
 ```
 
 **STOP — the next phase is the operator's decision.** The signoff is on the PR, so either

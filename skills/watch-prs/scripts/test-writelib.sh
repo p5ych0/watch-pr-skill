@@ -715,9 +715,9 @@ _wh_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # never proceeds — and it is written by the library rather than by hand, so the two halves
 # cannot drift apart on the terminator.
 rb_write_handoff "$_wh/head" "$_wh_sha" >/dev/null 2>&1 \
-    && rb_handoff_is_sha "$_wh/head" \
-    && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha" \
-    || die "the value this library writes is not accepted by its own reader"
+    && [ "$(rb_handoff_is_sha "$_wh/head")" = "$_wh_sha" ] \
+    && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha, which hands the value back from the read that validated it" \
+    || die "the value this library writes is not accepted by its own reader, or does not come back from it"
 # AND THE SHAPES THAT MUST NOT BE. A short id, a long one, uppercase, non-hex, empty, and a
 # 40-hex value with anything after it — the last being what a stopping reader would accept.
 for _wh_bad in "" "aaaaaaaa" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \

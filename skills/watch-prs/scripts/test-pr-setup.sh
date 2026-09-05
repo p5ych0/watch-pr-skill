@@ -17,14 +17,6 @@
 # driver named. So the transport is one value now, nothing the helper writes is
 # evaluated, and the quoting that made a sourced line an assignment is gone with it.
 #
-# WHAT THIS FILE IS ABOUT, and what `test-pr-skill-contract.sh` is about, are two ends
-# of one arrangement. The contract file reads the DRIVER's document — each step one
-# invocation acting on its status, setup's values read as data and validated, never
-# sourced — and executes its setup fence once against the real helper, with the first
-# parent refusing, to prove the one retry under `HOME`. This file runs the REAL helper:
-# whether the directory is a reservation, whether a hostile origin comes back byte-exact,
-# whether a refusal leaves anything behind. Neither can answer the other's question.
-#
 # THAT THE HELPER REMOVES NOTHING IS THE PART TO READ FIRST, and it is a contract rather
 # than an omission. This directory's name is published in argv, so every removal shape
 # resolves a name a same-UID process may have substituted in the meantime — and shell has
@@ -140,7 +132,6 @@ case "$_mode" in
     drwx------) pass "…at mode 700, so nothing else on the machine reads the session's files" ;;
     *) die "the setup directory is $_mode, not drwx------" ;;
 esac
-# ── the record says which mode the session runs in ────────────────────────
 case "$(out_of "$r")" in
     *" mode=attended"*) pass "…and with the switch unset the record says mode=attended" ;;
     *) die "no mode=attended on the ready record: '$r'" ;;

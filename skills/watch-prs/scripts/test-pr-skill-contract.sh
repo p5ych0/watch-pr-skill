@@ -60,7 +60,6 @@ grep -qF '. "$RB_SCRIPTS/identitylib.sh"' <<<"$fences" && grep -qF '&& rb_identi
     && pass "…and the document carries no parser of its own" \
     || die "SKILL.md defines rb_identity"
 
-# `docs/decisions/2026-09-05-driving-shell-trusted.md` is pinned here.
 big="$(awk '/^```bash$/{f=1; n=0; s=NR; next} /^```$/{ if (f && n > 15) print s ": " n; f=0 } f{n++}' "$SKILL")"
 [ -z "$big" ] \
     && pass "no fence is longer than the setup block's fifteen lines" \
@@ -297,9 +296,11 @@ elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
     _hrc=0; run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $hp" >/dev/null 2>&1 || _hrc=$?
     [ "$_hrc" -eq 0 ] \
         && pass "…while a proven head passes" || die "a 40-hex head was refused (rc=$_hrc)"
-    sp="$(grep -F 'CODEX_SHA="$(<"$HEAD_FILE")"' <<<"$fences" || true)"
+    sp="$(grep -F 'CODEX_SHA="$(/usr/bin/env bash -p -c' <<<"$fences" || true)"
     if [ -z "$sp" ] || ! grep -qF 'rb_handoff_is_sha() { return 127; }' <<<"$sp"; then
-        die "the signoff sha is read from the head file without the head proof ahead of it"
+        die "the signoff sha is not taken from the library's validating read"
+    elif grep -qF '$(<"$HEAD_FILE")' <<<"$fences"; then
+        die "the head file is opened a second time after its proof"
     else
         _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/bad\"; $sp; printf '%s' \"\${CODEX_SHA-unset}\"" 2>/dev/null)" || _src=$?
         { [ "$_src" -ne 0 ] && [ "$_sout" != "$(cat "$_hd/bad")" ]; } \
