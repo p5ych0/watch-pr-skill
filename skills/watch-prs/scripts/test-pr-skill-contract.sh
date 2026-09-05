@@ -4188,16 +4188,21 @@ fi
 grep -q 'WATCH_PR_AUTONOMOUS=1' "$SKILL" \
     && pass "the skill names the unattended switch" \
     || die "SKILL.md does not name WATCH_PR_AUTONOMOUS=1"
-# The switch is READ, by a test in the driving shell whose status is the answer: prose
-# cannot expand a variable, and only the exact value 1 is unattended.
-_una_probe="$(grep -x -F '[[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]' "$SKILL")" \
-    || die "SKILL.md has no exact-1 probe of WATCH_PR_AUTONOMOUS for the driving shell"
-_una_p1=0; env WATCH_PR_AUTONOMOUS=1 bash -uc "$_una_probe" || _una_p1=$?
-_una_py=0; env WATCH_PR_AUTONOMOUS=yes bash -uc "$_una_probe" || _una_py=$?
-_una_pu=0; env -u WATCH_PR_AUTONOMOUS bash -uc "$_una_probe" || _una_pu=$?
-{ [ -n "$_una_probe" ] && [ "$_una_p1" -eq 0 ] && [ "$_una_py" -eq 1 ] && [ "$_una_pu" -eq 1 ]; } \
-    && pass "…and the driving shell's probe is 0 for exactly 1, 1 for yes and for unset" \
-    || die "the probe answers 1 → $_una_p1, yes → $_una_py, unset → $_una_pu; only the exact value 1 may be unattended"
+# The switch is READ, by a test in the driving shell that prints which mode this is:
+# prose cannot expand a variable, only the exact value 1 is unattended, and a bare false
+# test would end an errexit shell in the ordinary attended case.
+_una_probe="$(awk 'index($0, "if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then") == 1 { c = 1 } c { print } c && $0 == "fi" { exit }' "$SKILL")" \
+    || { _una_probe=; die "the WATCH_PR_AUTONOMOUS probe could not be lifted"; }
+[ -n "$_una_probe" ] || die "SKILL.md has no exact-1 probe of WATCH_PR_AUTONOMOUS for the driving shell"
+_una_run() { env "$@" bash -euc "$_una_probe" 2>/dev/null; }
+_una_p1=0; _una_o1="$(_una_run WATCH_PR_AUTONOMOUS=1)" || _una_p1=$?
+_una_py=0; _una_oy="$(_una_run WATCH_PR_AUTONOMOUS=yes)" || _una_py=$?
+_una_pu=0; _una_ou="$(_una_run -u WATCH_PR_AUTONOMOUS)" || _una_pu=$?
+case "$_una_p1|$_una_py|$_una_pu|${_una_o1%%:*}|${_una_oy%%:*}|${_una_ou%%:*}" in
+    '0|0|0|UNATTENDED|ATTENDED|ATTENDED')
+        pass "…and the probe prints UNATTENDED for exactly 1, ATTENDED for yes and for unset, exiting 0 under errexit each time" ;;
+    *) die "the probe exited 1 → $_una_p1, yes → $_una_py, unset → $_una_pu and printed '$_una_o1' / '$_una_oy' / '$_una_ou'" ;;
+esac
 # Counts and section reads take their producer's status: a read that failed after
 # printing a plausible count is not a count, and a section that could not be read
 # holds nothing forbidden.

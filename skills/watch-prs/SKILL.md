@@ -13,11 +13,15 @@ With `WATCH_PR_AUTONOMOUS=1` exported the operator has made the decision stops i
 each carries an **Unattended:** line naming its answer, taken without asking and recorded
 on the PR as the operator's word would be. A stop that exists because something could not
 be read, proved or told apart has no such line and is never answered by it. Whether this
-session is unattended is the status of one test, run once per session: 0 is unattended and
-1 attended, and the value is the switch's alone, so `yes` or `true` is attended.
+session is unattended is what one test prints, run once per session — `UNATTENDED` or
+`ATTENDED` — and the value is the switch's alone, so `yes` or `true` is attended.
 
 ```bash
-[[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]
+if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then
+    echo "UNATTENDED: every decision stop takes its Unattended answer"
+else
+    echo "ATTENDED: every decision stop asks"
+fi
 ```
 
 | Reviewer | Login | Trigger |
