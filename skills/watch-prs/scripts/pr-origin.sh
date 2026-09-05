@@ -15,7 +15,7 @@ case "$MODE" in
     *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
 # A directory this script creates, not a file the caller made a place for: the exclusion has to run where
-# no shell function or variable of the caller's reaches it.
+# no shell function or variable attribute of the caller's reaches it.
 RB_DIR="${2-}"
 [[ -n $RB_DIR ]] \
     || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
@@ -27,7 +27,7 @@ case "$MODE" in
     read) OUT="$RB_DIR/origin" ;;
     pin)  OUT="$RB_DIR/pin" ;;
 esac
-# `set -C` makes the one `>` below refuse a path that resolves to an existing regular file; `>|` is never
+# `set -C` makes each `>` below refuse a path that resolves to an existing regular file; `>|` is never
 # used, since it overrides that. `umask 077` says who may write what the create makes.
 umask 077
 set -C
