@@ -765,8 +765,6 @@ grep -q 'state=probe_stalled' <<<"$out" \
     && pass "…within the configured bound" \
     || die "a 3s timeout took ${elapsed}s with stalling probes"
 # ── a capped probe that crosses the deadline is the timeout, not a stall ──
-# The stub moves the fake clock past the deadline and then holds the probe to its cap
-# with the real sleep, so the 124 comes back with the watch already expired.
 cat > "$TMP/cross.sh" <<SH
 #!/usr/bin/env bash
 [ "\$1" = head ] && { printf '%s\\n' "\$HEAD40"; exit 0; }
