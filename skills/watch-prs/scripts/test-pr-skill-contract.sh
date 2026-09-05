@@ -5792,10 +5792,10 @@ if [ -f "$_gen" ]; then
         printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
         for _gen_bad in twice unclosed reversed; do
             _gen_rc=0
-            bash "$_gen" "$_gen_tmp/$_gen_bad.md" >/dev/null 2>&1 || _gen_rc=$?
-            [ "$_gen_rc" -ne 0 ] \
-                && pass "…and a $_gen_bad marker layout is refused rather than copied with a gap" \
-                || die "the generator emitted a body from a $_gen_bad marker layout; Copilot would read a policy with a silent gap"
+            _gen_bad_out="$(bash "$_gen" "$_gen_tmp/$_gen_bad.md" 2>/dev/null)" || _gen_rc=$?
+            { [ "$_gen_rc" -ne 0 ] && [ -z "$_gen_bad_out" ]; } \
+                && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
+                || die "a $_gen_bad marker layout exited $_gen_rc with ${#_gen_bad_out} bytes on stdout; redirected, that overwrites the Copilot copy with a partial policy"
         done
         rm -rf "$_gen_tmp"
     else
