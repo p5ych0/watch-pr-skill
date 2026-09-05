@@ -156,8 +156,6 @@ readonly name fails silently.
 - A captured head — `GATED_HEAD="$( … )"`, or a `sed` over the record — is a
   regression.
 - The head file may not be the summary file, refused by path **and** by `-ef`.
-- The driver proves the head before the thread replies, the irreversible part,
-  and asks the file identity first.
 - Every non-alias refusal must leave the file empty; the alias refusal stays
   ahead of the emptying, because emptying a head file that is the summary
   destroys the account.
@@ -166,15 +164,12 @@ readonly name fails silently.
   the gate's `if` and a refusal can be walked past. Moving it below the loads,
   or back to a `>`, is a regression.
 
-The reply instructions are prose between two fences and cannot be made
-unreachable; that is a measured limit of the driving-shell design (#26, #228),
-not a deferred refactor, and not a reason for another guard. What stays in
-`SKILL.md` is what a helper process cannot do for the driver: finding the scripts
-at all, choosing the parent directory to hand over, the read of the origin
-itself, the assignments and read-backs after it that catch a readonly name or a
-nameref defeating the driver's own assignment, and the pin, which asks whether a
-child of the driver sees this repository. Do not raise "move this into a script"
-against any of those.
+The reply instructions are prose between two fences; the driver acts on the
+gate's status, which is what `docs/decisions/2026-09-05-driving-shell-trusted.md`
+relies on. What stays in `SKILL.md` is what a child process cannot do for the
+driver — locate the scripts, source the values setup hands over, act on each
+helper's status — as one invocation per step. Do not raise "move this into a
+script" against those, and do not raise a defence for the driving shell.
 
 ### A handoff file is written by rename, never by truncation
 
@@ -204,24 +199,19 @@ truncates an operator's file outside the session. When reviewing a change there:
 - the postcondition proves the value on the far side of the rename through one
   `O_NOFOLLOW|O_NONBLOCK` open, taking the type and size from `fstat` on that
   handle; a size asked as `[ ! -s "$path" ]`, or a `read < "$path"`, is the
-  defect. The driver reads the head file through `rb_handoff_is_sha` for the
-  same reason;
+  defect;
 - both `perl` readers use a `sysread` loop ending on a zero-length read, not a
   slurp, so a matching prefix before an I/O error is refused, and a NUL is
   refused by the comparison; `perl` runs under `env -i` keeping only `PATH`;
 - the driver must not redirect onto a handoff path, since that open happens
   before the helper starts;
 - the baseline file carries the request nonce — `<nonce> <value>`, required by
-  `pr-watch.sh --require-nonce` — so a previous round's well-formed id left by a
-  walked-past refusal is refused. The nonce is distinct by construction: a
-  `perl` prefix whose width every generation path validates as twenty-three
-  digits, with the per-session counter `RB_NONCE_SEQ` appended and its increment
-  proved by read-back; `RB_NONCE` and `RB_NONCE_SEQ` are probed at setup like
-  every name the driver assigns, since a readonly `RB_NONCE` predefined by a
-  startup file would serve one nonce to every round. A watch on an unnonced
-  file, a writer dropping the prefix, a compatibility arm, a source without the
-  width check, a nonce name without its setup probe, or an increment without its
-  read-back is the defect. Every baseline write stays **before** its request, on every
+  `pr-watch.sh --require-nonce` — so a previous round's well-formed id is
+  refused. The driver generates a fresh nonce before each request, one line, and
+  hands the same value to the writer and the watch. A watch on an unnonced
+  file, a writer dropping the prefix, or a compatibility arm is the defect; the
+  driver's own handling of the nonce is not reviewed, per the trusted-shell
+  record. Every baseline write stays **before** its request, on every
   request path: after the request there is nothing left to refuse with, and a
   request that fails after the write leaves this round's nonce and id, which is
   not a fail-open. A write moved after its request is the defect;
@@ -237,16 +227,16 @@ truncates an operator's file outside the session. When reviewing a change there:
 - nothing in the library is removed, including the temporary a failed write
   leaves (`docs/decisions/2026-08-29-setup-leaf-cleanup.md`).
 
-### The driving shell is not yours to change
+### The driving shell is trusted
 
-`SKILL.md`'s setup runs in the operator's own shell. A stdout-directed xtrace
-must be moved off the capture before the first command substitution, by putting
-one assignment inside a capture and looking at what comes back — not by comparing
-`BASH_XTRACEFD` to a number, not by identifying the trace by content, and not by
-saving and restoring the target, each of which was built and removed. It reassigns
-and never unsets or empties the variable, since that closes the descriptor. A
-change that removes the guard, adds a substitution above it, or adds state it
-keeps is a finding.
+`SKILL.md`'s bash runs in the operator's own session and defends against nothing
+in it: `docs/decisions/2026-09-05-driving-shell-trusted.md`. A shadowable name, a
+readonly or nameref name, a traced descriptor, a startup hook, a walked-past
+refusal — none is a finding there, and a guard against one is a finding, since it
+is the shape that record retires. What is a finding in `SKILL.md`: a helper
+invoked by name rather than as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, a
+status not acted on, a value cut out of a record where a file carries it, a step
+out of order, a body that may carry a reserved marker or a mention.
 
 ### Comments, claims and prose
 
@@ -285,8 +275,9 @@ and these files bump nothing.
   leaves the kernel to process the shebang and needs an `env -S` some platforms
   lack. The `$-` test is a last resort that cannot prove privileged startup, so
   `bash pr-x.sh` is unsupported rather than defended.
-- **Yes in `SKILL.md`'s own bash**, which runs in the operator's shell: reserved
-  words, assignments and expansions are the answer there.
+- **Not in `SKILL.md`'s own bash either.** The driving shell is trusted
+  (`docs/decisions/2026-09-05-driving-shell-trusted.md`); what is reviewed there
+  is the invocation, the status handling and the order.
 - **A poisoned `PATH` is settled and is not a finding on any file.** `command -p`
   holds neither `git` nor `gh`, a fixed list has to know where the binaries live,
   and "this `PATH` looks wrong" is unknowable. **The loop trusts the `PATH` of the
@@ -409,6 +400,15 @@ finding. The accepted records:
 - `docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`: a hook
   running between the driver's statements owns every value it holds, and no
   further guard answers that; do not raise it as a fresh finding.
+
+- `docs/decisions/2026-09-05-driving-shell-trusted.md`: the driving shell is
+  trusted. `SKILL.md`'s bash defends against nothing in the operator's own
+  session — no probe for a readonly or transforming name, no containment arm, no
+  descriptor read, no trace diversion, no nonce bookkeeping on the driver's own
+  account — because a shell hostile enough to shadow `exit` can edit the helpers
+  on disk, and every mutation and gate runs in a privileged helper against
+  GitHub's records. A guard against the driving shell is the finding, not its
+  absence.
 
 ## A resolved thread is not proof a finding was fixed
 

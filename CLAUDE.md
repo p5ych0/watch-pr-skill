@@ -94,6 +94,13 @@ existing one covers the case.
 including into records or abort messages. None in fixtures — the suite stubs `gh` and
 runs with no credentials, and a test that reaches GitHub is broken.
 
+**Driving shell.** Trusted, per `docs/decisions/2026-09-05-driving-shell-trusted.md`:
+`SKILL.md`'s bash runs in the operator's own session and defends against nothing in it.
+One invocation per step, every status acted on, values crossing in files a helper wrote.
+No name probe, containment arm, descriptor read, trace diversion or driver-side nonce
+bookkeeping; the helpers stay privileged. The longer sections below that build those
+defences are history.
+
 **Verification.** `pr-selfcheck.sh` clean before anything is claimed done or pushed. A
 failure is fixed first, never worked around and never explained away in prose.
 
