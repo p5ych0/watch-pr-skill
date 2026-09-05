@@ -14,17 +14,10 @@ each carries an **Unattended:** line naming its answer, taken without asking and
 on the PR as the operator's word would be. A stop that exists because something could not
 be read, proved or told apart has no such line and is never answered by it. Whether this
 session is unattended is what one test prints, run once per session — `UNATTENDED` or
-`ATTENDED` — and the value is the switch's alone, so `yes` or `true` is attended. A
-privileged child prints it, inheriting no function this shell may hold under `echo`.
-
-```bash
-/usr/bin/env bash -p -c '
-if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then
-    echo "UNATTENDED: every decision stop takes its Unattended answer"
-else
-    echo "ATTENDED: every decision stop asks"
-fi'
-```
+`ATTENDED` — and the value is the switch's alone, so `yes` or `true` is attended. It is
+printed once setup is done, below: by a privileged child, which inherits no function this
+shell may hold under `echo`, and after the trace diversion, so a trace on stdout cannot
+print both words.
 
 | Reviewer | Login | Trigger |
 | --- | --- | --- |
@@ -251,6 +244,17 @@ Success prints `OWNER= REPO= RB_SCRIPTS= SUMMARY_FILE=`. From here on `$HOST`, `
 `$REQUEST_FILE`, `$PRIOR_FILE`, `$HEAD_FILE` and `$RB_NONCE_SEQ` are set and proven, and
 `REVIEW_BUS_REMOTE` is exported so every helper routes by this repository whatever the
 current directory is.
+
+Then, once, which mode this session runs in:
+
+```bash
+/usr/bin/env bash -p -c '
+if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then
+    echo "UNATTENDED: every decision stop takes its Unattended answer"
+else
+    echo "ATTENDED: every decision stop asks"
+fi'
+```
 
 ## 1. State the task on the PR
 

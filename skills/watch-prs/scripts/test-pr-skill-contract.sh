@@ -4217,6 +4217,24 @@ case "$_una_ps|$_una_pt|$_una_os|$_una_ot" in
         pass "…and a shadowed echo in the driving shell forges neither answer" ;;
     *) die "with echo shadowed the probe exited $_una_ps / $_una_pt and printed '$_una_os' (1) / '$_una_ot' (unset)" ;;
 esac
+# A shell tracing to stdout prints the child's whole argument, both words in it, so the
+# probe runs only after setup's trace diversion.
+_una_div_ln="$(grep -n -F '    BASH_XTRACEFD=2' "$SKILL" | head -1 | cut -d: -f1)" || _una_div_ln=
+_una_probe_ln="$(grep -n -x -F "/usr/bin/env bash -p -c '" "$SKILL" | head -1 | cut -d: -f1)" || _una_probe_ln=
+{ [ -n "$_una_div_ln" ] && [ -n "$_una_probe_ln" ] && [ "$_una_div_ln" -lt "$_una_probe_ln" ]; } \
+    && pass "…and the probe runs after setup's trace diversion (diversion=$_una_div_ln probe=$_una_probe_ln)" \
+    || die "the probe runs before the trace diversion (diversion=${_una_div_ln:-none} probe=${_una_probe_ln:-none}); a shell tracing to stdout prints both words"
+_una_divert="$(awk 'index($0, "if [[ -n \"$( RB_TRACE_PROBE=1 )\" ]]") == 1 { c = 1 } c { print } c && $0 == "fi" { exit }' "$SKILL")" \
+    || { _una_divert=; die "the trace diversion could not be lifted"; }
+[ -n "$_una_divert" ] || die "SKILL.md has no trace diversion to lift"
+_una_px=0; _una_ox="$(env -u WATCH_PR_AUTONOMOUS SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -euc "$_una_divert"$'\n'"$_una_probe" 2>/dev/null)" || _una_px=$?
+case "$_una_px|$_una_ox" in
+    *UNATTENDED*) die "with xtrace on stdout an unset switch printed '$_una_ox'; the session cannot tell the mode" ;;
+    0\|*) [ "$(grep -c '^ATTENDED:' <<<"$_una_ox")" -eq 1 ] \
+        && pass "…and with xtrace on stdout the diverted probe prints the attended banner once and the other word never" \
+        || die "with xtrace on stdout the diverted probe printed '$_una_ox'" ;;
+    *) die "with xtrace on stdout the diverted probe exited $_una_px and printed '$_una_ox'" ;;
+esac
 # Counts and section reads take their producer's status: a read that failed after
 # printing a plausible count is not a count, and a section that could not be read
 # holds nothing forbidden.
