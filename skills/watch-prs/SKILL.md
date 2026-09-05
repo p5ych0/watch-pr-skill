@@ -700,8 +700,10 @@ stop opens the Copilot phase, since a second review costs rounds and a merge on 
 signoff is not taken on evidence this session has not got. Where instead a Copilot
 signoff already stands — `pr-signoff.sh`, asked as in the resume recipe but for
 `$COPILOT_BOT`, reports one — the Copilot phase has happened and the signoff just recorded
-is the fault-tolerance pass's, whatever the opening verdict was: merge now, `codex-only`
-where the head is past the Copilot signoff and `both` where it is that head; open nothing.
+is the fault-tolerance pass's, whatever the opening verdict was: run the counter of step 6
+for `$CODEX_BOT` first and acknowledge a 3 as there, since the merge gate counts Copilot's
+boundary alone, then merge now, `codex-only` where the head is past the Copilot signoff
+and `both` where it is that head; open nothing.
 
 Ask, then stop, unless unattended. Only on the second answer:
 

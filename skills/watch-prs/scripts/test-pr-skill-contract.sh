@@ -4247,12 +4247,16 @@ grep -q 'pr-round-count' <<<"$_una_sec" \
 # resumed session has no validated reader for it — a clean pass may arrive as an issue
 # comment and leave no review — so it opens the Copilot phase instead.
 grep -q 'session resumed at this' <<<"$_una_sec" \
+    && grep -q 'stop opens the Copilot phase' <<<"$_una_sec" \
     && grep -q 'a second review costs rounds' <<<"$_una_sec" \
     && pass "…and a resumed session opens the Copilot phase rather than merging on evidence it never saw" \
     || die "a resumed unattended session has no answer at the Codex stop, or merges on evidence it never saw"
-grep -qi 'oldest review\|signoff comment carries' <<<"$_una_sec" \
-    && die "the resumed session reconstructs or reads back the opening verdict, for which no validated reader exists" \
-    || pass "…and neither reconstructs nor reads back the opening verdict"
+# The merge gate counts Copilot's boundary alone, so a resumed session merging on a
+# fault-tolerance signoff has to ask about Codex's itself.
+grep -q 'counter of step 6' <<<"$_una_sec" \
+    && grep -qF '$CODEX_BOT' <<<"$_una_sec" \
+    && pass "…and re-checks the Codex boundary before a resumed merge on a fault-tolerance signoff" \
+    || die "a resumed merge after the fault-tolerance pass skips the Codex round check-in"
 # A standing Copilot signoff means the phase happened and this signoff is the
 # fault-tolerance pass's; a resumed session must not open Copilot a second time.
 grep -q 'signoff already stands' <<<"$_una_sec" \
