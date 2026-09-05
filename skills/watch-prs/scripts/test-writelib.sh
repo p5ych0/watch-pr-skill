@@ -714,10 +714,17 @@ _wh_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # THE VALUE THE WRITER PRODUCES IS ACCEPTED, which is the case that has to pass or the driver
 # never proceeds — and it is written by the library rather than by hand, so the two halves
 # cannot drift apart on the terminator.
+_wh_out=""
 rb_write_handoff "$_wh/head" "$_wh_sha" >/dev/null 2>&1 \
-    && [ "$(rb_handoff_is_sha "$_wh/head")" = "$_wh_sha" ] \
+    && _wh_out="$(rb_handoff_is_sha "$_wh/head")" && [ "$_wh_out" = "$_wh_sha" ] \
     && pass "a head file written by rb_write_handoff is accepted by rb_handoff_is_sha, which hands the value back from the read that validated it" \
     || die "the value this library writes is not accepted by its own reader, or does not come back from it"
+# The status travels with the value: a reader that printed the sha and failed is a refusal.
+_wh_lying() { printf '%s\n' "$_wh_sha"; return 1; }
+_wh_out=""
+{ _wh_out="$(_wh_lying)" && [ "$_wh_out" = "$_wh_sha" ]; } \
+    && die "a reader that prints the value and returns non-zero passed the value assertion" \
+    || pass "…and the assertion refuses a value that arrives with a non-zero status"
 # AND THE SHAPES THAT MUST NOT BE. A short id, a long one, uppercase, non-hex, empty, and a
 # 40-hex value with anything after it — the last being what a stopping reader would accept.
 for _wh_bad in "" "aaaaaaaa" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
