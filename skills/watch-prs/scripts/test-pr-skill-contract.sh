@@ -4181,6 +4181,170 @@ if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
         || die "README no longer rules out a silent skip"
 fi
 
+# ── THE UNATTENDED SWITCH ANSWERS THE DECISION STOPS AND NO OTHER ──────────
+# `WATCH_PR_AUTONOMOUS=1` pre-decides the four stops that are decisions. A stop that
+# exists because something could not be read or told apart carries no answer, or an
+# unattended session would record a signoff on a retraction it never read.
+grep -q 'WATCH_PR_AUTONOMOUS=1' "$SKILL" \
+    && pass "the skill names the unattended switch" \
+    || die "SKILL.md does not name WATCH_PR_AUTONOMOUS=1"
+# The switch is READ, by a test in the driving shell that prints which mode this is:
+# prose cannot expand a variable, only the exact value 1 is unattended, and a bare false
+# test would end an errexit shell in the ordinary attended case.
+_una_probe="$(awk -v a="/usr/bin/env bash -p -c '" -v b="fi'" '$0 == a { c = 1 } c { print } c && $0 == b { exit }' "$SKILL")" \
+    || { _una_probe=; die "the WATCH_PR_AUTONOMOUS probe could not be lifted"; }
+[ -n "$_una_probe" ] || die "SKILL.md has no exact-1 probe of WATCH_PR_AUTONOMOUS run by a privileged child"
+grep -q 'WATCH_PR_AUTONOMOUS:-} = 1' <<<"$_una_probe" \
+    || die "the lifted probe does not test WATCH_PR_AUTONOMOUS for exactly 1"
+_una_run() { env "$@" bash -euc "$_una_probe" 2>/dev/null; }
+_una_p1=0; _una_o1="$(_una_run WATCH_PR_AUTONOMOUS=1)" || _una_p1=$?
+_una_py=0; _una_oy="$(_una_run WATCH_PR_AUTONOMOUS=yes)" || _una_py=$?
+_una_pu=0; _una_ou="$(_una_run -u WATCH_PR_AUTONOMOUS)" || _una_pu=$?
+case "$_una_p1|$_una_py|$_una_pu|${_una_o1%%:*}|${_una_oy%%:*}|${_una_ou%%:*}" in
+    '0|0|0|UNATTENDED|ATTENDED|ATTENDED')
+        pass "…and the probe prints UNATTENDED for exactly 1, ATTENDED for yes and for unset, exiting 0 under errexit each time" ;;
+    *) die "the probe exited 1 → $_una_p1, yes → $_una_py, unset → $_una_pu and printed '$_una_o1' / '$_una_oy' / '$_una_ou'" ;;
+esac
+# The banner comes from a privileged child, so an echo the driving shell holds forges
+# neither answer.
+_una_ps=0; _una_os="$(env WATCH_PR_AUTONOMOUS=1 bash -euc 'echo() { printf "ATTENDED: forged\n"; }; export -f echo
+'"$_una_probe" 2>/dev/null)" || _una_ps=$?
+_una_pt=0; _una_ot="$(env -u WATCH_PR_AUTONOMOUS bash -euc 'echo() { printf "UNATTENDED: forged\n"; }; export -f echo
+'"$_una_probe" 2>/dev/null)" || _una_pt=$?
+case "$_una_ps|$_una_pt|$_una_os|$_una_ot" in
+    *forged*) die "a shadowed echo in the driving shell forged the mode: '$_una_os' (1) / '$_una_ot' (unset)" ;;
+    '0|0|UNATTENDED:'*'|ATTENDED:'*)
+        pass "…and a shadowed echo in the driving shell forges neither answer" ;;
+    *) die "with echo shadowed the probe exited $_una_ps / $_una_pt and printed '$_una_os' (1) / '$_una_ot' (unset)" ;;
+esac
+# A shell tracing to stdout prints the child's whole argument, both words in it, so the
+# probe runs only after setup's trace diversion.
+_una_div_ln="$(grep -n -F '    BASH_XTRACEFD=2' "$SKILL" | head -1 | cut -d: -f1)" || _una_div_ln=
+_una_probe_ln="$(grep -n -x -F "/usr/bin/env bash -p -c '" "$SKILL" | head -1 | cut -d: -f1)" || _una_probe_ln=
+{ [ -n "$_una_div_ln" ] && [ -n "$_una_probe_ln" ] && [ "$_una_div_ln" -lt "$_una_probe_ln" ]; } \
+    && pass "…and the probe runs after setup's trace diversion (diversion=$_una_div_ln probe=$_una_probe_ln)" \
+    || die "the probe runs before the trace diversion (diversion=${_una_div_ln:-none} probe=${_una_probe_ln:-none}); a shell tracing to stdout prints both words"
+_una_divert="$(awk 'index($0, "if [[ -n \"$( RB_TRACE_PROBE=1 )\" ]]") == 1 { c = 1 } c { print } c && $0 == "fi" { exit }' "$SKILL")" \
+    || { _una_divert=; die "the trace diversion could not be lifted"; }
+[ -n "$_una_divert" ] || die "SKILL.md has no trace diversion to lift"
+_una_px=0; _una_ox="$(env -u WATCH_PR_AUTONOMOUS SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -euc "$_una_divert"$'\n'"$_una_probe" 2>/dev/null)" || _una_px=$?
+case "$_una_px|$_una_ox" in
+    *UNATTENDED*) die "with xtrace on stdout an unset switch printed '$_una_ox'; the session cannot tell the mode" ;;
+    0\|*) [ "$(grep -c '^ATTENDED:' <<<"$_una_ox")" -eq 1 ] \
+        && pass "…and with xtrace on stdout the diverted probe prints the attended banner once and the other word never" \
+        || die "with xtrace on stdout the diverted probe printed '$_una_ox'" ;;
+    *) die "with xtrace on stdout the diverted probe exited $_una_px and printed '$_una_ox'" ;;
+esac
+# Counts and section reads take their producer's status: a read that failed after
+# printing a plausible count is not a count, and a section that could not be read
+# holds nothing forbidden.
+_una_rc=0
+_una_n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _una_rc=$?
+{ [ "$_una_rc" -le 1 ] && [ "$_una_n" -eq 4 ]; } \
+    && pass "…and exactly four stops carry an unattended answer" \
+    || die "expected an unattended answer at exactly four stops, found '$_una_n' (grep rc=$_una_rc)"
+_una_section() {
+    awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL"
+}
+_una_at() {
+    _una_sec="$(_una_section "$1" "$2")" || { die "the $3 section could not be read"; return 0; }
+    _una_rc=0
+    _una_c="$(grep -c '^\*\*Unattended:\*\*' <<<"$_una_sec")" || _una_rc=$?
+    { [ "$_una_rc" -le 1 ] && [ "$_una_c" -eq 1 ]; } \
+        && pass "…one at the $3" \
+        || die "the $3 carries no unattended answer (found '$_una_c', grep rc=$_una_rc)"
+}
+_una_at '## 6. ' '## 7. ' 'round check-in'
+_una_at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
+_una_at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
+_una_at '### Then: the gate' '## What this skill' 'merge gate'
+# A 3 is the boundary only where the stage said so: `gate` reports a replies-only pass
+# as 3 too, and re-running it after a no-op push skips the watch. And `record` has
+# written its signoff before it pauses, so running it again records two.
+_una_sec="$(_una_section '## 6. ' '## 7. ')" || { _una_sec=; die "the round check-in could not be read"; }
+grep -q 'PR_ROUND_PAUSE' <<<"$_una_sec" \
+    && grep -q 'left only replies' <<<"$_una_sec" \
+    && pass "…and the check-in answer keys on the PR_ROUND_PAUSE line, leaving the gate's replies-only 3 a stop" \
+    || die "the unattended check-in answers every 3, including the gate's replies-only pause"
+grep -q 'running it twice records two signoffs' <<<"$_una_sec" \
+    && pass "…and does not run record again after its signoff is written" \
+    || die "the unattended check-in re-runs record, which posts a second signoff"
+# The Codex-only decision reads the opening VERDICT, not the distinct-head count: a
+# finding answered on its thread and a later approval of the same head are one
+# reviewed head, and that change was sent back.
+_una_sec="$(_una_section '**STOP — the next phase is the operator' '```bash')" \
+    || { _una_sec=; die "the Codex-clean stop could not be read"; }
+grep -q 'findings=0' <<<"$_una_sec" \
+    && pass "…and the Codex-only merge is decided on the opening verdict" \
+    || die "the unattended Codex-clean answer does not read the opening verdict"
+grep -q 'pr-round-count' <<<"$_una_sec" \
+    && die "the Codex-only decision reads the distinct-head count, which a same-head re-review leaves at one" \
+    || pass "…and not on the reviewed-head count"
+# The Codex-only merge is the decision of the session that SAW the opening verdict. A
+# resumed session has no validated reader for it — a clean pass may arrive as an issue
+# comment and leave no review — so it opens the Copilot phase instead.
+grep -q 'session resumed at this' <<<"$_una_sec" \
+    && grep -q 'stop opens the Copilot phase' <<<"$_una_sec" \
+    && grep -q 'a second review costs rounds' <<<"$_una_sec" \
+    && pass "…and a resumed session opens the Copilot phase rather than merging on evidence it never saw" \
+    || die "a resumed unattended session has no answer at the Codex stop, or merges on evidence it never saw"
+# The merge gate counts Copilot's boundary alone, so a resumed session merging on a
+# fault-tolerance signoff has to ask about Codex's itself.
+grep -q 'counter of step 6' <<<"$_una_sec" \
+    && grep -qF '$CODEX_BOT' <<<"$_una_sec" \
+    && pass "…and re-checks the Codex boundary before a resumed merge on a fault-tolerance signoff" \
+    || die "a resumed merge after the fault-tolerance pass skips the Codex round check-in"
+# A standing Copilot signoff means the phase happened and this signoff is the
+# fault-tolerance pass's; a resumed session must not open Copilot a second time.
+grep -q 'signoff already stands' <<<"$_una_sec" \
+    && grep -qF '$COPILOT_BOT' <<<"$_una_sec" \
+    && grep -q 'open nothing' <<<"$_una_sec" \
+    && pass "…and after a fault-tolerance pass a resumed session merges rather than opening Copilot again" \
+    || die "a resumed session after a moved-head fault-tolerance pass opens a third phase"
+_una_sec="$(_una_section '**On the two-reviewer path, STOP.' '### Resuming after a stop')" \
+    || { _una_sec=; die "the Copilot-clean stop could not be read"; }
+grep -q 'fault-tolerance pass' <<<"$_una_sec" \
+    && pass "…which says what to do where the phase produced commits" \
+    || die "the unattended Copilot-clean answer does not name the fault-tolerance pass"
+# That pass is REQUESTED, on both trigger modes: with automatic review on, the manual
+# request's mention is the only trigger, since no push precedes it.
+grep -q 'auto-review argument' <<<"$_una_sec" \
+    && grep -q 'no push precedes it' <<<"$_una_sec" \
+    && pass "…and requests it by mention whatever the trigger mode" \
+    || die "the unattended fault-tolerance pass relies on a push that never happens under automatic review"
+_una_row="$(grep '^| `4` |' "$SKILL")" || { _una_row=; die "the watch table has no row for status 4"; }
+grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_row" \
+    && die "the replies-only stop is answered unattended; a retraction would be signed off unread" \
+    || pass "…and the replies-only stop is not answered unattended"
+_una_sec="$(_una_section '**On `4`' '## 4.')" || { _una_sec=; die "the status-4 paragraph could not be read"; }
+[ -n "$_una_sec" ] || die "the status-4 paragraph is empty"
+grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_sec" \
+    && die "the replies-only stop's answer is taken unattended" \
+    || pass "…nor is its answer"
+_una_sec="$(awk 'index($0, "**Prove a fix can fail.**") == 1 { c = 1 } /^$/ { c = 0 } c' "$SKILL")" \
+    || { _una_sec=; die "the prove-a-fix-can-fail paragraph could not be read"; }
+[ -n "$_una_sec" ] || die "the prove-a-fix-can-fail paragraph is empty"
+grep -qi 'unattended\|AUTONOMOUS' <<<"$_una_sec" \
+    && die "an untestable limitation is accepted unattended; acceptance is a base-ref record" \
+    || pass "…nor the untestable limitation"
+grep -q 'Copilot is unavailable to the repository is not permission' "$SKILL" \
+    && pass "…and an unavailable Copilot is still not permission to skip the pass" \
+    || die "the unavailable-reviewer stop is gone"
+grep -q 'It does not merge unattended past a failed or unreadable gate' "$SKILL" \
+    && pass "…and no failed or unreadable gate is merged past" \
+    || die "the skill no longer rules out merging unattended past a failed gate"
+if [ -f "$ROOT/README.md" ]; then
+    grep -q '^### Running unattended' "$ROOT/README.md" \
+        && pass "README documents running unattended" \
+        || die "README has no section on running unattended"
+    grep -q 'WATCH_PR_AUTONOMOUS' "$ROOT/README.md" \
+        && pass "…naming the switch" \
+        || die "README does not name WATCH_PR_AUTONOMOUS"
+    grep -q 'It answers decisions, never readings' "$ROOT/README.md" \
+        && pass "…and says which stops it leaves alone" \
+        || die "README does not say that the unattended mode answers decisions only"
+fi
+
 
 
 # ── WHY THERE IS NO MARKDOWN PARSER, AND NO LIFTED FRAGMENT, HERE ──────────

@@ -4,7 +4,7 @@
 GitHub's own reviewers, **Codex** and **Copilot**, review every pull request, and
 **Claude Code** works the fix → reply → resolve → re-request loop until they sign
 off. Then it stops and asks you before opening the second reviewer's phase, and
-again before merging.
+again before merging, or takes the answers you gave in advance and runs unattended.
 
 One install serves every project on your machine. No daemon: nothing keeps
 running between sessions.
@@ -50,7 +50,8 @@ keep finding defects in the *fixes* usually mean the change is too large.
 - **Copilot code review** on the repository, for the two-reviewer loop. A
   Codex-only merge is supported as a decision you make at the first stop. What
   there is deliberately no switch for is skipping a reviewer silently: the mode
-  is chosen at the stop and passed to the merge gate by name.
+  is chosen at the stop, by you or by the unattended rule below, recorded on the
+  PR and passed to the merge gate by name.
 - **Claude Code.** Both reviewers run in GitHub's cloud; nothing is installed for
   them here.
 
@@ -111,7 +112,8 @@ or the session asks before every wait:
 
 `TaskStop` is what cancels a watch. This is deliberately not in the committed
 settings: granting a tool that runs background commands is each user's decision
-for their own checkout.
+for their own checkout. An unattended session needs it: a wait that prompts is a
+stop.
 
 ## A session
 
@@ -184,6 +186,25 @@ answers, so a decision that arrives
 tomorrow, or on another machine, costs nothing already done. A new session
 reads the records back and resumes from the right stop.
 
+### Running unattended
+
+Export `WATCH_PR_AUTONOMOUS=1` and the session takes these answers at the decision
+stops instead of asking, recording each on the PR as it would your word:
+
+- **the round check-in**: acknowledge and continue, so the record of a long loop
+  stays on the PR;
+- **Codex is clean**: merge on that signoff alone if Codex approved the opening
+  request, otherwise open the Copilot phase; a session resumed at this stop opens
+  the Copilot phase, or merges where a Copilot signoff already stands;
+- **Copilot is clean**: merge if the phase produced no commits; otherwise run the
+  fault-tolerance pass and merge on its signoff, with no third Copilot phase over
+  the pass's own fixes.
+
+It answers decisions, never readings: a review that is only replies, a limitation
+it cannot test, an unavailable reviewer and every failed or unreadable gate still
+stop, and a session stopped there resumes from the records exactly as an attended
+one does. An unattended wait needs the `Monitor` permission above.
+
 ### The merge gate
 
 On your word, the session resolves the head once and evaluates every gate before
@@ -215,6 +236,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | --- | --- | --- |
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed heads per reviewer between check-ins; `0` disables the pause |
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin`, so GitHub enforces branch protection itself |
+| `WATCH_PR_AUTONOMOUS` | unset | `1` takes the answers under *Running unattended* at the decision stops; every failure still stops |
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks run |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
 | `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |

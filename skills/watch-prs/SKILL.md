@@ -9,6 +9,16 @@ Both reviewers are first-party GitHub apps. Nothing runs locally — no watcher,
 you drive the loop with `gh` and the helper scripts, and every stop below is the
 operator's decision.
 
+With `WATCH_PR_AUTONOMOUS=1` exported the operator has made the decision stops in advance:
+each carries an **Unattended:** line naming its answer, taken without asking and recorded
+on the PR as the operator's word would be. A stop that exists because something could not
+be read, proved or told apart has no such line and is never answered by it. Whether this
+session is unattended is what one test prints, run once per session — `UNATTENDED` or
+`ATTENDED` — and the value is the switch's alone, so `yes` or `true` is attended. It is
+printed once setup is done, below: by a privileged child, which inherits no function this
+shell may hold under `echo`, and after the trace diversion, so a trace on stdout cannot
+print both words.
+
 | Reviewer | Login | Trigger |
 | --- | --- | --- |
 | Codex | `chatgpt-codex-connector[bot]` | a comment containing `@codex review`, or automatically on push if the repo has auto-review on |
@@ -234,6 +244,17 @@ Success prints `OWNER= REPO= RB_SCRIPTS= SUMMARY_FILE=`. From here on `$HOST`, `
 `$REQUEST_FILE`, `$PRIOR_FILE`, `$HEAD_FILE` and `$RB_NONCE_SEQ` are set and proven, and
 `REVIEW_BUS_REMOTE` is exported so every helper routes by this repository whatever the
 current directory is.
+
+Then, once, which mode this session runs in:
+
+```bash
+/usr/bin/env bash -p -c '
+if [[ ${WATCH_PR_AUTONOMOUS:-} = 1 ]]; then
+    echo "UNATTENDED: every decision stop takes its Unattended answer"
+else
+    echo "ATTENDED: every decision stop asks"
+fi'
+```
 
 ## 1. State the task on the PR
 
@@ -610,6 +631,18 @@ derived from GitHub each time, so it survives a new session.
   naming a round that has not happened yet is refused. `REVIEW_ROUND_THRESHOLD=0` disables
   the check-in entirely.
 
+**Unattended:** continue — where the 3 is this boundary, which the stage's output says
+with a `PR_ROUND_PAUSE` line. `gate`'s `PAUSE: the pass the push started left only replies`
+is step 3's status 4 by another route, carries no such line, and stays a stop. Wherever a
+stage reports the boundary — this counter, `gate`, `record`, `open` or the merge gate — it
+belongs to the reviewer that stage counted: `$WHO` at the counter and `gate`, Codex at
+`record` and `open`, Copilot at the merge gate; the template line the counter prints names
+it. Record the acknowledgement above with that login in place of `$WHO`, say in the round
+summary what the rounds have been about, and run the stage again — except `record`, which
+pauses after its signoff is written and read back: go on to step 7's answer, since
+running it twice records two signoffs. The count stays on the PR, where
+`REVIEW_ROUND_THRESHOLD=0` would leave no record that the loop ran long.
+
 ## 7. Codex is clean — now the Copilot phase
 
 When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done. That
@@ -668,7 +701,21 @@ answer is resumable; `pr-signoff.sh` reads it back in a later session.
 - **open the Copilot phase** — a second, differently-trained reviewer over the same head.
   It costs rounds, and it finds things Codex does not.
 
-Ask, then stop. Only on the second answer:
+**Unattended:** merge now where Codex's first verdict on this PR was clean — the opening
+request's watch reported `verdict=clean findings=0` — and open the Copilot phase
+otherwise: a change Codex sent back gets the second reviewer, even where the answer on
+its thread left the head unchanged, and a change it passed is merged on that signoff.
+That is the answer of the session that saw the opening verdict: a session resumed at this
+stop opens the Copilot phase, since a second review costs rounds and a merge on one
+signoff is not taken on evidence this session has not got. Where instead a Copilot
+signoff already stands — `pr-signoff.sh`, asked as in the resume recipe but for
+`$COPILOT_BOT`, reports one — the Copilot phase has happened and the signoff just recorded
+is the fault-tolerance pass's, whatever the opening verdict was: run the counter of step 6
+for `$CODEX_BOT` first and acknowledge a 3 as there, since the merge gate counts Copilot's
+boundary alone, then merge now, `codex-only` where the head is past the Copilot signoff
+and `both` where it is that head; open nothing.
+
+Ask, then stop, unless unattended. Only on the second answer:
 
 ```bash
 # only when the operator chose the Copilot phase
@@ -746,6 +793,18 @@ offered — one would cost a revocation, a round and a reopened phase for a verd
 cannot differ; different means the Codex signoff is carried forward only if the gate
 proves every commit between them is a `Review-Phase: copilot` fix.
 
+**Unattended:** on the first menu, merge, with `REVIEWERS=both`. On the second, the
+fault-tolerance pass: post the revocation the menu describes, write the account of the
+Copilot-phase commits into `$REQUEST_FILE`, and run steps 2–6 — step 2's block proves
+`$WHO` as `$CODEX_BOT` again, and this one request is made with the auto-review argument
+`no` whatever `$AUTO_REVIEW` is, since no push precedes it: the mention is its only trigger
+and the baseline must be the verdict before the revocation — until Codex is clean; then
+`record` from step 7 once more,
+with a body saying what the pass changed, which writes the replacement signoff and reads
+back the new `$CODEX_SHA`. Merge with `REVIEWERS=codex-only` where the pass moved the head
+and `both` where it did not: Copilot's verdict is on the head the pass started from, and a
+third phase over the pass's own fixes would restart the cycle. The pass runs once.
+
 **In `codex-only` there is no second question.** No Copilot review was requested, so the
 stage records nothing and prints no menu, and the decision was taken at the Codex stop.
 Go straight to the merge gate.
@@ -807,10 +866,13 @@ exit "$MERGE_RC"
 If any gate fails, do **not** merge: post the reason on the PR and hand it back to the
 operator.
 
+**Unattended:** 3 is the check-in of step 6, answered there and the gate run again; 1 and 4
+are handed back as above.
+
 ## What this skill deliberately does not do
 
 - **It does not run a reviewer.** Codex and Copilot are GitHub apps; a local process
   reviewing PRs duplicates them, authors its comments as the repository owner, and spends
   a separate credit pool.
 - **It does not merge unattended past a failed or unreadable gate.** Every "cannot tell"
-  is a stop.
+  is a stop, and `WATCH_PR_AUTONOMOUS=1` answers none of them.
