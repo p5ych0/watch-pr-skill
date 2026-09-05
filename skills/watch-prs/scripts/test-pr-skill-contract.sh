@@ -4243,11 +4243,20 @@ grep -q 'findings=0' <<<"$_una_sec" \
 grep -q 'pr-round-count' <<<"$_una_sec" \
     && die "the Codex-only decision reads the distinct-head count, which a same-head re-review leaves at one" \
     || pass "…and not on the reviewed-head count"
-# Resuming, the opening verdict is the oldest review's STATE: a body-only
-# CHANGES_REQUESTED carries no comment and is a finding.
-grep -q 'CHANGES_REQUESTED' <<<"$_una_sec" \
-    && pass "…and a resumed session reads the oldest review's state, not its comment count alone" \
-    || die "a resumed unattended session reads comment absence as an opening clean verdict"
+# The opening verdict is PERSISTED in the phase body and read back from the signoff
+# comment, never reconstructed: a clean pass may arrive as an issue comment with no review.
+_una_pre="$(_una_section '## 7. ' '**STOP — the next phase is the operator')" \
+    || { _una_pre=; die "the Codex-clean step could not be read"; }
+grep -qF 'Codex approved the opening request.' <<<"$_una_pre" \
+    && grep -qF 'Codex approved the opening request.' <<<"$_una_sec" \
+    && pass "…persisting the opening verdict in the phase body and reading it back on resuming" \
+    || die "the opening verdict is not written where a resumed session can read it back"
+grep -qi 'oldest review' <<<"$_una_sec" \
+    && die "the resumed session reconstructs the opening verdict from reviews, which a comment-channel pass never creates" \
+    || pass "…and not reconstructed from the review list"
+grep -q 'a second review costs rounds' <<<"$_una_sec" \
+    && pass "…and with no record, opens the Copilot phase rather than merging on one signoff" \
+    || die "a resumed session with no record of the opening verdict has no unattended answer, or merges on it"
 # A standing Copilot signoff means the phase happened and this signoff is the
 # fault-tolerance pass's; a resumed session must not open Copilot a second time.
 grep -q 'signoff already stands' <<<"$_una_sec" \

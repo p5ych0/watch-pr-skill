@@ -644,7 +644,9 @@ it to the operator; do not re-request, and do not treat it as clean. A malformed
 
 `pr-copilot-phase.sh` is the phase, in three stages with the operator's decision between
 them. First write one paragraph into `$SUMMARY_FILE` — what the PR does and what the Codex
-phase changed; say so if Codex approved on the first pass — under the body rules of step 2.
+phase changed, and where Codex approved on the first pass the sentence
+`Codex approved the opening request.`, which a resumed session reads back — under the body
+rules of step 2.
 `record` proves Codex clean on an exact head, proves that head's checks, re-proves both
 immediately before writing, orders any revocation against the verdict, and writes the
 Codex signoff onto the PR:
@@ -692,11 +694,13 @@ answer is resumable; `pr-signoff.sh` reads it back in a later session.
   It costs rounds, and it finds things Codex does not.
 
 **Unattended:** merge now where Codex's first verdict on this PR was clean — the opening
-request's watch reported `verdict=clean findings=0`, or, resuming, Codex's oldest review
-on the PR is an APPROVED or COMMENTED one carrying no comment, a body-only
-`CHANGES_REQUESTED` being a finding with none — and open the Copilot phase otherwise: a
-change Codex sent back gets the second reviewer, even where the answer on its thread left
-the head unchanged, and a change it passed is merged on that signoff. Where a Copilot
+request's watch reported `verdict=clean findings=0`, or, resuming, the Codex signoff
+comment carries the sentence `Codex approved the opening request.` — and open the Copilot
+phase otherwise: a change Codex sent back gets the second reviewer, even where the answer
+on its thread left the head unchanged, and a change it passed is merged on that signoff.
+Resuming with neither, open the Copilot phase too: a second review costs rounds, and a
+merge on one signoff is not taken on evidence this session has not got — a clean pass may
+have come through the comment channel and left no review to read. Where a Copilot
 signoff already stands — `pr-signoff.sh`, asked as in the resume recipe but for
 `$COPILOT_BOT`, reports one — the Copilot phase has happened and the signoff just recorded
 is the fault-tolerance pass's, whatever the opening verdict was: merge now, `codex-only`
