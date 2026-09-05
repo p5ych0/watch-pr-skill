@@ -17,14 +17,19 @@ A startup file, an exported function, a readonly or nameref name, or a traced de
 in the driving shell can misdirect the driver: make it skip a step, stop, or read a value
 wrongly. That is accepted, because it is bounded:
 
-- every gate, and every mutation but two, runs inside a privileged helper, started by
-  path under `/usr/bin/env bash -p` (`pr-selfcheck.sh` excepted, which is run directly and
-  re-execs into a clean shell itself), against GitHub's own records. The two the driver
-  posts itself are the reaction on a finding, a signal to the reviewer that nothing reads,
-  and the check-in acknowledgement, a control record `pr-round-count.sh` honours: forged,
-  it costs the operator a skipped check-in and nothing a gate refuses, since the round
-  boundary is the one gate that reads it. A misdirected driver can stop a loop or skip a
-  check-in; it cannot make a helper merge what the helper refuses;
+- every gate, and every mutation but the ones the driver makes as the operator, runs
+  inside a privileged helper, started by path under `/usr/bin/env bash -p`
+  (`pr-selfcheck.sh` excepted, which is run directly and re-execs into a clean shell
+  itself), against GitHub's own records. The driver posts, as the operator's login, the
+  reply on a thread, its resolution, the reaction, and the check-in acknowledgement. A
+  reaction nothing reads. A forged acknowledgement costs a skipped check-in, the one gate
+  that reads it. A wrong resolution removes the unresolved-thread obstacle and nothing
+  else: the merge still needs each reviewer's clean verdict on the head it judged, so a
+  finding resolved unanswered blocks through the verdict that raised it until a later pass,
+  which reads open threads and not resolved ones, reports clean — the cost the operator
+  resolving a thread by hand already carries. A misdirected driver can stop a loop, skip a
+  check-in, or close a thread the reviewer then has to raise again; it cannot make a helper
+  merge what the helper refuses;
 - the operator owns the session. A shell hostile enough to redefine `exit` can edit the
   helpers on disk or alias `gh`. The defences protected against an adversary who owns the
   shell but not the filesystem, which is nobody;

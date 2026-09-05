@@ -414,11 +414,14 @@ finding. The accepted records:
   session — no probe for a readonly or transforming name, no containment arm, no
   descriptor read, no trace diversion, no nonce bookkeeping on the driver's own
   account — because a shell hostile enough to shadow `exit` can edit the helpers
-  on disk, and every gate, and every mutation but two, runs in a privileged
-  helper against GitHub's records: the driver itself posts the reaction on a
-  finding, which nothing reads, and the check-in acknowledgement, whose forgery
-  costs a skipped check-in and nothing a gate refuses. A guard against the
-  driving shell is the finding, not its absence.
+  on disk, and every gate, and every mutation but the ones the driver makes as
+  the operator, runs in a privileged helper against GitHub's records. The driver
+  itself posts the thread reply and its resolution, the reaction, and the
+  check-in acknowledgement: a wrong resolution removes the unresolved-thread
+  obstacle and nothing else, since the merge still needs each reviewer's clean
+  verdict on the head it judged; a forged acknowledgement costs a skipped
+  check-in; the reaction nothing reads. A guard against the driving shell is the
+  finding, not its absence.
 
 ## A resolved thread is not proof a finding was fixed
 
