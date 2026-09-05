@@ -81,8 +81,8 @@ against, restated here:
   invariant can be staged; a source-shape assertion is allowed only where the
   required mechanism cannot be reproduced portably, beside the behavioural case.
 - **Validate at the boundaries** — argv, files crossing a process, `gh` and
-  `git` output, the operator's shell — and trust a helper's stated contract
-  inside them.
+  `git` output — and trust a helper's stated contract inside them and the
+  driving shell around them (`docs/decisions/2026-09-05-driving-shell-trusted.md`).
 - **No tokens, credentials or `.env` files**, committed, echoed or logged —
   records and abort messages included — and none in fixtures: the suite stubs
   `gh` and runs with no credentials, and a test that reaches GitHub is broken.
@@ -130,10 +130,11 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   placeholder identity a fixture supplies as a value (`test-pr-identity.sh` keys
   on the owner and the shape so those pass; this paragraph does not spell them).
 - **Identity is pinned once per session.** `pr-setup.sh` reads the origin
-  through the privileged `pr-origin.sh` into a file the driver reads with
-  `$(<…)`, never sources; the driver re-derives the identity and exports
-  `REVIEW_BUS_REMOTE` itself. Dropping the pin or re-deriving per call is a
-  blocking finding, and `(cd "$REPO_DIR" && …)` is no substitute: `cd` is a name.
+  through the privileged `pr-origin.sh`, proves it parses, and hands it to the
+  driver, which exports `REVIEW_BUS_REMOTE` once so every helper routes by it
+  whatever the current directory is. Dropping the pin or re-deriving per call is
+  a blocking finding, and `(cd "$REPO_DIR" && …)` per call is no substitute: a
+  list of call sites is missing the next one.
 - **A guard where a removal would do is a finding.** A check is a name that can
   be shadowed, mis-parsed or forgotten; a removed dependency stays removed. The
   author is required to say **on the thread** which of the two they took and why;
@@ -150,19 +151,19 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
 ### The gated head is a file, and it is not the summary
 
 `pr-close-round.sh gate` writes the head it proved into a file both stages are
-given; the value never enters the driving shell, where an assignment to a
-readonly name fails silently.
+given, and the driver reads it from there once the gate's status says it is
+proven.
 
 - A captured head — `GATED_HEAD="$( … )"`, or a `sed` over the record — is a
-  regression.
+  regression: the record is for a reader, the file is the contract.
 - The head file may not be the summary file, refused by path **and** by `-ef`.
 - Every non-alias refusal must leave the file empty; the alias refusal stays
   ahead of the emptying, because emptying a head file that is the summary
   destroys the account.
 - The clearing runs above the bootstrap, in a child that sources `writelib.sh`
-  directly behind a refusing stub, because the driver reads the head file after
-  the gate's `if` and a refusal can be walked past. Moving it below the loads,
-  or back to a `>`, is a regression.
+  directly behind a refusing stub, because a load that refused ahead of it would
+  leave the previous round's head readable after a refusal, which the rule above
+  forbids. Moving it below the loads, or back to a `>`, is a regression.
 
 The reply instructions are prose between two fences; the driver acts on the
 gate's status, which is what `docs/decisions/2026-09-05-driving-shell-trusted.md`
@@ -234,9 +235,11 @@ in it: `docs/decisions/2026-09-05-driving-shell-trusted.md`. A shadowable name, 
 readonly or nameref name, a traced descriptor, a startup hook, a walked-past
 refusal — none is a finding there, and a guard against one is a finding, since it
 is the shape that record retires. What is a finding in `SKILL.md`: a helper
-invoked by name rather than as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, a
-status not acted on, a value cut out of a record where a file carries it, a step
-out of order, a body that may carry a reserved marker or a mention.
+invoked by name rather than as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+`pr-selfcheck.sh` excepted since it is run directly and re-execs into a clean
+shell itself; a status not acted on; a value cut out of a record where a file
+carries it; a step out of order; a body that may carry a reserved marker or a
+mention.
 
 ### Comments, claims and prose
 

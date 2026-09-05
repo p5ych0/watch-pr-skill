@@ -17,9 +17,14 @@ A startup file, an exported function, a readonly or nameref name, or a traced de
 in the driving shell can misdirect the driver: make it skip a step, stop, or read a value
 wrongly. That is accepted, because it is bounded:
 
-- every mutation and every gate runs inside a privileged helper, started by path under
-  `/usr/bin/env bash -p`, against GitHub's own records. A misdirected driver can stop a
-  loop; it cannot make a helper merge what the helper refuses;
+- every gate, and every mutation but two, runs inside a privileged helper, started by
+  path under `/usr/bin/env bash -p` (`pr-selfcheck.sh` excepted, which is run directly and
+  re-execs into a clean shell itself), against GitHub's own records. The two the driver
+  posts itself are the reaction on a finding, a signal to the reviewer that nothing reads,
+  and the check-in acknowledgement, a control record `pr-round-count.sh` honours: forged,
+  it costs the operator a skipped check-in and nothing a gate refuses, since the round
+  boundary is the one gate that reads it. A misdirected driver can stop a loop or skip a
+  check-in; it cannot make a helper merge what the helper refuses;
 - the operator owns the session. A shell hostile enough to redefine `exit` can edit the
   helpers on disk or alias `gh`. The defences protected against an adversary who owns the
   shell but not the filesystem, which is nobody;
@@ -40,16 +45,19 @@ The document is read on every invocation.
 ## What does not change
 
 - The helpers stay privileged, and every helper is still started by path under
-  `/usr/bin/env bash -p`: it costs nothing and the fixtures pin it.
+  `/usr/bin/env bash -p`, `pr-selfcheck.sh` excepted as before: it costs nothing and the
+  fixtures pin it.
 - A poisoned `PATH` stays settled as it was (#91).
-- Values still cross in files a helper wrote, through `writelib.sh` on the helper's side,
-  because that is the shape a child and its parent can share; the driver reads them
-  plainly.
+- The head, the baseline and the signoff sha still cross in files written through
+  `writelib.sh` on the helper's side, and the origin in a directory `pr-setup.sh` created
+  exclusively, because that is the shape a child and its parent can share; the driver
+  reads them plainly.
 
 ## What remains a finding in `SKILL.md`
 
-A helper invoked by name rather than by path, a status not acted on, a value cut out of a
-record where a file carries it, a step out of order, a body posted with a reserved marker.
+A helper invoked by name rather than by path, `pr-selfcheck.sh` excepted; a status not
+acted on; a value cut out of a record where a file carries it; a step out of order; a body
+posted with a reserved marker or a mention.
 
 ## Supersedes
 
