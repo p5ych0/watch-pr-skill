@@ -266,11 +266,12 @@ reason for a change by its changelog entry or its commit message.
 ### Releases
 
 A change to an installed file — the scripts, `SKILL.md`, the manifests — bumps
-the version and adds a changelog entry: a change to what the loop does, checks
-or offers is a minor bump whose entry explains the failure fixed; a change that
-alters no behaviour — comments, `SKILL.md` prose, a changelog correction — is a
-patch whose entry says what the text now records. Tests, authoring documentation
-and these files bump nothing.
+the version and adds a changelog entry. Minor only for a new capability: a
+switch, a command, a stop, a knob the operator did not have before. Patch for
+everything else — a fix however visible, a tightening, a compression, a comment
+or prose change — with an entry that explains the failure fixed or says what the
+text now records. A fix that makes the loop behave differently is still a patch.
+Tests, authoring documentation and these files bump nothing.
 
 ## Shadowable names: where a finding is, and is not
 
