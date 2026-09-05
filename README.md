@@ -194,7 +194,8 @@ stops instead of asking, recording each on the PR as it would your word:
 - **the round check-in**: acknowledge and continue, so the record of a long loop
   stays on the PR;
 - **Codex is clean**: merge on that signoff alone if Codex approved the opening
-  request, otherwise open the Copilot phase;
+  request, otherwise open the Copilot phase; a session resumed at this stop opens
+  the Copilot phase, or merges where a Copilot signoff already stands;
 - **Copilot is clean**: merge if the phase produced no commits; otherwise run the
   fault-tolerance pass and merge on its signoff, with no third Copilot phase over
   the pass's own fixes.

@@ -4243,20 +4243,16 @@ grep -q 'findings=0' <<<"$_una_sec" \
 grep -q 'pr-round-count' <<<"$_una_sec" \
     && die "the Codex-only decision reads the distinct-head count, which a same-head re-review leaves at one" \
     || pass "…and not on the reviewed-head count"
-# The opening verdict is PERSISTED in the phase body and read back from the signoff
-# comment, never reconstructed: a clean pass may arrive as an issue comment with no review.
-_una_pre="$(_una_section '## 7. ' '**STOP — the next phase is the operator')" \
-    || { _una_pre=; die "the Codex-clean step could not be read"; }
-grep -qF 'Codex approved the opening request.' <<<"$_una_pre" \
-    && grep -qF 'Codex approved the opening request.' <<<"$_una_sec" \
-    && pass "…persisting the opening verdict in the phase body and reading it back on resuming" \
-    || die "the opening verdict is not written where a resumed session can read it back"
-grep -qi 'oldest review' <<<"$_una_sec" \
-    && die "the resumed session reconstructs the opening verdict from reviews, which a comment-channel pass never creates" \
-    || pass "…and not reconstructed from the review list"
-grep -q 'a second review costs rounds' <<<"$_una_sec" \
-    && pass "…and with no record, opens the Copilot phase rather than merging on one signoff" \
-    || die "a resumed session with no record of the opening verdict has no unattended answer, or merges on it"
+# The Codex-only merge is the decision of the session that SAW the opening verdict. A
+# resumed session has no validated reader for it — a clean pass may arrive as an issue
+# comment and leave no review — so it opens the Copilot phase instead.
+grep -q 'session resumed at this' <<<"$_una_sec" \
+    && grep -q 'a second review costs rounds' <<<"$_una_sec" \
+    && pass "…and a resumed session opens the Copilot phase rather than merging on evidence it never saw" \
+    || die "a resumed unattended session has no answer at the Codex stop, or merges on evidence it never saw"
+grep -qi 'oldest review\|signoff comment carries' <<<"$_una_sec" \
+    && die "the resumed session reconstructs or reads back the opening verdict, for which no validated reader exists" \
+    || pass "…and neither reconstructs nor reads back the opening verdict"
 # A standing Copilot signoff means the phase happened and this signoff is the
 # fault-tolerance pass's; a resumed session must not open Copilot a second time.
 grep -q 'signoff already stands' <<<"$_una_sec" \
