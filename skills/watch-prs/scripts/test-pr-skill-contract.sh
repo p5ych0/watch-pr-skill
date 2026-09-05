@@ -5780,7 +5780,7 @@ if [ ! -f "$_gen" ]; then
 elif _gen_tmp="$(mktemp_d)"; then
     # Files and `cmp`, never a command substitution: an assignment drops a NUL.
     _gen_rc=0
-    bash "$_gen" > "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
+    "$_gen"> "$_gen_tmp/out.md" 2>/dev/null || _gen_rc=$?
     { [ "$_gen_rc" -eq 0 ] && [ -s "$_gen_tmp/out.md" ]; } \
         && pass "the Copilot copy generator runs" \
         || die "the Copilot copy generator failed or printed nothing"
@@ -5795,24 +5795,34 @@ elif _gen_tmp="$(mktemp_d)"; then
         && die "a copy differing from the generated one only by an embedded NUL passes the currentness check" \
         || pass "…and a copy differing only by an embedded NUL is behind"
     _gen_rc=0
-    bash "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/installed.md" >/dev/null 2>&1 || _gen_rc=$?
+    "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/installed.md" >/dev/null 2>&1 || _gen_rc=$?
     { [ "$_gen_rc" -eq 0 ] && _gen_current "$_gen_tmp/installed.md"; } \
         && pass "…and the destination form installs the same bytes" \
         || die "the destination form exited $_gen_rc or installed different bytes from the stdout form"
+    case "$(ls -l "$_gen_tmp/installed.md")" in
+        -rw-r--r--*) pass "…with a tracked file's mode rather than the temporary's" ;;
+        *) die "the destination form installed the copy with the temporary's mode: $(ls -l "$_gen_tmp/installed.md" | cut -c1-10)" ;;
+    esac
+    mkdir -p "$_gen_tmp/dir.dest"
+    _gen_rc=0
+    "$_gen" "$ROOT/AGENTS.md" "$_gen_tmp/dir.dest" >/dev/null 2>&1 || _gen_rc=$?
+    { [ "$_gen_rc" -ne 0 ] && [ -z "$(ls -A "$_gen_tmp/dir.dest")" ]; } \
+        && pass "…and a directory destination is refused with nothing moved inside it" \
+        || die "a directory destination exited $_gen_rc and left $(ls -A "$_gen_tmp/dir.dest" | wc -l | tr -d ' ') entries inside it"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' '<!-- copilot-body-end -->' 'c' \
         '<!-- copilot-body-start -->' 'd' '<!-- copilot-body-end -->' > "$_gen_tmp/twice.md"
     printf '%s\n' 'a' '<!-- copilot-body-start -->' 'b' > "$_gen_tmp/unclosed.md"
     printf '%s\n' 'a' '<!-- copilot-body-end -->' 'b' '<!-- copilot-body-start -->' 'c' > "$_gen_tmp/reversed.md"
     for _gen_bad in twice unclosed reversed; do
         _gen_rc=0
-        bash "$_gen" "$_gen_tmp/$_gen_bad.md" > "$_gen_tmp/$_gen_bad.out" 2>/dev/null || _gen_rc=$?
+        "$_gen" "$_gen_tmp/$_gen_bad.md" > "$_gen_tmp/$_gen_bad.out" 2>/dev/null || _gen_rc=$?
         { [ "$_gen_rc" -ne 0 ] && [ ! -s "$_gen_tmp/$_gen_bad.out" ]; } \
             && pass "…and a $_gen_bad marker layout is refused with nothing emitted" \
             || die "a $_gen_bad marker layout exited $_gen_rc with output on stdout; redirected, that overwrites the Copilot copy with a partial policy"
         printf '%s\n' 'the copy that was there' > "$_gen_tmp/$_gen_bad.dest"
         cp "$_gen_tmp/$_gen_bad.dest" "$_gen_tmp/$_gen_bad.keep"
         _gen_rc=0
-        bash "$_gen" "$_gen_tmp/$_gen_bad.md" "$_gen_tmp/$_gen_bad.dest" >/dev/null 2>&1 || _gen_rc=$?
+        "$_gen" "$_gen_tmp/$_gen_bad.md" "$_gen_tmp/$_gen_bad.dest" >/dev/null 2>&1 || _gen_rc=$?
         { [ "$_gen_rc" -ne 0 ] && cmp -s "$_gen_tmp/$_gen_bad.dest" "$_gen_tmp/$_gen_bad.keep"; } \
             && pass "…and the destination form leaves an existing copy untouched on a $_gen_bad layout" \
             || die "the destination form exited $_gen_rc and changed an existing copy on a $_gen_bad layout"
@@ -5823,7 +5833,7 @@ elif _gen_tmp="$(mktemp_d)"; then
           printf '%s\n' 'second open' > "$_gen_tmp/once" ) 2>/dev/null &
         _gen_w=$!
         _gen_rc=0
-        run_limited 20 bash "$_gen" "$_gen_tmp/once" > "$_gen_tmp/once.out" 2>/dev/null || _gen_rc=$?
+        run_limited 20 "$_gen" "$_gen_tmp/once" > "$_gen_tmp/once.out" 2>/dev/null || _gen_rc=$?
         kill "$_gen_w" 2>/dev/null || true; wait "$_gen_w" 2>/dev/null || true
         { [ "$_gen_rc" -eq 0 ] && grep -q 'one open' "$_gen_tmp/once.out" && ! grep -q 'second open' "$_gen_tmp/once.out"; } \
             && pass "…and the source is read once, so a source that changes between opens is emitted as validated" \

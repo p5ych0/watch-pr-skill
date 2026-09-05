@@ -32,10 +32,16 @@ if [ -z "$dst" ]; then
     emit
     exit 0
 fi
-tmp="$(mktemp "$(dirname -- "$dst")/.copilot-instructions.XXXXXX")"
-if emit > "$tmp" && [ -s "$tmp" ]; then
-    mv -f -- "$tmp" "$dst"
-else
-    rm -f -- "$tmp"
+# `mv` moves a file inside a directory it resolves the destination to and reports success; `rename(2)`
+# refuses a directory, so the exact rename is asked of `perl` and a directory is refused before that.
+if [ -d "$dst" ]; then
+    echo "$0: destination '$dst' is a directory" >&2
     exit 1
 fi
+tmp="$(mktemp "$(dirname -- "$dst")/.copilot-instructions.XXXXXX")"
+# `mktemp` creates the temporary 0600, which the rename would carry onto a tracked file.
+if emit > "$tmp" && [ -s "$tmp" ] && chmod 644 -- "$tmp" && perl -e 'rename $ARGV[0], $ARGV[1] or exit 1' -- "$tmp" "$dst"; then
+    exit 0
+fi
+rm -f -- "$tmp"
+exit 1

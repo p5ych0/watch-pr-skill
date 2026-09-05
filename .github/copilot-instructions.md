@@ -63,7 +63,9 @@ against, restated here:
   forbidden there, since statuses are control flow; a one-shot command uses
   `set -euo pipefail`. Do not ask for a script to move to a stricter mode.
 - **No new runtime dependency** without a measured defect only it removes, and
-  none where an existing one covers the case; `perl` is the precedent.
+  none where an existing one covers the case; `perl` is the precedent. The
+  runtime is bash 3.2 or 5 with `perl`, `jq`, `gh`, `git` and GNU or BSD
+  coreutils: no Node and no Python at runtime, whatever the defect.
 - **No abstraction in anticipation.** A shared library or a new helper exists
   only for a rule written more than once and then found missing from a copy; a
   wrapper that only delegates is a finding, except the interface wrappers
