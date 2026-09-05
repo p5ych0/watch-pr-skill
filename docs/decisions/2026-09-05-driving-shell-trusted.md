@@ -61,10 +61,13 @@ posted with a reserved marker or a mention.
 
 ## Supersedes
 
-The driver-side rules in `AGENTS.md` § The driving shell and the "yes in `SKILL.md`'s own
-bash" clause of § Shadowable names, both rewritten in #305; and, as history, `CLAUDE.md`'s
-accounts of the driver defences built under #102, #178, #181 and #183, which #306 removes
-from the document.
+`docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`, which accepted that a hook
+between the driver's statements owns every value the driver holds while describing the
+startup probes and read-backs as retained: this record trusts the whole shell, hooks
+included, so that limit is subsumed and those defences go with #306. The driver-side rules
+in `AGENTS.md` § The driving shell and the "yes in `SKILL.md`'s own bash" clause of
+§ Shadowable names, both rewritten in #305. And, as history, `CLAUDE.md`'s accounts of the
+driver defences built under #102, #178, #181 and #183, which #306 removes from the document.
 
 **Pinned by:** `test-pr-skill-contract.sh` after #306, which asserts that each fence in
 `SKILL.md` is one invocation and that no hostile-shell shape is left in the document.

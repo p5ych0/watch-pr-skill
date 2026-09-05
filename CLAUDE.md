@@ -81,8 +81,8 @@ unasked feature. A defect found on the way is filed, not fixed — unless this c
 introduced it (§ One change per pull request).
 
 **Boundaries.** Validate at this project's boundaries — argv, every file handed across a
-process, `gh` and `git` output, the operator's shell — and trust a helper's stated
-contract inside them. What "cannot happen" is decided by measurement, and where a case is
+process, `gh` and `git` output — and trust a helper's stated contract inside them and the
+operator's shell around them (§ Driving shell). What "cannot happen" is decided by measurement, and where a case is
 accepted rather than closed, by a record in `docs/decisions/`; not by intuition in either
 direction.
 

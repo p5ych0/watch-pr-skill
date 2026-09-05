@@ -168,8 +168,9 @@ proven.
 The reply instructions are prose between two fences; the driver acts on the
 gate's status, which is what `docs/decisions/2026-09-05-driving-shell-trusted.md`
 relies on. What stays in `SKILL.md` is what a child process cannot do for the
-driver — locate the scripts, source the values setup hands over, act on each
-helper's status — as one invocation per step. Do not raise "move this into a
+driver — locate the scripts, take the values setup hands over (a bare value is
+read, a file of assignments the helper wrote is sourced), act on each helper's
+status — as one invocation per step. Do not raise "move this into a
 script" against those, and do not raise a defence for the driving shell.
 
 ### A handoff file is written by rename, never by truncation
@@ -400,18 +401,19 @@ finding. The accepted records:
   driver's read to a forged head; the merge gate still refuses it against the
   durable signoff and the live verdict. The `(dev, ino)` anchor was tried and is
   substitutable; do not reintroduce it.
-- `docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md`: a hook
-  running between the driver's statements owns every value it holds, and no
-  further guard answers that; do not raise it as a fresh finding.
-
+- `docs/decisions/2026-09-03-driver-state-rewritten-by-hooks.md` is superseded
+  by the record below, which subsumes its limit: a hook between the driver's
+  statements is the driving shell, and the driving shell is trusted.
 - `docs/decisions/2026-09-05-driving-shell-trusted.md`: the driving shell is
   trusted. `SKILL.md`'s bash defends against nothing in the operator's own
   session — no probe for a readonly or transforming name, no containment arm, no
   descriptor read, no trace diversion, no nonce bookkeeping on the driver's own
   account — because a shell hostile enough to shadow `exit` can edit the helpers
-  on disk, and every mutation and gate runs in a privileged helper against
-  GitHub's records. A guard against the driving shell is the finding, not its
-  absence.
+  on disk, and every gate, and every mutation but two, runs in a privileged
+  helper against GitHub's records: the driver itself posts the reaction on a
+  finding, which nothing reads, and the check-in acknowledgement, whose forgery
+  costs a skipped check-in and nothing a gate refuses. A guard against the
+  driving shell is the finding, not its absence.
 
 ## A resolved thread is not proof a finding was fixed
 
