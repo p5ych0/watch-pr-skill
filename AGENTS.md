@@ -171,9 +171,10 @@ proven.
 The reply instructions are prose between two fences; the driver acts on the
 gate's status, which is what `docs/decisions/2026-09-05-driving-shell-trusted.md`
 relies on. What stays in `SKILL.md` is what a child process cannot do for the
-driver — locate the scripts, take the values setup hands over (a bare value is
-read, a file of assignments the helper wrote is sourced), act on each helper's
-status — as one invocation per step. Do not raise "move this into a
+driver — locate the scripts, take the values setup hands over as data, read and
+then validated, never sourced, since a file crossing from another process is a
+boundary whatever the shell is; act on each helper's status — as one invocation
+per step. Do not raise "move this into a
 script" against those, and do not raise a defence for the driving shell.
 
 ### A handoff file is written by rename, never by truncation
@@ -242,8 +243,9 @@ is the shape that record retires. What is a finding in `SKILL.md`: a helper
 invoked by name rather than as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
 `pr-selfcheck.sh` excepted since it is run directly and re-execs into a clean
 shell itself; a status not acted on; a value cut out of a record where a file
-carries it; a step out of order; a body that may carry a reserved marker or a
-mention.
+carries it; a step out of order; a request, summary or phase body that may carry
+a reserved marker or a mention — the check-in acknowledgement is the one body
+the driver writes with a marker on purpose.
 
 ### Comments, claims and prose
 

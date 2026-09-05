@@ -56,8 +56,10 @@ The document is read on every invocation.
 ## What remains a finding in `SKILL.md`
 
 A helper invoked by name rather than by path, `pr-selfcheck.sh` excepted; a status not
-acted on; a value cut out of a record where a file carries it; a step out of order; a body
-posted with a reserved marker or a mention.
+acted on; a value cut out of a record where a file carries it, or a handoff file sourced
+rather than read as data and validated; a step out of order; a request, summary or phase
+body posted with a reserved marker or a mention — the check-in acknowledgement is the one
+body the driver writes with a marker on purpose.
 
 ## Supersedes
 
