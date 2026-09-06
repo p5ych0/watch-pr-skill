@@ -1,10 +1,13 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Privileged mode reads no BASH_ENV, imports no function and ignores SHELLOPTS, so no name this
-# hook calls is one the environment can replace; a hook cannot ask its caller for the flag.
+# hook calls is one the environment can replace; a last resort, since `$-` reports the mode and
+# not how the shell got there, and a BASH_ENV that exits kills a shell that starts unprivileged.
 if [[ $- != *p* ]]; then
-    exec "$BASH" -p "${BASH_SOURCE[0]}" "$@"
+    echo "blocked: this hook must be started privileged, as .claude/settings.json starts it" >&2
+    exit 2
 fi
 set -uo pipefail
+unset BASH_ENV ENV
 
 f="$(jq -ers 'if length == 1 and (.[0].tool_input.file_path | type) == "string" then .[0].tool_input.file_path else error("no path") end' 2>/dev/null)" \
     || { echo "the post-edit hook could not read one path from its input; is jq installed, and is the envelope whole and single?" >&2; exit 2; }
@@ -13,7 +16,7 @@ case "$f" in
     *) exit 0 ;;
 esac
 [ -f "$f" ] || exit 0
-err="$(bash -n "$f" 2>&1)" && exit 0
+err="$(bash -p -n "$f" 2>&1)" && exit 0
 # The diagnostic quotes the offending source line, which may hold a value that must not reach a log.
 rest="${err%%$'\n'*}"
 rest="${rest#"$f": line }"

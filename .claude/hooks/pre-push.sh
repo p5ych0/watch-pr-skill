@@ -1,10 +1,13 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Privileged mode reads no BASH_ENV, imports no function and ignores SHELLOPTS, so no name this
-# hook calls is one the environment can replace; a hook cannot ask its caller for the flag.
+# hook calls is one the environment can replace; a last resort, since `$-` reports the mode and
+# not how the shell got there, and a BASH_ENV that exits kills a shell that starts unprivileged.
 if [[ $- != *p* ]]; then
-    exec "$BASH" -p "${BASH_SOURCE[0]}" "$@"
+    echo "blocked: this hook must be started privileged, as .claude/settings.json starts it" >&2
+    exit 2
 fi
 set -uo pipefail
+unset BASH_ENV ENV
 
 cmd="$(jq -ers 'if length == 1 and (.[0].tool_input.command | type) == "string" then .[0].tool_input.command else error("no command") end' 2>/dev/null)" \
     || { echo "blocked: the pre-push hook could not read one command from its input; is jq installed, and is the envelope whole and single?" >&2; exit 2; }
@@ -30,7 +33,7 @@ check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: $check is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
 . "$root/skills/watch-prs/scripts/testlib.sh" 2>/dev/null && [ "$(type -t run_limited)" = function ] \
     || { echo "blocked: the watchdog in testlib.sh could not be loaded; nothing is pushed unbounded" >&2; exit 2; }
-out="$(run_limited "$bound" "$check" "$root" 2>&1)"; rc=$?
+out="$(run_limited "$bound" /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && exit 0
 grep -v '^ok' <<<"$out" | tail -15 >&2
 if [ "$rc" -eq 124 ]; then

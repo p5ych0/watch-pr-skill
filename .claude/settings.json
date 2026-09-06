@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh",
+            "command": "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh",
             "timeout": 600
           }
         ]
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh"
+            "command": "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh"
           }
         ]
       }

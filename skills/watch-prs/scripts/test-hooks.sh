@@ -19,16 +19,17 @@ tmp="$(mktemp_d)" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
 wired() {
-    jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh" and .timeout == 600)' "$1" >/dev/null \
-    && jq -e '.hooks.PostToolUse[]? | select(.matcher == "Write|Edit") | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh")' "$1" >/dev/null
+    jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and .command == "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh" and .timeout == 600)' "$1" >/dev/null \
+    && jq -e '.hooks.PostToolUse[]? | select(.matcher == "Write|Edit") | .hooks[]? | select(.type == "command" and .command == "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh")' "$1" >/dev/null
 }
 wired "$SETTINGS" && pass "settings.json runs both hooks by their full path, each under its event and matcher, the push one with a 600 s timeout" \
     || die "settings.json does not run both hooks as the harness must"
-jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "echo hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-pre.json" || die "the pre decoy was not written"
-jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit") | .hooks[]).command = "echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
+jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "/usr/bin/env bash -p echo hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-pre.json" || die "the pre decoy was not written"
+jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit") | .hooks[]).command = "/usr/bin/env bash -p echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
 jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit")).matcher = "WriteEdit"' "$SETTINGS" > "$tmp/decoy-matcher.json" || die "the matcher decoy was not written"
 jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).timeout = 30' "$SETTINGS" > "$tmp/decoy-timeout.json" || die "the timeout decoy was not written"
-for d in pre post matcher timeout; do
+jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-unprivileged.json" || die "the unprivileged decoy was not written"
+for d in pre post matcher timeout unprivileged; do
     wired "$tmp/decoy-$d.json" && die "the $d decoy passed the wiring check" || pass "the $d decoy fails the wiring check"
 done
 for h in pre-push.sh post-edit.sh; do
@@ -87,8 +88,11 @@ expect "$tmp/ok" '{"tool_input":{}}' 2 "an envelope with no command blocks"
 expect "$tmp/ok" '{"tool_input":{"command":null}}' 2 "a null command blocks"
 expect "$tmp/ok" "$(cmd 'ls')$(cmd 'ls')" 2 "two envelopes block"
 bash_bin="$(command -v bash)"
-rc=0; printf '%s' "$(cmd 'git push origin b')" | PATH="$tmp/nopath" CLAUDE_PROJECT_DIR="$tmp/bad" "$bash_bin" "$HOOKS/pre-push.sh" >/dev/null 2>&1 || rc=$?
+mkdir -p "$tmp/nojq"; ln -s "$bash_bin" "$tmp/nojq/bash"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nojq" CLAUDE_PROJECT_DIR="$tmp/bad" "$HOOKS/pre-push.sh" >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 2 ] && pass "a missing jq blocks rather than passing an unchecked push" || die "with jq absent rc=$rc"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | CLAUDE_PROJECT_DIR="$tmp/ok" "$bash_bin" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'privileged' "$tmp/err" && pass "a push hook started unprivileged refuses rather than checking" || die "unprivileged start rc=$rc: $(head -c 120 "$tmp/err")"
 
 post() { printf '%s' "$1" | "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err"; }
 fp() { printf '{"tool_input":{"file_path":%s}}' "$(printf '%s' "$1" | jq -Rs .)"; }
@@ -112,10 +116,13 @@ rc=0; post "$(fp "$misleading")" || rc=$?
 # Tracing inherited at startup prints every expansion, the sanitised ones included.
 rc=0; printf '%s' "$(fp "$tmp/leak.sh")" | env SHELLOPTS=xtrace "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "inherited tracing does not print the diagnostic the edit hook refuses to quote" || die "traced post-edit rc=$rc: $(head -c 160 "$tmp/err")"
-grep -q '^+ ' "$tmp/err" && pass "…and the tracing was really on" || die "the traced run left no trace: $(head -c 160 "$tmp/err")"
+! grep -q '^+ ' "$tmp/err" && pass "…and a privileged start left no trace at all" || die "the edit hook traced: $(head -c 160 "$tmp/err")"
 rc=0; printf '%s' "$(cmd 'git push origin b # PLACEHOLDER_VALUE_NOT_FOR_LOGS')" | env CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 SHELLOPTS=xtrace "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "inherited tracing does not print the push hook's command" || die "traced pre-push rc=$rc: $(head -c 160 "$tmp/err")"
-grep -q '^+ ' "$tmp/err" && pass "…and that tracing was really on too" || die "the traced push run left no trace: $(head -c 160 "$tmp/err")"
+! grep -q '^+ ' "$tmp/err" && pass "…and that start left no trace either" || die "the push hook traced: $(head -c 160 "$tmp/err")"
+printf '#!/usr/bin/env bash\nx=PLACEHOLDER_VALUE_NOT_FOR_LOGS\n' > "$tmp/control.sh"; chmod +x "$tmp/control.sh"
+env SHELLOPTS=xtrace "$tmp/control.sh" 2>"$tmp/err"
+grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "…where an ordinary shell started the same way does trace" || die "SHELLOPTS traced nothing at all, so the two cases above prove nothing"
 
 # An environment that replaces a name the hooks call: privileged mode is the answer, so the
 # override must reach a shell that ignores it rather than one that imports it.
@@ -126,5 +133,13 @@ rc=0; printf '%s' "$(fp "$tmp/broken.sh")" | env BASH_ENV="$tmp/env.sh" "$HOOKS/
 [ "$rc" -eq 2 ] && pass "a bash defined through BASH_ENV does not pass a file that will not parse" || die "BASH_ENV bash rc=$rc: $(head -c 160 "$tmp/err")"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env "BASH_FUNC_jq%%=() { cat >/dev/null; return 0; }" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && pass "an exported jq function does not pass the push" || die "exported jq rc=$rc: $(head -c 160 "$tmp/err")"
+
+# A BASH_ENV that exits kills an unprivileged shell before its first line, so the flag comes
+# from the invocation settings.json makes, not from the script.
+printf 'exit 0\n' > "$tmp/exit.sh"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env BASH_ENV="$tmp/exit.sh" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 /usr/bin/env bash -p "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a BASH_ENV that exits does not pass the push" || die "BASH_ENV exit, push hook, rc=$rc: $(head -c 160 "$tmp/err")"
+rc=0; printf '%s' "$(fp "$tmp/broken.sh")" | env BASH_ENV="$tmp/exit.sh" /usr/bin/env bash -p "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a BASH_ENV that exits does not pass a file that will not parse" || die "BASH_ENV exit, edit hook, rc=$rc: $(head -c 160 "$tmp/err")"
 
 [ "$fail" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }
