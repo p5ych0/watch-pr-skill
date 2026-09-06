@@ -112,9 +112,19 @@ rc=0; post "$(fp "$misleading")" || rc=$?
 # Tracing inherited at startup prints every expansion, the sanitised ones included.
 rc=0; printf '%s' "$(fp "$tmp/leak.sh")" | env SHELLOPTS=xtrace "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "inherited tracing does not print the diagnostic the edit hook refuses to quote" || die "traced post-edit rc=$rc: $(head -c 160 "$tmp/err")"
-grep -q 'set +x' "$tmp/err" && pass "…and the tracing was really on" || die "the traced run left no trace: $(head -c 160 "$tmp/err")"
+grep -q '^+ ' "$tmp/err" && pass "…and the tracing was really on" || die "the traced run left no trace: $(head -c 160 "$tmp/err")"
 rc=0; printf '%s' "$(cmd 'git push origin b # PLACEHOLDER_VALUE_NOT_FOR_LOGS')" | env CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 SHELLOPTS=xtrace "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "inherited tracing does not print the push hook's command" || die "traced pre-push rc=$rc: $(head -c 160 "$tmp/err")"
-grep -q 'set +x' "$tmp/err" && pass "…and that tracing was really on too" || die "the traced push run left no trace: $(head -c 160 "$tmp/err")"
+grep -q '^+ ' "$tmp/err" && pass "…and that tracing was really on too" || die "the traced push run left no trace: $(head -c 160 "$tmp/err")"
+
+# An environment that replaces a name the hooks call: privileged mode is the answer, so the
+# override must reach a shell that ignores it rather than one that imports it.
+printf 'jq() { cat >/dev/null; return 0; }\nbash() { return 0; }\n' > "$tmp/env.sh"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env BASH_ENV="$tmp/env.sh" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a jq defined through BASH_ENV does not pass the push" || die "BASH_ENV jq rc=$rc: $(head -c 160 "$tmp/err")"
+rc=0; printf '%s' "$(fp "$tmp/broken.sh")" | env BASH_ENV="$tmp/env.sh" "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a bash defined through BASH_ENV does not pass a file that will not parse" || die "BASH_ENV bash rc=$rc: $(head -c 160 "$tmp/err")"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env "BASH_FUNC_jq%%=() { cat >/dev/null; return 0; }" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "an exported jq function does not pass the push" || die "exported jq rc=$rc: $(head -c 160 "$tmp/err")"
 
 [ "$fail" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }

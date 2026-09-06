@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Tracing inherited through SHELLOPTS or BASH_ENV would print the diagnostic this hook refuses to quote.
-set +x
+# Privileged mode reads no BASH_ENV, imports no function and ignores SHELLOPTS, so no name this
+# hook calls is one the environment can replace; a hook cannot ask its caller for the flag.
+if [[ $- != *p* ]]; then
+    exec "$BASH" -p "${BASH_SOURCE[0]}" "$@"
+fi
 set -uo pipefail
 
 f="$(jq -ers 'if length == 1 and (.[0].tool_input.file_path | type) == "string" then .[0].tool_input.file_path else error("no path") end' 2>/dev/null)" \
