@@ -85,6 +85,7 @@ expect "$tmp/ok" '' 2 "empty input blocks"
 expect "$tmp/ok" 'not json' 2 "unreadable input blocks"
 expect "$tmp/ok" '{"tool_input":{}}' 2 "an envelope with no command blocks"
 expect "$tmp/ok" '{"tool_input":{"command":null}}' 2 "a null command blocks"
+expect "$tmp/ok" "$(cmd 'ls')$(cmd 'ls')" 2 "two envelopes block"
 bash_bin="$(command -v bash)"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | PATH="$tmp/nopath" CLAUDE_PROJECT_DIR="$tmp/bad" "$bash_bin" "$HOOKS/pre-push.sh" >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 2 ] && pass "a missing jq blocks rather than passing an unchecked push" || die "with jq absent rc=$rc"
@@ -102,5 +103,6 @@ rc=0; post 'not json' || rc=$?;               [ "$rc" -eq 2 ] && pass "unreadabl
 rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelope with no path is reported" || die "pathless post-edit input rc=$rc"
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
 rc=0; post '' || rc=$?;                       [ "$rc" -eq 2 ] && pass "empty post-edit input is reported" || die "empty post-edit input rc=$rc"
+rc=0; post "$(fp "$tmp/broken.sh")$(fp "$tmp/good.sh")" || rc=$?; [ "$rc" -eq 2 ] && pass "two envelopes are reported, not read as one path" || die "two post-edit envelopes rc=$rc"
 
 [ "$fail" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }

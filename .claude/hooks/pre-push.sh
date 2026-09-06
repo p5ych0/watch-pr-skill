@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.command else error("no command") end' 2>/dev/null)" \
-    || { echo "blocked: the pre-push hook could not read a command from its input; is jq installed, and is the envelope whole?" >&2; exit 2; }
+cmd="$(jq -ers 'if length == 1 and (.[0].tool_input.command | type) == "string" then .[0].tool_input.command else error("no command") end' 2>/dev/null)" \
+    || { echo "blocked: the pre-push hook could not read one command from its input; is jq installed, and is the envelope whole and single?" >&2; exit 2; }
 
 # So a spelling that only quotes or escapes a word is the word, and a mention inside an argument
 # costs a self-check run.
@@ -27,7 +27,7 @@ check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
     || { echo "blocked: the watchdog in testlib.sh could not be loaded; nothing is pushed unbounded" >&2; exit 2; }
 out="$(run_limited "$bound" "$check" "$root" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && exit 0
-printf '%s\n' "$out" | grep -v '^ok' | tail -15 >&2
+grep -v '^ok' <<<"$out" | tail -15 >&2
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2
 else
