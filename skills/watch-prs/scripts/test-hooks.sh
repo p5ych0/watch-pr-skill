@@ -138,7 +138,7 @@ rc=0; post "$(fp "$tmp/leak.sh")" || rc=$?
 [ "$rc" -eq 2 ] && grep -q 'line 1' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "the report names the file and the line, never the line's text" || die "leak.sh rc=$rc: $(head -c 160 "$tmp/err")"
 rc=0; post "$(fp "$tmp/good.sh")" || rc=$?;   [ "$rc" -eq 0 ] && pass "a shell file that parses passes" || die "good.sh rc=$rc"
 printf 'echo ok\n' > "$tmp/-x.sh"
-rc=0; ( cd "$tmp" && printf '%s' "$(fp -- '-x.sh')" | "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" ) || rc=$?
+rc=0; ( cd "$tmp" && printf '%s' "$(fp '-x.sh')" | "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" ) || rc=$?
 [ "$rc" -eq 0 ] && pass "…including one named so that it reads as an option" || die "-x.sh rc=$rc: $(head -c 160 "$tmp/err")"
 rc=0; post "$(fp "$tmp/notes.md")" || rc=$?;  [ "$rc" -eq 0 ] && pass "a non-shell file is not parsed" || die "notes.md rc=$rc"
 rc=0; post 'not json' || rc=$?;               [ "$rc" -eq 2 ] && pass "unreadable input is reported" || die "malformed post-edit input rc=$rc"
