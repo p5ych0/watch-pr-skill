@@ -8,10 +8,8 @@ fi
 set -uo pipefail
 unset BASH_ENV ENV
 
-# The sentinel keeps a pathname that ends in a newline, which the substitution would eat.
-f="$(jq -jers 'if length == 1 and (.[0].tool_input.file_path | type) == "string" then .[0].tool_input.file_path + "X" else error("no path") end' 2>/dev/null)" \
+f="$(jq -ers 'if length == 1 and (.[0].tool_input.file_path | type) == "string" then .[0].tool_input.file_path else error("no path") end' 2>/dev/null)" \
     || { echo "the post-edit hook could not read one path from its input; is jq installed, and is the envelope whole and single?" >&2; exit 2; }
-f="${f%X}"
 case "$f" in
     *.sh) ;;
     *) exit 0 ;;

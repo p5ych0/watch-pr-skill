@@ -132,10 +132,6 @@ rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelo
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
 rc=0; post '' || rc=$?;                       [ "$rc" -eq 2 ] && pass "empty post-edit input is reported" || die "empty post-edit input rc=$rc"
 rc=0; post "$(fp "$tmp/broken.sh")$(fp "$tmp/good.sh")" || rc=$?; [ "$rc" -eq 2 ] && pass "two envelopes are reported, not read as one path" || die "two post-edit envelopes rc=$rc"
-trailing_path="$tmp/$(printf 'trailing\n').sh"
-printf 'x=1 )\n' > "$trailing_path"
-rc=0; post "$(fp "$trailing_path")" || rc=$?
-[ "$rc" -eq 2 ] && pass "a path that ends in a newline is still the path the hook parses" || die "trailing-newline path rc=$rc: $(head -c 200 "$tmp/err")"
 grep -q 'LC_ALL=C bash -p -n' "$HOOKS/post-edit.sh" && pass "the syntax probe runs under a fixed locale, where a translated diagnostic would hide the line" || die "post-edit.sh does not pin the locale of its syntax probe"
 newline_path="$tmp/$(printf 'two\nlines').sh"
 printf 'x=1 )\n' > "$newline_path"

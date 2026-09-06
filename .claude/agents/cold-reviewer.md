@@ -23,9 +23,12 @@ or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` or a credentials direct
 reported as changed and never opened, by diff or by any other means, since a diff prints the
 contents. A rename or a copy is one change with two names, so either name being secret keeps
 both endpoints closed. An untracked file is in no diff, so a copy of a secret-named one
-arrives under whatever name it was given: take `git hash-object -- <path>` for every
-untracked path and for every secret-named path, tracked or not, and close an untracked path
-whose hash matches one of theirs. The hash is an identifier, never contents. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read wherever it
+arrives under whatever name it was given: take `git hash-object --no-filters -- <path>`, the
+bytes as they are rather than as an attribute would store them, for every untracked path and
+for every secret-named path the tree holds — `git status --short -z --untracked-files=all
+--ignored` names the ignored ones, which an exclude file would otherwise keep out of sight —
+and close an untracked path whose hash matches one of theirs. The hash is an identifier,
+never contents. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read wherever it
 sits with `git show <base>:<path>`, that directory included; the branch's version of a
 policy file under such a directory stays closed like anything else there, since only the
 base's text is what the reviewers apply. For each of the rest, `git --literal-pathspecs diff <that sha> -- <one
