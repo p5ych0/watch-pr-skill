@@ -30,13 +30,11 @@ case "$bound" in *[!0-9]*) bound=x ;; esac
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: $check is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
-# Two files, each holding one number: a finding quotes the line it was found on, and that line
-# is the change being pushed, so the check's own output is counted in a pipe and never stored.
+# A finding quotes the line it was found on, and that line is the change being pushed.
 work="$(mktemp -d)" || { echo "blocked: the pre-push hook could not make a directory for the self-check's result" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
-# The bound is the hook's own, since the change being checked owns everything under $root, and
-# it covers the counting too: a descendant that outlives the check holds the pipe open.
-# Job control makes the subshell a group leader, so the deadline reaches everything it started.
+# The change being checked owns everything under $root, this bound included; the group is the
+# unit, since a descendant that outlives the check holds the pipe open.
 set -m
 ( { /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1; echo $? >"$work/rc"; } \
     | grep -c '^PR_SELFCHECK finding=' >"$work/n" ) &
