@@ -2,8 +2,8 @@
 # Exit 2 hands stderr back to Claude as feedback; a PostToolUse hook cannot block.
 set -uo pipefail
 
-f="$(jq -r '.tool_input.file_path // empty' 2>/dev/null)" \
-    || { echo "the post-edit hook could not read its input; is jq installed?" >&2; exit 2; }
+f="$(jq -er 'if (.tool_input.file_path | type) == "string" then .tool_input.file_path else error("no path") end' 2>/dev/null)" \
+    || { echo "the post-edit hook could not read a path from its input; is jq installed, and is the envelope whole?" >&2; exit 2; }
 case "$f" in
     *.sh) ;;
     *) exit 0 ;;
