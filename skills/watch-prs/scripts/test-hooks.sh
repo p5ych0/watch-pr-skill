@@ -63,6 +63,7 @@ expect "$tmp/ok" "$(cmd 'git push -q -u origin b')" 0 "a push passes when the se
 expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument passes when the self-check is clean"
 expect "$tmp/bad" "$(cmd 'git commit -m "the loop never runs git push"')" 2 "…and that run is real: its finding blocks"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a push is blocked when the self-check finds something"
+grep -q 'is not clean' "$tmp/err" && pass "…for that reason" || die "the finding was not named: $(head -c 120 "$tmp/err")"
 for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'git "push" origin b' 'git \push origin b' 'git pu"sh" origin b' 'g\it push origin b' $'git commit -m x\ngit push origin b' 'git</dev/null push origin b' 'git&>/dev/null push origin b' 'git${IFS}push origin b' 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
     expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: ${f//$'\n'/\\n}"
 done
@@ -73,6 +74,7 @@ expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh&>/dev/n
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh${IFS}gate 7 bot s no h p')" 2 "…or split by an expansion"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh post 7 bot s no h p n')" 0 "…and post is not the gate"
 expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks the push"
+grep -q 'missing or not executable' "$tmp/err" && pass "…and is named" || die "the missing check was not named: $(head -c 120 "$tmp/err")"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"
 grep -q 'did not finish' "$tmp/err" && pass "…and says so" || die "the hang was not named: $(head -c 120 "$tmp/err")"
 for b in 581 0 abc; do
