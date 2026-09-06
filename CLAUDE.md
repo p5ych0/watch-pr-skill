@@ -83,7 +83,20 @@ as data and validated, never sourced. No name probe, containment arm, descriptor
 diversion or driver-side nonce bookkeeping; the helpers stay privileged.
 
 **Verification.** `pr-selfcheck.sh` clean before anything is claimed done or pushed. A
-failure is fixed first, never worked around and never explained away in prose.
+failure is fixed first, never worked around and never explained away in prose. In a Claude
+Code session this checkout's `.claude/settings.json` enforces it: a `PreToolUse` hook runs
+the self-check before a Bash command whose text is a `git … push` or a
+`pr-close-round.sh gate`, and refuses one spelled with `--force`, `-f` or a `+` refspec — a
+text match, so a command line that merely quotes those spellings is refused too; a
+`PostToolUse` hook parses every `.sh` file written through Write or Edit.
+`.claude/hooks/test-hooks.sh` proves both. Before the first review request of a PR, and
+after each round's fixes, have the `cold-reviewer` subagent read the changes, then fix what
+it reports: a round is the expensive part of the loop, and a finding a cold read makes in a
+minute must not cost one.
+
+**Compaction.** When the context is compacted, preserve the PR number and branch, the setup
+directory and its four working files, the current nonce, each open finding's thread and
+comment ids, the round count per reviewer, and which stop is next.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment

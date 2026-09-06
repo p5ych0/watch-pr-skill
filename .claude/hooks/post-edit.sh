@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Exit 2 hands stderr back to Claude as feedback; a PostToolUse hook cannot block.
+set -uo pipefail
+
+f="$(jq -r '.tool_input.file_path // empty' 2>/dev/null)" \
+    || { echo "the post-edit hook could not read its input; is jq installed?" >&2; exit 2; }
+case "$f" in
+    *.sh) ;;
+    *) exit 0 ;;
+esac
+[ -f "$f" ] || exit 0
+err="$(bash -n "$f" 2>&1)" && exit 0
+printf '%s\n' "$err" >&2
+echo "$f no longer parses" >&2
+exit 2
