@@ -16,12 +16,14 @@ from that file in full, with the Read tool; an output cut short with no file is 
 agree — say so and stop. From here on use that sha, `<base>`, never the ref, since a ref can
 move under you. Take the merge base with its status, `git merge-base <base> HEAD`, and use
 it only if the command succeeded and printed one 40-hex sha, otherwise stop;
-`git diff --raw -M <that sha>` for the changed paths with their modes and both endpoints of
-a rename, then `git diff <that sha> -- <one path>` for each; `git status --short
---untracked-files=all` for what is untracked. The reviewers judge the change against the policy on the base as it
+`git diff --raw -M -z <that sha>` for the changed paths with their modes and both endpoints
+of a rename, then `git diff <that sha> -- <one path>` for each; `git status --short -z
+--untracked-files=all` for what is untracked. Each enumeration is NUL-terminated because a
+path holding a tab, a newline, a quote or a backslash comes back rewritten otherwise: take
+every path as the bytes between the NULs, and pass those bytes on unchanged. The reviewers judge the change against the policy on the base as it
 is now, so read it from there: `git show <base>:AGENTS.md` and `git show <base>:CLAUDE.md`,
 and, once the paths and the status have named the changed files,
-`git ls-tree -r --name-only <base>` for the base's files and `git show <base>:<its path>`
+`git ls-tree -r -z --name-only <base>` for the base's files and `git show <base>:<its path>`
 for each nested `AGENTS.md` under whose directory a changed file lies, at any depth.
 
 Then read the changes cold. Read, with the Read tool, any file of the checkout the paths or
