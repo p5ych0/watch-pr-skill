@@ -1,7 +1,6 @@
 #!/usr/bin/env -S bash -p
-# Privileged mode reads no BASH_ENV, imports no function and ignores SHELLOPTS, so no name this
-# hook calls is one the environment can replace; a last resort, since `$-` reports the mode and
-# not how the shell got there, and a BASH_ENV that exits kills a shell that starts unprivileged.
+# A last resort: `$-` reports the mode, not how the shell got there, and a BASH_ENV that exits
+# would kill an unprivileged shell before this line.
 if [[ $- != *p* ]]; then
     echo "blocked: this hook must be started privileged, as .claude/settings.json starts it" >&2
     exit 2
