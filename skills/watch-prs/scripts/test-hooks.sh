@@ -46,6 +46,7 @@ done
 printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh"
 printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=x"\nexit 1\n' > "$tmp/bad/skills/watch-prs/scripts/pr-selfcheck.sh"
 printf '#!/usr/bin/env bash\nsleep 3600\n' > "$tmp/hang/skills/watch-prs/scripts/pr-selfcheck.sh"
+printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=quoted_line SKILL.md:12"\necho "  gh pr comment --body PLACEHOLDER_VALUE_NOT_FOR_LOGS"\necho "PR_SELFCHECK status=findings count=1"\nexit 1\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh.quoting"
 chmod +x "$tmp"/*/skills/watch-prs/scripts/pr-selfcheck.sh
 
 pre() { printf '%s' "$2" | CLAUDE_PROJECT_DIR="$1" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err"; }
@@ -78,6 +79,25 @@ expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks t
 grep -q 'missing or not executable' "$tmp/err" && pass "…and is named" || die "the missing check was not named: $(head -c 120 "$tmp/err")"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"
 grep -q 'did not finish' "$tmp/err" && pass "…and says so" || die "the hang was not named: $(head -c 120 "$tmp/err")"
+
+# The change being pushed owns everything under the project, the watchdog and the findings alike.
+mkdir -p "$tmp/quoting/skills/watch-prs/scripts"
+cp "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh.quoting" "$tmp/quoting/skills/watch-prs/scripts/pr-selfcheck.sh"
+chmod +x "$tmp/quoting/skills/watch-prs/scripts/pr-selfcheck.sh"
+mkdir -p "$tmp/notimeout"
+for c in bash env jq grep sort head sleep kill mktemp rm; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"
+done
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/notimeout" CLAUDE_PROJECT_DIR="$tmp/hang" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'did not finish' "$tmp/err" && pass "the bound holds where timeout is not installed" || die "no-timeout hang rc=$rc: $(head -c 160 "$tmp/err")"
+[ "$(wc -l <"$tmp/err")" -eq 1 ] && pass "…and the shell's own notice about the killed job is not passed on" || die "the fallback said more than its message: $(head -c 200 "$tmp/err")"
+expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
+grep -q 'finding=quoted_line' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
+    && pass "…and the hook reports the finding, never the line" || die "the quoted line reached stderr: $(head -c 200 "$tmp/err")"
+printf 'run_limited() { return 0; }\nmktemp_d() { return 1; }\n' > "$tmp/bad/skills/watch-prs/scripts/testlib.sh.stub"
+rm -f "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
+cp "$tmp/bad/skills/watch-prs/scripts/testlib.sh.stub" "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
+expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a watchdog the change replaced with one that runs nothing does not pass the push"
 for b in 581 0 abc; do
     rc=0; printf '%s' "$(cmd 'git push origin b')" | CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND="$b" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
     [ "$rc" -eq 2 ] && grep -q 'PRE_PUSH_BOUND' "$tmp/err" && pass "a bound of $b is refused at once, before the deadline can pass" || die "PRE_PUSH_BOUND=$b rc=$rc: $(head -c 120 "$tmp/err")"

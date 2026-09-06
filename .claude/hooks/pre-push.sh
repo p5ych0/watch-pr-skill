@@ -28,13 +28,25 @@ case "$bound" in *[!0-9]*) bound=x ;; esac
 [ "$bound" != x ] && [ "$bound" -ge 1 ] && [ "$bound" -le 580 ] \
     || { echo "blocked: PRE_PUSH_BOUND='${PRE_PUSH_BOUND:-}' is not a whole number of seconds from 1 to 580; nothing is pushed unbounded" >&2; exit 2; }
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
+log="$(mktemp)" || { echo "blocked: the pre-push hook could not make a file for the self-check's output" >&2; exit 2; }
+trap 'rm -f "$log"' EXIT
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: $check is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
-. "$root/skills/watch-prs/scripts/testlib.sh" 2>/dev/null && [ "$(type -t run_limited)" = function ] \
-    || { echo "blocked: the watchdog in testlib.sh could not be loaded; nothing is pushed unbounded" >&2; exit 2; }
-out="$(run_limited "$bound" /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1)"; rc=$?
+# The bound is the hook's own, since the change being checked owns everything under $root.
+if command -v timeout >/dev/null 2>&1; then
+    timeout -k 5 "$bound" /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" >"$log" 2>&1; rc=$?
+else
+    /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" >"$log" 2>&1 &
+    cpid=$!
+    ( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$cpid" 2>/dev/null || exit 0; i=$((i + 1)); done; kill -9 "$cpid" 2>/dev/null ) &
+    wpid=$!
+    # The shell announces a killed job on its own stderr, naming the command it ran.
+    { wait "$cpid"; rc=$?; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
+    [ "$rc" -ge 128 ] && rc=124
+fi
 [ "$rc" -eq 0 ] && exit 0
-grep -v '^ok' <<<"$out" | tail -15 >&2
+# A finding can quote the line it was found on, and that line is the change being pushed.
+grep -o 'PR_SELFCHECK [a-z]*=[A-Za-z0-9_.-]*' "$log" | sort -u | head -15 >&2
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2
 else

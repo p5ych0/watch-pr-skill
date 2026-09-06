@@ -17,7 +17,8 @@ agree — say so and stop. From here on use that sha, `<base>`, never the ref, s
 move under you. Take the merge base with its status, `git merge-base <base> HEAD`, and use
 it only if the command succeeded and printed one 40-hex sha, otherwise stop;
 `git diff --raw -M -z <that sha>` for the changed paths with their modes and both endpoints
-of a rename, then `git diff <that sha> -- <one path>` for each; `git status --short -z
+of a rename, then `git --literal-pathspecs diff <that sha> -- <one path>` for each, since a
+path that begins with a colon is otherwise read as a pattern and not as itself; `git status --short -z
 --untracked-files=all` for what is untracked. Each enumeration is NUL-terminated because a
 path holding a tab, a newline, a quote or a backslash comes back rewritten otherwise. Every
 path is the bytes it is, passed on unchanged; a record is not the path. A short-status
