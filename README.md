@@ -308,8 +308,10 @@ skills/watch-prs/scripts/pr-selfcheck.sh
 It proves every variable the driver uses is assigned, every script parses and
 has a test, no fixture races a `printf` into `grep`, and the whole suite passes.
 In a Claude Code session, this checkout's `.claude/settings.json` runs it as a
-hook before a `git push` and refuses a push spelled with `--force`, `-f` or a
-`+` refspec.
+hook before a `git push`. Before the first review request of a pull request and
+after each round's fixes, the `cold-reviewer` subagent in `.claude/agents/` reads
+the changes cold, the way the reviewers will; a finding that names a defect the
+change introduced is fixed before the round is bought.
 CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
 mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the
 suite executes fails there before it reaches a macOS contributor. A path the

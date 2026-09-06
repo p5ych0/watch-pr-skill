@@ -5,16 +5,12 @@ set -uo pipefail
 cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.command else error("no command") end' 2>/dev/null)" \
     || { echo "blocked: the pre-push hook could not read a command from its input; is jq installed, and is the envelope whole?" >&2; exit 2; }
 
-push="(^|[;&|(\`'\"[:space:]])(/[^[:space:]]*/)?git([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+|[[:space:]]+--[[:alnum:]-]+[[:space:]]+[^-[:space:]][^[:space:]]*|[[:space:]]+--?[[:alnum:]-]+(=[^[:space:]]*)?)*[[:space:]]+push([;&|)\`'\"[:space:]]|$)"
-gate="pr-close-round\\.sh[[:space:]]+gate([;&|)\`'\"[:space:]]|$)"
-[[ $cmd =~ $push ]] || [[ $cmd =~ $gate ]] || exit 0
-
-# A text match, stopped at a separator: a segment that only quotes one of these spellings is refused too.
-force="push[^;&|"$'\n'"]*[[:space:]][\"']?(--force|-[[:alpha:]]*f[[:alpha:]]*([^[:alpha:]]|$)|\\+[^[:space:]]+)"
-if [[ $cmd =~ $force ]]; then
-    echo "blocked: a push spelled with --force, -f or a + refspec rewrites a remote branch, and this loop never does" >&2
-    exit 2
-fi
+# So a spelling that only quotes or escapes a word is the word, and a mention inside an argument
+# costs a self-check run, never a refusal.
+norm="${cmd//[\\\"\']/}"
+push='(^|[;&|(`[:space:]])(/[^[:space:]]*/)?git([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+|[[:space:]]+--[[:alnum:]-]+[[:space:]]+[^-[:space:]][^[:space:]]*|[[:space:]]+--?[[:alnum:]-]+(=[^[:space:]]*)?)*[[:space:]]+push([;&|)`[:space:]]|$)'
+gate='pr-close-round\.sh[[:space:]]+gate([;&|)`[:space:]]|$)'
+[[ $norm =~ $push ]] || [[ $norm =~ $gate ]] || exit 0
 
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"

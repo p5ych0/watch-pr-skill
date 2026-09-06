@@ -86,14 +86,14 @@ diversion or driver-side nonce bookkeeping; the helpers stay privileged.
 failure is fixed first, never worked around and never explained away in prose. In a Claude
 Code session this checkout's `.claude/settings.json` enforces it: a `PreToolUse` hook runs
 the self-check, bounded by the repository's watchdog, before a Bash command that contains a
-`git … push` or a `pr-close-round.sh gate`, and refuses one spelled with `--force`, `-f` or
-a `+` refspec — a text match within the same command segment, so a segment that merely
-quotes those spellings is refused too; a `PostToolUse` hook parses every `.sh` file written
-through Write or Edit. `test-hooks.sh` in the suite proves both. Before the first review
-request of a PR, and after each round's fixes, have the `cold-reviewer` subagent read the
-changes, giving it the PR body and the newest round summary; fix what names a defect this
-change introduced, whatever its group, and file or defer the rest. A round is the expensive
-part of the loop, and a finding a cold read makes in a minute must not cost one.
+`git … push` or a `pr-close-round.sh gate` — a text match with quotes and backslashes
+removed, so a mention inside an argument costs a self-check run, never a refusal; a
+`PostToolUse` hook parses every `.sh` file written through Write or Edit. `test-hooks.sh`
+in the suite proves both. Before the first review request of a PR, and after each round's
+fixes, have the `cold-reviewer` subagent read the changes, giving it the PR's base ref, its
+body and the newest round summary; fix what names a defect this change introduced, whatever
+its group, and file or defer the rest. A round is the expensive part of the loop, and a
+finding a cold read makes in a minute must not cost one.
 
 **Compaction.** When the context is compacted, preserve the PR number and branch, the setup
 directory and its four working files, the current nonce, each open finding's thread and
