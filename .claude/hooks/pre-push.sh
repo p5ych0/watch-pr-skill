@@ -52,7 +52,7 @@ if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2
 else
     # A count, since a finding quotes the line it was found on and that line is being pushed.
-    n=$(grep -c '^PR_SELFCHECK finding=' "$log")
+    n=$(head -c 1000000 "$log" | grep -c '^PR_SELFCHECK finding=')
     case "$n" in *[!0-9]*) n=an\ unknown\ number\ of ;; esac
     echo "blocked: pr-selfcheck.sh is not clean (rc=$rc), with $n findings; run it to read them" >&2
 fi

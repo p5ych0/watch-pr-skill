@@ -91,6 +91,12 @@ rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/notimeout" CLAUD
 [ "$(wc -l <"$tmp/err")" -eq 1 ] && pass "…and the shell's own notice about the killed job is not passed on" || die "the fallback said more than its message: $(head -c 200 "$tmp/err")"
 child="$(cat "$tmp/child.pid" 2>/dev/null)"
 [ -n "$child" ] && ! kill -0 "$child" 2>/dev/null && pass "…and what the self-check started is gone with it" || die "a child of the self-check outlived the deadline: pid '${child:-none}'"
+mkdir -p "$tmp/loud/skills/watch-prs/scripts"
+printf '#!/usr/bin/env bash\nsleep 1\nawk "BEGIN{ for (i = 0; i < 200000; i++) print \\"PR_SELFCHECK finding=x line of noise\\" }"\nexit 1\n' > "$tmp/loud/skills/watch-prs/scripts/pr-selfcheck.sh"
+chmod +x "$tmp/loud/skills/watch-prs/scripts/pr-selfcheck.sh"
+started=$(date +%s)
+expect "$tmp/loud" "$(cmd 'git push origin b')" 2 "a slow self-check with a great deal of output blocks"
+[ "$(( $(date +%s) - started ))" -le 8 ] && pass "…and reading what it printed stays inside the deadline" || die "the count took $(( $(date +%s) - started ))s"
 expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
 grep -q 'with 2 findings' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
     && pass "…and the hook reports how many, never a word of what the check printed" || die "the check's output reached stderr: $(head -c 200 "$tmp/err")"
@@ -126,6 +132,11 @@ rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelo
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
 rc=0; post '' || rc=$?;                       [ "$rc" -eq 2 ] && pass "empty post-edit input is reported" || die "empty post-edit input rc=$rc"
 rc=0; post "$(fp "$tmp/broken.sh")$(fp "$tmp/good.sh")" || rc=$?; [ "$rc" -eq 2 ] && pass "two envelopes are reported, not read as one path" || die "two post-edit envelopes rc=$rc"
+trailing_path="$tmp/$(printf 'trailing\n').sh"
+printf 'x=1 )\n' > "$trailing_path"
+rc=0; post "$(fp "$trailing_path")" || rc=$?
+[ "$rc" -eq 2 ] && pass "a path that ends in a newline is still the path the hook parses" || die "trailing-newline path rc=$rc: $(head -c 200 "$tmp/err")"
+grep -q 'LC_ALL=C bash -p -n' "$HOOKS/post-edit.sh" && pass "the syntax probe runs under a fixed locale, where a translated diagnostic would hide the line" || die "post-edit.sh does not pin the locale of its syntax probe"
 newline_path="$tmp/$(printf 'two\nlines').sh"
 printf 'x=1 )\n' > "$newline_path"
 rc=0; post "$(fp "$newline_path")" || rc=$?
