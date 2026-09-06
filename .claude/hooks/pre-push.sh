@@ -36,9 +36,12 @@ check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 if command -v timeout >/dev/null 2>&1; then
     timeout -k 5 "$bound" /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" >"$log" 2>&1; rc=$?
 else
+    # Job control makes the child a group leader, so the deadline reaches what it started too.
+    set -m
     /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" >"$log" 2>&1 &
     cpid=$!
-    ( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$cpid" 2>/dev/null || exit 0; i=$((i + 1)); done; kill -9 "$cpid" 2>/dev/null ) &
+    set +m
+    ( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$cpid" 2>/dev/null || exit 0; i=$((i + 1)); done; kill -9 -"$cpid" 2>/dev/null || kill -9 "$cpid" 2>/dev/null ) &
     wpid=$!
     # The shell announces a killed job on its own stderr, naming the command it ran.
     { wait "$cpid"; rc=$?; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null

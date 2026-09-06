@@ -85,7 +85,8 @@ diversion or driver-side nonce bookkeeping; the helpers stay privileged.
 **Verification.** `pr-selfcheck.sh` clean before anything is claimed done or pushed. A
 failure is fixed first, never worked around and never explained away in prose. In a Claude
 Code session this checkout's `.claude/settings.json` enforces it: a `PreToolUse` hook runs
-the self-check, bounded by the repository's watchdog, before a Bash command that contains a
+the self-check, under a bound of its own so the change being checked cannot lift it, before
+a Bash command that contains a
 `git … push` or a `pr-close-round.sh … gate` — a text match with quotes and backslashes
 removed, so a mention inside an argument costs a self-check run and is blocked only by that
 run's finding, and a spelling built to evade it is the session evading its own guard, not

@@ -37,15 +37,13 @@ for h in pre-push.sh post-edit.sh; do
 done
 [ "$fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
 
-# So the push arm is proved without the suite; the hook loads the watchdog from the project it
-# is given, so the real library is linked in.
+# So the push arm is proved without the suite.
 for p in ok bad hang none; do
     mkdir -p "$tmp/$p/skills/watch-prs/scripts"
-    ln -s "$SCRIPT_DIR/testlib.sh" "$tmp/$p/skills/watch-prs/scripts/testlib.sh"
 done
 printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh"
 printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=x"\nexit 1\n' > "$tmp/bad/skills/watch-prs/scripts/pr-selfcheck.sh"
-printf '#!/usr/bin/env bash\nsleep 3600\n' > "$tmp/hang/skills/watch-prs/scripts/pr-selfcheck.sh"
+printf '#!/usr/bin/env bash\nsleep 3600 &\necho "$!" > "%s"\nwait\n' "$tmp/child.pid" > "$tmp/hang/skills/watch-prs/scripts/pr-selfcheck.sh"
 printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=quoted_line SKILL.md:12"\necho "  gh pr comment --body PLACEHOLDER_VALUE_NOT_FOR_LOGS"\necho "PR_SELFCHECK status=findings count=1"\nexit 1\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh.quoting"
 chmod +x "$tmp"/*/skills/watch-prs/scripts/pr-selfcheck.sh
 
@@ -91,12 +89,12 @@ done
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/notimeout" CLAUDE_PROJECT_DIR="$tmp/hang" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && grep -q 'did not finish' "$tmp/err" && pass "the bound holds where timeout is not installed" || die "no-timeout hang rc=$rc: $(head -c 160 "$tmp/err")"
 [ "$(wc -l <"$tmp/err")" -eq 1 ] && pass "…and the shell's own notice about the killed job is not passed on" || die "the fallback said more than its message: $(head -c 200 "$tmp/err")"
+child="$(cat "$tmp/child.pid" 2>/dev/null)"
+[ -n "$child" ] && ! kill -0 "$child" 2>/dev/null && pass "…and what the self-check started is gone with it" || die "a child of the self-check outlived the deadline: pid '${child:-none}'"
 expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
 grep -q 'finding=quoted_line' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
     && pass "…and the hook reports the finding, never the line" || die "the quoted line reached stderr: $(head -c 200 "$tmp/err")"
-printf 'run_limited() { return 0; }\nmktemp_d() { return 1; }\n' > "$tmp/bad/skills/watch-prs/scripts/testlib.sh.stub"
-rm -f "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
-cp "$tmp/bad/skills/watch-prs/scripts/testlib.sh.stub" "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
+printf 'run_limited() { return 0; }\nmktemp_d() { return 1; }\n' > "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a watchdog the change replaced with one that runs nothing does not pass the push"
 for b in 581 0 abc; do
     rc=0; printf '%s' "$(cmd 'git push origin b')" | CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND="$b" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
@@ -128,6 +126,11 @@ rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelo
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
 rc=0; post '' || rc=$?;                       [ "$rc" -eq 2 ] && pass "empty post-edit input is reported" || die "empty post-edit input rc=$rc"
 rc=0; post "$(fp "$tmp/broken.sh")$(fp "$tmp/good.sh")" || rc=$?; [ "$rc" -eq 2 ] && pass "two envelopes are reported, not read as one path" || die "two post-edit envelopes rc=$rc"
+newline_path="$tmp/$(printf 'two\nlines').sh"
+printf 'x=1 )\n' > "$newline_path"
+rc=0; post "$(fp "$newline_path")" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'at line 1' "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
+    && pass "a path holding a newline is reported at its line, on one line" || die "newline path rc=$rc: $(head -c 200 "$tmp/err")"
 misleading="$tmp/x: line 99: broken.sh"
 printf 'x=1 )\n' > "$misleading"
 rc=0; post "$(fp "$misleading")" || rc=$?
