@@ -27,7 +27,7 @@ holds accepted limits; `README.md` is the only document written for a person.
 Files under `skills/watch-prs/scripts/` are `pr-<stage>.sh`, `<area>lib.sh`,
 `test-<area>.sh`; a function a shared library exports `rb_*`, its private implementation
 `_rb_*`; a helper's own function a plain name; a driver variable the setup fence assigns
-or probes `RB_*`; machine records `PR_<STAGE> status=… reason=…`; decision records
+and probes `RB_*`; machine records `PR_<STAGE> status=… reason=…`; decision records
 `docs/decisions/YYYY-MM-DD-<slug>.md`.
 
 **Code style.** Match the file: its strict-mode category (§ Bash conventions), its
