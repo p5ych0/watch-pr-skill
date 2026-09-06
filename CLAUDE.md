@@ -78,7 +78,7 @@ with no credentials, and a test that reaches GitHub is broken.
 
 **Driving shell.** Trusted, per `docs/decisions/2026-09-05-driving-shell-trusted.md`:
 `SKILL.md`'s bash runs in the operator's own session and defends against nothing in it. One
-invocation per fence, every status acted on, values crossing in files a helper wrote, read
+helper invocation per step, every status acted on, values crossing in files a helper wrote, read
 as data and validated, never sourced. No name probe, containment arm, descriptor read, trace
 diversion or driver-side nonce bookkeeping; the helpers stay privileged.
 
@@ -234,8 +234,10 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   no network.
 - **Portable, proved by running.** Both CI jobs run on every push to `main` and every pull
   request. The `macos-shell` job runs the suite on bash 3.2.57 with a `PATH` built from what
-  a Mac has, so a post-3.2 construct or a GNU-only tool on an executed path fails there; GNU-only flags, `\s` in a `grep` pattern and unexecuted
-  branches are review's job, tabled in the reviewer files. **Assert the invariant, not the
+  a Mac has, so a post-3.2 construct or a GNU-only tool on an executed path fails there —
+  unless its status is discarded, as `for i in $(seq 1 5)` runs zero iterations and stays
+  green; that gap, GNU-only flags, `\s` in a `grep` pattern and unexecuted branches are
+  review's job, tabled in the reviewer files. **Assert the invariant, not the
   version's route to it**: attack fixtures differ in route between bash 5 and 3.2.57 while
   the defence holds on both. Pin the inner interpreters, not only the outer shell.
 - `SKILL.md`'s bash is covered only where `test-pr-skill-contract.sh` lifts it: the setup
