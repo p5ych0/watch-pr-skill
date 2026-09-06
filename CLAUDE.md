@@ -94,10 +94,9 @@ defended against on the argument `docs/decisions/2026-09-05-driving-shell-truste
 on: the operator owns the session. A `PostToolUse` hook parses every `.sh` file written
 through Write or Edit. `test-hooks.sh` in the suite proves both. Before the first review
 request of a PR, and after each round's fixes, have the `cold-reviewer` subagent read the
-changes, giving it the PR's base ref and the sha GitHub reports for it, its body, the newest
-round summary, and the earlier rounds' findings with their replies; fix what names a defect
-this change introduced, whatever its group, and file or defer the rest. A round is the
-expensive part of the loop, and a finding a cold read makes in a minute must not cost one.
+changes, giving it the PR's base ref, its body and the newest round summary; fix what names
+a defect this change introduced and file the rest. It is a cheap pre-read in the operator's
+own session, not a boundary, and a round is the expensive part of the loop.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
