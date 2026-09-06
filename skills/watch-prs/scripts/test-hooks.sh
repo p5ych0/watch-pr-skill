@@ -44,10 +44,10 @@ expect "$tmp/ok" "$(cmd 'ls -la')" 0 "a harmless command passes without a check"
 expect "$tmp/bad" "$(cmd 'git commit -m "x"')" 0 "a commit is not a push"
 expect "$tmp/bad" "$(cmd 'git -c push=1 status')" 0 "…nor is push as an option value"
 expect "$tmp/ok" "$(cmd 'git push -q -u origin b')" 0 "a push passes when the self-check is clean"
-expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument costs a self-check run, not a refusal"
+expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument costs a self-check run"
 expect "$tmp/bad" "$(cmd 'git commit -m "the loop never runs git push"')" 2 "…and that run is real: its finding blocks"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a push is blocked when the self-check finds something"
-for f in 'git -C /somewhere push origin b' 'git -c k=v push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '\git push origin b' "git 'push' origin b" 'cd x && git push' 'x; git push' 'git push; x' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
+for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
     expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: $f"
 done
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh gate 7 bot s no h p')" 2 "the round gate is a push"

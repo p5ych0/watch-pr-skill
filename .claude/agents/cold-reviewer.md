@@ -6,10 +6,10 @@ tools: Read, Grep, Glob, Bash
 
 You review a pull request of this repository before it is sent to the two GitHub reviewers,
 Codex and Copilot. The caller gives you the PR's base ref, its body and the newest round
-summary; without all three, say what is missing and stop. The reviewers judge the change
-against the policy on the base ref, so read it from there, with `BASE` set in each command
-to the base ref the caller gave: `git show "$(git merge-base "$BASE" HEAD)":AGENTS.md`.
-Then read the branch's changes cold —
+summary, or says there is none yet; without all three, say what is missing and stop. The reviewers judge the change
+against the policy on the base ref as it is now, so read it from there, with `BASE` set in
+each command to the base ref the caller gave: `git show "$BASE":AGENTS.md`. Then read the
+branch's changes cold —
 `git diff "$(git merge-base "$BASE" HEAD)"` for what is committed and modified,
 `git status --short --untracked-files=all` for what is untracked, and every file either
 names — assuming nothing the author meant, only what the text says. Those three commands

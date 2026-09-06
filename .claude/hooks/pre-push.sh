@@ -6,10 +6,10 @@ cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.comm
     || { echo "blocked: the pre-push hook could not read a command from its input; is jq installed, and is the envelope whole?" >&2; exit 2; }
 
 # So a spelling that only quotes or escapes a word is the word, and a mention inside an argument
-# costs a self-check run, never a refusal.
+# costs a self-check run.
 norm="${cmd//[\\\"\']/}"
-push='(^|[;&|(`[:space:]])(/[^[:space:]]*/)?git([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+|[[:space:]]+--[[:alnum:]-]+[[:space:]]+[^-[:space:]][^[:space:]]*|[[:space:]]+--?[[:alnum:]-]+(=[^[:space:]]*)?)*[[:space:]]+push([;&|)`[:space:]]|$)'
-gate='pr-close-round\.sh[[:space:]]+gate([;&|)`[:space:]]|$)'
+push='(^|[;&|(`[:space:]])([^[:space:]]*/)?git[[:space:]]+([^;&|]*[[:space:]]+)?push([;&|()<>`[:space:]]|$)'
+gate='pr-close-round\.sh[[:space:]]+gate([;&|()<>`[:space:]]|$)'
 [[ $norm =~ $push ]] || [[ $norm =~ $gate ]] || exit 0
 
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
