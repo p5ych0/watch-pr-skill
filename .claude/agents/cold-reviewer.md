@@ -19,8 +19,13 @@ it only if the command succeeded and printed one 40-hex sha, otherwise stop;
 `git diff --raw -M -z <that sha>` for the changed paths with their modes and both endpoints
 of a rename, then `git diff <that sha> -- <one path>` for each; `git status --short -z
 --untracked-files=all` for what is untracked. Each enumeration is NUL-terminated because a
-path holding a tab, a newline, a quote or a backslash comes back rewritten otherwise: take
-every path as the bytes between the NULs, and pass those bytes on unchanged. The reviewers judge the change against the policy on the base as it
+path holding a tab, a newline, a quote or a backslash comes back rewritten otherwise. Every
+path is the bytes it is, passed on unchanged; a record is not the path. A short-status
+record is `XY PATH`, so the path is what follows the two status letters and the space, and
+a rename or copy there is two records, the destination first and the source next. A raw
+record is the modes, the blobs and the status, then the path or, for a rename or a copy, the
+source and the destination as separate NUL-terminated fields. A tree listing is the path
+alone. The reviewers judge the change against the policy on the base as it
 is now, so read it from there: `git show <base>:AGENTS.md` and `git show <base>:CLAUDE.md`,
 and, once the paths and the status have named the changed files,
 `git ls-tree -r -z --name-only <base>` for the base's files and `git show <base>:<its path>`
