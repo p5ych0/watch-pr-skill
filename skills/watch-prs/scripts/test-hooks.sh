@@ -20,14 +20,15 @@ trap 'rm -rf "$tmp"' EXIT
 
 wired() {
     jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh" and .timeout == 600)' "$1" >/dev/null \
-    && jq -e '.hooks.PostToolUse[]? | select((.matcher | test("Write")) and (.matcher | test("Edit"))) | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh")' "$1" >/dev/null
+    && jq -e '.hooks.PostToolUse[]? | select(.matcher == "Write|Edit") | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh")' "$1" >/dev/null
 }
 wired "$SETTINGS" && pass "settings.json runs both hooks by their full path, each under its event and matcher, the push one with a 600 s timeout" \
     || die "settings.json does not run both hooks as the harness must"
 jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "echo hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-pre.json" || die "the pre decoy was not written"
-jq '(.hooks.PostToolUse[] | select((.matcher | test("Write")) and (.matcher | test("Edit"))) | .hooks[]).command = "echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
-for d in pre post; do
-    wired "$tmp/decoy-$d.json" && die "a command that only names $d's hook passed the wiring check" || pass "a command that only names the $d hook is not the hook"
+jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit") | .hooks[]).command = "echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
+jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit")).matcher = "WriteEdit"' "$SETTINGS" > "$tmp/decoy-matcher.json" || die "the matcher decoy was not written"
+for d in pre post matcher; do
+    wired "$tmp/decoy-$d.json" && die "the $d decoy passed the wiring check" || pass "the $d decoy fails the wiring check"
 done
 for h in pre-push.sh post-edit.sh; do
     [ -x "$HOOKS/$h" ] || die "$HOOKS/$h is missing or not executable, so the harness cannot run it"
@@ -59,12 +60,13 @@ expect "$tmp/ok" "$(cmd 'git push -q -u origin b')" 0 "a push passes when the se
 expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument passes when the self-check is clean"
 expect "$tmp/bad" "$(cmd 'git commit -m "the loop never runs git push"')" 2 "…and that run is real: its finding blocks"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a push is blocked when the self-check finds something"
-for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'git</dev/null push origin b' 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
+for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'git "push" origin b' 'git \push origin b' 'git</dev/null push origin b' 'git&>/dev/null push origin b' 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
     expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: $f"
 done
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh gate 7 bot s no h p')" 2 "the round gate is a push"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh   gate 7 bot s no h p')" 2 "…however the gate is spaced"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh</dev/null gate 7 bot s no h p')" 2 "…or redirected"
+expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh&>/dev/null gate 7 bot s no h p')" 2 "…in any spelling"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh post 7 bot s no h p n')" 0 "…and post is not the gate"
 expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks the push"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"
@@ -85,6 +87,9 @@ post() { printf '%s' "$1" | "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err"; }
 fp() { printf '{"tool_input":{"file_path":%s}}' "$(printf '%s' "$1" | jq -Rs .)"; }
 printf 'echo "(\n' > "$tmp/broken.sh"; printf 'echo ok\n' > "$tmp/good.sh"; printf 'echo "(\n' > "$tmp/notes.md"
 rc=0; post "$(fp "$tmp/broken.sh")" || rc=$?; [ "$rc" -eq 2 ] && pass "a shell file that does not parse is reported" || die "broken.sh rc=$rc"
+printf 'x=PLACEHOLDER_VALUE_NOT_FOR_LOGS )\n' > "$tmp/leak.sh"
+rc=0; post "$(fp "$tmp/leak.sh")" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'line 1' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "the report names the file and the line, never the line's text" || die "leak.sh rc=$rc: $(head -c 160 "$tmp/err")"
 rc=0; post "$(fp "$tmp/good.sh")" || rc=$?;   [ "$rc" -eq 0 ] && pass "a shell file that parses passes" || die "good.sh rc=$rc"
 rc=0; post "$(fp "$tmp/notes.md")" || rc=$?;  [ "$rc" -eq 0 ] && pass "a non-shell file is not parsed" || die "notes.md rc=$rc"
 rc=0; post 'not json' || rc=$?;               [ "$rc" -eq 2 ] && pass "unreadable input is reported" || die "malformed post-edit input rc=$rc"

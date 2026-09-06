@@ -7,9 +7,13 @@ cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.comm
 # So a spelling that only quotes or escapes a word is the word, and a mention inside an argument
 # costs a self-check run.
 norm="${cmd//[\\\"\']/}"
-push='(^|[;&|(`[:space:]])([^[:space:]]*/)?git[[:space:]<>](.*[[:space:]]+)?push([;&|()<>`[:space:]]|$)'
-gate='pr-close-round\.sh[[:space:]<>](.*[[:space:]]+)?gate([;&|()<>`[:space:]]|$)'
-[[ $norm =~ $push ]] || [[ $norm =~ $gate ]] || exit 0
+push='(^|[^[:alnum:]_./-])([^[:space:]]*/)?git[^[:alnum:]_./-](.*[[:space:]]+)?push([^[:alnum:]_=./-]|$)'
+gate='pr-close-round\.sh[^[:alnum:]_./-](.*[[:space:]]+)?gate([^[:alnum:]_=./-]|$)'
+[[ $norm =~ $push ]]; p=$?
+[[ $norm =~ $gate ]]; g=$?
+[ "$p" -eq 1 ] && [ "$g" -eq 1 ] && exit 0
+[ "$p" -eq 0 ] || [ "$g" -eq 0 ] \
+    || { echo "blocked: a pattern in the pre-push hook did not compile; nothing is pushed unchecked" >&2; exit 2; }
 
 # Inside the 600 s deadline settings.json gives the hook, since a hook that overruns it does not block.
 bound="${PRE_PUSH_BOUND:-580}"

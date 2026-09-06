@@ -9,6 +9,8 @@ case "$f" in
 esac
 [ -f "$f" ] || exit 0
 err="$(bash -n "$f" 2>&1)" && exit 0
-printf '%s\n' "$err" >&2
-echo "$f no longer parses" >&2
+# The diagnostic quotes the offending source line, which may hold a value that must not reach a log.
+where=': line ([0-9]+): '
+[[ $err =~ $where ]] && where="line ${BASH_REMATCH[1]}" || where="an unknown line"
+echo "$f no longer parses, at $where" >&2
 exit 2
