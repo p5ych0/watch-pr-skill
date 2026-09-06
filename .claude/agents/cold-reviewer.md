@@ -16,14 +16,16 @@ from that file in full, with the Read tool; an output cut short with no file is 
 agree — say so and stop. From here on use that sha, `<base>`, never the ref, since a ref can
 move under you. Take the merge base with its status, `git merge-base <base> HEAD`, and use
 it only if the command succeeded and printed one 40-hex sha, otherwise stop;
-`git diff --raw -M -z <that sha>` for the changed paths with their modes and both endpoints
-of a rename, and `git status --short -z --untracked-files=all` for what is untracked. Sort
+`git diff --raw -C --find-copies-harder -z <that sha>` for the changed paths with their
+modes and both endpoints of a rename or a copy, the unchanged source of a copy included, and `git status --short -z --untracked-files=all` for what is untracked. Sort
 those paths before you open any of them: one whose name marks it as holding secrets — `.env`
 or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` or a credentials directory — is
 reported as changed and never opened, by diff or by any other means, since a diff prints the
 contents. A rename or a copy is one change with two names, so either name being secret keeps
-both endpoints closed. An `AGENTS.md` or `CLAUDE.md` is policy and is read wherever it sits, that
-directory included. For each of the rest, `git --literal-pathspecs diff <that sha> -- <one
+both endpoints closed. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read wherever it
+sits with `git show <base>:<path>`, that directory included; the branch's version of a
+policy file under such a directory stays closed like anything else there, since only the
+base's text is what the reviewers apply. For each of the rest, `git --literal-pathspecs diff <that sha> -- <one
 path>`, since a path that begins with a colon is otherwise read as a pattern and not as
 itself. Each enumeration is NUL-terminated because a
 path holding a tab, a newline, a quote or a backslash comes back rewritten otherwise. Every
