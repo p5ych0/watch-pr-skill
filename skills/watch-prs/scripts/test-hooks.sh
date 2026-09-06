@@ -82,6 +82,12 @@ grep -q 'did not finish' "$tmp/err" && pass "…and says so" || die "the hang wa
 mkdir -p "$tmp/quoting/skills/watch-prs/scripts"
 cp "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh.quoting" "$tmp/quoting/skills/watch-prs/scripts/pr-selfcheck.sh"
 chmod +x "$tmp/quoting/skills/watch-prs/scripts/pr-selfcheck.sh"
+mkdir -p "$tmp/detached/skills/watch-prs/scripts"
+printf '#!/usr/bin/env bash\nsleep 3600 &\necho "PR_SELFCHECK finding=x"\nexit 1\n' > "$tmp/detached/skills/watch-prs/scripts/pr-selfcheck.sh"
+chmod +x "$tmp/detached/skills/watch-prs/scripts/pr-selfcheck.sh"
+started=$(date +%s)
+expect "$tmp/detached" "$(cmd 'git push origin b')" 2 "a self-check whose child outlives it and holds the pipe open still blocks"
+[ "$(( $(date +%s) - started ))" -le 8 ] && pass "…within the bound, since the deadline covers the counting too" || die "the detached child held the hook for $(( $(date +%s) - started ))s"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"

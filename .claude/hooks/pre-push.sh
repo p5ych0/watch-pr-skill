@@ -34,22 +34,18 @@ check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 # is the change being pushed, so the check's own output is counted in a pipe and never stored.
 work="$(mktemp -d)" || { echo "blocked: the pre-push hook could not make a directory for the self-check's result" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
-# The bound is the hook's own, since the change being checked owns everything under $root.
-if command -v timeout >/dev/null 2>&1; then
-    { timeout -k 5 "$bound" /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1; echo $? >"$work/rc"; } \
-        | grep -c '^PR_SELFCHECK finding=' >"$work/n"
-else
-    # Job control makes the subshell a group leader, so the deadline reaches what it started too.
-    set -m
-    ( { /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1; echo $? >"$work/rc"; } \
-        | grep -c '^PR_SELFCHECK finding=' >"$work/n" ) &
-    gpid=$!
-    set +m
-    ( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
-    wpid=$!
-    # The shell announces a killed job on its own stderr, naming the command it ran.
-    { wait "$gpid"; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
-fi
+# The bound is the hook's own, since the change being checked owns everything under $root, and
+# it covers the counting too: a descendant that outlives the check holds the pipe open.
+# Job control makes the subshell a group leader, so the deadline reaches everything it started.
+set -m
+( { /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1; echo $? >"$work/rc"; } \
+    | grep -c '^PR_SELFCHECK finding=' >"$work/n" ) &
+gpid=$!
+set +m
+( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
+wpid=$!
+# The shell announces a killed job on its own stderr, naming the command it ran.
+{ wait "$gpid"; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
 rc="$(cat "$work/rc" 2>/dev/null)"
 case "$rc" in ''|*[!0-9]*) rc=124 ;; esac
 [ "$rc" -eq 0 ] && exit 0

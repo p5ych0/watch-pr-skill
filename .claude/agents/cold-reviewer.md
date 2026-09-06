@@ -27,8 +27,8 @@ arrives under whatever name it was given: take `git hash-object --no-filters -- 
 bytes as they are rather than as an attribute would store them, for every untracked path and
 for every secret-named path the tree holds — `git status --short -z --untracked-files=all
 --ignored` names the ignored ones, which an exclude file would otherwise keep out of sight —
-and close an untracked path whose hash matches one of theirs. The hash is an identifier,
-never contents. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read wherever it
+and close any path, tracked or not, whose hash matches one of theirs, before it is opened.
+The hash is an identifier, never contents. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read wherever it
 sits with `git show <base>:<path>`, that directory included; the branch's version of a
 policy file under such a directory stays closed like anything else there, since only the
 base's text is what the reviewers apply. For each of the rest, `git --literal-pathspecs diff <that sha> -- <one
