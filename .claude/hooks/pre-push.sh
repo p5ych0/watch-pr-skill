@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Tracing inherited through SHELLOPTS or BASH_ENV would print the command and the self-check's output.
+set +x
 set -uo pipefail
 
 cmd="$(jq -ers 'if length == 1 and (.[0].tool_input.command | type) == "string" then .[0].tool_input.command else error("no command") end' 2>/dev/null)" \

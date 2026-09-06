@@ -104,5 +104,17 @@ rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelo
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
 rc=0; post '' || rc=$?;                       [ "$rc" -eq 2 ] && pass "empty post-edit input is reported" || die "empty post-edit input rc=$rc"
 rc=0; post "$(fp "$tmp/broken.sh")$(fp "$tmp/good.sh")" || rc=$?; [ "$rc" -eq 2 ] && pass "two envelopes are reported, not read as one path" || die "two post-edit envelopes rc=$rc"
+misleading="$tmp/x: line 99: broken.sh"
+printf 'x=1 )\n' > "$misleading"
+rc=0; post "$(fp "$misleading")" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'at line 1' "$tmp/err" && pass "the line comes from the diagnostic, not from a path that spells one" || die "misleading path rc=$rc: $(head -c 160 "$tmp/err")"
+
+# Tracing inherited at startup prints every expansion, the sanitised ones included.
+rc=0; printf '%s' "$(fp "$tmp/leak.sh")" | env SHELLOPTS=xtrace "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "inherited tracing does not print the diagnostic the edit hook refuses to quote" || die "traced post-edit rc=$rc: $(head -c 160 "$tmp/err")"
+grep -q 'set +x' "$tmp/err" && pass "…and the tracing was really on" || die "the traced run left no trace: $(head -c 160 "$tmp/err")"
+rc=0; printf '%s' "$(cmd 'git push origin b # PLACEHOLDER_VALUE_NOT_FOR_LOGS')" | env CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 SHELLOPTS=xtrace "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "inherited tracing does not print the push hook's command" || die "traced pre-push rc=$rc: $(head -c 160 "$tmp/err")"
+grep -q 'set +x' "$tmp/err" && pass "…and that tracing was really on too" || die "the traced push run left no trace: $(head -c 160 "$tmp/err")"
 
 [ "$fail" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }

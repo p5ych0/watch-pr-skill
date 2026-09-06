@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Tracing inherited through SHELLOPTS or BASH_ENV would print the diagnostic this hook refuses to quote.
+set +x
 set -uo pipefail
 
 f="$(jq -ers 'if length == 1 and (.[0].tool_input.file_path | type) == "string" then .[0].tool_input.file_path else error("no path") end' 2>/dev/null)" \
@@ -10,7 +12,11 @@ esac
 [ -f "$f" ] || exit 0
 err="$(bash -n "$f" 2>&1)" && exit 0
 # The diagnostic quotes the offending source line, which may hold a value that must not reach a log.
-where=': line ([0-9]+): '
-[[ $err =~ $where ]] && where="line ${BASH_REMATCH[1]}" || where="an unknown line"
+rest="${err%%$'\n'*}"
+rest="${rest#"$f": line }"
+case "$rest" in
+    [0-9]*) where="line ${rest%%:*}" ;;
+    *)      where="an unknown line" ;;
+esac
 echo "$f no longer parses, at $where" >&2
 exit 2
