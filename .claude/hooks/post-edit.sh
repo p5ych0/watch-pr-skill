@@ -15,7 +15,7 @@ case "$f" in
     *) exit 0 ;;
 esac
 [ -f "$f" ] || exit 0
-err="$(LC_ALL=C bash -p -n "$f" 2>&1)" && exit 0
+err="$(LC_ALL=C bash -p -n -- "$f" 2>&1)" && exit 0
 # The diagnostic quotes the offending source line, which may hold a value that must not reach a log.
 rest="${err#"$f": line }"
 rest="${rest%%$'\n'*}"
