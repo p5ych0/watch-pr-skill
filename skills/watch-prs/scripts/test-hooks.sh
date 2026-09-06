@@ -18,9 +18,12 @@ fi
 tmp="$(mktemp_d)" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
+GUARD='h="$1"; LC_ALL=C bash -p -n -- "$h" 2>/dev/null || { echo "blocked: $h does not parse; the hook was not run" >&2; exit 2; }; exec bash -p -- "$h"'
+PRE_CMD="/usr/bin/env bash -p -c '$GUARD' guard \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh"
+POST_CMD="/usr/bin/env bash -p -c '$GUARD' guard \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh"
 wired() {
-    jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and .command == "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh" and .timeout == 600)' "$1" >/dev/null \
-    && jq -e '.hooks.PostToolUse[]? | select(.matcher == "Write|Edit") | .hooks[]? | select(.type == "command" and .command == "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh")' "$1" >/dev/null
+    jq -e --arg c "$PRE_CMD" '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and .command == $c and .timeout == 600)' "$1" >/dev/null \
+    && jq -e --arg c "$POST_CMD" '.hooks.PostToolUse[]? | select(.matcher == "Write|Edit") | .hooks[]? | select(.type == "command" and .command == $c)' "$1" >/dev/null
 }
 wired "$SETTINGS" && pass "settings.json runs both hooks by their full path, each under its event and matcher, the push one with a 600 s timeout" \
     || die "settings.json does not run both hooks as the harness must"
@@ -141,6 +144,10 @@ printf 'echo ok\n' > "$tmp/-x.sh"
 rc=0; ( cd "$tmp" && printf '%s' "$(fp '-x.sh')" | "$HOOKS/post-edit.sh" >/dev/null 2>"$tmp/err" ) || rc=$?
 [ "$rc" -eq 0 ] && pass "…including one named so that it reads as an option" || die "-x.sh rc=$rc: $(head -c 160 "$tmp/err")"
 rc=0; post "$(fp "$tmp/notes.md")" || rc=$?;  [ "$rc" -eq 0 ] && pass "a non-shell file is not parsed" || die "notes.md rc=$rc"
+printf 'x=PLACEHOLDER_VALUE_NOT_FOR_LOGS )\n' > "$tmp/hook-itself.sh"; chmod +x "$tmp/hook-itself.sh"
+rc=0; printf '%s' "$(fp "$tmp/good.sh")" | /usr/bin/env bash -p -c "$GUARD" guard "$tmp/hook-itself.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
+    && pass "a hook the edit just broke is refused by name, and its own diagnostic is not passed on" || die "the broken hook's line reached stderr: $(head -c 200 "$tmp/err")"
 rc=0; post 'not json' || rc=$?;               [ "$rc" -eq 2 ] && pass "unreadable input is reported" || die "malformed post-edit input rc=$rc"
 rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelope with no path is reported" || die "pathless post-edit input rc=$rc"
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"

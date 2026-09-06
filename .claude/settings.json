@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh",
+            "command": "/usr/bin/env bash -p -c 'h=\"$1\"; LC_ALL=C bash -p -n -- \"$h\" 2>/dev/null || { echo \"blocked: $h does not parse; the hook was not run\" >&2; exit 2; }; exec bash -p -- \"$h\"' guard \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh",
             "timeout": 600
           }
         ]
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env bash -p \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh"
+            "command": "/usr/bin/env bash -p -c 'h=\"$1\"; LC_ALL=C bash -p -n -- \"$h\" 2>/dev/null || { echo \"blocked: $h does not parse; the hook was not run\" >&2; exit 2; }; exec bash -p -- \"$h\"' guard \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh"
           }
         ]
       }
