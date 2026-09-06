@@ -88,6 +88,11 @@ chmod +x "$tmp/detached/skills/watch-prs/scripts/pr-selfcheck.sh"
 started=$(date +%s)
 expect "$tmp/detached" "$(cmd 'git push origin b')" 2 "a self-check whose child outlives it and holds the pipe open still blocks"
 [ "$(( $(date +%s) - started ))" -le 8 ] && pass "…within the bound, since the deadline covers the counting too" || die "the detached child held the hook for $(( $(date +%s) - started ))s"
+mkdir -p "$tmp/detachedok/skills/watch-prs/scripts"
+printf '#!/usr/bin/env bash\nsleep 3600 &\nexit 0\n' > "$tmp/detachedok/skills/watch-prs/scripts/pr-selfcheck.sh"
+chmod +x "$tmp/detachedok/skills/watch-prs/scripts/pr-selfcheck.sh"
+expect "$tmp/detachedok" "$(cmd 'git push origin b')" 2 "a check that exits clean while a child holds the pipe is not a clean check"
+grep -q 'did not finish' "$tmp/err" && pass "…it is a deadline, and says so" || die "the cut-short run was called clean: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"

@@ -40,12 +40,14 @@ set -m
     | grep -c '^PR_SELFCHECK finding=' >"$work/n" ) &
 gpid=$!
 set +m
-( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
+( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; : >"$work/killed"; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
 wpid=$!
 # The shell announces a killed job on its own stderr, naming the command it ran.
 { wait "$gpid"; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
 rc="$(cat "$work/rc" 2>/dev/null)"
 case "$rc" in ''|*[!0-9]*) rc=124 ;; esac
+# The check's own status says nothing if the deadline cut the run short around it.
+{ [ -e "$work/killed" ] || [ ! -s "$work/n" ]; } && rc=124
 [ "$rc" -eq 0 ] && exit 0
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2

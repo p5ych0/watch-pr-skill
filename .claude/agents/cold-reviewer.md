@@ -24,7 +24,9 @@ reported as changed and never opened, by diff or by any other means, since a dif
 contents. A rename or a copy is one change with two names, so either name being secret keeps
 both endpoints closed. An untracked file is in no diff, so a copy of a secret-named one
 arrives under whatever name it was given: take `git hash-object --no-filters -- <path>`, the
-bytes as they are rather than as an attribute would store them, for every untracked path and
+bytes as they are rather than as an attribute would store them, for every untracked path
+`test -L` does not report as a link, since hashing follows one out of the checkout and a
+link to a device would not return at all, and
 for every secret-named path the tree holds — `git status --short -z --untracked-files=all
 --ignored` names the ignored ones, which an exclude file would otherwise keep out of sight —
 and close any path, tracked or not, whose hash matches one of theirs, before it is opened.
