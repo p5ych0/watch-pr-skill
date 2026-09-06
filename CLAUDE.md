@@ -91,37 +91,41 @@ call — in a few sentences. Say what was unexpected.
 
 ## What ships
 
+This table locates; it does not specify. Each helper's contract is its fixture,
+`test-<area>.sh`, which pins every invariant it carries; the rules a reviewer holds a change
+to are in `AGENTS.md`; the argument for each design is in `CHANGELOG.md` and the commit
+history; an accepted limit is in `docs/decisions/`.
+
 | Path | Role |
 | --- | --- |
-| `skills/watch-prs/SKILL.md` | The driver contract: one helper invocation per step, statuses in prose, an **Unattended:** answer at each decision stop. Read on every invocation, so every line costs. |
-| `scripts/pr-setup.sh` | Session start: reserves a directory, reads the origin through `pr-origin.sh read`, creates the four empty working files, reports `mode=attended` or `mode=unattended`. Removes nothing (`docs/decisions/2026-08-29-setup-leaf-cleanup.md`); only `INT` is trapped, to re-raise it, since a non-interactive shell survives one delivered while it waits on a child and would report ready. 0 ready, 1 stopped and terminal, 2 the storage refused — retried once by the caller under its second parent, and only 2. |
-| `scripts/pr-request-review.sh` | The opening Codex request: body on stdin, refused if it carries a reserved marker, is empty, or carries a mention where a pass is already queued; writes `<nonce> <baseline>` to the caller's file before posting. 0 posted, 1 stopped. |
-| `scripts/pr-review-state.sh` | Whether a reviewer's review of a head can carry a merge: every comment counts, replies included; a review of only replies is `source=replies-only`, neither answer; a body-only `CHANGES_REQUESTED` is `blocked`, never clean. `clean-at` answers whether the verdict is clean and when it landed from one snapshot, so a clean-to-clean transition cannot pair one verdict with another's time. `state`, `verdict`, `head`, `review-id`, `clean-at`, `escape-snapshot`. |
-| `scripts/pr-merge-range.sh` | Whether every commit since the reviewed sha is a `Review-Phase: copilot` fix reachable from it. |
-| `scripts/pr-findings.sh` | The unresolved findings, paginated and shape-validated, and the body of a blocking review. 2 is a stop. |
-| `scripts/pr-round-count.sh` | Rounds per reviewer from GitHub, the check-in boundary, and the acknowledgement records it honours. 0, 2 unreadable, 3 pause. |
-| `scripts/pr-signoff.sh` | Which head a reviewer signed off, read from the PR's records. A record carries `at=` and `id=` before `sha=`, since callers read the sha as the tail; `verdict-at=` is optional on stored records — older ones lack it — and reported as `none` when absent. A revocation newer than the verdict a signoff answers wins, and equal is not older. |
-| `scripts/pr-ci-state.sh` | Whether a head's checks are green, running, failing or absent, from one rollup addressed by `--head`; the required set is the base branch's classic protection and its rulesets, each read twice and all four results unioned, since a context moving between them during one read would be seen by neither; `behind`, `stale` and `none` are distinct answers, and an unreadable protection is an error. |
-| `scripts/pr-ci-gate.sh` | Waits until the pushed head's checks settle and says whether the round may close. |
-| `scripts/pr-close-round.sh` | `gate` pushes the PR's branch by name, proves the head green, writes it to the head file; the thread replies and resolutions go between the stages, after that proof and before `post`, since a resolve cannot be taken back; `post` re-proves the head, writes the nonced baseline, then posts the summary and requests the next pass. Every non-alias refusal leaves both handoff files empty, the clearing running above the bootstrap in a child that sources `writelib.sh` directly behind a refusing stub, so a load that refuses cannot leave the previous round's head readable. 0, 1, 3 paused. |
-| `scripts/pr-copilot-phase.sh` | `record` proves Codex clean and writes the signoff; `open` revokes, re-proves, writes the nonced baseline and then requests Copilot; `close` records Copilot's signoff and prints the menu. Every proof runs immediately before its mutation; a revocation is ordered against the verdict. 0, 1, 3 paused. |
-| `scripts/pr-merge-gate.sh` | Every gate immediately before merging: the head resolved once as the full 40-hex sha with no client-side re-read before the merge, every probe addressed to that commit or to the one its reviewer judged, no unresolved thread across every page, the round boundary, and the merge pinned to that sha by `--match-head-commit`; `both` or `codex-only`; `--admin` by default (`docs/decisions/2026-08-06-merge-admin-default.md`), and `REVIEW_MERGE_STRICT=1`, exported so the gate process sees it, drops it and is the one path that honours a merge queue. 0 merged, 1 blocked, 3 paused, 4 queued. |
-| `scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the head is actionable; each probe bounded by `PR_WATCH_PROBE_TIMEOUT` and retried. The baseline file form requires `--require-nonce`, refuses an unnonced file and any other nonce, and has no compatibility arm. 0, 1 timed out, 2 unreadable, 4 replies only. |
-| `scripts/pr-origin.sh` | `read` writes the origin into a directory it creates; `pin` refuses a `REVIEW_BUS_REMOTE` that is not this checkout's origin. Not executable, started `/usr/bin/env bash -p`; every reason on stderr; cleanup is `rmdir` alone. 0, 1, 2 storage. |
-| `scripts/pr-phase-state.sh` | Which phase a PR is in, from its records, re-validating the one that must stand. 0, 1 stopped, 2 unreadable. |
-| `scripts/pr-selfcheck.sh` | The pre-push check over this plugin's sources; re-execs into a clean shell; the one helper not started privileged. |
-| `scripts/recordlib.sh` | What a well-formed GitHub record is, which lines are control records, what text requests a review, and what the replies-only escape means: a signoff answers a review only if it names the head and was recorded strictly after the later of the review and its newest reply, equal being a refusal. |
-| `scripts/writelib.sh` | How a value crosses in a caller-named file: the target's type refused before anything is created — a directory, FIFO, device, socket or a symlink to one, while a symlink to a regular file passes — then exclusive create, write, an exact-destination rename (`mv -T`, then `perl`'s `rename`, else refuse), and one non-blocking read-back that hands the value back. |
+| `skills/watch-prs/SKILL.md` | The driver contract, read on every invocation: one helper invocation per step, statuses in prose, an **Unattended:** answer at each decision stop. |
+| `scripts/pr-setup.sh` | Session start: the reservation, the origin, the four working files, the mode. |
+| `scripts/pr-request-review.sh` | The opening Codex request, and the baseline the watch is given. |
+| `scripts/pr-review-state.sh` | A reviewer's verdict on a head, and the replies-only escape. |
+| `scripts/pr-merge-range.sh` | Whether every commit since the reviewed sha is a Copilot-phase fix. |
+| `scripts/pr-findings.sh` | The unresolved findings, and a blocking review's body. |
+| `scripts/pr-round-count.sh` | Rounds per reviewer, the check-in boundary, the acknowledgements. |
+| `scripts/pr-signoff.sh` | The recorded signoffs and revocations, ordered. |
+| `scripts/pr-ci-state.sh` | A head's checks, and the base branch's required set. |
+| `scripts/pr-ci-gate.sh` | Waits for the pushed head's checks. |
+| `scripts/pr-close-round.sh` | `gate` and `post`, with the thread replies between them. |
+| `scripts/pr-copilot-phase.sh` | `record`, `open` and `close`. |
+| `scripts/pr-merge-gate.sh` | Every merge gate, then the merge pinned to one head. |
+| `scripts/pr-watch.sh` | Blocks until a reviewer's verdict is actionable. |
+| `scripts/pr-origin.sh` | Reads and pins the checkout's origin; not executable, started by an interpreter named by its caller. |
+| `scripts/pr-phase-state.sh` | Which phase a PR is in, from its own records. |
+| `scripts/pr-selfcheck.sh` | The pre-push check; re-execs into a clean shell; the one helper not started privileged. |
+| `scripts/recordlib.sh` | What a well-formed GitHub record is, and what a review request is. |
+| `scripts/writelib.sh` | How a value crosses in a caller-named file. |
 | `scripts/clocklib.sh` | One clock reader, so a fixture can own time. |
 | `scripts/identitylib.sh` | Which repository this checkout is: `rb_identity`, one definition. |
-| `scripts/loadlib.sh` | How a library is loaded and proven loaded: clear, take the clear's status, source, verify the symbol. |
+| `scripts/loadlib.sh` | How a library is loaded and proven loaded. |
 | `scripts/testlib.sh` | The portable watchdog and the validated scratch directory; ships at runtime inside `pr-ci-state.sh`. |
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
 `scripts/` is `skills/watch-prs/scripts/`; the other paths are as written. Everything else
-is documentation. The arguments for each design are in `CHANGELOG.md` and the commit
-history; the accepted limits in `docs/decisions/`.
+is documentation.
 
 ## The helpers are started privileged
 
@@ -228,9 +232,9 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   `testlib.sh`, which ships at runtime.
 - Self-contained: throwaway repositories under the validated scratch helper, `gh` stubbed,
   no network.
-- **Portable, proved by running.** The `macos-shell` job runs the suite on bash 3.2.57 with a
-  `PATH` built from what a Mac has, so a post-3.2 construct or a GNU-only tool on an
-  executed path fails there; GNU-only flags, `\s` in a `grep` pattern and unexecuted
+- **Portable, proved by running.** Both CI jobs run on every push to `main` and every pull
+  request. The `macos-shell` job runs the suite on bash 3.2.57 with a `PATH` built from what
+  a Mac has, so a post-3.2 construct or a GNU-only tool on an executed path fails there; GNU-only flags, `\s` in a `grep` pattern and unexecuted
   branches are review's job, tabled in the reviewer files. **Assert the invariant, not the
   version's route to it**: attack fixtures differ in route between bash 5 and 3.2.57 while
   the defence holds on both. Pin the inner interpreters, not only the outer shell.
