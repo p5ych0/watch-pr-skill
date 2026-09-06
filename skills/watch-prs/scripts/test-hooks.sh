@@ -44,7 +44,7 @@ done
 printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh"
 printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=x"\nexit 1\n' > "$tmp/bad/skills/watch-prs/scripts/pr-selfcheck.sh"
 printf '#!/usr/bin/env bash\nsleep 3600 &\necho "$!" > "%s"\nwait\n' "$tmp/child.pid" > "$tmp/hang/skills/watch-prs/scripts/pr-selfcheck.sh"
-printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=quoted_line SKILL.md:12"\necho "  gh pr comment --body PLACEHOLDER_VALUE_NOT_FOR_LOGS"\necho "PR_SELFCHECK status=findings count=1"\nexit 1\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh.quoting"
+printf '#!/usr/bin/env bash\necho "PR_SELFCHECK finding=quoted_line SKILL.md:12"\necho "  gh pr comment --body PLACEHOLDER_VALUE_NOT_FOR_LOGS"\necho "PR_SELFCHECK finding=PLACEHOLDER_VALUE_NOT_FOR_LOGS"\necho "PR_SELFCHECK status=findings count=1"\nexit 1\n' > "$tmp/ok/skills/watch-prs/scripts/pr-selfcheck.sh.quoting"
 chmod +x "$tmp"/*/skills/watch-prs/scripts/pr-selfcheck.sh
 
 pre() { printf '%s' "$2" | CLAUDE_PROJECT_DIR="$1" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err"; }
@@ -92,8 +92,8 @@ rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/notimeout" CLAUD
 child="$(cat "$tmp/child.pid" 2>/dev/null)"
 [ -n "$child" ] && ! kill -0 "$child" 2>/dev/null && pass "…and what the self-check started is gone with it" || die "a child of the self-check outlived the deadline: pid '${child:-none}'"
 expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
-grep -q 'finding=quoted_line' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
-    && pass "…and the hook reports the finding, never the line" || die "the quoted line reached stderr: $(head -c 200 "$tmp/err")"
+grep -q 'with 2 findings' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
+    && pass "…and the hook reports how many, never a word of what the check printed" || die "the check's output reached stderr: $(head -c 200 "$tmp/err")"
 printf 'run_limited() { return 0; }\nmktemp_d() { return 1; }\n' > "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a watchdog the change replaced with one that runs nothing does not pass the push"
 for b in 581 0 abc; do

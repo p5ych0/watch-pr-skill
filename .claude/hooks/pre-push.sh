@@ -48,11 +48,12 @@ else
     [ "$rc" -ge 128 ] && rc=124
 fi
 [ "$rc" -eq 0 ] && exit 0
-# A finding can quote the line it was found on, and that line is the change being pushed.
-grep -o 'PR_SELFCHECK [a-z]*=[A-Za-z0-9_.-]*' "$log" | sort -u | head -15 >&2
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2
 else
-    echo "blocked: pr-selfcheck.sh is not clean (rc=$rc); fix it before anything is pushed" >&2
+    # A count, since a finding quotes the line it was found on and that line is being pushed.
+    n=$(grep -c '^PR_SELFCHECK finding=' "$log")
+    case "$n" in *[!0-9]*) n=an\ unknown\ number\ of ;; esac
+    echo "blocked: pr-selfcheck.sh is not clean (rc=$rc), with $n findings; run it to read them" >&2
 fi
 exit 2

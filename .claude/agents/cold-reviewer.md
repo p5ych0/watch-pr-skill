@@ -21,7 +21,8 @@ of a rename, and `git status --short -z --untracked-files=all` for what is untra
 those paths before you open any of them: one whose name marks it as holding secrets — `.env`
 or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` or a credentials directory — is
 reported as changed and never opened, by diff or by any other means, since a diff prints the
-contents. An `AGENTS.md` or `CLAUDE.md` is policy and is read wherever it sits, that
+contents. A rename or a copy is one change with two names, so either name being secret keeps
+both endpoints closed. An `AGENTS.md` or `CLAUDE.md` is policy and is read wherever it sits, that
 directory included. For each of the rest, `git --literal-pathspecs diff <that sha> -- <one
 path>`, since a path that begins with a colon is otherwise read as a pattern and not as
 itself. Each enumeration is NUL-terminated because a
