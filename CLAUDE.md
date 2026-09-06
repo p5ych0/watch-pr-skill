@@ -88,12 +88,15 @@ Code session this checkout's `.claude/settings.json` enforces it: a `PreToolUse`
 the self-check, bounded by the repository's watchdog, before a Bash command that contains a
 `git … push` or a `pr-close-round.sh … gate` — a text match with quotes and backslashes
 removed, so a mention inside an argument costs a self-check run and is blocked only by that
-run's finding; a `PostToolUse` hook parses every `.sh` file written through Write or Edit.
-`test-hooks.sh` in the suite proves both. Before the first review request of a PR, and after
-each round's fixes, have the `cold-reviewer` subagent read the changes, giving it the PR's
-base ref, its body and the newest round summary; fix what names a defect this change
-introduced, whatever its group, and file or defer the rest. A round is the expensive part of
-the loop, and a finding a cold read makes in a minute must not cost one.
+run's finding, and a spelling built to evade it is the session evading its own guard, not
+defended against on the argument `docs/decisions/2026-09-05-driving-shell-trusted.md` rests
+on: the operator owns the session. A `PostToolUse` hook parses every `.sh` file written
+through Write or Edit. `test-hooks.sh` in the suite proves both. Before the first review
+request of a PR, and after each round's
+fixes, have the `cold-reviewer` subagent read the changes, giving it the PR's base ref, its
+body and the newest round summary; fix what names a defect this change introduced, whatever
+its group, and file or defer the rest. A round is the expensive part of the loop, and a
+finding a cold read makes in a minute must not cost one.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
@@ -133,6 +136,8 @@ history; an accepted limit is in `docs/decisions/`.
 | `scripts/testlib.sh` | The portable watchdog and the validated scratch directory; ships at runtime inside `pr-ci-state.sh`. |
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
+| `.claude/hooks/` | The two hooks `.claude/settings.json` runs in a Claude Code session; `test-hooks.sh` proves them. |
+| `.claude/agents/cold-reviewer.md` | The cold reviewer's brief. |
 
 `scripts/` is `skills/watch-prs/scripts/`; the other paths are as written. Everything else
 is documentation.
@@ -329,6 +334,7 @@ needs lands first as its own PR.
 
 ## Repo arming
 
-`.claude/settings.json` enables this plugin for the checkout and is committed. The Codex
+`.claude/settings.json` enables this plugin for the checkout, runs the two hooks, and is
+committed. The Codex
 connector is account-level (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.

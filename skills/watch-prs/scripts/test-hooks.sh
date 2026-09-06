@@ -27,7 +27,8 @@ wired "$SETTINGS" && pass "settings.json runs both hooks by their full path, eac
 jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "echo hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-pre.json" || die "the pre decoy was not written"
 jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit") | .hooks[]).command = "echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
 jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit")).matcher = "WriteEdit"' "$SETTINGS" > "$tmp/decoy-matcher.json" || die "the matcher decoy was not written"
-for d in pre post matcher; do
+jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).timeout = 30' "$SETTINGS" > "$tmp/decoy-timeout.json" || die "the timeout decoy was not written"
+for d in pre post matcher timeout; do
     wired "$tmp/decoy-$d.json" && die "the $d decoy passed the wiring check" || pass "the $d decoy fails the wiring check"
 done
 for h in pre-push.sh post-edit.sh; do
@@ -53,20 +54,23 @@ expect() {
 }
 cmd() { printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$1" | jq -Rs .)"; }
 
-expect "$tmp/ok" "$(cmd 'ls -la')" 0 "a harmless command passes without a check"
+expect "$tmp/bad" "$(cmd 'ls -la')" 0 "a harmless command passes without a check"
 expect "$tmp/bad" "$(cmd 'git commit -m "x"')" 0 "a commit is not a push"
 expect "$tmp/bad" "$(cmd 'git -c push=1 status')" 0 "…nor is push as an option value"
+expect "$tmp/bad" "$(cmd 'git config push.default simple')" 0 "…nor as a configuration key"
+expect "$tmp/bad" "$(cmd 'git log --grep=push')" 0 "…nor as a value after ="
 expect "$tmp/ok" "$(cmd 'git push -q -u origin b')" 0 "a push passes when the self-check is clean"
 expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument passes when the self-check is clean"
 expect "$tmp/bad" "$(cmd 'git commit -m "the loop never runs git push"')" 2 "…and that run is real: its finding blocks"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a push is blocked when the self-check finds something"
-for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'git "push" origin b' 'git \push origin b' 'git</dev/null push origin b' 'git&>/dev/null push origin b' 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
-    expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: $f"
+for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'git "push" origin b' 'git \push origin b' 'git pu"sh" origin b' 'g\it push origin b' $'git commit -m x\ngit push origin b' 'git</dev/null push origin b' 'git&>/dev/null push origin b' 'git${IFS}push origin b' 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
+    expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: ${f//$'\n'/\\n}"
 done
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh gate 7 bot s no h p')" 2 "the round gate is a push"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh   gate 7 bot s no h p')" 2 "…however the gate is spaced"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh</dev/null gate 7 bot s no h p')" 2 "…or redirected"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh&>/dev/null gate 7 bot s no h p')" 2 "…in any spelling"
+expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh${IFS}gate 7 bot s no h p')" 2 "…or split by an expansion"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh post 7 bot s no h p n')" 0 "…and post is not the gate"
 expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks the push"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"
@@ -94,5 +98,7 @@ rc=0; post "$(fp "$tmp/good.sh")" || rc=$?;   [ "$rc" -eq 0 ] && pass "a shell f
 rc=0; post "$(fp "$tmp/notes.md")" || rc=$?;  [ "$rc" -eq 0 ] && pass "a non-shell file is not parsed" || die "notes.md rc=$rc"
 rc=0; post 'not json' || rc=$?;               [ "$rc" -eq 2 ] && pass "unreadable input is reported" || die "malformed post-edit input rc=$rc"
 rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelope with no path is reported" || die "pathless post-edit input rc=$rc"
+rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
+rc=0; post '' || rc=$?;                       [ "$rc" -eq 2 ] && pass "empty post-edit input is reported" || die "empty post-edit input rc=$rc"
 
 [ "$fail" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }

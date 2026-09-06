@@ -7,8 +7,8 @@ cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.comm
 # So a spelling that only quotes or escapes a word is the word, and a mention inside an argument
 # costs a self-check run.
 norm="${cmd//[\\\"\']/}"
-push='(^|[^[:alnum:]_./-])([^[:space:]]*/)?git[^[:alnum:]_./-](.*[[:space:]]+)?push([^[:alnum:]_=./-]|$)'
-gate='pr-close-round\.sh[^[:alnum:]_./-](.*[[:space:]]+)?gate([^[:alnum:]_=./-]|$)'
+push='(^|[^[:alnum:]_./-])([^[:space:]]*/)?git[^[:alnum:]_./-](.*[^[:alnum:]_=./-])?push([^[:alnum:]_=./-]|$)'
+gate='pr-close-round\.sh[^[:alnum:]_./-](.*[^[:alnum:]_=./-])?gate([^[:alnum:]_=./-]|$)'
 [[ $norm =~ $push ]]; p=$?
 [[ $norm =~ $gate ]]; g=$?
 [ "$p" -eq 1 ] && [ "$g" -eq 1 ] && exit 0
