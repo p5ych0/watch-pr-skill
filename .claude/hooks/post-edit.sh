@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Exit 2 hands stderr back to Claude as feedback; a PostToolUse hook cannot block.
 set -uo pipefail
 
 f="$(jq -er 'if (.tool_input.file_path | type) == "string" then .tool_input.file_path else error("no path") end' 2>/dev/null)" \

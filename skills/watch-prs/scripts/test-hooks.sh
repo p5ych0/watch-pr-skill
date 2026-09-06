@@ -3,30 +3,39 @@ set -uo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$SCRIPT_DIR/../../.."
 HOOKS="$ROOT/.claude/hooks"
+SETTINGS="$ROOT/.claude/settings.json"
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 
 # The settings file is the promise; a copy without one has no hooks to prove.
-if [ ! -f "$ROOT/.claude/settings.json" ]; then
+if [ ! -f "$SETTINGS" ]; then
     echo "ok   - no .claude/settings.json in this copy; hook checks skipped"
     echo "RESULT: PASS"
     exit 0
 fi
-jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and (.command | test("hooks/pre-push\\.sh")) and .timeout == 600)' "$ROOT/.claude/settings.json" >/dev/null \
-    || die "settings.json does not run pre-push.sh as a PreToolUse command on Bash with a 600 s timeout"
-jq -e '.hooks.PostToolUse[]? | select((.matcher | test("Write")) and (.matcher | test("Edit"))) | .hooks[]? | select(.type == "command" and (.command | test("hooks/post-edit\\.sh")))' "$ROOT/.claude/settings.json" >/dev/null \
-    || die "settings.json does not run post-edit.sh as a PostToolUse command on Write and Edit"
-for h in pre-push.sh post-edit.sh; do
-    [ -x "$HOOKS/$h" ] || die "$HOOKS/$h is missing or not executable, so the harness cannot run it"
-done
-[ "$fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
 . "$SCRIPT_DIR/testlib.sh" || exit 1
 tmp="$(mktemp_d)" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
-# Scratch projects whose self-check is a stub, so the push arm is proved without the suite;
-# the hook loads the watchdog from the project it is given, so the real library is linked in.
+wired() {
+    jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh" and .timeout == 600)' "$1" >/dev/null \
+    && jq -e '.hooks.PostToolUse[]? | select((.matcher | test("Write")) and (.matcher | test("Edit"))) | .hooks[]? | select(.type == "command" and .command == "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh")' "$1" >/dev/null
+}
+wired "$SETTINGS" && pass "settings.json runs both hooks by their full path, each under its event and matcher, the push one with a 600 s timeout" \
+    || die "settings.json does not run both hooks as the harness must"
+jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "echo hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-pre.json" || die "the pre decoy was not written"
+jq '(.hooks.PostToolUse[] | select((.matcher | test("Write")) and (.matcher | test("Edit"))) | .hooks[]).command = "echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
+for d in pre post; do
+    wired "$tmp/decoy-$d.json" && die "a command that only names $d's hook passed the wiring check" || pass "a command that only names the $d hook is not the hook"
+done
+for h in pre-push.sh post-edit.sh; do
+    [ -x "$HOOKS/$h" ] || die "$HOOKS/$h is missing or not executable, so the harness cannot run it"
+done
+[ "$fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
+
+# So the push arm is proved without the suite; the hook loads the watchdog from the project it
+# is given, so the real library is linked in.
 for p in ok bad hang none; do
     mkdir -p "$tmp/$p/skills/watch-prs/scripts"
     ln -s "$SCRIPT_DIR/testlib.sh" "$tmp/$p/skills/watch-prs/scripts/testlib.sh"
@@ -50,11 +59,12 @@ expect "$tmp/ok" "$(cmd 'git push -q -u origin b')" 0 "a push passes when the se
 expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument passes when the self-check is clean"
 expect "$tmp/bad" "$(cmd 'git commit -m "the loop never runs git push"')" 2 "…and that run is real: its finding blocks"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a push is blocked when the self-check finds something"
-for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
+for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'git</dev/null push origin b' 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
     expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: $f"
 done
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh gate 7 bot s no h p')" 2 "the round gate is a push"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh   gate 7 bot s no h p')" 2 "…however the gate is spaced"
+expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh</dev/null gate 7 bot s no h p')" 2 "…or redirected"
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh post 7 bot s no h p n')" 0 "…and post is not the gate"
 expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks the push"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"

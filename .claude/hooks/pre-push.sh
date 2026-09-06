@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Exit 2 blocks the command and hands stderr back to Claude.
 set -uo pipefail
 
 cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.command else error("no command") end' 2>/dev/null)" \
@@ -8,8 +7,8 @@ cmd="$(jq -er 'if (.tool_input.command | type) == "string" then .tool_input.comm
 # So a spelling that only quotes or escapes a word is the word, and a mention inside an argument
 # costs a self-check run.
 norm="${cmd//[\\\"\']/}"
-push='(^|[;&|(`[:space:]])([^[:space:]]*/)?git[[:space:]]+(.*[[:space:]]+)?push([;&|()<>`[:space:]]|$)'
-gate='pr-close-round\.sh[[:space:]]+gate([;&|()<>`[:space:]]|$)'
+push='(^|[;&|(`[:space:]])([^[:space:]]*/)?git[[:space:]<>](.*[[:space:]]+)?push([;&|()<>`[:space:]]|$)'
+gate='pr-close-round\.sh[[:space:]<>](.*[[:space:]]+)?gate([;&|()<>`[:space:]]|$)'
 [[ $norm =~ $push ]] || [[ $norm =~ $gate ]] || exit 0
 
 # Inside the 600 s deadline settings.json gives the hook, since a hook that overruns it does not block.

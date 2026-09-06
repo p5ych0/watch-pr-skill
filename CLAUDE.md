@@ -86,7 +86,7 @@ diversion or driver-side nonce bookkeeping; the helpers stay privileged.
 failure is fixed first, never worked around and never explained away in prose. In a Claude
 Code session this checkout's `.claude/settings.json` enforces it: a `PreToolUse` hook runs
 the self-check, bounded by the repository's watchdog, before a Bash command that contains a
-`git … push` or a `pr-close-round.sh gate` — a text match with quotes and backslashes
+`git … push` or a `pr-close-round.sh … gate` — a text match with quotes and backslashes
 removed, so a mention inside an argument costs a self-check run and is blocked only by that
 run's finding; a `PostToolUse` hook parses every `.sh` file written through Write or Edit.
 `test-hooks.sh` in the suite proves both. Before the first review request of a PR, and after
