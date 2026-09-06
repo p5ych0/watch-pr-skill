@@ -13,8 +13,11 @@ if [ ! -f "$ROOT/.claude/settings.json" ]; then
     echo "RESULT: PASS"
     exit 0
 fi
+jq -e '.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | select(.type == "command" and (.command | test("hooks/pre-push\\.sh")) and .timeout == 600)' "$ROOT/.claude/settings.json" >/dev/null \
+    || die "settings.json does not run pre-push.sh as a PreToolUse command on Bash with a 600 s timeout"
+jq -e '.hooks.PostToolUse[]? | select((.matcher | test("Write")) and (.matcher | test("Edit"))) | .hooks[]? | select(.type == "command" and (.command | test("hooks/post-edit\\.sh")))' "$ROOT/.claude/settings.json" >/dev/null \
+    || die "settings.json does not run post-edit.sh as a PostToolUse command on Write and Edit"
 for h in pre-push.sh post-edit.sh; do
-    grep -q "hooks/$h" "$ROOT/.claude/settings.json" || die "settings.json no longer names $h"
     [ -x "$HOOKS/$h" ] || die "$HOOKS/$h is missing or not executable, so the harness cannot run it"
 done
 [ "$fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
@@ -44,10 +47,10 @@ expect "$tmp/ok" "$(cmd 'ls -la')" 0 "a harmless command passes without a check"
 expect "$tmp/bad" "$(cmd 'git commit -m "x"')" 0 "a commit is not a push"
 expect "$tmp/bad" "$(cmd 'git -c push=1 status')" 0 "…nor is push as an option value"
 expect "$tmp/ok" "$(cmd 'git push -q -u origin b')" 0 "a push passes when the self-check is clean"
-expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument costs a self-check run"
+expect "$tmp/ok" "$(cmd 'git commit -m "the loop never runs git push"')" 0 "a mention inside an argument passes when the self-check is clean"
 expect "$tmp/bad" "$(cmd 'git commit -m "the loop never runs git push"')" 2 "…and that run is real: its finding blocks"
 expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a push is blocked when the self-check finds something"
-for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
+for f in 'git -C /somewhere push origin b' 'git -C "/a repo with spaces" push origin b' 'git -c k=v push origin b' "git -c 'foo.bar=x;y' push origin b" 'git -c "a|b" push origin b' 'git -C d -c k=v push' 'git --git-dir=/g push origin b' 'git --git-dir /g push origin b' 'git --no-pager push origin b' '/usr/bin/git push origin b' '"/usr/bin/git" push origin b' '"/opt/my tools/git" push origin b' '\git push origin b' "git 'push' origin b" 'cd x && git push' 'x; git push' 'git push; x' 'git push>log 2>&1' "bash -c 'git push origin b'" '(git push origin b)' 'out=$(git push origin b)'; do
     expect "$tmp/bad" "$(cmd "$f")" 2 "a push is a push: $f"
 done
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh gate 7 bot s no h p')" 2 "the round gate is a push"
@@ -56,6 +59,10 @@ expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh post 7 
 expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks the push"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"
 grep -q 'did not finish' "$tmp/err" && pass "…and says so" || die "the hang was not named: $(head -c 120 "$tmp/err")"
+for b in 581 0 abc; do
+    rc=0; printf '%s' "$(cmd 'git push origin b')" | CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND="$b" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+    [ "$rc" -eq 2 ] && grep -q 'PRE_PUSH_BOUND' "$tmp/err" && pass "a bound of $b is refused at once, before the deadline can pass" || die "PRE_PUSH_BOUND=$b rc=$rc: $(head -c 120 "$tmp/err")"
+done
 expect "$tmp/ok" '' 2 "empty input blocks"
 expect "$tmp/ok" 'not json' 2 "unreadable input blocks"
 expect "$tmp/ok" '{"tool_input":{}}' 2 "an envelope with no command blocks"
