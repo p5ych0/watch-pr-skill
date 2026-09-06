@@ -17,28 +17,32 @@ agree — say so and stop. From here on use that sha, `<base>`, never the ref, s
 move under you. Take the merge base with its status, `git merge-base <base> HEAD`, and use
 it only if the command succeeded and printed one 40-hex sha, otherwise stop;
 `git diff --raw -C --find-copies-harder -z <that sha>` for the changed paths with their
-modes and both endpoints of a rename or a copy, the unchanged source of a copy included, and `git status --short -z --untracked-files=all` for what is untracked. Sort
-those paths before you open any of them: one whose name marks it as holding secrets — `.env`
-or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` or a credentials directory — is
-reported as changed and never opened, by diff or by any other means, since a diff prints the
-contents. A rename or a copy is one change with two names, so either name being secret keeps
-both endpoints closed. An untracked file is in no diff, so a copy of a secret-named one
-arrives under whatever name it was given: take `git hash-object --no-filters -- <path>`, the
-bytes as they are rather than as an attribute would store them, for every path in either set that the working tree still holds and
-`test -L` does not report as a link — a deletion and a rename's source are gone from it, and
-a path that is not there cannot be a copy of anything — since hashing follows one out of the checkout and a link to a device would not return
-at all — a secret-named path that is a link has no hash, so say the comparison is incomplete
-and stop rather than open what it cannot clear — and
-for every secret-named path the tree holds — `git status --short -z --untracked-files=all
---ignored` names the ignored ones, which an exclude file would otherwise keep out of sight —
-and close any path, tracked or not, whose hash matches one of theirs, before it is opened.
-The hash is an identifier, never contents. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read wherever it
-sits with `git show <base>:<path>`, that directory included; the branch's version of a
-policy file under such a directory stays closed like anything else there, since only the
-base's text is what the reviewers apply. For each of the rest, `git --literal-pathspecs diff <that sha> -- <one
+modes and both endpoints of a rename or a copy, the unchanged source of a copy included, and
+`git status --short -z --untracked-files=all --ignored` for what is untracked or ignored,
+which an exclude file would otherwise keep out of sight.
+
+Sort those paths before you open any of them. A path whose name marks it as holding secrets
+— `.env` or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` or a credentials directory
+— is reported as changed and never opened, by diff or by any other means, since a diff
+prints the contents; a rename or a copy is one change with two names, so either name being
+secret keeps both endpoints closed. A copy into an untracked file is in no diff at all, so
+compare by hash: `git hash-object --no-filters -- <path>`, the bytes as they are rather than
+as an attribute would store them, for every candidate and every secret-named path that
+`test -f` reports as a regular file, and close any candidate whose hash matches a secret
+one. A hash is an identifier, never contents. Where a secret-named path is a link, a device
+or a queue, or the tree no longer holds it, take the base's bytes instead —
+`git show <base>:<path> | git hash-object --no-filters --stdin` — and where the base has no
+such path either, the comparison is incomplete: say so and stop rather than open what it
+cannot clear. A changed path the tree simply no longer holds is a deletion and has nothing
+to compare. An `AGENTS.md` or `CLAUDE.md` is policy, and the base's version of one is read
+wherever it sits with `git show <base>:<path>`, that directory included; the branch's
+version of a policy file under a secret-named directory stays closed like anything else
+there, since the base's text is what the reviewers apply.
+
+For each path that survives the sorting, `git --literal-pathspecs diff <that sha> -- <one
 path>`, since a path that begins with a colon is otherwise read as a pattern and not as
-itself. Each enumeration is NUL-terminated because a
-path holding a tab, a newline, a quote or a backslash comes back rewritten otherwise. Every
+itself. Each enumeration is NUL-terminated because a path holding a tab, a newline, a quote
+or a backslash comes back rewritten otherwise. Every
 path is the bytes it is, passed on unchanged; a record is not the path. A short-status
 record is `XY PATH`, so the path is what follows the two status letters and the space, and
 a rename or copy there is two records, the destination first and the source next. A raw
@@ -46,9 +50,9 @@ record is the modes, the blobs and the status, then the path or, for a rename or
 source and the destination as separate NUL-terminated fields. A tree listing is the path
 alone. The reviewers judge the change against the policy on the base as it
 is now, so read it from there: `git show <base>:AGENTS.md` and `git show <base>:CLAUDE.md`,
-and, once the paths and the status have named the changed files,
-`git ls-tree -r -z --name-only <base>` for the base's files and `git show <base>:<its path>`
-for each nested `AGENTS.md` under whose directory a changed file lies, at any depth.
+and, once the paths and the status have named the changed files, `git ls-tree -r -z
+--name-only <base>` for the base's files and `git show <base>:<its path>` for each nested
+`AGENTS.md` under whose directory a changed file lies, at any depth.
 
 Then read the changes cold. Read, with the Read tool, any file of the checkout the paths or
 the status name, and with `git show <base>:<path>` any file the listing holds, unchanged
