@@ -236,8 +236,10 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   request. The `macos-shell` job runs the suite on bash 3.2.57 with a `PATH` built from what
   a Mac has, so a post-3.2 construct or a GNU-only tool on an executed path fails there —
   unless its status is discarded, as `for i in $(seq 1 5)` runs zero iterations and stays
-  green; that gap, GNU-only flags, `\s` in a `grep` pattern and unexecuted branches are
-  review's job, tabled in the reviewer files. **Assert the invariant, not the
+  green, a gap the workflow file notes. GNU-only flags, `\s` in a `grep` pattern and
+  unexecuted branches are review's job, tabled in the reviewer files. A tool stock macOS
+  lacks is usable behind a `command -v` probe and a fallback, as `testlib.sh` does for
+  `timeout`. **Assert the invariant, not the
   version's route to it**: attack fixtures differ in route between bash 5 and 3.2.57 while
   the defence holds on both. Pin the inner interpreters, not only the outer shell.
 - `SKILL.md`'s bash is covered only where `test-pr-skill-contract.sh` lifts it: the setup
@@ -298,8 +300,8 @@ needs lands first as its own PR.
 - Prefer removing the dependency over guarding it, and say on the thread which was taken and
   why.
 - Read the thread and the previous round's diff before writing.
-- The fault-tolerance pass runs only if the Copilot phase produced commits, once, and is
-  bound by every rule above; its own commits do not restart the cycle.
+- The fault-tolerance pass runs only if the Copilot phase produced commits, and is bound by
+  every rule above: it reviews those commits and is not an opening to revisit the design.
 
 ## Stating the task
 

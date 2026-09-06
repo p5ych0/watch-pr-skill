@@ -312,7 +312,6 @@ assembled at runtime on a branch the suite never takes, and for:
 | GNU-only **flags** on commands both platforms have | The command is present, so absence proves nothing | `sed -i` with no argument, `readlink -f`, `grep -P`, `date -d`, `stat -c`, `xargs -r`, `sort -h` |
 | GNU regex escapes in a `grep`/`sed` pattern, gawk-only operators in `awk` | BSD `grep` does not fail on `\s`: it matches a literal `s`, so the suite passes and the behaviour is silently wrong | `\s`, `\S`, `\d`, `\D`, `\w`, `\W`, `\B`; `\b` in `grep`/`sed`; `\<`, `\>` |
 | A construct on a branch the suite never executes | Coverage is high, not total | a post-3.2 spelling in an untaken error path |
-| A GNU-only command whose status is discarded | The command is missing, but nothing propagates the failure, so the job stays green | `for i in $(seq 1 5)` runs zero iterations; a `$(…)` whose status no one takes |
 
 Not findings: `\s` inside a jq program (Oniguruma supports it); `\b` in awk,
 which is backspace and portable; `echo -e` where the Bash builtin runs; a tool
