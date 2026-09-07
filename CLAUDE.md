@@ -83,7 +83,20 @@ as data and validated, never sourced. No name probe, containment arm, descriptor
 diversion or driver-side nonce bookkeeping; the helpers stay privileged.
 
 **Verification.** `pr-selfcheck.sh` clean before anything is claimed done or pushed. A
-failure is fixed first, never worked around and never explained away in prose.
+failure is fixed first, never worked around and never explained away in prose. In a Claude
+Code session this checkout's `.claude/settings.json` enforces it: a `PreToolUse` hook runs
+the self-check, under a bound of its own so the change being checked cannot lift it, before
+a Bash command that contains a
+`git … push` or a `pr-close-round.sh … gate` — a text match with quotes and backslashes
+removed, so a mention inside an argument costs a self-check run and is blocked only by that
+run's finding, and a spelling built to evade it is the session evading its own guard, not
+defended against on the argument `docs/decisions/2026-09-05-driving-shell-trusted.md` rests
+on: the operator owns the session. A `PostToolUse` hook parses every `.sh` file written
+through Write or Edit. `test-hooks.sh` in the suite proves both. Before the first review
+request of a PR, and after each round's fixes, have the `cold-reviewer` subagent read the
+changes, giving it the PR's base ref, its body and the newest round summary; fix what names
+a defect this change introduced and file the rest. It is a cheap pre-read in the operator's
+own session, not a boundary, and a round is the expensive part of the loop.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
@@ -319,6 +332,8 @@ needs lands first as its own PR.
 
 ## Repo arming
 
-`.claude/settings.json` enables this plugin for the checkout and is committed. The Codex
+`.claude/settings.json` enables this plugin for the checkout, runs the two hooks in
+`.claude/hooks/` that `test-hooks.sh` proves, and is committed; `.claude/agents/` holds the
+cold reviewer's brief. None of these installs. The Codex
 connector is account-level (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.
