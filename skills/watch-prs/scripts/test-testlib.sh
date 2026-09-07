@@ -218,13 +218,8 @@ for b in bash sh date true false kill sed grep printf env mktemp cat rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BROKE/$b"
 done
 # The stub is the watchdog's clock and nobody else's: the child names the real
-# `sleep` by path, so the stub can fail whatever interval the watchdog naps for
-# without pinning that interval. A stub shared with the child made `sleep 30`
-# return at once, and the child could be FINISHED before the parent's first
-# `kill -0` — the watchdog then observed a completed command and returned its
-# status, never reaching the 125 path this case exists to prove. The test still
-# passed, on scheduling. A mandatory gate that passes for a reason it does not
-# name is the failure mode this whole suite is about.
+# `sleep` by path, so the stub fails whatever interval the watchdog naps for
+# without pinning it, and the child is provably still running when it does.
 REAL_SLEEP="$(command -v sleep)"
 # THE STUB WAITS FOR THE CHILD BEFORE FAILING. Failing the watchdog's first nap
 # immediately still left a race the other way: under a scheduler that leaves the
@@ -276,8 +271,7 @@ grep -q 'rc=124' <<<"$out" \
     || pass "…and was still running when the clock failed"
 
 # ── a fast command is not charged a nap ─────────────────────────────────────
-# The fallback path once slept a whole second before its first liveness check, so
-# ten bounded no-ops cost ten seconds; the bound has to be free for what finishes.
+# The bound is for what hangs; what finishes must not pay for the poll.
 QUICK="$TMP/quick"; mkdir -p "$QUICK"
 for b in bash sh sleep true kill mktemp cat rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$QUICK/$b"
