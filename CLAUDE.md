@@ -95,9 +95,11 @@ on: the operator owns the session. A `PostToolUse` hook parses every `.sh` file 
 through Write or Edit. `test-hooks.sh` in the suite proves both. Before the first review
 request of a PR, and after each round's fixes, have the `cold-reviewer` subagent read the
 changes, giving it the PR's base ref, its body, the newest round summary and the earlier
-rounds' findings with their replies; fix what names
-a defect this change introduced and file the rest. It is a cheap pre-read in the operator's
-own session, not a boundary, and a round is the expensive part of the loop.
+rounds' findings with their replies; fix what names a defect this change introduced and file
+the rest. It is a cheap pre-read in the operator's own session, not a boundary, and a round
+is the expensive part of the loop. A mechanical fix pass may run as a subagent pinned to a
+smaller model, since answering a stated finding is bounded work; the judgment calls, the
+thread replies and the round summary stay with the session driving the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can
 recover. That is the PR number and branch; `REPO_DIR` and `RB_SCRIPTS` as setup resolved
