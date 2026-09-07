@@ -1058,7 +1058,7 @@ for _st_lib in loadlib recordlib identitylib; do
     # what a stale 40-hex OID would satisfy. Reading the file the helper actually left is the
     # only way this case can see the difference.
     case "$(<"$HEADF")" in
-        *[!0-9a-f]*|"")          _st_driver=refused ;;
+        *[!0123456789abcdef]*|"") _st_driver=refused ;;
         ????????????????????????????????????????) _st_driver=accepted ;;
         *)                       _st_driver=refused ;;
     esac
@@ -1093,7 +1093,7 @@ else
         || die "a PATH without dirname left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_nd_rc out='$_nd_out')"
     # THROUGH THE DRIVER'S OWN CHECK, as the library cases above do.
     case "$(<"$HEADF")" in
-        *[!0-9a-f]*|"")                            _nd_driver=refused ;;
+        *[!0123456789abcdef]*|"")                   _nd_driver=refused ;;
         ????????????????????????????????????????) _nd_driver=accepted ;;
         *)                                         _nd_driver=refused ;;
     esac
