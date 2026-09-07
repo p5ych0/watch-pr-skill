@@ -100,13 +100,15 @@ a defect this change introduced and file the rest. It is a cheap pre-read in the
 own session, not a boundary, and a round is the expensive part of the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps the PR number and
-branch, the setup directory and its four working files, `REVIEW_BUS_REMOTE` as setup exported
-it, `AUTO_REVIEW` as step 2 settled it, neither of which any `gh` call can recover, which
-reviewer the loop is on and therefore which phase, whether the opening Codex verdict was
-clean, since that is what decides between merging and buying a Copilot phase, the current
-nonce, each open finding's thread and comment ids, the round count per reviewer, and which
-stop is next.
-Losing any of them costs a round.
+branch, the setup directory and its four working files, and the origin file setup wrote,
+which the pin is restored from rather than by copying the remote into the summary, since an
+HTTPS origin can carry a credential. It keeps the exported knobs no probe recovers,
+`AUTO_REVIEW` as step 2 settled it and `REVIEW_MERGE_STRICT` as the operator set it; which
+reviewer the loop is on and therefore which phase; whether the opening Codex verdict was
+clean, since that decides between merging and buying a Copilot phase; any replies-only
+classification not yet recorded as a signoff or a fix; the current nonce; each open finding's
+thread and comment ids; the round count per reviewer; and which stop is next. Losing any of
+them costs a round.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
