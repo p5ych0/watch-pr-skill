@@ -217,13 +217,14 @@ BROKE="$TMP/broke"; mkdir -p "$BROKE"
 for b in bash sh date true false kill sed grep printf env mktemp cat rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BROKE/$b"
 done
-# The stub fails ONLY for the watchdog's own `sleep 0.1`, and works for everything
-# else. A stub that failed unconditionally was shared with the child on the same
-# PATH, so `sleep 30` returned instantly and the child could be FINISHED before
-# the parent's first `kill -0` — the watchdog then observed a completed command
-# and returned its status, never reaching the 125 path this case exists to prove.
-# The test still passed, on scheduling. A mandatory gate that passes for a reason
-# it does not name is the failure mode this whole suite is about.
+# The stub is the watchdog's clock and nobody else's: the child names the real
+# `sleep` by path, so the stub can fail whatever interval the watchdog naps for
+# without pinning that interval. A stub shared with the child made `sleep 30`
+# return at once, and the child could be FINISHED before the parent's first
+# `kill -0` — the watchdog then observed a completed command and returned its
+# status, never reaching the 125 path this case exists to prove. The test still
+# passed, on scheduling. A mandatory gate that passes for a reason it does not
+# name is the failure mode this whole suite is about.
 REAL_SLEEP="$(command -v sleep)"
 # THE STUB WAITS FOR THE CHILD BEFORE FAILING. Failing the watchdog's first nap
 # immediately still left a race the other way: under a scheduler that leaves the
@@ -238,15 +239,12 @@ REAL_SLEEP="$(command -v sleep)"
 # instead of failing it.
 cat > "$BROKE/sleep" <<SLEEPSH
 #!/usr/bin/env bash
-if [ "\$1" = "0.1" ]; then
-    _w=0
-    while [ ! -e "\$TMP/child-started" ] && [ "\$_w" -lt 50 ]; do
-        "$REAL_SLEEP" 0.1
-        _w=\$((_w + 1))
-    done
-    exit 1
-fi
-exec "$REAL_SLEEP" "\$@"
+_w=0
+while [ ! -e "\$TMP/child-started" ] && [ "\$_w" -lt 50 ]; do
+    "$REAL_SLEEP" 0.1
+    _w=\$((_w + 1))
+done
+exit 1
 SLEEPSH
 chmod +x "$BROKE/sleep"
 # The child's liveness is OBSERVABLE, not inferred from the status. Whether the
@@ -257,7 +255,7 @@ chmod +x "$BROKE/sleep"
 # child runs to completion at once and writes it; with the clock-only stub it is
 # still sleeping when the watchdog gives up, and never does.
 rm -f "$TMP/child-started" "$TMP/child-ended"
-out="$(PATH="$BROKE" TMP="$TMP" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 3 sh -c ": > \"$TMP/child-started\"; sleep 30; : > \"$TMP/child-ended\""; echo "rc=$?"' 2>&1)"
+out="$(PATH="$BROKE" TMP="$TMP" REAL_SLEEP="$REAL_SLEEP" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 3 sh -c ": > \"$TMP/child-started\"; \"$REAL_SLEEP\" 30; : > \"$TMP/child-ended\""; echo "rc=$?"' 2>&1)"
 case "$out" in
     *"rc=125"*) pass "a failing watchdog sleep returns 125, not an ordinary timeout" ;;
     *) die "broken sleep gave '$out' (want rc=125)" ;;
@@ -276,6 +274,19 @@ grep -q 'rc=124' <<<"$out" \
 [ -e "$TMP/child-ended" ] \
     && die "the child ran to completion; the watchdog never had a live command to bound" \
     || pass "…and was still running when the clock failed"
+
+# ── a fast command is not charged a nap ─────────────────────────────────────
+# The fallback path once slept a whole second before its first liveness check, so
+# ten bounded no-ops cost ten seconds; the bound has to be free for what finishes.
+QUICK="$TMP/quick"; mkdir -p "$QUICK"
+for b in bash sh sleep true kill mktemp cat rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$QUICK/$b"
+done
+_t0="$(date +%s)"
+PATH="$QUICK" bash -c '. "'"$SELF_DIR"'/testlib.sh"; i=0; while [ "$i" -lt 10 ]; do run_limited 5 true >/dev/null || exit 1; i=$((i + 1)); done' \
+    && [ "$(( $(date +%s) - _t0 ))" -le 5 ] \
+    && pass "ten bounded no-ops on the fallback path finish inside five seconds" \
+    || die "ten bounded no-ops took $(( $(date +%s) - _t0 ))s on the fallback path"
 
 # ── a command that IGNORES TERM is still killed ────────────────────────────
 # The GNU arm sent TERM and stopped there: `timeout --help` says plainly that a

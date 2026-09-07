@@ -211,8 +211,9 @@ elif _sr="$(mktemp_d)" && _ro="$(mktemp_d)" && _home="$(mktemp_d)" \
     # TMPDIR reaches the fence only: the bound's own scratch file must not land in the parent that refuses.
     _srout="$(cd "$_sr" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home" \
         run_limited 60 env TMPDIR="$_ro" bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _srrc=$?
-    # A marker, since the bound replays stdout and then stderr where GNU timeout interleaves them.
-    _srdir="${_srout##*RB_SETUP_DIR=}"; _srdir="${_srdir%%$'\n'*}"
+    # A marked line, since the bound replays stdout and then stderr where GNU timeout interleaves
+    # them; anchored, since a scratch path may itself contain the marker's text.
+    _srdir="$(printf '%s\n' "$_srout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
     case "$_srrc|$_srdir" in
         "0|$_home/watch-pr-setup-2."*)
             [ -f "$_srdir/origin" ] \
@@ -226,13 +227,30 @@ else
 fi
 
 if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the marker-collision case"
+elif _sr4="$(mktemp_d)" && _home4="$(mktemp_d)" && _col="$(mktemp_d)/RB_SETUP_DIR=here" && mkdir -p "$_col" \
+     && git -C "$_sr4" init -q && git -C "$_sr4" remote add origin 'git@github.com:acme/widget.git'; then
+    _crc=0
+    _cout="$(cd "$_sr4" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home4" \
+        run_limited 60 env TMPDIR="$_col" bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _crc=$?
+    _cdir="$(printf '%s\n' "$_cout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
+    case "$_crc|$_cdir" in
+        "0|$_col/watch-pr-setup."*) pass "a scratch parent whose path spells the marker does not confuse the read" ;;
+        *) die "with the marker in the parent's path the fence exited $_crc with: '$_cout'" ;;
+    esac
+    rm -rf "$_sr4" "$_home4" "${_col%/RB_SETUP_DIR=here}"
+else
+    die "could not stage the marker-collision case"
+fi
+
+if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the relative-TMPDIR case"
 elif _sr3="$(mktemp_d)" && _home3="$(mktemp_d)" \
      && git -C "$_sr3" init -q && git -C "$_sr3" remote add origin 'git@github.com:acme/widget.git'; then
     _rrc=0
     _rout="$(cd "$_sr3" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home3" \
         run_limited 60 env TMPDIR=relative/dir bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _rrc=$?
-    _rdir="${_rout##*RB_SETUP_DIR=}"; _rdir="${_rdir%%$'\n'*}"
+    _rdir="$(printf '%s\n' "$_rout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
     case "$_rrc|$_rdir" in
         "0|$_home3/watch-pr-setup."*) pass "a relative TMPDIR sends setup under HOME on the first attempt" ;;
         *) die "with a relative TMPDIR the setup fence exited $_rrc with: '$_rout'" ;;

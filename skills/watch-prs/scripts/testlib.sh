@@ -33,8 +33,7 @@ run_limited() {
     set +m
     local waited=0
     # A `sleep` that fails is a broken clock, not a timeout; 125, not 2, which a command can return.
-    # Tenths, which GNU and BSD sleep both take: a whole second here charged every bounded call a
-    # second on this path, and a helper making eight such calls a hundred times over ran past its bound.
+    # Tenths, which GNU and BSD sleep both take: the nap is what a fast command costs on this path.
     while [ "$waited" -lt $((secs * 10)) ]; do
         { kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; } || break
         if ! sleep 0.1; then
