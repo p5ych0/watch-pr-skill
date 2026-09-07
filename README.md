@@ -91,17 +91,22 @@ Once, before updating:
    rm -rf /tmp/<owner>-<repo>-review-bus
    ```
 
-   Remove the clone and the worktrees too where `REVIEW_BUS_REPO_CLONE` or
-   `CODEX_REVIEW_WORKTREE_ROOT` put them outside that directory. Where an earlier
-   1.x ran the bus under `setsid`, kill any `review-bus-*.sh` process still
-   running.
+   Where you exported `BUS_DIR`, the bus lived there instead, so remove that
+   directory. Remove the clone and the worktrees too where
+   `REVIEW_BUS_REPO_CLONE` or `CODEX_REVIEW_WORKTREE_ROOT` put them outside that
+   directory. Where an earlier 1.x ran the bus under `setsid`, run
+   `review-bus-codex-start.sh --stop` from the 1.x copy while it is still
+   installed: it terminates each daemon's whole process group, and killing the
+   shell alone leaves its `codex exec` child running.
 2. Update as above. The skill keeps its name. Remove the Codex CLI copy of the
    plugin where you installed one: Codex is a reviewer now, not a driver.
 3. The `codex` CLI, `inotify-tools` and systemd are no longer needed; `perl` is.
-   Link the Codex connector and enable Copilot code review as under
-   *Requirements*, then follow *Per-project setup*, deleting `.review-bus.md` on
-   the way: nothing reads it, and the conventions live in the two files the
-   reviewers read from the base branch.
+   Link the Codex connector as under *Requirements*, and enable Copilot code
+   review there only where you want the Copilot phase; a Codex-only merge needs
+   none. Then follow *Per-project setup*, carrying anything stack-specific in
+   `.review-bus.md` into `AGENTS.md` and `.github/copilot-instructions.md` on the
+   way and deleting it after: nothing reads it, and the conventions live in the
+   two files the reviewers read from the base branch.
 4. `CODEX_REVIEW_ROUND_THRESHOLD` is `REVIEW_ROUND_THRESHOLD`. Every other
    `CODEX_REVIEW_*` variable, `REVIEW_BUS_REPO_CLONE`, `REVIEW_BUS_WATCHER` and
    `REVIEW_BUS_MONITOR` are gone: model and effort are Codex account settings, and
