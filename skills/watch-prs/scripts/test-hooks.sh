@@ -136,6 +136,14 @@ if [ -f "$BRIEF" ]; then
     grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
         || die "the brief no longer disables the filesystem monitor"
 fi
+mkdir -p "$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS.ro/scratch" "$tmp/noopen"
+chmod 500 "$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS.ro/scratch"
+for c in bash env jq grep sleep kill rm cat; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/noopen/$c"
+done
+printf '#!/usr/bin/env bash\nprintf %%s "%s/PLACEHOLDER_VALUE_NOT_FOR_LOGS.ro/scratch"\n' "$tmp" > "$tmp/noopen/mktemp"; chmod +x "$tmp/noopen/mktemp"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/noopen" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "a scratch directory that cannot be written blocks, and its path is in no diagnostic" || die "unwritable scratch rc=$rc: $(head -c 200 "$tmp/err")"
 mkdir -p "$tmp/norm"
 for c in bash env jq grep sleep kill mktemp cat; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/norm/$c"
