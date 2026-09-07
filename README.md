@@ -95,7 +95,8 @@ Once, before updating:
    systemctl --user is-active review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
    ```
 
-   Only once both lines read `inactive`, and after checking that the second
+   Only once neither line reads `active` — a unit that is gone reads `inactive`,
+   or `unknown` on an older systemd — and after checking that the second
    directory below holds nothing you still want:
 
    ```
