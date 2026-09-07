@@ -142,6 +142,13 @@ if [ -f "$BRIEF" ]; then
         || die "the brief no longer disables optional locks, so its status can rewrite the index"
     grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
         || die "the brief no longer disables the filesystem monitor"
+    grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
+        || die "the brief no longer probes for the path before reading it"
+    [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
+        && pass "…with the link probe first, since -e follows a link and calls a dangling one absent" \
+        || die "the brief asks -e before -L, so a dangling link reads as absent"
+    grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
+        || die "the brief no longer reads a link with readlink at the root"
 fi
 # A parent that is not there fails every open whatever the user's privileges are.
 mkdir -p "$tmp/noopen"
