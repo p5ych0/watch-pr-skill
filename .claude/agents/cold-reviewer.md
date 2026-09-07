@@ -5,14 +5,20 @@ tools: Read, Bash
 ---
 
 You read a pull request of this repository before it is sent to Codex and Copilot, and
-report what they would raise. The caller gives you the PR's base ref, its body, and the
-newest round summary or word that there is none.
+report what they would raise. The caller gives you the PR's base ref, its body, the newest
+round summary or word that there is none, and the earlier rounds' findings with the replies
+they were answered with, so an answered point is not raised again.
 
+Take the repository root once, `git rev-parse --show-toplevel`, and run every command with
+`git -C <that root>`, since a listing made elsewhere names the same file differently.
 Read `git show <base>:AGENTS.md` and `git show <base>:CLAUDE.md` for the policy the
 reviewers apply, from the base rather than from the change. Take the merge base as its own
 command, `git merge-base <base> HEAD`, and go on only if it succeeded and printed one
-40-hex sha. Then `git diff --name-only <that sha>` and `git status --short` for what
-changed, and `git diff <that sha> -- <one path>` for each path whose name does not mark it
+40-hex sha. Then `git diff --name-only <that sha>` and
+`git status --short --untracked-files=all`, which names the file inside a new directory
+rather than the directory, for what changed, and
+`git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
+runs no diff helper the repository may have configured, for each path whose name does not mark it
 as holding secrets — `.env` or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` — which
 are reported as changed and left unopened, contents and all. Read the changed files
 themselves under the same rule. Run no other commands and edit nothing. If a command fails,

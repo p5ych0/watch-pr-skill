@@ -96,6 +96,15 @@ printf '#!/usr/bin/env bash\nsleep 3600 &\nexit 0\n' > "$tmp/detachedok/skills/w
 chmod +x "$tmp/detachedok/skills/watch-prs/scripts/pr-selfcheck.sh"
 expect "$tmp/detachedok" "$(cmd 'git push origin b')" 2 "a check that exits clean while a child holds the pipe is not a clean check"
 grep -q 'did not finish' "$tmp/err" && pass "…it is a deadline, and says so" || die "the cut-short run was called clean: $(head -c 160 "$tmp/err")"
+# The status of the read that recovers the check's result: a plausible value from a failed
+# read is the deadline path, not a clean one.
+mkdir -p "$tmp/badcat"
+for c in bash env jq grep sleep kill mktemp rm; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/badcat/$c"
+done
+printf '#!/usr/bin/env bash\nprintf 0\nexit 1\n' > "$tmp/badcat/cat"; chmod +x "$tmp/badcat/cat"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/badcat" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a read that prints a clean status and then fails does not pass the push" || die "failed status read rc=$rc: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"
