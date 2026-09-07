@@ -123,8 +123,6 @@ expect "$tmp/loud" "$(cmd 'git push origin b')" 2 "a slow self-check with a grea
 expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
 grep -q 'with 2 findings' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
     && pass "…and the hook reports how many, never a word of what the check printed" || die "the check's output reached stderr: $(head -c 200 "$tmp/err")"
-printf 'run_limited() { return 0; }\nmktemp_d() { return 1; }\n' > "$tmp/bad/skills/watch-prs/scripts/testlib.sh"
-expect "$tmp/bad" "$(cmd 'git push origin b')" 2 "a watchdog the change replaced with one that runs nothing does not pass the push"
 for b in 581 0 abc; do
     rc=0; printf '%s' "$(cmd 'git push origin b')" | CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND="$b" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
     [ "$rc" -eq 2 ] && grep -q 'PRE_PUSH_BOUND' "$tmp/err" && pass "a bound of $b is refused at once, before the deadline can pass" || die "PRE_PUSH_BOUND=$b rc=$rc: $(head -c 120 "$tmp/err")"

@@ -26,7 +26,7 @@ gate='pr-close-round\.sh[^[:alnum:]_./-](.*[^[:alnum:]_=./-])?gate([^[:alnum:]_=
 bound="${PRE_PUSH_BOUND:-580}"
 case "$bound" in *[!0-9]*) bound=x ;; esac
 [ "$bound" != x ] && [ "$bound" -ge 1 ] && [ "$bound" -le 580 ] \
-    || { echo "blocked: PRE_PUSH_BOUND='${PRE_PUSH_BOUND:-}' is not a whole number of seconds from 1 to 580; nothing is pushed unbounded" >&2; exit 2; }
+    || { echo "blocked: PRE_PUSH_BOUND is not a whole number of seconds from 1 to 580; nothing is pushed unbounded" >&2; exit 2; }
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: $check is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
