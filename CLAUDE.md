@@ -112,9 +112,10 @@ line being the list rather than a copy of it here, and never `REVIEW_BUS_REMOTE`
 which can hold a credential; which reviewer the loop is on and therefore which phase;
 whether the opening Codex verdict was clean, since that decides between merging and buying a
 Copilot phase; every answer the operator has given that a helper has not yet enacted, a
-replies-only classification among them; the current nonce; each open finding's thread and
-comment ids; the round count per reviewer; and which stop is next. Losing any of them costs
-a round.
+replies-only classification among them; the current nonce; each finding of the round with the
+reply it was answered with, until the cold read that follows those fixes has had them, and
+each open finding's thread and comment ids; the round count per reviewer;
+and which stop is next. Losing any of them costs a round.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
