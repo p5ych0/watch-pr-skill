@@ -99,6 +99,11 @@ rounds' findings with their replies; fix what names
 a defect this change introduced and file the rest. It is a cheap pre-read in the operator's
 own session, not a boundary, and a round is the expensive part of the loop.
 
+**Compaction.** When the context is compacted mid-loop, the summary keeps the PR number and
+branch, the setup directory and its four working files, the current nonce, each open
+finding's thread and comment ids, the round count per reviewer, and which stop is next.
+Losing any of them costs a round.
+
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
 call — in a few sentences. Say what was unexpected.
