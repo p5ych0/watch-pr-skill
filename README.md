@@ -76,6 +76,68 @@ Install once at user scope. To update:
 /reload-plugins
 ```
 
+### Upgrading from 1.x
+
+2.0.0 replaced the plugin rather than extending it. The file bus, its two
+`systemd --user` daemons, the `codex exec` reviewer and the SessionStart hook are
+gone; both reviewers are GitHub apps, and the plugin runs under Claude Code only.
+Once, before updating:
+
+1. In every repository where the bus ran, stop it and then remove its
+   directories, in that order and from inside that checkout, with the 1.x copy
+   still installed: the launcher recreates the bus directory and its clone on
+   every start, `--stop` included. `<plugin>` below is that installed copy,
+   `$CLAUDE_PLUGIN_ROOT` in a 1.x session and otherwise a directory under
+   `~/.claude/plugins/cache/` or `~/.codex/plugins/cache/`.
+
+   ```
+   <plugin>/skills/watch-prs/scripts/review-bus-codex-start.sh --stop
+   systemctl --user is-active review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
+   ```
+
+   Only once `is-active` prints `inactive`, `failed` or `unknown` for both units
+   — a unit that is gone reads the first, or the last on an older systemd — and
+   after checking that the second directory below holds nothing you still want:
+
+   ```
+   rm -rf /tmp/<owner>-<repo>-review-bus /tmp/<owner>-<repo>-claude-worktrees
+   git worktree prune
+   ```
+
+   `--stop` stops both transient units and terminates the whole process group of
+   a daemon an earlier 1.x launched under `setsid`, which killing the shell alone
+   would leave running with its `codex exec` child. It needs a running
+   `systemd --user`; without one, signal each daemon's process group yourself. It
+   reports success even where a unit refused to stop, which is what the check
+   between the two blocks is for. The second directory is where 1.x put
+   implementer worktrees by default, and `git worktree prune` drops the
+   registrations they leave in `.git`. Where you exported `BUS_DIR`, the bus
+   lived there instead, so remove that directory. Remove the clone and the
+   worktrees too where `REVIEW_BUS_REPO_CLONE` or `CODEX_REVIEW_WORKTREE_ROOT`
+   put them outside that directory.
+2. Update as above, or, where 1.x was installed in the Codex CLI only, install
+   in Claude Code as under *Install*. The skill keeps its name. Remove the Codex
+   CLI copy of the plugin where you installed one: Codex is a reviewer now, not
+   a driver.
+3. The `codex` CLI, `inotify-tools` and systemd are no longer needed; `perl` is.
+   Link the Codex connector as under *Requirements*, and enable Copilot code
+   review on the repository only where you want the Copilot phase; a Codex-only
+   merge needs none. Then follow *Per-project setup*, carrying anything
+   stack-specific in `.review-bus.md` into `AGENTS.md` and
+   `.github/copilot-instructions.md` on the way and deleting it after: nothing
+   reads it, and the conventions live in the two files the reviewers read from
+   the base branch.
+4. `CODEX_REVIEW_ROUND_THRESHOLD` is `REVIEW_ROUND_THRESHOLD`, counting reviewed
+   heads per reviewer where 1.x counted enqueued heads per PR, so a carried-over
+   value pauses at a different point. Unset every old `CODEX_REVIEW_*` and
+   `REVIEW_BUS_*` export and `BUS_DIR`. Most are gone — model and effort are
+   Codex account settings, and the round pause is a stop in the session — and
+   `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` are test seams
+   here, which a stale export must not reach: they retarget the session's
+   repository identity. The current list is under *Configuration*.
+5. There is no request or close-round command to run: the skill drives the loop
+   and stops where a decision is yours. Read *A session*.
+
 ## Per-project setup
 
 1. Authenticate `gh` for the repository.
