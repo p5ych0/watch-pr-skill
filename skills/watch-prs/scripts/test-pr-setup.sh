@@ -102,8 +102,9 @@ run() {   # run [env-entries…] -- [args…] ; prints "<rc>|<dir>|<output>"
     #
     # BOTH STREAMS JOINED, so one assertion can look at the ready line and the
     # reason together. The separation itself is asserted by its own case below.
-    out="$(cd "$REPO" && run_limited 25 env "${envs[@]}" \
-        /usr/bin/env bash -p "$SCRIPT" "${args[@]}" 2>&1)" || rc=$?
+    # Either array can be empty, which bash 3.2 reads as unbound under `set -u`.
+    out="$(cd "$REPO" && run_limited 25 env ${envs[@]+"${envs[@]}"} \
+        /usr/bin/env bash -p "$SCRIPT" ${args[@]+"${args[@]}"} 2>&1)" || rc=$?
     printf '%s|%s|%s\n' "$rc" "$vd" "$out"
 }
 rc_of()  { printf '%s' "${1%%|*}"; }

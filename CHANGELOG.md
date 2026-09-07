@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.9.1] — 2026-09-07
+
+- **The portable watchdog polls in tenths.** Where GNU `timeout` is absent — stock macOS —
+  `run_limited` falls back to a watchdog of its own, and that watchdog slept a whole second
+  between liveness checks, so every bounded call cost a second however fast the command was.
+  `pr-ci-state.sh` makes up to eight bounded `gh` calls per invocation and its fixture
+  invokes it about a hundred times, which put the file past the mac-shaped CI job's 600 s
+  bound: the job, re-enabled after a pause, went red on `main` for it. The poll is a tenth
+  of a second now, which GNU and BSD `sleep` both take; a bounded no-op costs about a tenth,
+  and a hang is still cut at the bound.
+
 ## [2.9.0] — 2026-09-05
 
 - **`SKILL.md` is one command per step.** The document the driver reads on every invocation
