@@ -114,8 +114,8 @@ whether the opening Codex verdict was clean, since that decides between merging 
 Copilot phase; every answer the operator has given that a helper has not yet enacted, a
 replies-only classification among them; the current nonce; each finding of the round with the
 reply it was answered with, until the cold read that follows those fixes has had them, and
-each open finding's thread and comment ids; the round count per reviewer;
-and which stop is next. Losing any of them costs a round.
+each open finding's thread and comment ids; the cold read's result, whether clean or a
+finding not yet fixed or filed; the round count per reviewer; and which stop is next. Losing any of them costs a round.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
