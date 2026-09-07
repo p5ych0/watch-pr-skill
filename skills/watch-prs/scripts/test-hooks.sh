@@ -128,6 +128,13 @@ done
 printf '#!/usr/bin/env bash\ncase "$*" in *"/g") printf 0; exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$tmp/nogread/cat"; chmod +x "$tmp/nogread/cat"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nogread" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && pass "a failed read of the count's status blocks, as the check's own does" || die "unread count status rc=$rc: $(head -c 160 "$tmp/err")"
+mkdir -p "$tmp/nomktemp"
+for c in bash env jq grep sleep kill rm cat; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/nomktemp/$c"
+done
+printf '#!/usr/bin/env bash\necho "mktemp: failed to create directory via template PLACEHOLDER_VALUE_NOT_FOR_LOGS/tmp.XXX" >&2\nexit 1\n' > "$tmp/nomktemp/mktemp"; chmod +x "$tmp/nomktemp/mktemp"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nomktemp" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "a scratch directory that cannot be made blocks, and the utility's own path is not passed on" || die "mktemp failure rc=$rc: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"

@@ -33,7 +33,7 @@ root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &&
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: pr-selfcheck.sh is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
 # A finding quotes the line it was found on, and that line is the change being pushed.
-work="$(mktemp -d)" || { echo "blocked: the pre-push hook could not make a directory for the self-check's result" >&2; exit 2; }
+work="$(mktemp -d 2>/dev/null)" || { echo "blocked: the pre-push hook could not make a directory for the self-check's result" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
 # The change being checked owns everything under $root, this bound included; the group is the
 # unit, since a descendant that outlives the check holds the pipe open.

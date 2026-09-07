@@ -10,9 +10,10 @@ round summary or word that there is none, and the earlier rounds' findings with 
 they were answered with. A reply is context, not a verdict: raise a point again unless the
 code as it stands now makes it false.
 
-Take the repository root once, `git rev-parse --show-toplevel`, and run every command with
-`git -C <that root> -c core.fsmonitor=false`, since a listing made elsewhere names the same file differently and a monitor hook the
-repository configures would otherwise run inside this read.
+Take the repository root once, `git rev-parse --show-toplevel`, and run every command as
+`GIT_OPTIONAL_LOCKS=0 git -C <that root> -c core.fsmonitor=false`, since a listing made elsewhere names the same file differently and a monitor hook the
+repository configures, or a refresh of the index this read is not entitled to write, would
+otherwise happen inside it.
 Read `git show <base>:AGENTS.md` and `git show <base>:CLAUDE.md` for the policy the
 reviewers apply, from the base rather than from the change. Take the merge base as its own
 command, `git merge-base <base> HEAD`, and go on only if it succeeded and printed one
