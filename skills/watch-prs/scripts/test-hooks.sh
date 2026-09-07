@@ -142,7 +142,7 @@ expect "$tmp/loud" "$(cmd 'git push origin b')" 2 "a slow self-check with a grea
 expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
 grep -q 'with 2 findings' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
     && pass "…and the hook reports how many, never a word of what the check printed" || die "the check's output reached stderr: $(head -c 200 "$tmp/err")"
-long="$(printf '9%.0s' $(seq 1 40))"
+long="$(printf '9%.0s' {1..40})"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND="$long" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && ! grep -q 99999 "$tmp/err" && pass "a bound too large to compare is refused without any of it reaching the message" || die "long bound rc=$rc: $(head -c 160 "$tmp/err")"
 for b in 581 0 abc; do
@@ -188,6 +188,11 @@ printf 'x=1 )\n' > "$newline_path"
 rc=0; post "$(fp "$newline_path")" || rc=$?
 [ "$rc" -eq 2 ] && grep -q 'at line 1' "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
     && pass "a path holding a newline is reported at its line, on one line" || die "newline path rc=$rc: $(head -c 200 "$tmp/err")"
+secret_path="$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS.sh"
+printf 'x=1 )\n' > "$secret_path"
+rc=0; post "$(fp "$secret_path")" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'at line 1' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
+    && pass "a path that itself holds a value is reported by line alone" || die "secret path rc=$rc: $(head -c 200 "$tmp/err")"
 misleading="$tmp/x: line 99: broken.sh"
 printf 'x=1 )\n' > "$misleading"
 rc=0; post "$(fp "$misleading")" || rc=$?

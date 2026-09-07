@@ -23,5 +23,6 @@ case "$rest" in
     [0-9]*) where="line ${rest%%:*}" ;;
     *)      where="an unknown line" ;;
 esac
-printf '%s no longer parses, at %s\n' "$(printf '%q' "$f")" "$where" >&2
+# The path can hold a value that must not reach a log, and the caller knows what it edited.
+echo "the file just written does not parse, at $where" >&2
 exit 2
