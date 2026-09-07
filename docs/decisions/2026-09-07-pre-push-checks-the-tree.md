@@ -28,14 +28,16 @@ the tree was dirty. The rule it broke, that a mention costs a run and nothing mo
 the loop depends on. The other two cases it did not close at all.
 
 Closing all three means checking out the pushed commit into a temporary work tree and running
-the check there, on every push. That cost is paid by every push in exchange for cases the loop
-does not produce: `pr-close-round.sh gate` commits and pushes in one step, and the driver
-never writes an explicit refspec.
+the check there, on every push. What the loop relies on instead is a habit, not a mechanism:
+`SKILL.md` has the driver commit the round's fixes before it calls `pr-close-round.sh gate`,
+and the gate pushes `HEAD` as it finds it. A driver that gates with the fixes still
+uncommitted has the hook check a tree the push does not send, and nothing here stops it.
 
 ## What does not change
 
 - The hook still fails closed on everything it can see, and a regression in one of those
   guards is a finding.
 - An operator who pushes by hand from a dirty tree, or with an explicit refspec, is outside
-  what this hook checks. `pr-selfcheck.sh` run directly is the answer there, and the loop's
-  own gate is unaffected.
+  what this hook checks. Running `pr-selfcheck.sh` directly answers the first, since it reads
+  the tree that is about to be committed; it does not answer the second, which needs a work
+  tree at the refspec's own commit, and that too is accepted rather than closed.
