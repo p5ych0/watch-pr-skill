@@ -330,16 +330,12 @@ jobs:
           # runner it resolves to gawk, which is why GAWK-ONLY REGEX OPERATORS are
           # in the reviewers' table rather than here: the name is portable and the
           # dialect is not, and no PATH can tell those apart.
-          # `base64` and `comm` are here because the first version of this list
-          # left them out and the job said so: `base64: command not found`,
-          # `comm: command not found`. Stock macOS has both. That is this list
-          # working as intended — a name nobody thought of fails LOUDLY rather
-          # than passing quietly, which is the whole reason the denylist was
-          # replaced.
+          # An allowlist is wrong by omission, and that is the point: a name it
+          # lacks fails loudly here rather than passing quietly on a Mac.
           cmds="bash sh env git gh jq awk sed grep
-                cat cut head tail sort uniq comm wc tr od tee base64
+                cat cut head tail sort uniq comm cmp wc tr od tee base64
                 ls mkdir rmdir rm cp mv ln find xargs chmod touch
-                mktemp dirname basename readlink stat
+                mktemp mkfifo dirname basename readlink stat
                 date sleep ps kill id whoami uname hostname
                 diff patch tar gzip gunzip curl openssl shasum
                 expr perl"
