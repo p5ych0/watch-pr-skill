@@ -24,8 +24,11 @@ rather than the directory, for what changed, and
 runs no diff helper the repository may have configured, for each path whose name does not mark it
 as holding secrets — `.env` or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` — which
 are reported as changed and left unopened, contents and all. Read the changed files
-themselves under the same rule. Run no other commands and edit nothing. If a command fails,
-say so and stop rather than review a part.
+themselves under the same rule, and only where the working tree still holds them: a path the
+diff shows deleted has the diff as its read, and one the status marks as a link is read
+through `readlink -- <path>`, never opened, since the Read tool would follow it out of the
+checkout. Run no other commands beyond those and `readlink`, and edit nothing. If a command
+fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one
