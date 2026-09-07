@@ -128,6 +128,21 @@ done
 printf '#!/usr/bin/env bash\ncase "$*" in *"/g") printf 0; exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$tmp/nogread/cat"; chmod +x "$tmp/nogread/cat"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nogread" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && pass "a failed read of the count's status blocks, as the check's own does" || die "unread count status rc=$rc: $(head -c 160 "$tmp/err")"
+BRIEF="$ROOT/.claude/agents/cold-reviewer.md"
+if [ -f "$BRIEF" ]; then
+    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
+    grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
+        || die "the brief no longer disables optional locks, so its status can rewrite the index"
+    grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
+        || die "the brief no longer disables the filesystem monitor"
+fi
+mkdir -p "$tmp/norm"
+for c in bash env jq grep sleep kill mktemp cat; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/norm/$c"
+done
+printf '#!/usr/bin/env bash\necho "rm: cannot remove PLACEHOLDER_VALUE_NOT_FOR_LOGS/tmp.XXX" >&2\nexit 1\n' > "$tmp/norm/rm"; chmod +x "$tmp/norm/rm"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/norm" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "a cleanup that cannot remove the scratch directory says nothing about it" || die "cleanup diagnostic rc=$rc: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/nomktemp"
 for c in bash env jq grep sleep kill rm cat; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/nomktemp/$c"

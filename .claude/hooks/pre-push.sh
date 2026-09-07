@@ -34,7 +34,7 @@ check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: pr-selfcheck.sh is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
 # A finding quotes the line it was found on, and that line is the change being pushed.
 work="$(mktemp -d 2>/dev/null)" || { echo "blocked: the pre-push hook could not make a directory for the self-check's result" >&2; exit 2; }
-trap 'rm -rf "$work"' EXIT
+trap 'rm -rf "$work" 2>/dev/null' EXIT
 # The change being checked owns everything under $root, this bound included; the group is the
 # unit, since a descendant that outlives the check holds the pipe open.
 set -m
@@ -42,7 +42,7 @@ set -m
     | { grep -c '^PR_SELFCHECK finding=' >"$work/n"; echo $? >"$work/g"; } ) &
 gpid=$!
 set +m
-( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; : >"$work/killed"; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
+( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; : >"$work/killed" 2>/dev/null; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
 wpid=$!
 # The shell announces a killed job on its own stderr, naming the command it ran.
 { wait "$gpid"; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
