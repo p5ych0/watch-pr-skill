@@ -335,7 +335,7 @@ jobs:
           cmds="bash sh env git gh jq awk sed grep
                 cat cut head tail sort uniq comm cmp wc tr od tee base64
                 ls mkdir rmdir rm cp mv ln find xargs chmod touch
-                mktemp mkfifo dirname basename readlink stat
+                mktemp mkfifo mknod dirname basename readlink stat
                 date sleep ps kill id whoami uname hostname
                 diff patch tar gzip gunzip curl openssl shasum
                 expr perl"
