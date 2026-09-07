@@ -57,7 +57,8 @@ def pages_or_error:
 # `case` with a length test rather than `[[ =~ ]]`, where the pattern would be data.
 sha_reason() {
     case "${1-}" in
-        ""|*[!0-9a-f]*) printf 'bad_head'; return 1 ;;
+        # Spelled out: a range collates by locale on bash 3.2, and `[a-f]` then takes `A` through `E`.
+        ""|*[!0123456789abcdef]*) printf 'bad_head'; return 1 ;;
     esac
     [ "${#1}" -eq 40 ] || { printf 'head_not_full_sha'; return 1; }
     return 0

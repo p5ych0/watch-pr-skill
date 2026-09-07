@@ -390,6 +390,7 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # written a different way. A guard that matches one spelling of a
         # duplicated rule has not found the duplication.
         /\*\[!0-9a-f\]\*/                    { print FILENAME ":" FNR ": commit_id shape (shell case)" }
+        /\*\[!0123456789abcdef\]\*/          { print FILENAME ":" FNR ": commit_id shape (shell case)" }
         /\$\{#[A-Za-z_]+\}" -(eq|ne) 40/      { print FILENAME ":" FNR ": commit_id length (shell)" }
         # …and the reply/finding distinction. A helper asking this inline is one
         # that has stopped VALIDATING the field, which is exactly how a malformed
@@ -539,6 +540,16 @@ seen="$(scan_inline_rules "$DRIFT")"; drc3=$?
     && pass "a helper merely named like the library is still scanned" \
     || die "pr-recordlib.sh was exempted by a suffix match (rc=$drc3 out='$seen')"
 rm -f "$DRIFT/pr-recordlib.sh"
+
+# …and in the spelled-out class the library itself uses, which a copy would carry.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$h" in *[!0123456789abcdef]*|"") return 1 ;; esac\n'
+} > "$DRIFT/pr-classdrift.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc10=$?
+{ [ "$drc10" -eq 0 ] && grep -q 'pr-classdrift.sh.*shell' <<<"$seen"; } \
+    && pass "…and the spelled-out class the library uses" \
+    || die "a copy of the library's own spelling was not caught (rc=$drc10 out='$seen')"
+rm -f "$DRIFT/pr-classdrift.sh"
 
 # …in the SHELL spelling too. This is the case the first version of the guard
 # missed: three helpers already validated a SHA with `case` plus a length test,

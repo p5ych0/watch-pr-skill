@@ -510,7 +510,7 @@ which; 2 unreadable, which is not "no signoff".
 Only on 0, read the Codex signoff back; it must read back as a 40-hex sha:
 
 ```bash
-CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")" && [ "${#CODEX_SHA}" -eq 40 ] && [ -z "${CODEX_SHA//[0-9a-f]/}" ] || { echo "ABORT: the recorded Codex signoff did not read back as a sha"; exit 1; }
+CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")" && [ "${#CODEX_SHA}" -eq 40 ] && [ -z "${CODEX_SHA//[0123456789abcdef]/}" ] || { echo "ABORT: the recorded Codex signoff did not read back as a sha"; exit 1; }
 ```
 
 ### Then: the gate

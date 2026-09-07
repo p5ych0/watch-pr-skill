@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.2] — 2026-09-07
+
+- **A hex class is spelled out, not ranged.** On bash 3.2 under a non-C locale a bracket
+  range collates by locale, so `[0-9a-f]` takes `A` through `E` and a value git never emits
+  read as a full sha in `recordlib.sh`'s `case`, and in the driver's read-back of the Codex
+  signoff. Both spell the sixteen characters out. The mac-shaped CI job runs under `C.UTF-8`
+  and did not see it; a Mac in a user's locale would.
+
 ## [2.9.1] — 2026-09-07
 
 - **The portable watchdog polls in tenths.** Where GNU `timeout` is absent — stock macOS —
