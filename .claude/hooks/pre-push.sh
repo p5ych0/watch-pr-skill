@@ -57,7 +57,7 @@ case "$g" in 0|1) ;; *) rc=124 ;; esac
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within the bound; nothing is pushed unchecked" >&2
 else
-    n="$(cat "$work/n" 2>/dev/null)"
+    n="$(cat "$work/n" 2>/dev/null)" || n=x
     case "$n" in ''|*[!0-9]*) n=an\ unknown\ number\ of ;; esac
     echo "blocked: pr-selfcheck.sh is not clean (rc=$rc), with $n findings; run it to read them" >&2
 fi

@@ -120,7 +120,6 @@ rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUD
 printf '#!/usr/bin/env bash\nprintf 0\nexit 1\n' > "$tmp/failcount/grep"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 0 ] && pass "…while a count of none is a count, and the push passes" || die "no-match count rc=$rc: $(head -c 160 "$tmp/err")"
-# Only the read of the count's own status fails, with the check clean and the count written.
 mkdir -p "$tmp/nogread"
 for c in bash env jq grep sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/nogread/$c"
@@ -128,6 +127,14 @@ done
 printf '#!/usr/bin/env bash\ncase "$*" in *"/g") printf 0; exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$tmp/nogread/cat"; chmod +x "$tmp/nogread/cat"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nogread" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && pass "a failed read of the count's status blocks, as the check's own does" || die "unread count status rc=$rc: $(head -c 160 "$tmp/err")"
+mkdir -p "$tmp/nonread"
+for c in bash env jq grep sleep kill mktemp rm; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/nonread/$c"
+done
+printf '#!/usr/bin/env bash\ncase "$*" in *"/n") printf 0; exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$tmp/nonread/cat"; chmod +x "$tmp/nonread/cat"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nonread" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && grep -q 'an unknown number of findings' "$tmp/err" \
+    && pass "…and a count that could not be read is reported as unknown, not as none" || die "unread count rc=$rc: $(head -c 200 "$tmp/err")"
 BRIEF="$ROOT/.claude/agents/cold-reviewer.md"
 if [ -f "$BRIEF" ]; then
     # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
@@ -136,14 +143,18 @@ if [ -f "$BRIEF" ]; then
     grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
         || die "the brief no longer disables the filesystem monitor"
 fi
-mkdir -p "$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS.ro/scratch" "$tmp/noopen"
-chmod 500 "$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS.ro/scratch"
+# A parent that is not there fails every open whatever the user's privileges are.
+mkdir -p "$tmp/noopen"
 for c in bash env jq grep sleep kill rm cat; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/noopen/$c"
 done
-printf '#!/usr/bin/env bash\nprintf %%s "%s/PLACEHOLDER_VALUE_NOT_FOR_LOGS.ro/scratch"\n' "$tmp" > "$tmp/noopen/mktemp"; chmod +x "$tmp/noopen/mktemp"
-rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/noopen" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
-[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "a scratch directory that cannot be written blocks, and its path is in no diagnostic" || die "unwritable scratch rc=$rc: $(head -c 200 "$tmp/err")"
+printf '#!/usr/bin/env bash\nprintf %%s "%s/PLACEHOLDER_VALUE_NOT_FOR_LOGS.gone/scratch"\n' "$tmp" > "$tmp/noopen/mktemp"; chmod +x "$tmp/noopen/mktemp"
+for p in ok hang; do
+    rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/noopen" CLAUDE_PROJECT_DIR="$tmp/$p" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+    [ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
+        && pass "a scratch directory that cannot be written blocks a $p check, and its path is in no diagnostic" \
+        || die "unwritable scratch, $p check, rc=$rc: $(head -c 200 "$tmp/err")"
+done
 mkdir -p "$tmp/norm"
 for c in bash env jq grep sleep kill mktemp cat; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/norm/$c"
