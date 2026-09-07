@@ -88,13 +88,13 @@ Once, before updating:
 
    ```
    systemctl --user stop review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
-   systemctl --user reset-failed
    rm -rf /tmp/<owner>-<repo>-review-bus
    ```
 
-   Remove the clone under `CODEX_REVIEW_WORKTREE_ROOT` too where you set it.
-   Where the bus ran under `setsid` instead of systemd, kill any `review-bus-*.sh`
-   process still running.
+   Remove the clone and the worktrees too where `REVIEW_BUS_REPO_CLONE` or
+   `CODEX_REVIEW_WORKTREE_ROOT` put them outside that directory. Where an earlier
+   1.x ran the bus under `setsid`, kill any `review-bus-*.sh` process still
+   running.
 2. Update as above. The skill keeps its name. Remove the Codex CLI copy of the
    plugin where you installed one: Codex is a reviewer now, not a driver.
 3. The `codex` CLI, `inotify-tools` and systemd are no longer needed; `perl` is.
@@ -103,8 +103,8 @@ Once, before updating:
    the way: nothing reads it, and the conventions live in the two files the
    reviewers read from the base branch.
 4. `CODEX_REVIEW_ROUND_THRESHOLD` is `REVIEW_ROUND_THRESHOLD`. Every other
-   `CODEX_REVIEW_*` variable, `CODEX_AUTO_SKIP`, `REVIEW_BUS_THRESHOLD_PAUSE` and
-   `REVIEW_BUS_WORKER` are gone: model and effort are Codex account settings, and
+   `CODEX_REVIEW_*` variable, `REVIEW_BUS_REPO_CLONE`, `REVIEW_BUS_WATCHER` and
+   `REVIEW_BUS_MONITOR` are gone: model and effort are Codex account settings, and
    the round pause is a stop in the session. The current list is under
    *Configuration*.
 5. There is no request or close-round command to run: the skill drives the loop
