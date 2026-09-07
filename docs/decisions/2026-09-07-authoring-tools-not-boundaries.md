@@ -30,8 +30,9 @@ is bought.
   that runs the subagent can already read the same bytes, and no filter written in prose
   distinguishes a copy from an original. An operator who needs that bound does not run the
   cold reviewer on a checkout holding live credentials.
-- **Neither is installed.** Nothing under `.claude/` ships with the plugin, so a defect
-  here costs this checkout a wasted round, never a user of the skill.
+- **Neither is installed.** Nothing under `.claude/` ships with the plugin, so no user of
+  the skill inherits either tool. That bounds who a defect here reaches, not what it costs:
+  in this checkout the cost is the disclosure above, and a wasted round besides.
 
 ## What it cost to learn
 
