@@ -100,9 +100,10 @@ a defect this change introduced and file the rest. It is a cheap pre-read in the
 own session, not a boundary, and a round is the expensive part of the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps the PR number and
-branch, the setup directory and its four working files, the auto-review mode `pr-setup.sh`
-established, which no `gh` call can recover, the current nonce, each open finding's thread
-and comment ids, the round count per reviewer, and which stop is next.
+branch, the setup directory and its four working files, `AUTO_REVIEW` as step 2 settled it,
+which no `gh` call can recover, whether the opening Codex verdict was clean, since that is
+what decides between merging and buying a Copilot phase, the current nonce, each open
+finding's thread and comment ids, the round count per reviewer, and which stop is next.
 Losing any of them costs a round.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
