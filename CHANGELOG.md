@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.3] — 2026-09-07
+
+- **The manifests name the generation.** Both descriptions carried one sentence, which said
+  what the plugin does and nothing about which of the two incompatible generations it is, so
+  a reader who knew the 1.x file bus could not tell from a marketplace listing that the
+  daemons and the `codex exec` reviewer are gone. They say 2.x and no daemon now.
+
 ## [2.9.2] — 2026-09-07
 
 - **A hex class is spelled out, not ranged.** On bash 3.2 under a non-C locale a bracket
