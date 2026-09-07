@@ -44,7 +44,7 @@ set +m
 wpid=$!
 # The shell announces a killed job on its own stderr, naming the command it ran.
 { wait "$gpid"; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
-rc="$(cat "$work/rc" 2>/dev/null)"
+rc="$(cat "$work/rc" 2>/dev/null)" || rc=x
 case "$rc" in ''|*[!0-9]*) rc=124 ;; esac
 # The check's own status says nothing if the deadline cut the run short around it.
 { [ -e "$work/killed" ] || [ ! -s "$work/n" ]; } && rc=124
