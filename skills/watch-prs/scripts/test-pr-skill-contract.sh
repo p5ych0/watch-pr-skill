@@ -351,6 +351,11 @@ else
     die "the head proof does not precede the thread replies, or the case could not be staged"
 fi
 
+_sr="$(grep -F 'pr-signoff.sh sha N' <<<"$fences" | grep -F 'CODEX_SHA' || true)"
+{ [ -n "$_sr" ] && grep -qF '${CODEX_SHA//[0123456789abcdef]/}' <<<"$_sr"; } \
+    && pass "the signoff read-back spells its hex class out, where a range collates by locale on bash 3.2" \
+    || die "the signoff read-back does not spell its hex class out: '$_sr'"
+
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
 { [ "$_rc" -le 1 ] && [ "$_n" -eq 4 ]; } \
