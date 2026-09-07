@@ -30,6 +30,13 @@ case "$bound" in *[!0-9]*) bound=x ;; esac
 [ "$bound" != x ] && [ "$bound" -ge 1 ] && [ "$bound" -le 580 ] \
     || { echo "blocked: PRE_PUSH_BOUND is not a whole number of seconds from 1 to 580; nothing is pushed unbounded" >&2; exit 2; }
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# The check reads the tree, the push sends the commit; where there is a work tree to compare,
+# they must be the same thing.
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    dirty="$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null)" || dirty=x
+    [ -z "$dirty" ] \
+        || { echo "blocked: tracked files differ from the commit being pushed, so the check would not read what the push sends; commit or stash first" >&2; exit 2; }
+fi
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
 [ -x "$check" ] || { echo "blocked: pr-selfcheck.sh is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
 # A finding quotes the line it was found on, and that line is the change being pushed.

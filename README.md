@@ -308,7 +308,8 @@ skills/watch-prs/scripts/pr-selfcheck.sh
 It proves every variable the driver uses is assigned, every script parses and
 has a test, no fixture races a `printf` into `grep`, and the whole suite passes.
 In a Claude Code session, this checkout's `.claude/settings.json` runs it as a
-hook before a `git push` or the round gate. Before the first review request of a
+hook before a `git push` or the round gate, and refuses while a tracked file differs from
+the commit being pushed. Before the first review request of a
 pull request and after each round's fixes, the `cold-reviewer` subagent in
 `.claude/agents/` reads the changes cold, the way the reviewers will; a finding
 that names a defect the change introduced is fixed before the round is bought.

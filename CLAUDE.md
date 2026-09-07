@@ -92,8 +92,10 @@ removed, so a mention inside an argument costs a self-check run and is blocked o
 run's finding, and a spelling built to evade it is the session evading its own guard, not
 defended against on the argument `docs/decisions/2026-09-05-driving-shell-trusted.md` rests
 on: the operator owns the session. A `PostToolUse` hook parses every `.sh` file written
-through Write or Edit. `test-hooks.sh` in the suite proves both. Before the first review
-request of a PR, and after each round's fixes, have the `cold-reviewer` subagent read the
+through Write or Edit, and the push hook refuses while a tracked file differs from the commit,
+since the check reads the tree and the push sends the commit. `test-hooks.sh` in the suite
+proves all three. Before the first review request of a PR, and after each round's fixes,
+have the `cold-reviewer` subagent read the
 changes, giving it the PR's base ref, its body, the newest round summary and the earlier
 rounds' findings with their replies; fix what names
 a defect this change introduced and file the rest. It is a cheap pre-read in the operator's
