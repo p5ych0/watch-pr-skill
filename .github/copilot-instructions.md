@@ -446,6 +446,15 @@ finding. The accepted records:
   round: a secret the cold reviewer reaches through a copy, a link or an ignored file
   enters its transcript.
 
+- `docs/decisions/2026-09-07-pre-push-checks-the-tree.md`: the pre-push hook checks the
+  working tree, not the commit a push sends. Three things are accepted there: a tree that
+  differs from the pushed head is checked instead of it, an explicit refspec sends what no
+  check read, and an untracked file under the scripts directory is read by the check though
+  no push sends it. Closing them means a temporary checkout on every push, for cases the
+  loop does not produce, since the gate commits and pushes in one step and the driver writes
+  no explicit refspec. A refusal that fires on a mere mention of a push is not the fix: it
+  breaks the rule that a mention costs a check run and nothing more.
+
 ## A resolved thread is not proof a finding was fixed
 
 The author resolves threads when closing a round and may record a finding as
