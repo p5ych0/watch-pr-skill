@@ -18,7 +18,7 @@ fi
 tmp="$(mktemp_d)" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
-GUARD='h="$1"; LC_ALL=C bash -p -n -- "$h" 2>/dev/null || { echo "blocked: $h does not parse; the hook was not run" >&2; exit 2; }; exec bash -p -- "$h"'
+GUARD='h="$1"; LC_ALL=C bash -p -n -- "$h" 2>/dev/null || { echo "blocked: the hook does not parse; it was not run" >&2; exit 2; }; exec bash -p -- "$h"'
 PRE_CMD="/usr/bin/env bash -p -c '$GUARD' guard \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh"
 POST_CMD="/usr/bin/env bash -p -c '$GUARD' guard \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit.sh"
 wired() {
@@ -175,8 +175,8 @@ rc=0; ( cd "$tmp" && printf '%s' "$(fp '-x.sh')" | "$HOOKS/post-edit.sh" >/dev/n
 rc=0; post "$(fp "$tmp/notes.md")" || rc=$?;  [ "$rc" -eq 0 ] && pass "a non-shell file is not parsed" || die "notes.md rc=$rc"
 printf 'x=PLACEHOLDER_VALUE_NOT_FOR_LOGS )\n' > "$tmp/hook-itself.sh"; chmod +x "$tmp/hook-itself.sh"
 rc=0; printf '%s' "$(fp "$tmp/good.sh")" | /usr/bin/env bash -p -c "$GUARD" guard "$tmp/hook-itself.sh" >/dev/null 2>"$tmp/err" || rc=$?
-[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" \
-    && pass "a hook the edit just broke is refused by name, and its own diagnostic is not passed on" || die "the broken hook's line reached stderr: $(head -c 200 "$tmp/err")"
+[ "$rc" -eq 2 ] && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && ! grep -q "$tmp" "$tmp/err" \
+    && pass "a hook the edit just broke is refused without its path or its own diagnostic" || die "the broken hook's line reached stderr: $(head -c 200 "$tmp/err")"
 rc=0; post 'not json' || rc=$?;               [ "$rc" -eq 2 ] && pass "unreadable input is reported" || die "malformed post-edit input rc=$rc"
 rc=0; post '{"tool_input":{}}' || rc=$?;      [ "$rc" -eq 2 ] && pass "an envelope with no path is reported" || die "pathless post-edit input rc=$rc"
 rc=0; post '{"tool_input":{"file_path":null}}' || rc=$?; [ "$rc" -eq 2 ] && pass "a null path is reported" || die "null post-edit path rc=$rc"
