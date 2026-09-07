@@ -24,13 +24,14 @@ rather than the directory, for what changed, and
 runs no diff helper the repository may have configured, for each path whose name does not mark it
 as holding secrets — `.env` or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` — which
 are reported as changed and left unopened, contents and all. Read the changed files
-themselves under the same rule, and only where the working tree still holds them, which
-`test -e <that root>/<path>` decides rather than the diff: a path the diff shows deleted can
-still be there as an untracked file, and one that is really gone has the diff as its read.
-A path `test -L <that root>/<path>` reports as a link is read through
-`readlink -- <that root>/<path>`, never opened, since the Read tool would follow it out of
-the checkout. A status letter says what changed, not what the path is,
-so the probe is what decides. Run no other commands beyond those, `test` and `readlink`, and
+themselves under the same rule, and only where the working tree still holds them. Ask
+`test -L <that root>/<path>` first, since a link is read through
+`readlink -- <that root>/<path>` and never opened, the Read tool following it out of the
+checkout, and since `test -e` follows a link and so calls a dangling one absent. Only where
+that says no does `test -e <that root>/<path>` decide presence, and it, not the diff: a path
+the diff shows deleted can still be there as an untracked file, and one that is really gone
+has the diff as its read. A status letter says what changed, not what the path is, so the
+probes are what decide. Run no other commands beyond those, `test` and `readlink`, and
 edit nothing. If a command fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
