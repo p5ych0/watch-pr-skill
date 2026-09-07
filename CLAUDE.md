@@ -100,19 +100,21 @@ a defect this change introduced and file the rest. It is a cheap pre-read in the
 own session, not a boundary, and a round is the expensive part of the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can
-recover. That is the PR number and branch; `REPO_DIR` and the setup directory with its four
-working files; the pinned identity as the three components `rb_identity` sets, host, owner and
-repository, which the resumed session re-pins from and refuses to continue if the checkout's origin names
-another host or repository, and which are recorded only when none of them carries a
-credential, a query or a fragment — where one does, the summary says so and the resumed
-session runs setup again rather than writing that value down; every value the setup fence
-exports and every knob the operator set, each with the value it had, the fence in `SKILL.md`
-being the list rather than a copy of it here; which reviewer the loop is on and therefore
-which phase; whether the opening Codex verdict was clean, since that decides between merging
-and buying a Copilot phase; every answer the operator has given that a helper has not yet
-enacted, a replies-only classification among them; the current nonce; each open finding's
-thread and comment ids; the round count per reviewer; and which stop is next. Losing any of
-them costs a round.
+recover. That is the PR number and branch; `REPO_DIR` and `RB_SCRIPTS` as setup resolved
+them, and the setup directory with its four working files; the pinned identity as the three
+components `rb_identity` sets, host, owner and repository, which the resumed session re-pins
+from and refuses to continue if the checkout's origin names another host or repository, and
+which are recorded only when none of them carries a credential, a query or a fragment —
+where one does, the summary says the identity could not be recorded and the resumed session
+stops for the operator rather than pinning a fresh one; every value the configuration export
+line in `SKILL.md` carries and every knob the operator set, each with the value it had, that
+line being the list rather than a copy of it here, and never `REVIEW_BUS_REMOTE` itself,
+which can hold a credential; which reviewer the loop is on and therefore which phase;
+whether the opening Codex verdict was clean, since that decides between merging and buying a
+Copilot phase; every answer the operator has given that a helper has not yet enacted, a
+replies-only classification among them; the current nonce; each open finding's thread and
+comment ids; the round count per reviewer; and which stop is next. Losing any of them costs
+a round.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment
