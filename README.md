@@ -88,11 +88,17 @@ Once, before updating:
    still installed: the launcher recreates the bus directory and its clone on
    every start, `--stop` included. `<plugin>` below is that installed copy,
    `$CLAUDE_PLUGIN_ROOT` in a 1.x session and otherwise a directory under
-   `~/.claude/plugins/cache/`.
+   `~/.claude/plugins/cache/` or `~/.codex/plugins/cache/`.
 
    ```
    <plugin>/skills/watch-prs/scripts/review-bus-codex-start.sh --stop
    systemctl --user is-active review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
+   ```
+
+   Only once both lines read `inactive`, and after checking that the second
+   directory below holds nothing you still want:
+
+   ```
    rm -rf /tmp/<owner>-<repo>-review-bus /tmp/<owner>-<repo>-claude-worktrees
    git worktree prune
    ```
@@ -101,9 +107,9 @@ Once, before updating:
    a daemon an earlier 1.x launched under `setsid`, which killing the shell alone
    would leave running with its `codex exec` child. It needs a running
    `systemd --user`; without one, signal each daemon's process group yourself. It
-   reports success even where a unit refused to stop, so both units have to
-   report `inactive` before you remove anything; the second directory is where
-   1.x put implementer worktrees by default, and `git worktree prune` drops the
+   reports success even where a unit refused to stop, which is what the check
+   between the two blocks is for. The second directory is where 1.x put
+   implementer worktrees by default, and `git worktree prune` drops the
    registrations they leave in `.git`. Where you exported `BUS_DIR`, the bus
    lived there instead, so remove that directory. Remove the clone and the
    worktrees too where `REVIEW_BUS_REPO_CLONE` or `CODEX_REVIEW_WORKTREE_ROOT`
