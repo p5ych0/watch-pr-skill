@@ -76,6 +76,12 @@ Install once at user scope. To update:
 /reload-plugins
 ```
 
+What that takes is this repository as it stands, since the marketplace tracks it
+rather than a tag, so `CHANGELOG.md` is the record of what an update brings. The
+newest versions are also tagged and released at
+[github.com/p5ych0/watch-pr-skill/releases](https://github.com/p5ych0/watch-pr-skill/releases),
+carrying the same entries.
+
 ### Upgrading from 1.x
 
 2.0.0 replaced the plugin rather than extending it. The file bus, its two
