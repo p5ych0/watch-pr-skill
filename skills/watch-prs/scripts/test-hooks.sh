@@ -105,6 +105,14 @@ done
 printf '#!/usr/bin/env bash\nprintf 0\nexit 1\n' > "$tmp/badcat/cat"; chmod +x "$tmp/badcat/cat"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/badcat" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && pass "a read that prints a clean status and then fails does not pass the push" || die "failed status read rc=$rc: $(head -c 160 "$tmp/err")"
+# grep says 0 for a match and 1 for none; anything else is a count that did not happen.
+mkdir -p "$tmp/failcount"
+for c in bash env jq sleep kill mktemp rm cat; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/failcount/$c"
+done
+printf '#!/usr/bin/env bash\nprintf 0\nexit 2\n' > "$tmp/failcount/grep"; chmod +x "$tmp/failcount/grep"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a count that prints a number and then fails does not pass the push" || die "failed count rc=$rc: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"
