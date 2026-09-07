@@ -77,10 +77,10 @@ Install once at user scope. To update:
 ```
 
 What that takes is this repository as it stands, since the marketplace tracks it
-rather than a tag. Each version is tagged and released at
-[the releases page](https://github.com/p5ych0/watch-pr-skill/releases), whose
-notes carry that version's `CHANGELOG.md` entry, so read those to see what an
-update brings.
+rather than a tag, so `CHANGELOG.md` is the record of what an update brings. The
+newest versions are also tagged and released at
+[github.com/p5ych0/watch-pr-skill/releases](https://github.com/p5ych0/watch-pr-skill/releases),
+carrying the same entries.
 
 ### Upgrading from 1.x
 
