@@ -443,7 +443,11 @@ finding. The accepted records:
   under another name, a link, an ignored original stay readable by the session
   itself. Nothing under `.claude/` installs. A fail-closed guard going open in
   either hook — an unreadable envelope, a missing or unparseable self-check, a
-  bound outside the deadline, a run the deadline cut short — is still a finding.
+  bound outside the deadline, a run the deadline cut short — is still a finding, and so is
+  a change that drops `skills/watch-prs/scripts/test-hooks.sh` from the suite or stops
+  either CI job from running it. The cost accepted there is a disclosure, not a wasted
+  round: a secret the cold reviewer reaches through a copy, a link or an ignored file
+  enters its transcript.
 
 ## A resolved thread is not proof a finding was fixed
 
