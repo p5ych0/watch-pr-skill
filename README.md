@@ -83,35 +83,38 @@ Install once at user scope. To update:
 gone; both reviewers are GitHub apps, and the plugin runs under Claude Code only.
 Once, before updating:
 
-1. In every repository where the bus ran, stop its daemons and remove its
-   directory. The units were transient, so stopping them removes them:
+1. In every repository where the bus ran, stop it and then remove its directory,
+   in that order and from inside that checkout, with the 1.x copy still
+   installed: the launcher recreates the bus directory and its clone on every
+   start, `--stop` included.
 
    ```
-   systemctl --user stop review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
+   review-bus-codex-start.sh --stop
    rm -rf /tmp/<owner>-<repo>-review-bus
    ```
 
+   `--stop` stops both transient units and terminates the whole process group of
+   a daemon an earlier 1.x launched under `setsid`, which killing the shell alone
+   would leave running with its `codex exec` child. It needs a running
+   `systemd --user`; without one, signal each daemon's process group yourself.
    Where you exported `BUS_DIR`, the bus lived there instead, so remove that
    directory. Remove the clone and the worktrees too where
    `REVIEW_BUS_REPO_CLONE` or `CODEX_REVIEW_WORKTREE_ROOT` put them outside that
-   directory. Where an earlier 1.x ran the bus under `setsid`, run
-   `review-bus-codex-start.sh --stop` from the 1.x copy while it is still
-   installed: it terminates each daemon's whole process group, and killing the
-   shell alone leaves its `codex exec` child running.
+   directory.
 2. Update as above. The skill keeps its name. Remove the Codex CLI copy of the
    plugin where you installed one: Codex is a reviewer now, not a driver.
 3. The `codex` CLI, `inotify-tools` and systemd are no longer needed; `perl` is.
    Link the Codex connector as under *Requirements*, and enable Copilot code
-   review there only where you want the Copilot phase; a Codex-only merge needs
-   none. Then follow *Per-project setup*, carrying anything stack-specific in
+   review on the repository only where you want the Copilot phase; a Codex-only
+   merge needs none. Then follow *Per-project setup*, carrying anything stack-specific in
    `.review-bus.md` into `AGENTS.md` and `.github/copilot-instructions.md` on the
    way and deleting it after: nothing reads it, and the conventions live in the
    two files the reviewers read from the base branch.
-4. `CODEX_REVIEW_ROUND_THRESHOLD` is `REVIEW_ROUND_THRESHOLD`. Every other
-   `CODEX_REVIEW_*` variable, `REVIEW_BUS_REPO_CLONE`, `REVIEW_BUS_WATCHER` and
-   `REVIEW_BUS_MONITOR` are gone: model and effort are Codex account settings, and
-   the round pause is a stop in the session. The current list is under
-   *Configuration*.
+4. `CODEX_REVIEW_ROUND_THRESHOLD` is `REVIEW_ROUND_THRESHOLD`; `REVIEW_BUS_REMOTE`,
+   `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` stay. Every other `CODEX_REVIEW_*` and
+   `REVIEW_BUS_*` variable and `BUS_DIR` are gone: model and effort are Codex
+   account settings, and the round pause is a stop in the session. The current
+   list is under *Configuration*.
 5. There is no request or close-round command to run: the skill drives the loop
    and stops where a decision is yours. Read *A session*.
 
