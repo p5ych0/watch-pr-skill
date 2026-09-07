@@ -217,7 +217,7 @@ BROKE="$TMP/broke"; mkdir -p "$BROKE"
 for b in bash sh date true false kill sed grep printf env mktemp cat rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BROKE/$b"
 done
-# The stub fails ONLY for the watchdog's own `sleep 1`, and works for everything
+# The stub fails ONLY for the watchdog's own `sleep 0.1`, and works for everything
 # else. A stub that failed unconditionally was shared with the child on the same
 # PATH, so `sleep 30` returned instantly and the child could be FINISHED before
 # the parent's first `kill -0` — the watchdog then observed a completed command
@@ -238,7 +238,7 @@ REAL_SLEEP="$(command -v sleep)"
 # instead of failing it.
 cat > "$BROKE/sleep" <<SLEEPSH
 #!/usr/bin/env bash
-if [ "\$1" = "1" ]; then
+if [ "\$1" = "0.1" ]; then
     _w=0
     while [ ! -e "\$TMP/child-started" ] && [ "\$_w" -lt 50 ]; do
         "$REAL_SLEEP" 0.1

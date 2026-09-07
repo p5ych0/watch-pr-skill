@@ -208,9 +208,11 @@ elif _sr="$(mktemp_d)" && _ro="$(mktemp_d)" && _home="$(mktemp_d)" \
      && git -C "$_sr" init -q && git -C "$_sr" remote add origin 'git@github.com:acme/widget.git' \
      && chmod 500 "$_ro"; then
     _srrc=0
-    _srout="$(cd "$_sr" && CLAUDE_PLUGIN_ROOT="$ROOT" TMPDIR="$_ro" HOME="$_home" \
-        run_limited 60 bash -c "$setup_fence"$'\n''printf "%s\n" "$RB_SETUP_DIR"' 2>&1)" || _srrc=$?
-    _srdir="${_srout##*$'\n'}"
+    # TMPDIR reaches the fence only: the bound's own scratch file must not land in the parent that refuses.
+    _srout="$(cd "$_sr" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home" \
+        run_limited 60 env TMPDIR="$_ro" bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _srrc=$?
+    # A marker, since the bound replays stdout and then stderr where GNU timeout interleaves them.
+    _srdir="${_srout##*RB_SETUP_DIR=}"; _srdir="${_srdir%%$'\n'*}"
     case "$_srrc|$_srdir" in
         "0|$_home/watch-pr-setup-2."*)
             [ -f "$_srdir/origin" ] \
@@ -228,9 +230,9 @@ if [ -z "$setup_fence" ]; then
 elif _sr3="$(mktemp_d)" && _home3="$(mktemp_d)" \
      && git -C "$_sr3" init -q && git -C "$_sr3" remote add origin 'git@github.com:acme/widget.git'; then
     _rrc=0
-    _rout="$(cd "$_sr3" && CLAUDE_PLUGIN_ROOT="$ROOT" TMPDIR=relative/dir HOME="$_home3" \
-        run_limited 60 bash -c "$setup_fence"$'\n''printf "%s\n" "$RB_SETUP_DIR"' 2>&1)" || _rrc=$?
-    _rdir="${_rout##*$'\n'}"
+    _rout="$(cd "$_sr3" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home3" \
+        run_limited 60 env TMPDIR=relative/dir bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _rrc=$?
+    _rdir="${_rout##*RB_SETUP_DIR=}"; _rdir="${_rdir%%$'\n'*}"
     case "$_rrc|$_rdir" in
         "0|$_home3/watch-pr-setup."*) pass "a relative TMPDIR sends setup under HOME on the first attempt" ;;
         *) die "with a relative TMPDIR the setup fence exited $_rrc with: '$_rout'" ;;
