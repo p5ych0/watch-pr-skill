@@ -95,9 +95,9 @@ Once, before updating:
    systemctl --user is-active review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
    ```
 
-   Only once both lines read `inactive`, `failed` or `unknown` — a unit that is
-   gone reads the first, or the last on an older systemd — and after checking
-   that the second directory below holds nothing you still want:
+   Only once `is-active` prints `inactive`, `failed` or `unknown` for both units
+   — a unit that is gone reads the first, or the last on an older systemd — and
+   after checking that the second directory below holds nothing you still want:
 
    ```
    rm -rf /tmp/<owner>-<repo>-review-bus /tmp/<owner>-<repo>-claude-worktrees
