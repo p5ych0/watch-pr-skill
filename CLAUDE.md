@@ -101,9 +101,11 @@ own session, not a boundary, and a round is the expensive part of the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can
 recover. That is the PR number and branch; `REPO_DIR` and the setup directory with its four
-working files; the pinned identity as `<owner>/<repo>`, which the resumed session re-pins
-from and refuses to continue if the checkout's origin names another repository, rather than
-a remote copied into the summary, which can carry a credential; every value the setup fence
+working files; the pinned identity as the three components `rb_identity` sets, host, owner and
+repository, which the resumed session re-pins from and refuses to continue if the checkout's origin names
+another host or repository, and which are recorded only when none of them carries a
+credential, a query or a fragment — where one does, the summary says so and the resumed
+session runs setup again rather than writing that value down; every value the setup fence
 exports and every knob the operator set, each with the value it had, the fence in `SKILL.md`
 being the list rather than a copy of it here; which reviewer the loop is on and therefore
 which phase; whether the opening Codex verdict was clean, since that decides between merging
