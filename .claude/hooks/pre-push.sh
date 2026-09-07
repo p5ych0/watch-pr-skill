@@ -37,19 +37,19 @@ trap 'rm -rf "$work"' EXIT
 # unit, since a descendant that outlives the check holds the pipe open.
 set -m
 ( { /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS "$check" "$root" 2>&1; echo $? >"$work/rc"; } \
-    | grep -c '^PR_SELFCHECK finding=' >"$work/n" ) &
+    | { grep -c '^PR_SELFCHECK finding=' >"$work/n"; echo $? >"$work/g"; } ) &
 gpid=$!
 set +m
 ( i=0; while [ "$i" -lt "$bound" ]; do sleep 1; kill -0 "$gpid" 2>/dev/null || exit 0; i=$((i + 1)); done; : >"$work/killed"; kill -9 -"$gpid" 2>/dev/null || kill -9 "$gpid" 2>/dev/null ) &
 wpid=$!
 # The shell announces a killed job on its own stderr, naming the command it ran.
-{ wait "$gpid"; wrc=$?; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
+{ wait "$gpid"; kill "$wpid" 2>/dev/null; wait "$wpid"; } 2>/dev/null
 rc="$(cat "$work/rc" 2>/dev/null)" || rc=x
 case "$rc" in ''|*[!0-9]*) rc=124 ;; esac
 # The check's own status says nothing if the deadline cut the run short around it, or if the
 # count that ran beside it failed: grep says 0 for a match and 1 for none, and nothing else.
 { [ -e "$work/killed" ] || [ ! -s "$work/n" ]; } && rc=124
-case "$wrc" in 0|1) ;; *) rc=124 ;; esac
+case "$(cat "$work/g" 2>/dev/null)" in 0|1) ;; *) rc=124 ;; esac
 [ "$rc" -eq 0 ] && exit 0
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2

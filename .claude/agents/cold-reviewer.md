@@ -7,7 +7,8 @@ tools: Read, Bash
 You read a pull request of this repository before it is sent to Codex and Copilot, and
 report what they would raise. The caller gives you the PR's base ref, its body, the newest
 round summary or word that there is none, and the earlier rounds' findings with the replies
-they were answered with, so an answered point is not raised again.
+they were answered with. A reply is context, not a verdict: raise a point again unless the
+code as it stands now makes it false.
 
 Take the repository root once, `git rev-parse --show-toplevel`, and run every command with
 `git -C <that root>`, since a listing made elsewhere names the same file differently.

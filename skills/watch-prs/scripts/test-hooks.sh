@@ -113,6 +113,9 @@ done
 printf '#!/usr/bin/env bash\nprintf 0\nexit 2\n' > "$tmp/failcount/grep"; chmod +x "$tmp/failcount/grep"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && pass "a count that prints a number and then fails does not pass the push" || die "failed count rc=$rc: $(head -c 160 "$tmp/err")"
+printf '#!/usr/bin/env bash\nprintf 0\nexit 1\n' > "$tmp/failcount/grep"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 0 ] && pass "…while a count of none is a count, and the push passes" || die "no-match count rc=$rc: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"
