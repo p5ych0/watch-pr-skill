@@ -78,8 +78,12 @@ expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh${IFS}ga
 expect "$tmp/bad" "$(cmd '/usr/bin/env bash -p scripts/pr-close-round.sh post 7 bot s no h p n')" 0 "…and post is not the gate"
 expect "$tmp/none" "$(cmd 'git push origin b')" 2 "a missing self-check blocks the push"
 grep -q 'missing or not executable' "$tmp/err" && pass "…and is named" || die "the missing check was not named: $(head -c 120 "$tmp/err")"
+mkdir -p "$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS/skills/watch-prs/scripts"
+expect "$tmp/PLACEHOLDER_VALUE_NOT_FOR_LOGS" "$(cmd 'git push origin b')" 2 "a project path that itself holds a value blocks"
+! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && pass "…and no part of that path is in the message" || die "the project path reached stderr: $(head -c 160 "$tmp/err")"
 expect "$tmp/hang" "$(cmd 'git push origin b')" 2 "a self-check that hangs is bounded inside the hook and blocks"
 grep -q 'did not finish' "$tmp/err" && pass "…and says so" || die "the hang was not named: $(head -c 120 "$tmp/err")"
+! grep -q ' 2s' "$tmp/err" && pass "…without repeating the bound it was given" || die "the bound reached the message: $(head -c 160 "$tmp/err")"
 
 # The change being pushed owns everything under the project, the watchdog and the findings alike.
 mkdir -p "$tmp/quoting/skills/watch-prs/scripts"

@@ -31,7 +31,7 @@ case "$bound" in *[!0-9]*) bound=x ;; esac
     || { echo "blocked: PRE_PUSH_BOUND is not a whole number of seconds from 1 to 580; nothing is pushed unbounded" >&2; exit 2; }
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
 check="$root/skills/watch-prs/scripts/pr-selfcheck.sh"
-[ -x "$check" ] || { echo "blocked: $check is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
+[ -x "$check" ] || { echo "blocked: pr-selfcheck.sh is missing or not executable; nothing is pushed unchecked" >&2; exit 2; }
 # A finding quotes the line it was found on, and that line is the change being pushed.
 work="$(mktemp -d)" || { echo "blocked: the pre-push hook could not make a directory for the self-check's result" >&2; exit 2; }
 trap 'rm -rf "$work"' EXIT
@@ -55,7 +55,7 @@ g="$(cat "$work/g" 2>/dev/null)" || g=x
 case "$g" in 0|1) ;; *) rc=124 ;; esac
 [ "$rc" -eq 0 ] && exit 0
 if [ "$rc" -eq 124 ]; then
-    echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2
+    echo "blocked: pr-selfcheck.sh did not finish within the bound; nothing is pushed unchecked" >&2
 else
     n="$(cat "$work/n" 2>/dev/null)"
     case "$n" in ''|*[!0-9]*) n=an\ unknown\ number\ of ;; esac
