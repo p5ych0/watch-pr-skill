@@ -116,6 +116,14 @@ rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUD
 printf '#!/usr/bin/env bash\nprintf 0\nexit 1\n' > "$tmp/failcount/grep"
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/failcount" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 0 ] && pass "…while a count of none is a count, and the push passes" || die "no-match count rc=$rc: $(head -c 160 "$tmp/err")"
+# Only the read of the count's own status fails, with the check clean and the count written.
+mkdir -p "$tmp/nogread"
+for c in bash env jq grep sleep kill mktemp rm; do
+    p="$(command -v "$c")" && ln -sf "$p" "$tmp/nogread/$c"
+done
+printf '#!/usr/bin/env bash\ncase "$*" in *"/g") printf 0; exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$tmp/nogread/cat"; chmod +x "$tmp/nogread/cat"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nogread" CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && pass "a failed read of the count's status blocks, as the check's own does" || die "unread count status rc=$rc: $(head -c 160 "$tmp/err")"
 mkdir -p "$tmp/notimeout"
 for c in bash env jq grep sort head sleep kill mktemp rm; do
     p="$(command -v "$c")" && ln -sf "$p" "$tmp/notimeout/$c"
@@ -134,6 +142,9 @@ expect "$tmp/loud" "$(cmd 'git push origin b')" 2 "a slow self-check with a grea
 expect "$tmp/quoting" "$(cmd 'git push origin b')" 2 "a finding that quotes the line it was found on still blocks"
 grep -q 'with 2 findings' "$tmp/err" && ! grep -q PLACEHOLDER_VALUE_NOT_FOR_LOGS "$tmp/err" && [ "$(wc -l <"$tmp/err")" -eq 1 ] \
     && pass "…and the hook reports how many, never a word of what the check printed" || die "the check's output reached stderr: $(head -c 200 "$tmp/err")"
+long="$(printf '9%.0s' $(seq 1 40))"
+rc=0; printf '%s' "$(cmd 'git push origin b')" | env CLAUDE_PROJECT_DIR="$tmp/ok" PRE_PUSH_BOUND="$long" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
+[ "$rc" -eq 2 ] && ! grep -q 99999 "$tmp/err" && pass "a bound too large to compare is refused without any of it reaching the message" || die "long bound rc=$rc: $(head -c 160 "$tmp/err")"
 for b in 581 0 abc; do
     rc=0; printf '%s' "$(cmd 'git push origin b')" | CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND="$b" "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
     [ "$rc" -eq 2 ] && grep -q 'PRE_PUSH_BOUND' "$tmp/err" && pass "a bound of $b is refused at once, before the deadline can pass" || die "PRE_PUSH_BOUND=$b rc=$rc: $(head -c 120 "$tmp/err")"

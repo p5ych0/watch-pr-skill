@@ -24,7 +24,9 @@ gate='pr-close-round\.sh[^[:alnum:]_./-](.*[^[:alnum:]_=./-])?gate([^[:alnum:]_=
 
 # Inside the 600 s deadline settings.json gives the hook, since a hook that overruns it does not block.
 bound="${PRE_PUSH_BOUND:-580}"
+# Length first: `[` prints the whole operand back when it is too large to compare.
 case "$bound" in *[!0-9]*) bound=x ;; esac
+[ "${#bound}" -le 3 ] || bound=x
 [ "$bound" != x ] && [ "$bound" -ge 1 ] && [ "$bound" -le 580 ] \
     || { echo "blocked: PRE_PUSH_BOUND is not a whole number of seconds from 1 to 580; nothing is pushed unbounded" >&2; exit 2; }
 root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -49,7 +51,8 @@ case "$rc" in ''|*[!0-9]*) rc=124 ;; esac
 # The check's own status says nothing if the deadline cut the run short around it, or if the
 # count that ran beside it failed: grep says 0 for a match and 1 for none, and nothing else.
 { [ -e "$work/killed" ] || [ ! -s "$work/n" ]; } && rc=124
-case "$(cat "$work/g" 2>/dev/null)" in 0|1) ;; *) rc=124 ;; esac
+g="$(cat "$work/g" 2>/dev/null)" || g=x
+case "$g" in 0|1) ;; *) rc=124 ;; esac
 [ "$rc" -eq 0 ] && exit 0
 if [ "$rc" -eq 124 ]; then
     echo "blocked: pr-selfcheck.sh did not finish within ${bound}s; nothing is pushed unchecked" >&2
