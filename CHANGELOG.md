@@ -14,8 +14,8 @@
   `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each changed path.
   It reads those and says which it found. Its safety rules are unchanged. This checkout
   reads the brief through a link in `.claude/agents/`, so a session here uses the branch's
-  brief, not the installed release's. `test-hooks.sh` pins the shipped file, its name, its read-only tool list and
-  its policy read in every copy, and the link in this checkout.
+  brief, not the installed release's. `test-hooks.sh` pins the shipped file, its name, its
+  read-only tool list and its policy read in every copy, and the link in this checkout.
 
 ## [2.9.3] — 2026-09-07
 
