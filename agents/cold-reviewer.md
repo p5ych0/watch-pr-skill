@@ -16,15 +16,17 @@ repository configures, or a refresh of the index this read is not entitled to wr
 otherwise happen inside it. First read the policy the reviewers apply, from the base rather
 than from the change, whichever of these policy files the repository keeps:
 `git --literal-pathspecs ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
-lists which the base has, and `git show <base>:<path>` reads each it lists with mode
-`100644` or `100755`; a same-named directory is no policy file, and a `120000` link is
-reported with the target its read prints, not followed. Of those files,
-`AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty, as Codex reads
-it. An `AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a
+lists which the base has, with their modes. Only an entry with mode `100644` or `100755`
+is a policy file: a same-named directory is none, and a `120000` link is reported with the
+target its read prints, not taken as rules. Of the policy files listed, `git show <base>:<path>`
+reads `.github/copilot-instructions.md` and `CLAUDE.md`, and `AGENTS.override.md` first,
+then `AGENTS.md` only where the override is absent or empty, as Codex reads them. An
+`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a
 finding one would produce goes unpredicted. Say which you found; with none, judge against
 the PR body alone. A path that policy says not to open is left unopened, as the secrets
 rule below leaves its own. Then take the merge base as its own command,
-`git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha. Then `git diff --name-only <that sha>` and
+`git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha.
+Then `git diff --name-only <that sha>` and
 `git status --short --untracked-files=all`, which names the file inside a new directory
 rather than the directory, for what changed, and
 `git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
