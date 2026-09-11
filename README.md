@@ -204,8 +204,8 @@ session writes the limitation at the site and **stops for you**.
 
 Before closing a round the session runs this plugin's own pre-push self-check,
 which reports "not applicable" in any other repository and checks nothing of
-your project (your CI does that), has the cold reviewer read the round's fixes
-(below), then it must check the round boundary, since
+your project (your CI does that), then has the cold reviewer read the round's
+fixes (below), then checks the round boundary, since
 with automatic review on the push itself is the next request. It then hands the closing to `pr-close-round.sh`, which runs in
 two stages with the thread replies between them: the push, then the CI gate,
 which waits for that head's checks on the runner and lets the round close on
@@ -223,9 +223,9 @@ what they would raise: one line per finding, graded by how likely a reviewer is
 to block on it, or `clean`. A round is the expensive part of the loop, so the
 session has it read the change before the first review request and again after
 each round's fixes, giving it the base branch, the PR description, the newest
-round summary, and the earlier rounds' findings with the replies they got. It
-fixes what the read names as a defect the change introduced and files the rest.
-The read is not a gate: nothing refuses when it is skipped.
+round summary, and the earlier rounds' findings with the replies they got. The
+session fixes what the read names as a defect the change introduced and files the
+rest. The read is not a gate: nothing refuses when it is skipped.
 
 It reads the review policy from the base branch before any changed file:
 whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.md`,
