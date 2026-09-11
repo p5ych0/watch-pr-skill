@@ -10,7 +10,7 @@
   have made first. It is `agents/cold-reviewer.md` at the plugin root now, loaded as
   `watch-pr-skill:cold-reviewer`. Its brief read `AGENTS.md` and `CLAUDE.md` off the base and
   stopped where either was missing. It now asks the base which policy files it has:
-  `.github/copilot-instructions.md` and `.github/instructions/`, which Copilot reads, and
+  `.github/copilot-instructions.md`, which Copilot reads, and
   `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each changed path.
   It reads those and says which it found. Its safety rules are unchanged. This checkout
   reads the brief through a link in `.claude/agents/`, so a session here uses the branch's

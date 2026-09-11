@@ -225,7 +225,7 @@ fixes. Give it the base branch, the PR description, the newest round summary,
 and the earlier rounds' findings with the replies they got.
 
 It reads the review policy from the base branch, wherever your repository keeps
-it: `.github/copilot-instructions.md` and `.github/instructions/`, and
+it: `.github/copilot-instructions.md`, which Copilot reads, and
 `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each
 changed path. It says which of those it found. It is read-only by instruction and
 runs only `git`, `test` and `readlink`. It leaves unopened any path whose name

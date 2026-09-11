@@ -31,8 +31,8 @@ the diff shows deleted can still be there as an untracked file, and one that is 
 has the diff as its read. A status letter says what changed, not what the path is, so the
 probes are what decide. Read the policy the reviewers apply from the base rather than from
 the change, wherever the repository keeps it:
-`git --literal-pathspecs ls-tree -r --name-only <base> -- <paths>`, naming
-`.github/copilot-instructions.md` and `.github/instructions`, which Copilot reads, and
+`git --literal-pathspecs ls-tree --name-only <base> -- <paths>`, naming
+`.github/copilot-instructions.md`, which Copilot reads, and
 `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and in every directory that
 holds a changed path or lies above one, lists which the base has, and
 `git show <base>:<path>` reads each. Say which you found; with none, judge against the PR
