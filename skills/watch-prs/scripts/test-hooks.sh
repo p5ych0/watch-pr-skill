@@ -72,7 +72,7 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets" \
         || die "the brief's diff and read no longer obey both the base's policy and a secrets rule covering a path's name and the directories above it"
     policy=0
-    for s in 'ls-tree --name-only <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' '`AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
+    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'reads each it lists as a `blob`' '`AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
     if [ "$policy" -eq 0 ]; then
@@ -82,8 +82,8 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
             || die "the brief's git show is not exactly git show <base>:<path>, so it can name a file a consuming project lacks: $shows"
     fi
     first() { awk -v p="$1" 'index($0, p) { print NR; exit }' "$BRIEF"; }
-    [ "$(first 'ls-tree --name-only <base> -- .github')" -lt "$(first 'git merge-base <base> HEAD')" ] 2>/dev/null \
-        && pass "…and it reads that policy before the merge base, so no changed path is opened before a rule that forbids it" \
+    [ "$(first 'git show <base>:<path>')" -lt "$(first 'git merge-base <base> HEAD')" ] 2>/dev/null \
+        && pass "…and it reads that policy's contents before the merge base, so no changed path is opened before a rule that forbids it" \
         || die "the brief reads policy after it takes the merge base, so a path the policy forbids can be opened first"
 else
     die "agents/cold-reviewer.md is not a regular file, so no project that installs the plugin gets the cold reviewer"

@@ -15,8 +15,9 @@ Take the repository root once, `git rev-parse --show-toplevel`, and run every co
 repository configures, or a refresh of the index this read is not entitled to write, would
 otherwise happen inside it. First read the policy the reviewers apply, from the base rather
 than from the change, whichever of these policy files the repository keeps:
-`git --literal-pathspecs ls-tree --name-only <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
-lists which the base has, and `git show <base>:<path>` reads each, except that
+`git --literal-pathspecs ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
+lists which the base has, and `git show <base>:<path>` reads each it lists as a `blob`, a
+directory of the same name being no policy file, except that
 `AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty, as Codex reads
 it. An `AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a
 finding one would produce goes unpredicted. Say which you found; with none, judge against
