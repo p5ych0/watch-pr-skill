@@ -20,7 +20,8 @@ lists which the base has, with their modes. Only an entry with mode `100644` or 
 is a policy file: a same-named directory is none, and a `120000` link is reported with the
 target its read prints, not taken as rules. Of the policy files listed, `git show <base>:<path>`
 reads `.github/copilot-instructions.md` and `CLAUDE.md`, and `AGENTS.override.md` first,
-then `AGENTS.md` only where the override is absent or empty, as Codex reads them. An
+then `AGENTS.md` only where the override is absent as a policy file or empty, as Codex
+does. An
 `AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a
 finding one would produce goes unpredicted. Say which you found; with none, judge against
 the PR body alone. A path that policy says not to open is left unopened, as the secrets
