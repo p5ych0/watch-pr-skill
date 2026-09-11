@@ -442,8 +442,8 @@ finding. The accepted records:
   as holding secrets is a guard against an accident, not containment — a copy
   under another name, a link, an ignored original stay readable by the session
   itself. No hook installs, and `skills/watch-prs/scripts/test-hooks.sh` fails if
-  the plugin root gains a `hooks/` directory or either manifest declares hooks. An
-  installed copy of the brief is covered: it runs in the installing operator's
+  the plugin root gains a `hooks/` directory, either manifest declares hooks, or a
+  shipped Markdown file declares them in its frontmatter. An installed copy of the brief is covered: it runs in the installing operator's
   own session, and the disclosure is accepted there on the same argument. A
   fail-closed guard going open in either hook — an unreadable envelope, a missing or unparseable self-check, a
   bound outside the deadline, a run the deadline cut short — is still a finding, and so is

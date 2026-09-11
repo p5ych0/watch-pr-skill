@@ -37,8 +37,7 @@ reads a change before a review round is bought.
   ships with the plugin, so no user of the skill inherits either hook. An installed copy of
   the brief runs in the installing operator's own session on their own checkout, and the
   disclosure above is accepted there on the same argument: the subagent reads nothing that
-  session cannot. Installing changes who the cost reaches, not what it is: the disclosure,
-  and in this checkout a wasted round besides.
+  session cannot. Installing changes who the cost reaches, not what it is.
 
 ## What it cost to learn
 
@@ -60,6 +59,7 @@ again.
   change does not land there is nothing here to accept.
 - A finding that names a fail-closed guard going open, in a hook or anywhere else, is still
   a finding whatever this record says.
-- No hook installs. `test-hooks.sh` fails if the plugin root gains a `hooks/` directory or
-  either manifest declares hooks, since the evasion accepted above would then reach every
-  project that installs the plugin.
+- No hook installs. `test-hooks.sh` fails if the plugin root gains a `hooks/` directory,
+  either manifest declares hooks, or a shipped Markdown file declares them in its
+  frontmatter, since the evasion accepted above would then reach every project that
+  installs the plugin.

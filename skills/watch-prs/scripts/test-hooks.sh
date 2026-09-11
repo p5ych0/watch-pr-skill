@@ -7,16 +7,41 @@ SETTINGS="$ROOT/.claude/settings.json"
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
+. "$SCRIPT_DIR/testlib.sh" || exit 1
+tmp="$(mktemp_d)" || exit 1
+trap 'rm -rf "$tmp"' EXIT
+
+ships_no_hook() {
+    local found
+    [ ! -e "$1/hooks" ] && [ ! -L "$1/hooks" ] \
+        && jq -e 'has("hooks") | not' "$1/.claude-plugin/plugin.json" >/dev/null \
+        && jq -e 'all(.plugins[]; has("hooks") | not)' "$1/.claude-plugin/marketplace.json" >/dev/null \
+        && found="$(find "$1" \( -name .git -o -name .claude \) -prune -o -name '*.md' -exec awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^hooks:/ { f = 1; exit } END { exit !f }' {} \; -print)" \
+        && [ -z "$found" ]
+}
+for d in clean dir plugin market skill; do
+    mkdir -p "$tmp/root-$d/.claude-plugin" "$tmp/root-$d/skills/s"
+    printf '{"name":"p"}\n' > "$tmp/root-$d/.claude-plugin/plugin.json"
+    printf '{"plugins":[{"name":"p","source":"./"}]}\n' > "$tmp/root-$d/.claude-plugin/marketplace.json"
+    printf -- '---\nname: s\n---\n\nhooks: prose, not frontmatter\n' > "$tmp/root-$d/skills/s/SKILL.md"
+done
+mkdir -p "$tmp/root-dir/hooks" "$tmp/root-unread/.claude-plugin"
+printf '{"name":"p","hooks":"./h.json"}\n' > "$tmp/root-plugin/.claude-plugin/plugin.json"
+printf '{"plugins":[{"name":"p","source":"./","hooks":{}}]}\n' > "$tmp/root-market/.claude-plugin/marketplace.json"
+printf -- '---\nname: s\nhooks:\n  Stop: []\n---\n' > "$tmp/root-skill/skills/s/SKILL.md"
+ships_no_hook "$tmp/root-clean" && pass "a plugin root with no hook route passes the install check" \
+    || die "the install check refuses a plugin root that ships no hook"
+for d in dir plugin market skill unread; do
+    ships_no_hook "$tmp/root-$d" && die "the $d decoy passed the install check" || pass "the $d decoy fails the install check"
+done
+ships_no_hook "$ROOT" && pass "no hook ships with the plugin, so the evasion the authoring-tools record accepts stays in this checkout" \
+    || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
 
 # The settings file is the promise; a copy without one has no hooks to prove.
 if [ ! -f "$SETTINGS" ]; then
     echo "ok   - no .claude/settings.json in this copy; hook checks skipped"
-    echo "RESULT: PASS"
-    exit 0
+    [ "$fail" -eq 0 ] && { echo "RESULT: PASS"; exit 0; } || { echo "RESULT: FAIL"; exit 1; }
 fi
-. "$SCRIPT_DIR/testlib.sh" || exit 1
-tmp="$(mktemp_d)" || exit 1
-trap 'rm -rf "$tmp"' EXIT
 
 GUARD='h="$1"; LC_ALL=C bash -p -n -- "$h" 2>/dev/null || { echo "blocked: the hook does not parse; it was not run" >&2; exit 2; }; exec bash -p -- "$h"'
 PRE_CMD="/usr/bin/env bash -p -c '$GUARD' guard \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-push.sh"
@@ -38,11 +63,6 @@ done
 for h in pre-push.sh post-edit.sh; do
     [ -x "$HOOKS/$h" ] || die "$HOOKS/$h is missing or not executable, so the harness cannot run it"
 done
-[ ! -e "$ROOT/hooks" ] && [ ! -L "$ROOT/hooks" ] \
-    && jq -e 'has("hooks") | not' "$ROOT/.claude-plugin/plugin.json" >/dev/null \
-    && jq -e 'all(.plugins[]; has("hooks") | not)' "$ROOT/.claude-plugin/marketplace.json" >/dev/null \
-    && pass "no hook ships with the plugin, so the evasion the authoring-tools record accepts stays in this checkout" \
-    || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
 [ "$fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
 
 # So the push arm is proved without the suite.
