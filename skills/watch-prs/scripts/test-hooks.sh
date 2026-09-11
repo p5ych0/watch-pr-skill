@@ -67,7 +67,7 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
         || die "the brief no longer reads a link with readlink at the root"
     policy=0
-    for s in 'ls-tree --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md`' 'holds a changed path or lies above one' '`AGENTS.override.md` is read' 'in place of its `AGENTS.md`'; do
+    for s in 'ls-tree --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md`' 'holds a changed path or lies above one' 'naming none whose path the rule above marks as' '`AGENTS.override.md` is read' 'in place of its `AGENTS.md`'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
     if [ "$policy" -eq 0 ]; then

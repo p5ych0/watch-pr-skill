@@ -34,11 +34,12 @@ the change, wherever the repository keeps it:
 `git --literal-pathspecs ls-tree --name-only <base> -- <paths>`, naming
 `.github/copilot-instructions.md`, which Copilot reads, and
 `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and in every directory that
-holds a changed path or lies above one, lists which the base has, and
-`git show <base>:<path>` reads each, except that a directory's `AGENTS.override.md` is read
-in place of its `AGENTS.md`, as Codex reads it. Say which you found; with none, judge
-against the PR body alone. Run no other commands beyond those, `test` and `readlink`, and
-edit nothing. If a command fails, say so and stop rather than review a part.
+holds a changed path or lies above one, naming none whose path the rule above marks as
+holding secrets, a `.env` or `.env.*` directory or `.ssh` among it, lists which the base
+has, and `git show <base>:<path>` reads each, except that a directory's
+`AGENTS.override.md` is read in place of its `AGENTS.md`, as Codex reads it. Say which you
+found; with none, judge against the PR body alone. Run no other commands beyond those,
+`test` and `readlink`, and edit nothing. If a command fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one
