@@ -98,6 +98,18 @@ before '"$RB_SCRIPTS"/pr-selfcheck.sh' 'pr-close-round.sh gate N' \
     && pass "the self-check precedes the push" || die "the push precedes the self-check"
 before '**check the round boundary — step 6.**' '**run `gate`**' \
     && pass "the round boundary is checked before the push, in the numbered procedure" || die "the push precedes the boundary check"
+before '**Before the first request, have the cold reviewer read the change**' 'pr-request-review.sh N' \
+    && before '**run the self-check — 5a' "**have the cold reviewer read the round's fixes**" \
+    && before "**have the cold reviewer read the round's fixes**" '**run `gate`**' \
+    && pass "the cold reviewer reads the change before the first request, and each round's fixes before the push" \
+    || die "the cold read is missing, or placed after the request or the push it exists to precede"
+hasf 'watch-pr-skill:cold-reviewer' && hasf 'It is a pre-read, not a gate: nothing refuses when it is skipped' \
+    && hasf 'The cold read of steps 1 and 5 is not one' \
+    && pass "…by the name the plugin ships it under, and as a pre-read that gates nothing and is not a reviewer" \
+    || die "SKILL.md names the cold reviewer by no name the plugin loads, makes it a gate, or leaves it contradicting 'does not run a reviewer'"
+hasf 'committing, running 5a and pushing before the request' && hasf 'commit as in 1, run 5a again' \
+    && pass "…and its fixes are committed as the round's own are, self-checked, and pushed before the request they precede" \
+    || die "a cold-read fix can reach a request unpushed, unchecked, or without the Copilot-phase trailer"
 before 'pr-close-round.sh gate N' 'resolveReviewThread' \
     && before 'resolveReviewThread' 'pr-close-round.sh post N' \
     && pass "gate, then the thread replies, then post" || die "the round-closing order is wrong"

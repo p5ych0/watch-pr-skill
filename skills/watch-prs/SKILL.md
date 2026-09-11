@@ -119,6 +119,15 @@ request, the PR description states what the change does and what it deliberately
 Every later round adds a round-summary comment: what was addressed, and what was skipped
 as a past-tense disposition with a bare issue number. Neither can waive a finding.
 
+**Before the first request, have the cold reviewer read the change**, and where automatic
+review is on, before the PR is opened, since opening it queues a pass. The plugin ships a
+`cold-reviewer` agent, `watch-pr-skill:cold-reviewer`; where the checkout keeps a
+project-level `cold-reviewer`, use that one. It reads the branch against the base the way
+Codex and Copilot will. Give it the base ref, the PR body and word that there is no round
+summary yet. Fix what it names as a defect this change introduced, committing, running 5a
+and pushing before the request, and file the rest as issues. It is a pre-read, not a gate:
+nothing refuses when it is skipped, and its findings are not a reviewer's.
+
 ## 2. Request the review — Codex first
 
 The loop is phased: Codex reviews to a clean signoff, and only then is Copilot asked.
@@ -253,14 +262,18 @@ silently. Then, in this order:
    A blank line above it makes it invisible to the gate, which reports `untagged_commit`;
    `pr-merge-range.sh` names that case `trailer_not_in_trailer_block`;
 2. **run the self-check — 5a — and fix what it finds**, before anything leaves the machine;
-3. **check the round boundary — step 6.** Both precede the push: with automatic review on
-   the push itself requests the next review, so a check after it stops nothing. **The push
-   is not here** — `gate` pushes, because the checks on what it pushes decide whether the
-   round may close at all;
-4. **run `gate`**, and only then reply to each thread with what changed, react to it,
+3. **have the cold reviewer read the round's fixes**, as before the first request, now
+   also given the newest round summary and each earlier finding with the reply it got; fix
+   what it names as a defect the change introduced, commit as in 1, run 5a again, and write
+   what the fix changed into the round summary;
+4. **check the round boundary — step 6.** All three precede the push: with automatic review
+   on the push itself requests the next review, so a check after it stops nothing. **The
+   push is not here** — `gate` pushes, because the checks on what it pushes decide whether
+   the round may close at all;
+5. **run `gate`**, and only then reply to each thread with what changed, react to it,
    resolve it, and read the `isResolved` the resolve returns. A resolve cannot be taken
    back, so it follows the pushed, green head;
-5. **run `post`** — it re-proves that head, posts the summary and re-requests `$WHO`. The
+6. **run `post`** — it re-proves that head, posts the summary and re-requests `$WHO`. The
    irreversible parts of a round come last.
 
 ### 5a. Self-check before the push
@@ -538,6 +551,7 @@ are handed back as above.
 
 - **It does not run a reviewer.** Codex and Copilot are GitHub apps; a local process
   reviewing PRs duplicates them, authors its comments as the repository owner, and spends
-  a separate credit pool.
+  a separate credit pool. The cold read of steps 1 and 5 is not one: a subagent of this
+  session that posts nothing and gates nothing.
 - **It does not merge unattended past a failed or unreadable gate.** Every "cannot tell"
   is a stop, and `WATCH_PR_AUTONOMOUS=1` answers none of them.
