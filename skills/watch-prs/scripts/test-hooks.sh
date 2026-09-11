@@ -94,9 +94,11 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     [ -n "$lp" ] && [ -n "$ep" ] \
         && [ "$(run_probe "$lp" dangling)" = link ] && [ "$(run_probe "$lp" file)" = not-a-link ] \
         && [ "$(run_probe "$ep" file)" = present ] && [ "$(run_probe "$ep" missing)" = absent ] \
-        && grep -qF 'and `echo` only to print a probe' "$BRIEF" \
-        && pass "…and each probe the brief states prints its answer, for a dangling link, a file and a path that is gone" \
-        || die "a probe in the brief prints no answer, so its verdict rests on an exit status the reader may not see"
+        && grep -qF 'Only where that prints `not-a-link` does' "$BRIEF" \
+        && pass "…and each probe the brief states prints its answer, for a dangling link, a file and a path that is gone, the second asked only on not-a-link" \
+        || die "a probe in the brief prints no answer, or not the word the sentence after it tests (link probe: $lp; presence probe: $ep)"
+    grep -qF 'and `echo` only to print a probe' "$BRIEF" && pass "…and echo is allowed for printing a probe's answer and nothing else" \
+        || die "the brief's command list does not allow the echo its probes print through"
     grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
         && grep -qF 'The secrets rule marks a path named `.env`, `.env.*`,' "$BRIEF" \
         && grep -qF 'or with a `.env`, `.env.*` or `.ssh` directory anywhere above it' "$BRIEF" \
