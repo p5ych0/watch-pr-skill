@@ -358,8 +358,8 @@ needs lands first as its own PR.
 
 `.claude/settings.json` enables this plugin for the checkout, runs the two hooks in
 `.claude/hooks/` that `test-hooks.sh` proves, and is committed;
-`.claude/agents/cold-reviewer.md` is a link to `agents/cold-reviewer.md`, so a session here
-reads the branch's brief rather than an installed release's. None of these installs; the
-brief the link names does. The Codex connector is account-level
+`.claude/agents/cold-reviewer.md` is a link to `agents/cold-reviewer.md`, so that a session
+here reads the branch's brief rather than an installed release's. None of these installs;
+the brief the link names does. The Codex connector is account-level
 (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.
