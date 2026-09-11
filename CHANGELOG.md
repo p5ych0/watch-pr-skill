@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.10.2] — 2026-09-11
+
+- **The cold reviewer's path probes print their answers.** Its brief decided what a changed
+  path is with `test -L` and then `test -e`, which answer only through their exit status,
+  and a subagent's tool output may not show one. A downstream cold read reported that
+  `test -L` "printed nothing even on a file I know is regular" and fell back to `readlink`
+  and the modes git records, though the brief says the probes decide. Each probe is now
+  `test -L <path> && echo link || echo not-a-link` and
+  `test -e <path> && echo present || echo absent`, `echo` is allowed for that purpose
+  only, and a probe's exit status no longer reads as a failed command. `test-hooks.sh`
+  takes both probes from the brief and runs them on a dangling link, a file and a missing
+  path.
+
 ## [2.10.1] — 2026-09-11
 
 - **The cold reviewer sees both ends of a move.** Its brief listed what changed with

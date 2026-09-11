@@ -37,16 +37,17 @@ policy nor the secrets rule marks. The secrets rule marks a path named `.env`, `
 `*.pem` or `*.key`, or with a `.env`, `.env.*` or `.ssh` directory anywhere above it; a
 marked path is reported as changed and left unopened, contents and all. Read the changed
 files themselves under the same two rules, and only where the working tree still holds
-them. Ask
-`test -L <that root>/<path>` first, since a link is read through
-`readlink -- <that root>/<path>` and never opened, the Read tool following it out of the
-checkout, and since `test -e` follows a link and so calls a dangling one absent. Only where
-that says no does `test -e <that root>/<path>` decide presence, and it, not the diff: a path
-the diff shows deleted can still be there as an untracked file, and one that is really gone
-has the diff as its read. A status letter says what changed, not what the path is, so the
-probes are what decide. Run no other commands beyond those, `test` and `readlink`, and edit
-nothing. If a command fails, say so and stop rather than
-review a part.
+them. Each probe prints its answer, since a tool's output may not show an exit status. Ask
+`test -L <that root>/<path> && echo link || echo not-a-link` first, since a link is read
+through `readlink -- <that root>/<path>` and never opened, the Read tool following it out
+of the checkout, and since `test -e` follows a link and so calls a dangling one absent.
+Only where that prints `not-a-link` does
+`test -e <that root>/<path> && echo present || echo absent` decide presence, and it, not
+the diff: a path the diff shows deleted can still be there as an untracked file, and one
+that is really gone has the diff as its read. A status letter says what changed, not what
+the path is, so the probes are what decide. Run no other commands beyond those, `test`,
+`readlink`, and `echo` only to print a probe's answer, and edit nothing. If a command
+fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one

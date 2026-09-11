@@ -55,7 +55,7 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         front_ok "$tmp/brief-$d.md" && die "the $d brief decoy passed the frontmatter check" || pass "the $d brief decoy fails the frontmatter check"
     done
     # The brief is prose a subagent follows, so its commands are pinned by shape, not by running,
-    # except the change listing, which is taken from the brief and run where what it names decides what is read.
+    # except the listing and the path probes: taken from the brief and run, since their output decides what is read.
     grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
         || die "the brief no longer disables optional locks, so its status can rewrite the index"
     grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
@@ -86,6 +86,19 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         || die "the brief asks -e before -L, so a dangling link reads as absent"
     grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
         || die "the brief no longer reads a link with readlink at the root"
+    pd="$tmp/probe"
+    mkdir -p "$pd" && : > "$pd/file" && ln -s "$pd/nowhere" "$pd/dangling" || die "the probe directory was not built"
+    lp="$(grep -m1 -o 'test -L <that root>/<path> && echo [a-z-]* || echo [a-z-]*' "$BRIEF")"
+    ep="$(grep -m1 -o 'test -e <that root>/<path> && echo [a-z-]* || echo [a-z-]*' "$BRIEF")"
+    run_probe() { (cd "$pd" && bash -c "${1//<that root>\/<path>/$2}"); }
+    [ -n "$lp" ] && [ -n "$ep" ] \
+        && [ "$(run_probe "$lp" dangling)" = link ] && [ "$(run_probe "$lp" file)" = not-a-link ] \
+        && [ "$(run_probe "$ep" file)" = present ] && [ "$(run_probe "$ep" missing)" = absent ] \
+        && grep -qF 'Only where that prints `not-a-link` does' "$BRIEF" \
+        && pass "…and each probe the brief states prints its answer, for a dangling link, a file and a path that is gone, the second asked only on not-a-link" \
+        || die "a probe in the brief prints no answer, or not the word the sentence after it tests (link probe: $lp; presence probe: $ep)"
+    grep -qF 'and `echo` only to print a probe' "$BRIEF" && pass "…and echo is allowed for printing a probe's answer and nothing else" \
+        || die "the brief's command list does not allow the echo its probes print through"
     grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
         && grep -qF 'The secrets rule marks a path named `.env`, `.env.*`,' "$BRIEF" \
         && grep -qF 'or with a `.env`, `.env.*` or `.ssh` directory anywhere above it' "$BRIEF" \
