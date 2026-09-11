@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.1] — 2026-09-11
+
+- **The cold reviewer sees both ends of a move.** Its brief listed what changed with
+  `git diff --name-only`, and rename detection is on by default, so a commit that moves a
+  file listed only the destination: the per-path diff then showed a new file and never the
+  deletion at the source, and what a move left behind went unread, which is what a
+  "location only" claim needs checked. Measured on a downstream commit with a rename, the
+  default listing gave only the destination. The listing is
+  `git diff --no-renames --name-only` now, which names the source as deleted and the
+  destination as added. `test-hooks.sh` pins the flag and runs it on a commit that moves a
+  file.
+
 ## [2.10.0] — 2026-09-11
 
 - **The cold reviewer ships with the plugin.** The subagent that reads a branch against its

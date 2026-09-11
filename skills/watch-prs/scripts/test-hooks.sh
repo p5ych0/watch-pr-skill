@@ -54,11 +54,31 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     for d in open twotools twonames unnamed; do
         front_ok "$tmp/brief-$d.md" && die "the $d brief decoy passed the frontmatter check" || pass "the $d brief decoy fails the frontmatter check"
     done
-    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
+    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running,
+    # except the change listing, which is taken from the brief and run where what it names decides what is read.
     grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
         || die "the brief no longer disables optional locks, so its status can rewrite the index"
     grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
         || die "the brief no longer disables the filesystem monitor"
+    grep -qF 'git diff --no-renames --name-only <that sha>' "$BRIEF" && ! grep -qF 'git diff --name-only' "$BRIEF" \
+        && pass "…and list a moved file at its source as well as its destination" \
+        || die "the brief lists changes with rename detection on, so a move shows only its destination and what it left behind is never read"
+    rn="$tmp/rename"
+    if git init -q "$rn" && printf 'a\nb\nc\n' > "$rn/old.txt" && git -C "$rn" add old.txt \
+        && git -C "$rn" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m a \
+        && git -C "$rn" mv old.txt new.txt \
+        && git -C "$rn" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q -m move; then
+        listing="$(grep -m1 -o 'git diff [^`]*<that sha>' "$BRIEF")"
+        read -r -a words <<<"${listing/<that sha>/HEAD~1}"
+        listed=""
+        [ "${words[0]:-}" = git ] && [ "${words[1]:-}" = diff ] \
+            && listed="$(git -C "$rn" "${words[@]:1}")" \
+            && [ "$(sort <<<"$listed" | tr '\n' ' ')" = 'new.txt old.txt ' ] \
+            && pass "…and the brief's own listing, run on a commit that moves a file, names both its source and its destination" \
+            || die "the brief's listing ($listing) did not name both ends of a move: $listed"
+    else
+        die "the repository with a moved file was not built"
+    fi
     grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
         || die "the brief no longer probes for the path before reading it"
     [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
