@@ -37,6 +37,35 @@ done
 ships_no_hook "$ROOT" && pass "no hook ships with the plugin, so the evasion the authoring-tools record accepts stays in this checkout" \
     || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
 
+BRIEF="$ROOT/agents/cold-reviewer.md"
+front() { awk -v want="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } $0 == want { f = 1; exit } END { exit !f }' "$1"; }
+if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
+    front "$BRIEF" 'name: cold-reviewer' && front "$BRIEF" 'tools: Read, Bash' \
+        && pass "the cold reviewer ships at the plugin root, named, with no tool that writes" \
+        || die "agents/cold-reviewer.md lost its name or gained a tool beyond Read and Bash"
+    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
+    grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
+        || die "the brief no longer disables optional locks, so its status can rewrite the index"
+    grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
+        || die "the brief no longer disables the filesystem monitor"
+    grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
+        || die "the brief no longer probes for the path before reading it"
+    [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
+        && pass "…with the link probe first, since -e follows a link and calls a dangling one absent" \
+        || die "the brief asks -e before -L, so a dangling link reads as absent"
+    grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
+        || die "the brief no longer reads a link with readlink at the root"
+    policy=0
+    for s in 'ls-tree -r --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`.github/instructions`' '`AGENTS.md` and `CLAUDE.md`' 'every directory that holds a changed path' 'git show <base>:<path>'; do
+        grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
+    done
+    [ "$policy" -eq 0 ] && ! grep -qF 'git show <base>:AGENTS.md' "$BRIEF" \
+        && pass "…and it reads whichever policy files the base has, naming none a project may lack" \
+        || die "the brief reads policy a consuming project may not keep, and stops where the base lacks it"
+else
+    die "agents/cold-reviewer.md is not a regular file, so no project that installs the plugin gets the cold reviewer"
+fi
+
 # The settings file is the promise; a copy without one has no hooks to prove.
 if [ ! -f "$SETTINGS" ]; then
     echo "ok   - no .claude/settings.json in this copy; hook checks skipped"
@@ -160,21 +189,9 @@ printf '#!/usr/bin/env bash\ncase "$*" in *"/n") printf 0; exit 1 ;; esac\nexec 
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nonread" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && grep -q 'an unknown number of findings' "$tmp/err" \
     && pass "…and a count that could not be read is reported as unknown, not as none" || die "unread count rc=$rc: $(head -c 200 "$tmp/err")"
-BRIEF="$ROOT/.claude/agents/cold-reviewer.md"
-if [ -f "$BRIEF" ]; then
-    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
-    grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
-        || die "the brief no longer disables optional locks, so its status can rewrite the index"
-    grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
-        || die "the brief no longer disables the filesystem monitor"
-    grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
-        || die "the brief no longer probes for the path before reading it"
-    [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
-        && pass "…with the link probe first, since -e follows a link and calls a dangling one absent" \
-        || die "the brief asks -e before -L, so a dangling link reads as absent"
-    grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
-        || die "the brief no longer reads a link with readlink at the root"
-fi
+[ -L "$ROOT/.claude/agents/cold-reviewer.md" ] && [ "$(readlink "$ROOT/.claude/agents/cold-reviewer.md")" = ../../agents/cold-reviewer.md ] \
+    && pass "this checkout reads the cold reviewer it ships, through a link, not an installed copy" \
+    || die ".claude/agents/cold-reviewer.md is not the link to ../../agents/cold-reviewer.md, so this checkout reviews with another brief"
 # A parent that is not there fails every open whatever the user's privileges are.
 mkdir -p "$tmp/noopen"
 for c in bash env jq grep sleep kill rm cat; do
