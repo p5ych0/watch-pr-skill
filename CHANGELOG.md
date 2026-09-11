@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.3] — 2026-09-11
+
+- **`SKILL.md` runs the cold reviewer.** 2.10.0 shipped the `cold-reviewer` agent to installing
+  projects, but the driver never named it, so a session in such a project had the agent and
+  no step that ran it, and bought review rounds a minute's cold read would have saved. Step 2
+  now has it read the change before the first request, and step 5's procedure has it read
+  each round's fixes after the self-check and before the round boundary and the push, given
+  the base ref, the PR body, the newest round summary and the earlier findings with their
+  replies. The session fixes what it names as a defect the change introduced and files the
+  rest. It stays a pre-read, not a gate. The contract test pins both placements and the name
+  the plugin loads it under; README's session description says the same.
+
 ## [2.10.2] — 2026-09-11
 
 - **The cold reviewer's path probes print their answers.** Its brief decided what a changed
