@@ -4,12 +4,15 @@
 **Status:** accepted
 **Decided by:** the repository operator, in session, on the measurement below
 **Raised in:** #314
+**Amended:** 2026-09-11, #340, so that the acceptance covers an installed copy of the cold
+reviewer before #339 ships one
 
-`.claude/hooks/` and `.claude/agents/` run inside the operator's own Claude Code session,
-on the operator's own checkout. They exist to make a mistake expensive, not to withstand an
-adversary: the pre-push hook runs the self-check before a push, the post-edit hook parses a
-shell file that was just written, and the cold reviewer reads a change before a review round
-is bought.
+`.claude/hooks/` and the cold reviewer's brief run inside the operator's own Claude Code
+session, on the operator's own checkout: this one for the hooks, and for an installed copy
+of the brief, the project that installed the plugin. They exist to make a mistake
+expensive, not to withstand an adversary: the pre-push hook runs the self-check before a
+push, the post-edit hook parses a shell file that was just written, and the cold reviewer
+reads a change before a review round is bought.
 
 ## What is accepted
 
@@ -30,9 +33,12 @@ is bought.
   that runs the subagent can already read the same bytes, and no filter written in prose
   distinguishes a copy from an original. An operator who needs that bound does not run the
   cold reviewer on a checkout holding live credentials.
-- **Neither is installed.** Nothing under `.claude/` ships with the plugin, so no user of
-  the skill inherits either tool. That bounds who a defect here reaches, not what it costs:
-  in this checkout the cost is the disclosure above, and a wasted round besides.
+- **The hooks are not installed; the cold reviewer may be.** Nothing under `.claude/hooks/`
+  ships with the plugin, so no user of the skill inherits either hook. An installed copy of
+  the brief runs in the installing operator's own session on their own checkout, and the
+  disclosure above is accepted there on the same argument: the subagent reads nothing that
+  session cannot. Installing changes who the cost reaches, not what it is: the disclosure,
+  and in this checkout a wasted round besides.
 
 ## What it cost to learn
 
@@ -54,3 +60,6 @@ again.
   change does not land there is nothing here to accept.
 - A finding that names a fail-closed guard going open, in a hook or anywhere else, is still
   a finding whatever this record says.
+- No hook installs. `test-hooks.sh` fails if the plugin root gains a `hooks/` directory or
+  either manifest declares hooks, since the evasion accepted above would then reach every
+  project that installs the plugin.

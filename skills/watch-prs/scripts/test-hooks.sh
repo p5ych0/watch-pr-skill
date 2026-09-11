@@ -38,6 +38,11 @@ done
 for h in pre-push.sh post-edit.sh; do
     [ -x "$HOOKS/$h" ] || die "$HOOKS/$h is missing or not executable, so the harness cannot run it"
 done
+[ ! -e "$ROOT/hooks" ] && [ ! -L "$ROOT/hooks" ] \
+    && jq -e 'has("hooks") | not' "$ROOT/.claude-plugin/plugin.json" >/dev/null \
+    && jq -e 'all(.plugins[]; has("hooks") | not)' "$ROOT/.claude-plugin/marketplace.json" >/dev/null \
+    && pass "no hook ships with the plugin, so the evasion the authoring-tools record accepts stays in this checkout" \
+    || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
 [ "$fail" -eq 0 ] || { echo "RESULT: FAIL"; exit 1; }
 
 # So the push arm is proved without the suite.
