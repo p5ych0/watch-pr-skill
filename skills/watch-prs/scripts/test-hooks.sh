@@ -72,7 +72,7 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets" \
         || die "the brief's diff and read no longer obey both the base's policy and a secrets rule covering a path's name and the directories above it"
     policy=0
-    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'reads each it lists as a `blob`' '`AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
+    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'reads each it lists with mode' '`100644` or `100755`; a same-named directory is no policy file, and a `120000` link is' '`AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
     if [ "$policy" -eq 0 ]; then
