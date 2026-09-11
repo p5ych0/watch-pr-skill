@@ -17,21 +17,21 @@ otherwise happen inside it. First read the policy the reviewers apply, from the 
 than from the change, whichever of these policy files the repository keeps:
 `git --literal-pathspecs ls-tree --name-only <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
 lists which the base has, and `git show <base>:<path>` reads each, except that
-`AGENTS.override.md` is read in place of `AGENTS.md`, as Codex reads it. An
-`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a finding
-one would produce goes unpredicted. Say which you found; with none, judge against the PR
-body alone. A path that policy says not to open is left unopened, as the secrets rule
-below leaves its own. Then take the merge base as its own
-command, `git merge-base <base> HEAD`, and go on only if it succeeded and printed one
-40-hex sha. Then `git diff --name-only <that sha>` and
+`AGENTS.override.md` is read in place of `AGENTS.md` unless it is empty, as Codex reads
+it. An `AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a
+finding one would produce goes unpredicted. Say which you found; with none, judge against
+the PR body alone. A path that policy says not to open is left unopened, as the secrets
+rule below leaves its own. Then take the merge base as its own command,
+`git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha. Then `git diff --name-only <that sha>` and
 `git status --short --untracked-files=all`, which names the file inside a new directory
 rather than the directory, for what changed, and
 `git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
-runs no diff helper the repository may have configured, for each path the secrets rule does
-not mark — one named `.env`, `.env.*`, `*.pem` or `*.key`, or with a `.env`, `.env.*` or
-`.ssh` directory anywhere above it — which are reported as changed and left unopened,
-contents and all. Read the changed files
-themselves under the same rule, and only where the working tree still holds them. Ask
+runs no diff helper the repository may have configured, for each path that neither that
+policy nor the secrets rule marks. The secrets rule marks a path named `.env`, `.env.*`,
+`*.pem` or `*.key`, or with a `.env`, `.env.*` or `.ssh` directory anywhere above it; a
+marked path is reported as changed and left unopened, contents and all. Read the changed
+files themselves under the same two rules, and only where the working tree still holds
+them. Ask
 `test -L <that root>/<path>` first, since a link is read through
 `readlink -- <that root>/<path>` and never opened, the Read tool following it out of the
 checkout, and since `test -e` follows a link and so calls a dangling one absent. Only where

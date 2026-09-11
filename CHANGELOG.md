@@ -10,8 +10,8 @@
   have made first. It is `agents/cold-reviewer.md` at the plugin root now, loaded as
   `watch-pr-skill:cold-reviewer`. Its brief read `AGENTS.md` and `CLAUDE.md` off the base and
   stopped where either was missing. It now asks the base which of
-  `.github/copilot-instructions.md` and the root's `AGENTS.override.md` (read in place of
-  `AGENTS.md`), `AGENTS.md` and `CLAUDE.md` it has, reads those first and says which it
+  `.github/copilot-instructions.md` and the root's `AGENTS.override.md` (read, unless empty,
+  in place of `AGENTS.md`), `AGENTS.md` and `CLAUDE.md` it has, reads those first and says which it
   found, and leaves unopened a path that policy says not to open; the same files below the
   root are not read. Its secrets rule now also covers anything under a `.env` or `.env.*`
   directory, and a `.ssh` directory at any depth; its other safety rules are unchanged. This checkout keeps a link to the brief in `.claude/agents/`, so that a

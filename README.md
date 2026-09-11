@@ -226,8 +226,8 @@ and the earlier rounds' findings with the replies they got.
 
 It reads the review policy from the base branch before any changed file:
 whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.md`,
-`AGENTS.md` and `CLAUDE.md` your repository keeps, taking the override in place
-of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
+`AGENTS.md` and `CLAUDE.md` your repository keeps, taking a non-empty override in
+place of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
 `AGENTS.override.md` or `CLAUDE.md` below the root is not read, so a finding
 one would produce goes unpredicted. It is read-only by instruction and runs only
 `git`, `test` and `readlink`. It leaves unopened a path that policy says not to
