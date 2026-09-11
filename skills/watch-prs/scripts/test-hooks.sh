@@ -38,11 +38,11 @@ ships_no_hook "$ROOT" && pass "no hook ships with the plugin, so the evasion the
     || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
 
 BRIEF="$ROOT/agents/cold-reviewer.md"
-front() { awk -v want="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } $0 == want { f = 1; exit } END { exit !f }' "$1"; }
 if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
-    front "$BRIEF" 'name: cold-reviewer' && front "$BRIEF" 'tools: Read, Bash' \
-        && pass "the cold reviewer ships at the plugin root, named, with no tool that writes" \
-        || die "agents/cold-reviewer.md lost its name or gained a tool beyond Read and Bash"
+    fm="$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } NR > 1 { print }' "$BRIEF")"
+    grep -qx 'name: cold-reviewer' <<<"$fm" && [ "$(grep -c '^tools:' <<<"$fm")" -eq 1 ] && grep -qx 'tools: Read, Bash' <<<"$fm" \
+        && pass "the cold reviewer ships at the plugin root, named, with only Read and Bash" \
+        || die "agents/cold-reviewer.md lost its name or holds a tools line other than exactly one Read, Bash"
     # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
     grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
         || die "the brief no longer disables optional locks, so its status can rewrite the index"
@@ -56,12 +56,14 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
         || die "the brief no longer reads a link with readlink at the root"
     policy=0
-    for s in 'ls-tree -r --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`.github/instructions`' '`AGENTS.md` and `CLAUDE.md`' 'every directory that holds a changed path' 'git show <base>:<path>'; do
+    for s in 'ls-tree -r --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`.github/instructions`' '`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md`' 'holds a changed path or lies above one' 'git show <base>:<path>'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
-    [ "$policy" -eq 0 ] && ! grep -qF 'git show <base>:AGENTS.md' "$BRIEF" \
-        && pass "…and it reads whichever policy files the base has, naming none a project may lack" \
-        || die "the brief reads policy a consuming project may not keep, and stops where the base lacks it"
+    if [ "$policy" -eq 0 ]; then
+        grep -q 'git show <base>:[^<]' "$BRIEF" \
+            && die "the brief shows a fixed file off the base, which a consuming project may not keep, and stops where it is missing" \
+            || pass "…and it reads whichever policy files the base has, naming none a project may lack"
+    fi
 else
     die "agents/cold-reviewer.md is not a regular file, so no project that installs the plugin gets the cold reviewer"
 fi

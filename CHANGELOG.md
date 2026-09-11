@@ -11,10 +11,10 @@
   `watch-pr-skill:cold-reviewer`. Its brief read `AGENTS.md` and `CLAUDE.md` off the base and
   stopped where either was missing. It now asks the base which policy files it has:
   `.github/copilot-instructions.md` and `.github/instructions/`, which Copilot reads, and
-  `AGENTS.md` and `CLAUDE.md` at the root and above each changed path. It reads those and
-  says which it found. Its safety rules are unchanged. This checkout reads the brief through
-  a link in `.claude/agents/`, so a session here uses the branch's brief, not the installed
-  release's. `test-hooks.sh` pins the shipped file, its name, its read-only tool list and
+  `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each changed path.
+  It reads those and says which it found. Its safety rules are unchanged. This checkout
+  reads the brief through a link in `.claude/agents/`, so a session here uses the branch's
+  brief, not the installed release's. `test-hooks.sh` pins the shipped file, its name, its read-only tool list and
   its policy read in every copy, and the link in this checkout.
 
 ## [2.9.3] — 2026-09-07

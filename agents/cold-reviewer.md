@@ -33,11 +33,10 @@ probes are what decide. Read the policy the reviewers apply from the base rather
 the change, wherever the repository keeps it:
 `git --literal-pathspecs ls-tree -r --name-only <base> -- <paths>`, naming
 `.github/copilot-instructions.md` and `.github/instructions`, which Copilot reads, and
-`AGENTS.md` and `CLAUDE.md` at the root and in every directory that holds a changed path or
-lies above one, lists which the base has, and `git show <base>:<path>` reads each. Say
-which you found; with none, judge against the PR body alone. Run no other commands beyond
-those, `test` and `readlink`, and
-edit nothing. If a command fails, say so and stop rather than review a part.
+`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and in every directory that
+holds a changed path or lies above one, lists which the base has, and
+`git show <base>:<path>` reads each. Say which you found; with none, judge against the PR
+body alone. Run no other commands beyond those, `test` and `readlink`, and edit nothing. If a command fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one
