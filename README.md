@@ -230,9 +230,10 @@ whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.m
 place of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
 `AGENTS.override.md` or `CLAUDE.md` below the root is not read, so a finding
 one would produce goes unpredicted. It is read-only by instruction and runs only
-`git`, `test` and `readlink`. It leaves unopened a path that policy says not to
-open, any path named `.env`, `.env.*`, `*.pem` or `*.key`, and anything under a
-`.env`, `.env.*` or `.ssh` directory, and it reads a link without following it. That is a guard against an
+`git`, `test` and `readlink`, with `echo` printing each path probe's answer. It
+leaves unopened a path that policy says not to open, any path named `.env`,
+`.env.*`, `*.pem` or `*.key`, and anything under a `.env`, `.env.*` or `.ssh`
+directory, and it reads a link without following it. That is a guard against an
 accident, not containment. The subagent runs in your session and sees what your
 session sees, so a secret kept under another name can reach its transcript. If
 that matters, do not run it on a checkout that holds live credentials.
