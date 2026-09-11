@@ -66,8 +66,13 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         || die "the brief asks -e before -L, so a dangling link reads as absent"
     grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
         || die "the brief no longer reads a link with readlink at the root"
+    grep -qF 'for each path the secrets rule does' "$BRIEF" \
+        && grep -qF 'one named `.env`, `.env.*`, `*.pem` or `*.key`, or with a `.env`, `.env.*` or' "$BRIEF" \
+        && grep -qF '`.ssh` directory anywhere above it' "$BRIEF" \
+        && pass "…and it leaves a path unopened when its name, or any directory above it, marks it as holding secrets" \
+        || die "the brief's secrets rule no longer covers both a path's name and the directories above it"
     policy=0
-    for s in 'ls-tree --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md`' 'holds a changed path or lies above one' 'naming none whose path the rule above marks as' '`AGENTS.override.md` is read' 'in place of its `AGENTS.md`'; do
+    for s in 'ls-tree --name-only <base> -- <paths>' '`.github/copilot-instructions.md`' '`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md`' 'holds a changed path or lies above one' 'naming none the secrets rule marks' '`AGENTS.override.md` is read' 'in place of its `AGENTS.md`'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
     if [ "$policy" -eq 0 ]; then

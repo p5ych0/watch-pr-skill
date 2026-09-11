@@ -12,10 +12,12 @@
   stopped where either was missing. It now asks the base which policy files it has:
   `.github/copilot-instructions.md`, which Copilot reads, and
   `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each changed path.
-  It reads those and says which it found. Its safety rules are unchanged. This checkout
-  reads the brief through a link in `.claude/agents/`, so a session here uses the branch's
-  brief, not the installed release's. `test-hooks.sh` pins the shipped file, its name, its
-  read-only tool list and its policy read in every copy, and the link in this checkout.
+  It reads those and says which it found. Its secrets rule now also covers anything under a
+  `.env`, `.env.*` or `.ssh` directory, and the policy read obeys it; its other safety rules
+  are unchanged. This checkout reads the brief through a link in `.claude/agents/`, so a
+  session here uses the branch's brief, not the installed release's. `test-hooks.sh` pins the
+  shipped file, its name, its read-only tool list, its secrets rule and its policy read in
+  every copy, and the link in this checkout.
 
 ## [2.9.3] — 2026-09-07
 

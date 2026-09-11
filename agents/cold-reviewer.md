@@ -19,9 +19,10 @@ command, `git merge-base <base> HEAD`, and go on only if it succeeded and printe
 `git status --short --untracked-files=all`, which names the file inside a new directory
 rather than the directory, for what changed, and
 `git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
-runs no diff helper the repository may have configured, for each path whose name does not mark it
-as holding secrets — `.env` or `.env.*`, a `*.pem` or `*.key`, anything under `.ssh` — which
-are reported as changed and left unopened, contents and all. Read the changed files
+runs no diff helper the repository may have configured, for each path the secrets rule does
+not mark — one named `.env`, `.env.*`, `*.pem` or `*.key`, or with a `.env`, `.env.*` or
+`.ssh` directory anywhere above it — which are reported as changed and left unopened,
+contents and all. Read the changed files
 themselves under the same rule, and only where the working tree still holds them. Ask
 `test -L <that root>/<path>` first, since a link is read through
 `readlink -- <that root>/<path>` and never opened, the Read tool following it out of the
@@ -34,12 +35,12 @@ the change, wherever the repository keeps it:
 `git --literal-pathspecs ls-tree --name-only <base> -- <paths>`, naming
 `.github/copilot-instructions.md`, which Copilot reads, and
 `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and in every directory that
-holds a changed path or lies above one, naming none whose path the rule above marks as
-holding secrets, a `.env` or `.env.*` directory or `.ssh` among it, lists which the base
-has, and `git show <base>:<path>` reads each, except that a directory's
+holds a changed path or lies above one, naming none the secrets rule marks, lists which the
+base has, and `git show <base>:<path>` reads each, except that a directory's
 `AGENTS.override.md` is read in place of its `AGENTS.md`, as Codex reads it. Say which you
 found; with none, judge against the PR body alone. Run no other commands beyond those,
-`test` and `readlink`, and edit nothing. If a command fails, say so and stop rather than review a part.
+`test` and `readlink`, and edit nothing. If a command fails, say so and stop rather than
+review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one

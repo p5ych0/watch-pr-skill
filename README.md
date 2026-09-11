@@ -229,9 +229,10 @@ it: `.github/copilot-instructions.md`, which Copilot reads, and
 `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each
 changed path, taking a directory's override in place of its `AGENTS.md` as Codex
 does. It says which of those it found. It is read-only by instruction and
-runs only `git`, `test` and `readlink`. It leaves unopened any path whose name
-marks it as holding secrets (`.env`, `.env.*`, `*.pem`, `*.key`, anything under
-`.ssh`), and it reads a link without following it. That is a guard against an
+runs only `git`, `test` and `readlink`. It leaves unopened, policy files
+included, any path named `.env`, `.env.*`, `*.pem` or `*.key`, and anything
+under a `.env`, `.env.*` or `.ssh` directory, and it reads a link without
+following it. That is a guard against an
 accident, not containment. The subagent runs in your session and sees what your
 session sees, so a secret kept under another name can reach its transcript. If
 that matters, do not run it on a checkout that holds live credentials.
