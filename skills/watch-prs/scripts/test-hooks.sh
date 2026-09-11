@@ -16,7 +16,7 @@ ships_no_hook() {
     [ ! -e "$1/hooks" ] && [ ! -L "$1/hooks" ] \
         && jq -e 'has("hooks") | not' "$1/.claude-plugin/plugin.json" >/dev/null \
         && jq -e 'all(.plugins[]; has("hooks") | not)' "$1/.claude-plugin/marketplace.json" >/dev/null \
-        && found="$(find "$1" \( -name .git -o -name .claude \) -prune -o -name '*.md' -exec awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^hooks:/ { f = 1; exit } END { exit !f }' {} \; -print)" \
+        && found="$(find "$1" -name .git -prune -o -name '*.md' -exec awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^hooks:/ { f = 1; exit } END { exit !f }' {} \; -print)" \
         && [ -z "$found" ]
 }
 for d in clean dir plugin market skill; do

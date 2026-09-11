@@ -60,6 +60,6 @@ again.
 - A finding that names a fail-closed guard going open, in a hook or anywhere else, is still
   a finding whatever this record says.
 - No hook installs. `test-hooks.sh` fails if the plugin root gains a `hooks/` directory,
-  either manifest declares hooks, or a shipped Markdown file declares them in its
-  frontmatter, since the evasion accepted above would then reach every project that
-  installs the plugin.
+  either manifest declares hooks, or a Markdown file's frontmatter holds a line starting
+  `hooks:`, since the evasion accepted above would then reach every project that installs
+  the plugin.
