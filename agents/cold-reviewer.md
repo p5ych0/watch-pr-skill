@@ -27,8 +27,9 @@ finding one would produce goes unpredicted. Say which you found; with none, judg
 the PR body alone. A path that policy says not to open is left unopened, as the secrets
 rule below leaves its own. Then take the merge base as its own command,
 `git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha.
-Then `git diff --name-only <that sha>` and
-`git status --short --untracked-files=all`, which names the file inside a new directory
+Then `git diff --no-renames --name-only <that sha>`, which names a moved file at its source
+as well as its destination, and `git status --short --untracked-files=all`, which names
+the file inside a new directory
 rather than the directory, for what changed, and
 `git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
 runs no diff helper the repository may have configured, for each path that neither that

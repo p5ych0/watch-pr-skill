@@ -1,6 +1,6 @@
 {
   "name": "watch-pr-skill",
-  "version": "2.10.0",
+  "version": "2.10.1",
   "description": "Native PR review loop, 2.x \u2014 drives the Codex and Copilot GitHub reviewers to a clean signoff, then gates the merge. No daemon: the 1.x file bus is retired.",
   "author": {
     "name": "p5ych0"
