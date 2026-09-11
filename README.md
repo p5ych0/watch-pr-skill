@@ -214,6 +214,29 @@ addressed and what was intentionally skipped, as a past-tense disposition and an
 issue number, because it shares a comment with the review request and a request
 that describes work to be done is treated as one.
 
+### The cold reviewer
+
+The plugin ships a subagent, `watch-pr-skill:cold-reviewer`, that reads the
+branch's changes against the PR's base the way Codex and Copilot will and reports
+what they would raise: one line per finding, graded by how likely a reviewer is
+to block on it, or `clean`. A round is the expensive part of the loop, so have it
+read the change before the first review request and again after each round's
+fixes. Give it the base branch, the PR description, the newest round summary,
+and the earlier rounds' findings with the replies they got.
+
+It reads the review policy from the base branch before any changed file:
+whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.md`,
+`AGENTS.md` and `CLAUDE.md` your repository keeps, taking a non-empty override in
+place of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
+`AGENTS.override.md` or `CLAUDE.md` below the root is not read, so a finding
+one would produce goes unpredicted. It is read-only by instruction and runs only
+`git`, `test` and `readlink`. It leaves unopened a path that policy says not to
+open, any path named `.env`, `.env.*`, `*.pem` or `*.key`, and anything under a
+`.env`, `.env.*` or `.ssh` directory, and it reads a link without following it. That is a guard against an
+accident, not containment. The subagent runs in your session and sees what your
+session sees, so a secret kept under another name can reach its transcript. If
+that matters, do not run it on a checkout that holds live credentials.
+
 ### The stops
 
 The loop stops and asks at these points:
@@ -377,9 +400,11 @@ It proves every variable the driver uses is assigned, every script parses and
 has a test, no fixture races a `printf` into `grep`, and the whole suite passes.
 In a Claude Code session, this checkout's `.claude/settings.json` runs it as a
 hook before a `git push` or the round gate. Before the first review request of a
-pull request and after each round's fixes, the `cold-reviewer` subagent in
-`.claude/agents/` reads the changes cold, the way the reviewers will; a finding
-that names a defect the change introduced is fixed before the round is bought.
+pull request and after each round's fixes, the cold reviewer reads the changes
+the way the reviewers will; a finding that names a defect the change introduced
+is fixed before the round is bought. Here `.claude/agents/cold-reviewer.md` links
+to `agents/cold-reviewer.md`, so that the session reads the branch's brief rather
+than the installed release's.
 CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
 mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the
 suite executes fails there before it reaches a macOS contributor. A path the

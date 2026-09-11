@@ -20,8 +20,9 @@ requirement), `jq`, `gh`, `git`, GNU or BSD coreutils. No Node, no Python at run
 reviewers: Codex and Copilot, both GitHub apps; no daemon.
 
 **Structure.** `skills/watch-prs/SKILL.md` drives; `skills/watch-prs/scripts/pr-*.sh` are
-the helpers, `*lib.sh` the shared libraries, `test-*.sh` the fixtures; `docs/decisions/`
-holds accepted limits; `README.md` is the only document written for a person.
+the helpers, `*lib.sh` the shared libraries, `test-*.sh` the fixtures;
+`agents/cold-reviewer.md` is the cold reviewer the plugin ships; `docs/decisions/` holds
+accepted limits; `README.md` is the only document written for a person.
 
 **Naming — for NEW names only.** Established names keep their spelling whatever it is.
 Files under `skills/watch-prs/scripts/` are `pr-<stage>.sh`, `<area>lib.sh`,
@@ -156,6 +157,7 @@ history; an accepted limit is in `docs/decisions/`.
 | `scripts/loadlib.sh` | How a library is loaded and proven loaded. |
 | `scripts/testlib.sh` | The portable watchdog and the validated scratch directory; ships at runtime inside `pr-ci-state.sh`. |
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
+| `agents/cold-reviewer.md` | The cold reviewer: reads a branch against its base the way the reviewers will, before a round is bought. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
 `scripts/` is `skills/watch-prs/scripts/`; the other paths are as written. Everything else
@@ -304,8 +306,9 @@ user-visible change with no `README.md` update is incomplete.
 ## Release
 
 Bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry in the same
-PR whenever an installed file changes — the scripts, `SKILL.md`, the manifests. A change
-confined to `test-*.sh`, to authoring documentation, or to the reviewer files bumps nothing:
+PR whenever an installed file changes — the scripts, `SKILL.md`, `agents/cold-reviewer.md`,
+the manifests. A change confined to `test-*.sh`, to authoring documentation, or to the
+reviewer files bumps nothing:
 the reviewer files are read from the base ref and nothing installs them.
 
 **The size of the bump.** MINOR (x.Y.0) only for a new capability: a switch, a command, a
@@ -354,7 +357,9 @@ needs lands first as its own PR.
 ## Repo arming
 
 `.claude/settings.json` enables this plugin for the checkout, runs the two hooks in
-`.claude/hooks/` that `test-hooks.sh` proves, and is committed; `.claude/agents/` holds the
-cold reviewer's brief. None of these installs. The Codex
-connector is account-level (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
+`.claude/hooks/` that `test-hooks.sh` proves, and is committed;
+`.claude/agents/cold-reviewer.md` is a link to `agents/cold-reviewer.md`, so that a session
+here reads the branch's brief rather than an installed release's. None of these installs;
+the brief the link names does. The Codex connector is account-level
+(`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.

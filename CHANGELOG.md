@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.10.0] — 2026-09-11
+
+- **The cold reviewer ships with the plugin.** The subagent that reads a branch against its
+  base the way Codex and Copilot will, before a round is bought, lived in this checkout's
+  `.claude/agents/`, which Claude Code does not load from a plugin. A project that installed
+  watch-pr-skill got the review loop without the pre-read that makes a round cheaper, and
+  one measured downstream session spent rounds on four findings a cold read of the diff would
+  have made first. It is `agents/cold-reviewer.md` at the plugin root now, loaded as
+  `watch-pr-skill:cold-reviewer`. Its brief read `AGENTS.md` and `CLAUDE.md` off the base and
+  stopped where either was missing. It now asks the base which of
+  `.github/copilot-instructions.md` and the root's `AGENTS.override.md` (read, unless empty,
+  in place of `AGENTS.md`), `AGENTS.md` and `CLAUDE.md` it has, reads those first and says which it
+  found, and leaves unopened a path that policy says not to open; the same files below the
+  root are not read. Its secrets rule now also covers anything under a `.env` or `.env.*`
+  directory, and a `.ssh` directory at any depth; its other safety rules are unchanged. This checkout keeps a link to the brief in `.claude/agents/`, so that a
+  session here uses the branch's brief, not the installed release's. `test-hooks.sh` pins the
+  shipped file, its name, its read-only tool list, its secrets rule and its policy read in
+  every copy, and the link in this checkout.
+
 ## [2.9.3] — 2026-09-07
 
 - **The manifests name the generation.** Both descriptions carried one sentence, which said

@@ -37,6 +37,61 @@ done
 ships_no_hook "$ROOT" && pass "no hook ships with the plugin, so the evasion the authoring-tools record accepts stays in this checkout" \
     || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
 
+BRIEF="$ROOT/agents/cold-reviewer.md"
+front_ok() {
+    local fm
+    fm="$(awk 'NR == 1 && $0 != "---" { exit 1 } NR > 1 && $0 == "---" { c = 1; exit } NR > 1 { print } END { exit !c }' "$1")" \
+        && [ "$(grep -c '^name:' <<<"$fm")" -eq 1 ] && grep -qx 'name: cold-reviewer' <<<"$fm" && [ "$(grep -c '^tools:' <<<"$fm")" -eq 1 ] && grep -qx 'tools: Read, Bash' <<<"$fm"
+}
+if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
+    front_ok "$BRIEF" \
+        && pass "the cold reviewer ships at the plugin root, its frontmatter closed, named, with only Read and Bash" \
+        || die "agents/cold-reviewer.md has no closed frontmatter, holds a name or tools line other than exactly one cold-reviewer and one Read, Bash"
+    awk '!(NR > 1 && $0 == "---" && !d++)' "$BRIEF" > "$tmp/brief-open.md" || die "the open brief decoy was not written"
+    awk '{ print } $0 == "tools: Read, Bash" { print "tools: Read, Bash, Write" }' "$BRIEF" > "$tmp/brief-twotools.md" || die "the twotools brief decoy was not written"
+    awk '{ print } $0 == "name: cold-reviewer" { print "name: other" }' "$BRIEF" > "$tmp/brief-twonames.md" || die "the twonames brief decoy was not written"
+    awk '$0 != "name: cold-reviewer"' "$BRIEF" > "$tmp/brief-unnamed.md" || die "the unnamed brief decoy was not written"
+    for d in open twotools twonames unnamed; do
+        front_ok "$tmp/brief-$d.md" && die "the $d brief decoy passed the frontmatter check" || pass "the $d brief decoy fails the frontmatter check"
+    done
+    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
+    grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
+        || die "the brief no longer disables optional locks, so its status can rewrite the index"
+    grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
+        || die "the brief no longer disables the filesystem monitor"
+    grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
+        || die "the brief no longer probes for the path before reading it"
+    [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
+        && pass "…with the link probe first, since -e follows a link and calls a dangling one absent" \
+        || die "the brief asks -e before -L, so a dangling link reads as absent"
+    grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
+        || die "the brief no longer reads a link with readlink at the root"
+    grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
+        && grep -qF 'The secrets rule marks a path named `.env`, `.env.*`,' "$BRIEF" \
+        && grep -qF 'or with a `.env`, `.env.*` or `.ssh` directory anywhere above it' "$BRIEF" \
+        && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets" \
+        || die "the brief's diff and read no longer obey both the base's policy and a secrets rule covering a path's name and the directories above it"
+    policy=0
+    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'Only an entry with mode `100644` or `100755`' 'a same-named directory is none, and a `120000` link is reported with the' '`AGENTS.override.md` first,' 'then `AGENTS.md` only where the override is absent as a policy file or empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
+        grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
+    done
+    if [ "$policy" -eq 0 ]; then
+        shows="$(grep -oE 'git( [^` ]+)* show [^`]*' "$BRIEF")"
+        [ "$(sort -u <<<"$shows")" = 'git show <base>:<path>' ] \
+            && pass "…and it reads whichever policy files the base has, through one git show that names no fixed file" \
+            || die "the brief's git show is not exactly git show <base>:<path>, so it can name a file a consuming project lacks: $shows"
+    fi
+    grep -qF 'reads each it lists' "$BRIEF" \
+        && die "the brief reads every listed policy file, so an AGENTS.md that a non-empty override replaces is read too" \
+        || pass "…and the wording that read every listed policy file, a replaced AGENTS.md included, is gone"
+    first() { awk -v p="$1" 'index($0, p) { print NR; exit }' "$BRIEF"; }
+    [ "$(first 'git show <base>:<path>')" -lt "$(first 'git merge-base <base> HEAD')" ] 2>/dev/null \
+        && pass "…and it reads that policy's contents before the merge base, so no changed path is opened before a rule that forbids it" \
+        || die "the brief reads policy after it takes the merge base, so a path the policy forbids can be opened first"
+else
+    die "agents/cold-reviewer.md is not a regular file, so no project that installs the plugin gets the cold reviewer"
+fi
+
 # The settings file is the promise; a copy without one has no hooks to prove.
 if [ ! -f "$SETTINGS" ]; then
     echo "ok   - no .claude/settings.json in this copy; hook checks skipped"
@@ -160,21 +215,9 @@ printf '#!/usr/bin/env bash\ncase "$*" in *"/n") printf 0; exit 1 ;; esac\nexec 
 rc=0; printf '%s' "$(cmd 'git push origin b')" | env PATH="$tmp/nonread" CLAUDE_PROJECT_DIR="$tmp/bad" PRE_PUSH_BOUND=2 "$HOOKS/pre-push.sh" >/dev/null 2>"$tmp/err" || rc=$?
 [ "$rc" -eq 2 ] && grep -q 'an unknown number of findings' "$tmp/err" \
     && pass "…and a count that could not be read is reported as unknown, not as none" || die "unread count rc=$rc: $(head -c 200 "$tmp/err")"
-BRIEF="$ROOT/.claude/agents/cold-reviewer.md"
-if [ -f "$BRIEF" ]; then
-    # The brief is prose a subagent follows, so its commands are pinned by shape, not by running.
-    grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
-        || die "the brief no longer disables optional locks, so its status can rewrite the index"
-    grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
-        || die "the brief no longer disables the filesystem monitor"
-    grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
-        || die "the brief no longer probes for the path before reading it"
-    [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
-        && pass "…with the link probe first, since -e follows a link and calls a dangling one absent" \
-        || die "the brief asks -e before -L, so a dangling link reads as absent"
-    grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
-        || die "the brief no longer reads a link with readlink at the root"
-fi
+[ -L "$ROOT/.claude/agents/cold-reviewer.md" ] && [ "$(readlink "$ROOT/.claude/agents/cold-reviewer.md")" = ../../agents/cold-reviewer.md ] \
+    && pass "this checkout reads the cold reviewer it ships, through a link, not an installed copy" \
+    || die ".claude/agents/cold-reviewer.md is not the link to ../../agents/cold-reviewer.md, so this checkout reviews with another brief"
 # A parent that is not there fails every open whatever the user's privileges are.
 mkdir -p "$tmp/noopen"
 for c in bash env jq grep sleep kill rm cat; do
