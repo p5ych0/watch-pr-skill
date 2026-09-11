@@ -432,17 +432,20 @@ finding. The accepted records:
   finding, not its absence.
 
 - `docs/decisions/2026-09-07-authoring-tools-not-boundaries.md`: the checkout's
-  authoring tools are not boundaries. The hooks in `.claude/hooks/` and the
-  subagent brief in `.claude/agents/` run inside the operator's own session, on
-  the operator's own checkout, and make a mistake expensive rather than
+  authoring tools are not boundaries. The hooks in `.claude/hooks/` and the cold
+  reviewer's subagent brief run inside the operator's own session, on the
+  operator's own checkout, and make a mistake expensive rather than
   withstanding an adversary. Two things are accepted there: a command spelled to
   evade the pre-push hook's text match is the session evading its own guard, on
   the argument the driving-shell record already carries; and the cold reviewer
   sees what that session sees, so its refusal to open a path whose name marks it
   as holding secrets is a guard against an accident, not containment — a copy
   under another name, a link, an ignored original stay readable by the session
-  itself. Nothing under `.claude/` installs. A fail-closed guard going open in
-  either hook — an unreadable envelope, a missing or unparseable self-check, a
+  itself. No hook installs, and `skills/watch-prs/scripts/test-hooks.sh` fails if
+  the plugin root gains a `hooks/` directory, either manifest declares hooks, or a
+  Markdown file's frontmatter holds a line starting `hooks:`. An installed copy of the brief is covered: it runs in the installing operator's
+  own session, and the disclosure is accepted there on the same argument. A
+  fail-closed guard going open in either hook — an unreadable envelope, a missing or unparseable self-check, a
   bound outside the deadline, a run the deadline cut short — is still a finding, and so is
   a change that drops `skills/watch-prs/scripts/test-hooks.sh` from the suite or stops
   either CI job from running it. The cost accepted there is a disclosure, not a wasted
