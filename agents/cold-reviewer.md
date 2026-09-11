@@ -13,7 +13,15 @@ code as it stands now makes it false.
 Take the repository root once, `git rev-parse --show-toplevel`, and run every command as
 `GIT_OPTIONAL_LOCKS=0 git -C <that root> -c core.fsmonitor=false`, since a listing made elsewhere names the same file differently and a monitor hook the
 repository configures, or a refresh of the index this read is not entitled to write, would
-otherwise happen inside it. Take the merge base as its own
+otherwise happen inside it. First read the policy the reviewers apply, from the base rather
+than from the change, whichever of these policy files the repository keeps:
+`git --literal-pathspecs ls-tree --name-only <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
+lists which the base has, and `git show <base>:<path>` reads each, except that
+`AGENTS.override.md` is read in place of `AGENTS.md`, as Codex reads it. An
+`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a finding
+one would produce goes unpredicted. Say which you found; with none, judge against the PR
+body alone. A path that policy says not to open is left unopened, as the secrets rule
+below leaves its own. Then take the merge base as its own
 command, `git merge-base <base> HEAD`, and go on only if it succeeded and printed one
 40-hex sha. Then `git diff --name-only <that sha>` and
 `git status --short --untracked-files=all`, which names the file inside a new directory
@@ -30,15 +38,8 @@ checkout, and since `test -e` follows a link and so calls a dangling one absent.
 that says no does `test -e <that root>/<path>` decide presence, and it, not the diff: a path
 the diff shows deleted can still be there as an untracked file, and one that is really gone
 has the diff as its read. A status letter says what changed, not what the path is, so the
-probes are what decide. Read the policy the reviewers apply from the base rather than from
-the change, whichever of these policy files the repository keeps:
-`git --literal-pathspecs ls-tree --name-only <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
-lists which the base has, and `git show <base>:<path>` reads each, except that
-`AGENTS.override.md` is read in place of `AGENTS.md`, as Codex reads it. An
-`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a finding
-one would produce goes unpredicted. Say which you found; with none, judge against the PR
-body alone. Run no other commands beyond those,
-`test` and `readlink`, and edit nothing. If a command fails, say so and stop rather than
+probes are what decide. Run no other commands beyond those, `test` and `readlink`, and edit
+nothing. If a command fails, say so and stop rather than
 review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
