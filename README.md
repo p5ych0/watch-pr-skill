@@ -224,16 +224,15 @@ read the change before the first review request and again after each round's
 fixes. Give it the base branch, the PR description, the newest round summary,
 and the earlier rounds' findings with the replies they got.
 
-It reads the review policy from the base branch, wherever your repository keeps
-it: `.github/copilot-instructions.md`, which Copilot reads, and
-`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and above each
-changed path, taking a directory's override in place of its `AGENTS.md` as Codex
-does. It says which of those it found. It is read-only by instruction and
-runs only `git`, `test` and `readlink`. It leaves unopened, policy files
-included, any path named `.env`, `.env.*`, `*.pem` or `*.key`, and anything
-under a `.env`, `.env.*` or `.ssh` directory, and it reads a link without
-following it. That is a guard against an
-accident, not containment. The subagent runs in your session and sees what your
+It reads the review policy from the base branch: whichever of
+`.github/copilot-instructions.md`, `AGENTS.override.md`, `AGENTS.md` and
+`CLAUDE.md` your repository keeps at its root, taking the override in place of
+`AGENTS.md` as Codex does, and it says which it found. A policy file below the
+root is not read, since it governs only its own subtree. It is read-only by
+instruction and runs only `git`, `test` and `readlink`. It leaves unopened any
+path named `.env`, `.env.*`, `*.pem` or `*.key`, and anything under a `.env`,
+`.env.*` or `.ssh` directory, and it reads a link without following it. That is
+a guard against an accident, not containment. The subagent runs in your session and sees what your
 session sees, so a secret kept under another name can reach its transcript. If
 that matters, do not run it on a checkout that holds live credentials.
 

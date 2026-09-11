@@ -31,14 +31,12 @@ that says no does `test -e <that root>/<path>` decide presence, and it, not the 
 the diff shows deleted can still be there as an untracked file, and one that is really gone
 has the diff as its read. A status letter says what changed, not what the path is, so the
 probes are what decide. Read the policy the reviewers apply from the base rather than from
-the change, wherever the repository keeps it:
-`git --literal-pathspecs ls-tree --name-only <base> -- <paths>`, naming
-`.github/copilot-instructions.md`, which Copilot reads, and
-`AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` at the root and in every directory that
-holds a changed path or lies above one, naming none the secrets rule marks, lists which the
-base has, and `git show <base>:<path>` reads each, except that a directory's
-`AGENTS.override.md` is read in place of its `AGENTS.md`, as Codex reads it. Say which you
-found; with none, judge against the PR body alone. Run no other commands beyond those,
+the change, whichever of the root's policy files the repository keeps:
+`git --literal-pathspecs ls-tree --name-only <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`
+lists which the base has, and `git show <base>:<path>` reads each, except that
+`AGENTS.override.md` is read in place of `AGENTS.md`, as Codex reads it. A policy file
+below the root is not read, since it governs only its own subtree. Say which you found;
+with none, judge against the PR body alone. Run no other commands beyond those,
 `test` and `readlink`, and edit nothing. If a command fails, say so and stop rather than
 review a part.
 
