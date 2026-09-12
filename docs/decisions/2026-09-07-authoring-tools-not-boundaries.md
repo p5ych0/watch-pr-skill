@@ -27,7 +27,9 @@ reads a change before a review round is bought.
   with the same filesystem. Its brief keeps it away from a path whose name marks it as
   holding secrets, and that is a guard against an accident, not a containment: a copy of
   such a file under another name, a link, an ignored original, all remain readable by the
-  session itself whether the subagent reads them or not. **The cost is a disclosure, not a
+  session itself whether the subagent reads them or not, and an `open:` line in a project's
+  own `.cold-review.md` unmarks a name deliberately, which is the project saying that name
+  holds no secret. **The cost is a disclosure, not a
   wasted round.** A secret reached by one of those routes enters the subagent's transcript,
   which is a real cost the name filter does not bound, and it is accepted here: the session
   that runs the subagent can already read the same bytes, and no filter written in prose
