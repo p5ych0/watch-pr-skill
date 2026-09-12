@@ -231,8 +231,9 @@ It reads the review policy from the base branch before any changed file:
 whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.md`,
 `AGENTS.md` and `CLAUDE.md` your repository keeps, taking a non-empty override in
 place of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
-`AGENTS.override.md` or `CLAUDE.md` below the root is not read, so a finding
-one would produce goes unpredicted. It is read-only by instruction and runs only
+`AGENTS.override.md` or `CLAUDE.md` below the root is not read unless a
+`policy:` line in your `.cold-review.md` names it, so a finding one would
+otherwise produce goes unpredicted. It is read-only by instruction and runs only
 `git`, `test` and `readlink`, with `echo` printing each path probe's answer. It
 leaves unopened a path that policy says not to open, any path named `.env`,
 `.env.*`, `*.pem` or `*.key` whose name does not end `.example`, and anything
@@ -257,7 +258,7 @@ review. Two headings, and nothing else is taken from the file:
 policy: docs/api-contract.md
 policy: services/worker/CLAUDE.md
 secret: deploy-key.json
-open: config/sample.env.sample
+open: .env.sample
 ```
 
 A check says what to look for, and changes nothing about what may be read or

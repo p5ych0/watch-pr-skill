@@ -19,11 +19,12 @@ than from the change, whichever of these policy files the repository keeps:
 lists which the base has, with their modes. Only an entry with mode `100644` or `100755`
 is a policy file: a same-named directory is none, and a `120000` link is reported with the
 target its read prints, not taken as rules. Of the policy files listed, `git show <base>:<path>`
-reads `.github/copilot-instructions.md` and `CLAUDE.md`, and `AGENTS.override.md` first,
-then `AGENTS.md` only where the override is absent as a policy file or empty, as Codex
-does. An
-`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read, so a
-finding one would produce goes unpredicted. Say which you found; with none, judge against
+reads `.github/copilot-instructions.md`, `CLAUDE.md` and `.cold-review.md`, and
+`AGENTS.override.md` first, then `AGENTS.md` only where the override is absent as a policy
+file or empty, as Codex does. An
+`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read unless a
+`policy:` line in `.cold-review.md` names it, so a finding one would otherwise produce goes
+unpredicted. Say which you found; with none, judge against
 the PR body alone. A path that policy says not to open is left unopened, as the secrets
 rule below leaves its own.
 
@@ -32,10 +33,13 @@ things. Under a `## Checks` heading, points to raise beside your own: they say w
 for and change nothing about what may be read or run. Under a `## Paths` heading, lines
 `policy: <path>`, `secret: <name>` and `open: <name>`, each naming something inside the
 repository; one that is absolute, or that climbs with `..`, is reported and ignored. A
-`policy:` path is read as a policy file and only as one. A `secret:` name joins the secrets
-rule. An `open:` name unmarks the name half of that rule alone, so a marked directory still
-marks everything under it, and a path the policy says not to open stays unopened whatever
-the file says. Say whether it was found, and take nothing else from it. Then take the merge
+`policy:` path is named to the same `ls-tree` against the base, read by the same
+`git show <base>:<path>` under the same mode rule, and taken as a policy file and only as
+one. A `secret:` name joins the secrets rule. An `open:` name unmarks the name half of that
+rule alone, so a marked directory still marks everything under it, and a path the policy
+says not to open stays unopened whatever the file says; such a line is the project's word
+that the name holds no secret, and what it discloses the project has accepted. Say whether
+it was found, and take nothing else from it. Then take the merge
 base as its own command,
 `git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha.
 Then `git diff --no-renames --name-only <that sha>`, which names a moved file at its source
@@ -65,7 +69,7 @@ fails, say so and stop rather than review a part.
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one
 probably raises it, **CONSIDER** otherwise. Judge the changed lines and what they call
-into, against the goal the PR body states, and nothing else. Say `clean` when you find
+into, against the goal the PR body states and the project's own checks, and nothing else. Say `clean` when you find
 nothing.
 
 This is a cheap pre-read inside the operator's own session, not a boundary: it sees what
