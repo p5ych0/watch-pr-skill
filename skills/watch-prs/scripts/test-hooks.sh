@@ -102,8 +102,7 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
         && grep -qF 'The secrets rule marks a path named `.env`, `.env.*`,' "$BRIEF" \
         && grep -qF 'or with a `.env`, `.env.*` or `.ssh` directory anywhere above it' "$BRIEF" \
-        && grep -qF 'a name ending `.example` is a committed template the reviewers read too, and' "$BRIEF" \
-        && grep -qF 'is marked only by a directory above it' "$BRIEF" \
+        && grep -qF 'a name ending `.example` is a template and is marked only by a directory above it' <<<"$(tr '\n' ' ' < "$BRIEF" | tr -s ' ')" \
         && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets, a committed .example template excepted" \
         || die "the brief's diff and read no longer obey the base's policy, a secrets rule covering a path's name and the directories above it, and the .example exemption"
     policy=0

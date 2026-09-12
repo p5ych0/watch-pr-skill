@@ -8,7 +8,11 @@
   unread, though its contents are committed and both reviewers read them once the PR is
   pushed. A project keeping three of those templates had every change to one reviewed cold
   without it. A name ending `.example` is exempt now, and is marked only where a directory
-  above it is. `test-hooks.sh` pins the exemption beside the rest of the rule.
+  above it is. The exemption is by name, so a `*.pem.example` or `*.key.example` template is
+  read on the same argument, and a marking directory still marks every template under it.
+  Another spelling — `.env.sample`, `.env.template` — stays unread, which is for a project
+  to exempt itself once it can (#351). `test-hooks.sh` pins the exemption beside the rest of
+  the rule.
 
 ## [2.10.3] — 2026-09-11
 
