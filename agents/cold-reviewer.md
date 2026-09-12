@@ -35,7 +35,8 @@ for and change nothing about what may be read or run. Under a `## Paths` heading
 repository; one that is absolute, or that climbs with `..`, is reported and ignored. A
 `policy:` path is named to the same `ls-tree` against the base, read by the same
 `git show <base>:<path>` under the same mode rule, and taken as a policy file and only as
-one. A `secret:` name joins the secrets rule. An `open:` name unmarks the name half of that
+one — unless the secrets rule below marks it, this file's own `secret:` and `open:` lines
+counted, in which case it is reported as named and not read, as any other marked path is. A `secret:` name joins the secrets rule. An `open:` name unmarks the name half of that
 rule alone, so a marked directory still marks everything under it, and a path the policy
 says not to open stays unopened whatever the file says; such a line is the project's word
 that the name holds no secret, and what it discloses the project has accepted. Say whether

@@ -262,8 +262,9 @@ open: .env.sample
 ```
 
 A check says what to look for, and changes nothing about what may be read or
-run. A `policy:` path is read as a policy file, which is how a rule below the
-root reaches the read at all. A `secret:` name joins the rule above. An `open:`
+run. A `policy:` path is read from the base as a policy file, which is how a
+rule below the root reaches the read at all; one the secrets rule still marks is
+reported and left unread, like any other. A `secret:` name joins the rule above. An `open:`
 name unmarks the name half of that rule only: a marked directory still marks
 everything under it, and a path your policy says not to open stays unopened.
 A path that is absolute, or that climbs out with `..`, is reported and ignored.
