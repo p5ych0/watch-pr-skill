@@ -105,10 +105,16 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         && grep -qF 'a name ending `.example` is a template and is marked only by a directory above it' <<<"$(tr '\n' ' ' < "$BRIEF" | tr -s ' ')" \
         && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets, a committed .example template excepted" \
         || die "the brief's diff and read no longer obey the base's policy, a secrets rule covering a path's name and the directories above it, and the .example exemption"
+    fb="$(tr '\n' ' ' < "$BRIEF" | tr -s ' ')"
     policy=0
-    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'Only an entry with mode `100644` or `100755`' 'a same-named directory is none, and a `120000` link is reported with the' '`AGENTS.override.md` first,' 'then `AGENTS.md` only where the override is absent as a policy file or empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
-        grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
+    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md .cold-review.md`' 'Only an entry with mode `100644` or `100755`' 'a same-named directory is none, and a `120000` link is reported with the' '`AGENTS.override.md` first,' 'then `AGENTS.md` only where the override is absent as a policy file or empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
+        grep -qF -- "$s" <<<"$fb" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
+    project=0
+    for s in '`.cold-review.md`, read the same way, is what the project adds, and it adds only these two things' 'they say what to look for and change nothing about what may be read or run' 'lines `policy: <path>`, `secret: <name>` and `open: <name>`, each naming something inside the repository' 'one that is absolute, or that climbs with `..`, is reported and ignored' 'A `policy:` path is named to the same `ls-tree` against the base, read by the same `git show <base>:<path>` under the same mode rule' 'unless the secrets rule below marks it, this file'"'"'s own `secret:` and `open:` lines counted, in which case it is reported as named and not read' 'A `secret:` name joins the name half of that rule' 'An `open:` name unmarks the name half alone' 'only where that listing prints exactly one entry for it' 'a path the policy says not to open stays unopened whatever the file says' 'Under a `## Checks` heading' 'Under a `## Paths` heading' 'Say whether it was found, and take nothing else from it' 'A finding only a project check raises is **SHOULD FIX** at most' 'below the root is not read unless a `policy:` line in `.cold-review.md` names it'; do
+        grep -qF -- "$s" <<<"$fb" || { die "the project file is read beyond what the brief bounds, or not at all: $s"; project=1; }
+    done
+    [ "$project" -eq 0 ] && pass "…and a project's own checks and paths are read from .cold-review.md, bounded to what it may add"
     if [ "$policy" -eq 0 ]; then
         shows="$(grep -oE 'git( [^` ]+)* show [^`]*' "$BRIEF")"
         [ "$(sort -u <<<"$shows")" = 'git show <base>:<path>' ] \

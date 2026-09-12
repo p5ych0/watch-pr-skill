@@ -231,8 +231,9 @@ It reads the review policy from the base branch before any changed file:
 whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.md`,
 `AGENTS.md` and `CLAUDE.md` your repository keeps, taking a non-empty override in
 place of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
-`AGENTS.override.md` or `CLAUDE.md` below the root is not read, so a finding
-one would produce goes unpredicted. It is read-only by instruction and runs only
+`AGENTS.override.md` or `CLAUDE.md` below the root is not read unless a
+`policy:` line in your `.cold-review.md` names it, so a finding one would
+otherwise produce goes unpredicted. It is read-only by instruction and runs only
 `git`, `test` and `readlink`, with `echo` printing each path probe's answer. It
 leaves unopened a path that policy says not to open, any path named `.env`,
 `.env.*`, `*.pem` or `*.key` whose name does not end `.example`, and anything
@@ -241,6 +242,35 @@ link without following it. That is a guard against an
 accident, not containment. The subagent runs in your session and sees what your
 session sees, so a secret kept under another name can reach its transcript. If
 that matters, do not run it on a checkout that holds live credentials.
+
+Your project can add to it with a `.cold-review.md` at the root, read from the
+base branch like the policy files, so a pull request cannot widen its own
+review. Two headings, and nothing else is taken from the file:
+
+```markdown
+## Checks
+
+- An exception the PR body lists that no test covers.
+- A PR body that no longer describes what the code does.
+
+## Paths
+
+policy: docs/api-contract.md
+policy: services/worker/CLAUDE.md
+secret: deploy-key.json
+open: .env.sample
+```
+
+A check says what to look for, and changes nothing about what may be read or
+run. A `policy:` path is read from the base as a policy file, which is how a
+rule below the root reaches the read at all; one the secrets rule still marks is
+reported and left unread, like any other. A `secret:` name joins the rule above. An `open:`
+name unmarks the name half of that rule only: a marked directory still marks
+everything under it, and a path your policy says not to open stays unopened. An
+`open:` line is your word that the name holds no secret, and the disclosure is
+yours to accept, so name templates and never a live file.
+A path that is absolute, or that climbs out with `..`, is reported and ignored.
+Without the file, the reviewer behaves exactly as above.
 
 ### The stops
 

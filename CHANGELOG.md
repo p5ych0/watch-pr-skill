@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.11.0] — 2026-09-12
+
+- **A project can add its own checks and paths to the cold reviewer.** The brief the plugin
+  ships is the same everywhere: it reads the root's policy files, applies one secrets rule,
+  and judges the change against the PR body. Everything a project knew beyond that — checks
+  distilled from rounds it had already paid for, rules kept below the root, credential names
+  the rule does not cover — lived in whatever the caller remembered to type, which is the
+  failure 2.10.3 fixed for the step itself. A `.cold-review.md` at the root, read from the
+  base like every other policy input so a pull request cannot widen its own review, now
+  carries two headings and nothing else: `## Checks`, points to raise, which say what to
+  look for and change nothing about what may be read or run; and `## Paths`, lines
+  `policy:`, `secret:` and `open:`. A `policy:` path is listed and read from the base under
+  the same mode rule as every other policy file, taken as a policy file and only as one, and
+  only where the listing prints exactly one entry for it; one the secrets rule still marks —
+  the file's own `secret:` and `open:` lines counted — is reported as named and left unread,
+  so the project's own file cannot route a credential into the read. That line is how a rule
+  below the root reaches the read after 2.10.0 stopped guessing at subtree scope. A `secret:` name joins the secrets rule. An `open:` name unmarks the name
+  half of that rule alone, so a marked directory still marks everything under it and a path
+  the policy forbids stays unopened. A path that is absolute or climbs with `..` is reported
+  and ignored. A project without the file is reviewed exactly as before. `test-hooks.sh`
+  pins each bound against the brief flattened.
+
 ## [2.10.4] — 2026-09-12
 
 - **A committed `.example` template is not a secret.** The cold reviewer's secrets rule marks a
