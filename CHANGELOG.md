@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.10.4] — 2026-09-12
+
+- **A committed `.example` template is not a secret.** The cold reviewer's secrets rule marks a
+  path named `.env` or `.env.*`, which takes a tracked `.env.example` or
+  `<dir>/.env.example` with it: the pre-read reported such a file as changed and left it
+  unread, though its contents are committed and both reviewers read them once the PR is
+  pushed. A project keeping three of those templates had every change to one reviewed cold
+  without it. A name ending `.example` is exempt now, and is marked only where a directory
+  above it is. `test-hooks.sh` pins the exemption beside the rest of the rule.
+
 ## [2.10.3] — 2026-09-11
 
 - **`SKILL.md` runs the cold reviewer.** 2.10.0 shipped the `cold-reviewer` agent to installing

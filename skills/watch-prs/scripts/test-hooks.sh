@@ -102,8 +102,10 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
         && grep -qF 'The secrets rule marks a path named `.env`, `.env.*`,' "$BRIEF" \
         && grep -qF 'or with a `.env`, `.env.*` or `.ssh` directory anywhere above it' "$BRIEF" \
-        && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets" \
-        || die "the brief's diff and read no longer obey both the base's policy and a secrets rule covering a path's name and the directories above it"
+        && grep -qF 'a name ending `.example` is a committed template the reviewers read too, and' "$BRIEF" \
+        && grep -qF 'is marked only by a directory above it' "$BRIEF" \
+        && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets, a committed .example template excepted" \
+        || die "the brief's diff and read no longer obey the base's policy, a secrets rule covering a path's name and the directories above it, and the .example exemption"
     policy=0
     for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'Only an entry with mode `100644` or `100755`' 'a same-named directory is none, and a `120000` link is reported with the' '`AGENTS.override.md` first,' 'then `AGENTS.md` only where the override is absent as a policy file or empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
