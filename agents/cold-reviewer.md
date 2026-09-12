@@ -34,8 +34,10 @@ rather than the directory, for what changed, and
 `git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
 runs no diff helper the repository may have configured, for each path that neither that
 policy nor the secrets rule marks. The secrets rule marks a path named `.env`, `.env.*`,
-`*.pem` or `*.key`, or with a `.env`, `.env.*` or `.ssh` directory anywhere above it; a
-marked path is reported as changed and left unopened, contents and all. Read the changed
+`*.pem` or `*.key`, or with a `.env`, `.env.*` or `.ssh` directory anywhere above it,
+except that a name ending `.example` is a template and is marked only by a directory
+above it. A marked path is reported as changed and left unopened, contents and all. Read
+the changed
 files themselves under the same two rules, and only where the working tree still holds
 them. Each probe prints its answer, since a tool's output may not show an exit status. Ask
 `test -L <that root>/<path> && echo link || echo not-a-link` first, since a link is read
