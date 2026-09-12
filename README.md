@@ -238,7 +238,9 @@ otherwise produce goes unpredicted. It is read-only by instruction and runs only
 leaves unopened a path that policy says not to open, any path named `.env`,
 `.env.*`, `*.pem` or `*.key` whose name does not end `.example`, and anything
 under a `.env`, `.env.*` or `.ssh` directory, templates included. It reads a
-link without following it. That is a guard against an
+link without following it, and probes every directory above a path as well, so
+a folder replaced by a link out of the checkout is reported rather than read
+through. That is a guard against an
 accident, not containment. The subagent runs in your session and sees what your
 session sees, so a secret kept under another name can reach its transcript. If
 that matters, do not run it on a checkout that holds live credentials.

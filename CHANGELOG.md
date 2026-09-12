@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.11.1] — 2026-09-12
+
+- **A link one level up is a link.** The cold reviewer probed a changed path with
+  `test -L <root>/<path>`, which answers for the component it names. Where a tracked
+  directory had been replaced by a symlink to a directory outside the checkout holding the
+  same child path, the child printed `not-a-link`, `test -e` printed `present`, and the Read
+  tool followed the symlinked parent out — while the brief says a link is read through
+  `readlink` and never opened, which is why the probe exists at all. The pattern is ordinary:
+  a framework that links a public directory at its own storage outside the tree. The probe is
+  asked of every prefix from the root down now, and a path under one that prints `link` is
+  reported as reached through it and nothing under it is opened. `test-hooks.sh` builds a
+  directory that is a link to one outside the probe root and asserts what made the gap: the
+  child answers `not-a-link` and `present`, while the prefix answers `link`.
+
 ## [2.11.0] — 2026-09-12
 
 - **A project can add its own checks and paths to the cold reviewer.** The brief the plugin
