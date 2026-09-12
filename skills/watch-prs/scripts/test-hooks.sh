@@ -106,9 +106,15 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
         && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets, a committed .example template excepted" \
         || die "the brief's diff and read no longer obey the base's policy, a secrets rule covering a path's name and the directories above it, and the .example exemption"
     policy=0
-    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md`' 'Only an entry with mode `100644` or `100755`' 'a same-named directory is none, and a `120000` link is reported with the' '`AGENTS.override.md` first,' 'then `AGENTS.md` only where the override is absent as a policy file or empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
+    for s in 'ls-tree <base> -- .github/copilot-instructions.md AGENTS.override.md AGENTS.md CLAUDE.md .cold-review.md`' 'Only an entry with mode `100644` or `100755`' 'a same-named directory is none, and a `120000` link is reported with the' '`AGENTS.override.md` first,' 'then `AGENTS.md` only where the override is absent as a policy file or empty' '`AGENTS.override.md`, `AGENTS.md` or `CLAUDE.md` below the root is not read' 'A path that policy says not to open is left unopened'; do
         grep -qF -- "$s" "$BRIEF" || { die "the brief no longer reads policy through: $s"; policy=1; }
     done
+    fb="$(tr '\n' ' ' < "$BRIEF" | tr -s ' ')"
+    project=0
+    for s in '`.cold-review.md`, read the same way, is what the project adds, and it adds only these two things' 'they say what to look for and change nothing about what may be read or run' 'lines `policy: <path>`, `secret: <name>` and `open: <name>`, each naming something inside the repository' 'one that is absolute, or that climbs with `..`, is reported and ignored' 'A `policy:` path is read as a policy file and only as one' 'An `open:` name unmarks the name half of that rule alone' 'a path the policy says not to open stays unopened whatever the file says'; do
+        grep -qF -- "$s" <<<"$fb" || { die "the project file is read beyond what the brief bounds, or not at all: $s"; project=1; }
+    done
+    [ "$project" -eq 0 ] && pass "…and a project's own checks and paths are read from .cold-review.md, bounded to what it may add"
     if [ "$policy" -eq 0 ]; then
         shows="$(grep -oE 'git( [^` ]+)* show [^`]*' "$BRIEF")"
         [ "$(sort -u <<<"$shows")" = 'git show <base>:<path>' ] \

@@ -242,6 +242,32 @@ accident, not containment. The subagent runs in your session and sees what your
 session sees, so a secret kept under another name can reach its transcript. If
 that matters, do not run it on a checkout that holds live credentials.
 
+Your project can add to it with a `.cold-review.md` at the root, read from the
+base branch like the policy files, so a pull request cannot widen its own
+review. Two headings, and nothing else is taken from the file:
+
+```markdown
+## Checks
+
+- An exception the PR body lists that no test covers.
+- A PR body that no longer describes what the code does.
+
+## Paths
+
+policy: docs/api-contract.md
+policy: services/worker/CLAUDE.md
+secret: deploy-key.json
+open: config/sample.env.sample
+```
+
+A check says what to look for, and changes nothing about what may be read or
+run. A `policy:` path is read as a policy file, which is how a rule below the
+root reaches the read at all. A `secret:` name joins the rule above. An `open:`
+name unmarks the name half of that rule only: a marked directory still marks
+everything under it, and a path your policy says not to open stays unopened.
+A path that is absolute, or that climbs out with `..`, is reported and ignored.
+Without the file, the reviewer behaves exactly as above.
+
 ### The stops
 
 The loop stops and asks at these points:
