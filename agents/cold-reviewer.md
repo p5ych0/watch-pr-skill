@@ -35,12 +35,14 @@ for and change nothing about what may be read or run. Under a `## Paths` heading
 repository; one that is absolute, or that climbs with `..`, is reported and ignored. A
 `policy:` path is named to the same `ls-tree` against the base, read by the same
 `git show <base>:<path>` under the same mode rule, and taken as a policy file and only as
-one — unless the secrets rule below marks it, this file's own `secret:` and `open:` lines
-counted, in which case it is reported as named and not read, as any other marked path is. A `secret:` name joins the secrets rule. An `open:` name unmarks the name half of that
-rule alone, so a marked directory still marks everything under it, and a path the policy
-says not to open stays unopened whatever the file says; such a line is the project's word
-that the name holds no secret, and what it discloses the project has accepted. Say whether
-it was found, and take nothing else from it. Then take the merge
+one, and only where that listing prints exactly one entry for it — unless the secrets rule
+below marks it, this file's own `secret:` and `open:` lines counted, in which case it is
+reported as named and not read, as any other marked path is. A `secret:` name joins the
+name half of that rule. An `open:` name unmarks the name half alone, so a marked directory
+still marks everything under it, and a path the policy says not to open stays unopened
+whatever the file says; such a line is the project's word that the name holds no secret,
+and what it discloses the project has accepted. Say whether it was found, and take nothing
+else from it. Then take the merge
 base as its own command,
 `git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha.
 Then `git diff --no-renames --name-only <that sha>`, which names a moved file at its source
@@ -69,8 +71,10 @@ fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one
-probably raises it, **CONSIDER** otherwise. Judge the changed lines and what they call
-into, against the goal the PR body states and the project's own checks, and nothing else. Say `clean` when you find
+probably raises it, **CONSIDER** otherwise. A finding only a project check raises is
+**SHOULD FIX** at most, since the reviewers do not read that check, unless it also breaches
+the base policy. Judge the changed lines and what they call into, against the goal the PR
+body states and the project's own checks, and nothing else. Say `clean` when you find
 nothing.
 
 This is a cheap pre-read inside the operator's own session, not a boundary: it sees what

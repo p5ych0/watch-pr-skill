@@ -266,7 +266,9 @@ run. A `policy:` path is read from the base as a policy file, which is how a
 rule below the root reaches the read at all; one the secrets rule still marks is
 reported and left unread, like any other. A `secret:` name joins the rule above. An `open:`
 name unmarks the name half of that rule only: a marked directory still marks
-everything under it, and a path your policy says not to open stays unopened.
+everything under it, and a path your policy says not to open stays unopened. An
+`open:` line is your word that the name holds no secret, and the disclosure is
+yours to accept, so name templates and never a live file.
 A path that is absolute, or that climbs out with `..`, is reported and ignored.
 Without the file, the reviewer behaves exactly as above.
 

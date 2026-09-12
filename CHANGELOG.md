@@ -11,9 +11,12 @@
   base like every other policy input so a pull request cannot widen its own review, now
   carries two headings and nothing else: `## Checks`, points to raise, which say what to
   look for and change nothing about what may be read or run; and `## Paths`, lines
-  `policy:`, `secret:` and `open:`. A `policy:` path is read as a policy file and only as
-  one, which is how a rule below the root reaches the read after 2.10.0 stopped guessing at
-  subtree scope. A `secret:` name joins the secrets rule. An `open:` name unmarks the name
+  `policy:`, `secret:` and `open:`. A `policy:` path is listed and read from the base under
+  the same mode rule as every other policy file, taken as a policy file and only as one, and
+  only where the listing prints exactly one entry for it; one the secrets rule still marks —
+  the file's own `secret:` and `open:` lines counted — is reported as named and left unread,
+  so the project's own file cannot route a credential into the read. That line is how a rule
+  below the root reaches the read after 2.10.0 stopped guessing at subtree scope. A `secret:` name joins the secrets rule. An `open:` name unmarks the name
   half of that rule alone, so a marked directory still marks everything under it and a path
   the policy forbids stays unopened. A path that is absolute or climbs with `..` is reported
   and ignored. A project without the file is reviewed exactly as before. `test-hooks.sh`
