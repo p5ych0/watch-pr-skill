@@ -441,7 +441,8 @@ finding. The accepted records:
   sees what that session sees, so its refusal to open a path whose name marks it
   as holding secrets is a guard against an accident, not containment — a copy
   under another name, a link, an ignored original stay readable by the session
-  itself. No hook installs, and `skills/watch-prs/scripts/test-hooks.sh` fails if
+  itself, and an `open:` line in a project's `.cold-review.md` unmarks a name on
+  that project's own word. No hook installs, and `skills/watch-prs/scripts/test-hooks.sh` fails if
   the plugin root gains a `hooks/` directory, either manifest declares hooks, or a
   Markdown file's frontmatter holds a line starting `hooks:`. An installed copy of the brief is covered: it runs in the installing operator's
   own session, and the disclosure is accepted there on the same argument. A
@@ -449,8 +450,8 @@ finding. The accepted records:
   bound outside the deadline, a run the deadline cut short — is still a finding, and so is
   a change that drops `skills/watch-prs/scripts/test-hooks.sh` from the suite or stops
   either CI job from running it. The cost accepted there is a disclosure, not a wasted
-  round: a secret the cold reviewer reaches through a copy, a link or an ignored file
-  enters its transcript.
+  round: a secret the cold reviewer reaches through a copy, a link, an ignored file or a
+  project's own `open:` line enters its transcript.
 
 - `docs/decisions/2026-09-07-pre-push-checks-the-tree.md`: the pre-push hook checks the
   working tree, not the commit a push sends. Three things are accepted there: a tree that
