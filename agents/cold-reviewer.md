@@ -63,9 +63,10 @@ through `readlink -- <that root>/<path>` and never opened, the Read tool followi
 of the checkout, and since `test -e` follows a link and so calls a dangling one absent. Ask
 it of every directory above the path as well, each prefix from the root down, since the
 probe answers for the component it names and a link one level up carries the read out of
-the checkout just the same; where any prefix prints `link`, report the path as reached
-through that link and open nothing under it. Only where every one of them prints
-`not-a-link` does
+the checkout just the same; a prefix already answered is not asked again. Where any prefix
+prints `link`, report the path as reached through that link, named by
+`readlink -- <that root>/<prefix>`, and open nothing under it. Only where the path and
+every directory above it print `not-a-link` does
 `test -e <that root>/<path> && echo present || echo absent` decide presence, and it, not
 the diff: a path the diff shows deleted can still be there as an untracked file, and one
 that is really gone has the diff as its read. A status letter says what changed, not what

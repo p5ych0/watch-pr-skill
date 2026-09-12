@@ -88,30 +88,32 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
         || die "the brief no longer reads a link with readlink at the root"
     pd="$tmp/probe"
-    mkdir -p "$pd/outside" && : > "$pd/file" && : > "$pd/outside/child" && ln -s "$pd/nowhere" "$pd/dangling" \
-        && ln -s "$pd/outside" "$pd/tree" || die "the probe directory was not built"
+    mkdir -p "$pd" "$tmp/outside" && : > "$pd/file" && : > "$tmp/outside/child" && ln -s "$pd/nowhere" "$pd/dangling" \
+        && ln -s "$tmp/outside" "$pd/tree" || die "the probe directory was not built"
     lp="$(grep -m1 -o 'test -L <that root>/<path> && echo [a-z-]* || echo [a-z-]*' "$BRIEF")"
     ep="$(grep -m1 -o 'test -e <that root>/<path> && echo [a-z-]* || echo [a-z-]*' "$BRIEF")"
     run_probe() { (cd "$pd" && bash -c "${1//<that root>\/<path>/$2}"); }
     [ -n "$lp" ] && [ -n "$ep" ] \
         && [ "$(run_probe "$lp" dangling)" = link ] && [ "$(run_probe "$lp" file)" = not-a-link ] \
         && [ "$(run_probe "$ep" file)" = present ] && [ "$(run_probe "$ep" missing)" = absent ] \
-        && grep -qF 'Only where every one of them prints' "$BRIEF" \
+        && grep -qF 'Only where the path and every directory above it print `not-a-link` does' <<<"$fb" \
+        && ! grep -qF 'Only where that prints' "$BRIEF" \
         && pass "…and each probe the brief states prints its answer, for a dangling link, a file and a path that is gone, the second asked only where the first says not-a-link" \
         || die "a probe in the brief prints no answer, or not the word the sentence after it tests (link probe: $lp; presence probe: $ep)"
     # A link one level up is why the brief probes every prefix: the child itself answers not-a-link.
     [ "$(run_probe "$lp" tree/child)" = not-a-link ] && [ "$(run_probe "$ep" tree/child)" = present ] \
         && [ "$(run_probe "$lp" tree)" = link ] \
         && grep -qF 'Ask it of every directory above the path as well, each prefix from the root down' <<<"$fb" \
-        && grep -qF 'where any prefix prints `link`, report the path as reached through that link and open nothing under it' <<<"$fb" \
+        && grep -qF 'Where any prefix prints `link`, report the path as reached through that link' <<<"$fb" \
+        && grep -qF 'and open nothing under it' <<<"$fb" \
         && pass "…and a path under a linked directory, which probes not-a-link and present itself, is caught by the probe the brief asks of every prefix" \
-        || die "the brief probes only the final component, so a directory replaced by a link carries the read out of the checkout"
+        || die "the brief probes only the final component, so a directory replaced by a link carries the read out of the checkout (link probe: $lp; tree/child answered $(run_probe "$lp" tree/child), tree answered $(run_probe "$lp" tree))"
     grep -qF 'and `echo` only to print a probe' "$BRIEF" && pass "…and echo is allowed for printing a probe's answer and nothing else" \
         || die "the brief's command list does not allow the echo its probes print through"
     grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
         && grep -qF 'The secrets rule marks a path named `.env`, `.env.*`,' "$BRIEF" \
         && grep -qF 'or with a `.env`, `.env.*` or `.ssh` directory anywhere above it' "$BRIEF" \
-        && grep -qF 'a name ending `.example` is a template and is marked only by a directory above it' <<<"$(tr '\n' ' ' < "$BRIEF" | tr -s ' ')" \
+        && grep -qF 'a name ending `.example` is a template and is marked only by a directory above it' <<<"$fb" \
         && pass "…and it leaves a path unopened when the base's policy forbids it, or its name or a directory above it marks it as holding secrets, a committed .example template excepted" \
         || die "the brief's diff and read no longer obey the base's policy, a secrets rule covering a path's name and the directories above it, and the .example exemption"
     policy=0

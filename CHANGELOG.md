@@ -12,7 +12,8 @@
   asked of every prefix from the root down now, and a path under one that prints `link` is
   reported as reached through it and nothing under it is opened. `test-hooks.sh` builds a
   directory that is a link to one outside the probe root and asserts what made the gap: the
-  child answers `not-a-link` and `present`, while the prefix answers `link`.
+  child answers `not-a-link` and `present`, while the prefix answers `link`. The old
+  single-component sentence is refused beside it.
 
 ## [2.11.0] — 2026-09-12
 
