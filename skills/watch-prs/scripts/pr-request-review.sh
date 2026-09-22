@@ -58,8 +58,7 @@ if _marker="$(rb_reserved_marker_line "$BODY")"; then
     exit 1
 fi
 
-# Only where a pass is already queued: on the manual path this helper writes the mention itself,
-# unless the body already carries one.
+# Only where a pass is already queued: on the manual path a quoted mention is the request itself.
 if [ "$AUTO_REVIEW" = "yes" ]; then
     rb_review_trigger "$BODY"; _trig_rc=$?
     case "$_trig_rc" in
@@ -85,9 +84,7 @@ _rb_wh="$(rb_write_handoff "$BASELINE_FILE" "$NONCE ${PRIOR:-none}")" \
     || { echo "ABORT: the review baseline could not be written; nothing has been posted: $_rb_wh" >&2; exit 1; }
 
 # One comment on the manual path: the mention is the trigger, and an account posted apart from
-# it is one the pass may not read. A body that already carries one is posted as it stands: the
-# comment is the trigger either way, and a written mention above a quoted one reads as two
-# requests.
+# it is one the pass may not read; a body already carrying the mention is its own request.
 _PREFIX="@codex review
 
 "

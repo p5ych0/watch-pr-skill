@@ -359,10 +359,7 @@ rb_review_trigger ""; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and empty text requests nothing" \
     || die "empty text gave rc=$rc"
-# …AND NO ANSWER DEPENDS ON A COMMAND THAT CAN FAIL. `pr-close-round.sh` asks this in `gate`, before
-# the threads are resolved, and again in `post` afterwards: an indeterminate answer there aborts with
-# the round half-closed. With an empty PATH nothing external resolves, so a folding command would
-# leave rc=2 where the answer is now still 0 and 1.
+# …AND NO ANSWER DEPENDS ON A COMMAND, since a caller asks it after work it cannot take back.
 BASH_EXE="$(command -v bash)" || BASH_EXE=/bin/bash
 for _case in '@CODEX Review please:0' 'nothing to see here:1'; do
     _t="${_case%:*}"; _want="${_case##*:}"
@@ -426,8 +423,7 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         /'"'"'\*\*(Review-Signoff|Review-Signoff-Revoked|Review-Pause-Acknowledged|Reviewed commit):\*\*'"'"'\*/ { print FILENAME ":" FNR ": reserved marker set" }
         # …and the review trigger. Two callers must refuse it and a third writes
         # it deliberately, which is exactly the split that ends up wrong in one.
-        # Both spellings: the library carries the case in the pattern now, and a copy of
-        # either one is the duplication this exists to find.
+        # Both spellings: a copy of either is the duplication this exists to find.
         /\*'"'"'@codex review'"'"'\*\)/ { print FILENAME ":" FNR ": review trigger" }
         /\*'"'"'@'"'"'\[Cc\]\[Oo\]\[Dd\]\[Ee\]\[Xx\]/ { print FILENAME ":" FNR ": review trigger" }
         # …and the `PR_REVIEW_STATE` record shape. It was written out in

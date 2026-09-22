@@ -192,10 +192,7 @@ if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 1; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 1; }
 # A Copilot round's summary must not carry the Codex mention, which requests a pass on its own; in a
-# Codex round the comment carrying the summary IS the request, so a quoted mention asks for the same
-# pass and only decides whether this script writes one above it.
-# `post` asks this after the driver has resolved the threads, where a refusal would leave the round
-# half-closed, so the question runs no command and cannot come back indeterminate.
+# Codex round a quoted one is the request, so none is written above it.
 _PREFIX="@codex review
 
 "
@@ -260,7 +257,6 @@ request_review() {
             || { echo "ABORT: could not re-request Copilot."; return 1; }
     else
         # The mention and the summary share one comment: a separate summary is one the pass may not read.
-        # `$_PREFIX` is empty where the summary already carries the mention, decided above in this stage.
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$_PREFIX$SUMMARY" \
             || { echo "ABORT: could not request the review that carries this round's summary."; return 1; }
     fi

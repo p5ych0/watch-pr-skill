@@ -318,15 +318,13 @@ rc="$(run 7 no)"
     && pass "…while the manual path accepts one, because the comment it posts IS the request" \
     || die "a quoted mention on the manual path was refused: rc=$rc '$(stderr)'"
 
-# AND IT IS POSTED ONCE. The written mention above a quoted one reads as two
-# requests where only one pass was asked for, which is what the operator sees.
+# AND IT IS POSTED ONCE: a mention written above a quoted one reads as two requests.
 _cap bodies
 [ "$(grep -o -i '@codex review' <<<"$_CAP" | wc -l | tr -d ' ')" = 1 ] \
     && pass "…carrying the mention exactly once, not the written one above the quoted one" \
     || die "the manual path posted the mention more than once: $(bodies)"
 
-# The prefix is still written for a body that carries none, which is every
-# ordinary round: dropping it would post an account nothing triggers a pass on.
+# A body quoting none is still posted under the mention, or nothing would trigger the pass.
 world; printf 'An account that never names the trigger.\n' > "$TMP/body.md"
 rc="$(run 7 no)"
 _cap bodies
