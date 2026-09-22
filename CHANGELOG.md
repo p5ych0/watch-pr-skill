@@ -14,6 +14,11 @@
   the body, so a quoted mention, indented or fenced, requests the pass by itself. `test-pr-request-review.sh`
   and `test-pr-close-round.sh` count the mentions in what was posted, for a body that quotes
   one and for a body that does not; both cases fail against the unfixed helpers.
+  `rb_review_trigger` answers from a case pattern rather than folding the text with `tr`, so the
+  question runs no command and cannot come back indeterminate. `gate` asks it before the threads
+  are resolved and `post` asks it again afterwards, where a refusal would have left the round
+  half-closed with nothing posted; `test-recordlib.sh` runs both answers with an empty `PATH`,
+  which the folding version could not survive.
 
 ## [2.11.1] — 2026-09-12
 

@@ -194,8 +194,9 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 # A Copilot round's summary must not carry the Codex mention, which requests a pass on its own; in a
 # Codex round the comment carrying the summary IS the request, so a quoted mention asks for the same
 # pass and only decides whether this script writes one above it.
-# Asked here, before the gate pushes and the driver resolves the threads: by `post` the round is
-# irreversibly half-closed, and an unreadable answer must refuse while refusing still costs nothing.
+# Asked in both stages, since each process decides its own prefix, and `post` asks it after the driver
+# has resolved the threads, where a refusal would leave the round half-closed with nothing posted:
+# `rb_review_trigger` runs no command, so the answer cannot be indeterminate in one stage and not the other.
 _PREFIX="@codex review
 
 "

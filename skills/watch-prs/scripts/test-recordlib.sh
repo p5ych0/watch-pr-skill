@@ -359,6 +359,18 @@ rb_review_trigger ""; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and empty text requests nothing" \
     || die "empty text gave rc=$rc"
+# …AND NO ANSWER DEPENDS ON A COMMAND THAT CAN FAIL. `pr-close-round.sh` asks this in `gate`, before
+# the threads are resolved, and again in `post` afterwards: an indeterminate answer there aborts with
+# the round half-closed. With an empty PATH nothing external resolves, so a folding command would
+# leave rc=2 where the answer is now still 0 and 1.
+BASH_EXE="$(command -v bash)" || BASH_EXE=/bin/bash
+for _case in '@CODEX Review please:0' 'nothing to see here:1'; do
+    _t="${_case%:*}"; _want="${_case##*:}"
+    rc=0; env -i PATH= "$BASH_EXE" -c '. "$1"/recordlib.sh || exit 9; rb_review_trigger "$2"' _ "$SELF_DIR" "$_t" || rc=$?
+    [ "$rc" -eq "$_want" ] \
+        && pass "…and it answers $rc with no command available: ${_t:0:24}" \
+        || die "with an empty PATH '$_t' gave rc=$rc, wanted $_want"
+done
 
 # ── the drift guard ───────────────────────────────────────────────────────
 # Centralising is not a one-time act. Each of these rules was re-implemented by
