@@ -103,11 +103,10 @@ rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if th
 }
 
 # Anywhere and in any case: the mention is the trigger wherever it sits, so a body quoting it requests a pass.
-rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not, 2 could not tell
-    local _lc
-    _lc="$(printf '%s' "${1-}" | LC_ALL=C tr '[:upper:]' '[:lower:]')" || return 2
-    case "$_lc" in
-        *'@codex review'*) return 0 ;;
+# The case is carried in the pattern, since a caller asks this after work it cannot take back.
+rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not
+    case "${1-}" in
+        *'@'[Cc][Oo][Dd][Ee][Xx]' '[Rr][Ee][Vv][Ii][Ee][Ww]*) return 0 ;;
     esac
     return 1
 }

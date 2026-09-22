@@ -192,14 +192,23 @@ if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 1; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 1; }
 # A Copilot round's summary must not carry the Codex mention, which requests a pass on its own; in a
-# Codex round this script writes the mention itself, so a quoted one changes nothing.
+# Codex round a quoted one is the request, so none is written above it.
+_PREFIX="@codex review
+
+"
+rb_review_trigger "$SUMMARY"; _trig_rc=$?
 if [ "$WHO" = "$COPILOT_BOT" ]; then
-    rb_review_trigger "$SUMMARY"; _trig_rc=$?
     case "$_trig_rc" in
         1) ;;
         0) echo "ABORT: this is a Copilot round and the summary contains '@codex review', which requests a Codex pass on its own."
            echo "Only Copilot should be re-requested here. Break the mention up, or describe it without the @."
            exit 1 ;;
+        *) echo "ABORT: could not tell whether the round summary requests a review (rc=$_trig_rc)"; exit 1 ;;
+    esac
+else
+    case "$_trig_rc" in
+        1) ;;
+        0) _PREFIX="" ;;
         *) echo "ABORT: could not tell whether the round summary requests a review (rc=$_trig_rc)"; exit 1 ;;
     esac
 fi
@@ -248,9 +257,7 @@ request_review() {
             || { echo "ABORT: could not re-request Copilot."; return 1; }
     else
         # The mention and the summary share one comment: a separate summary is one the pass may not read.
-        gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "@codex review
-
-$SUMMARY" \
+        gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$_PREFIX$SUMMARY" \
             || { echo "ABORT: could not request the review that carries this round's summary."; return 1; }
     fi
     RB_PRIOR_REVIEW="$prior"

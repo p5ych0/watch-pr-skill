@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.11.2] — 2026-09-22
+
+- **The request comment carried the mention twice.** On the manual path the opening request
+  and a Codex round's summary are posted under a `@codex review` line this loop writes, and a
+  body that already quoted the mention — out of a finding, a PR description or a previous
+  round — was posted underneath it unchanged. One comment is one trigger, so the pass was
+  never doubled; what doubled was what the operator reads, a request that says itself twice,
+  reported twice from one repository before anyone traced it. Quoting stays allowed, because
+  quoting a finding is most of what a round summary does: the mention is written only when
+  the body carries none, so the loop never writes a second one above it. The drop rests on
+  the same measurement the refusals do — the trigger matches case-insensitively anywhere in
+  the body, so a quoted mention, indented or fenced, requests the pass by itself. `test-pr-request-review.sh`
+  and `test-pr-close-round.sh` count the mentions in what was posted, for a body that quotes
+  one and for a body that does not; both cases fail against the unfixed helpers.
+  `rb_review_trigger` answers from a case pattern rather than folding the text with `tr`, so the
+  question runs no command and cannot come back indeterminate. `gate` asks it before the threads
+  are resolved and `post` asks it again afterwards, where a refusal would have left the round
+  half-closed with nothing posted; `test-recordlib.sh` runs both answers with an empty `PATH`,
+  which the folding version could not survive.
+
 ## [2.11.1] — 2026-09-12
 
 - **A link one level up is a link.** The cold reviewer probed a changed path with

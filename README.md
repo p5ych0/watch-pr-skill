@@ -306,7 +306,12 @@ The loop stops and asks at these points:
    create the record it quotes. Indent it by four spaces or quote it inline with
    backticks; a fenced block does not help, since the readers scan the raw body.
    A body containing `@codex review` is refused wherever the comment is posted
-   on its own, because any comment containing that text requests a pass.
+   on its own, because any comment containing that text requests a pass. Where
+   the loop writes the mention itself — the opening request with automatic
+   review off, and a Codex round's summary — a body that already carries one is
+   posted as it stands, so the loop never writes a second one above it. A
+   mention indented or inside a fence triggers the pass just the same, which is
+   why a body carrying one needs no help from the loop.
 
 Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
 the head and, where the phase could read it, the time of the verdict it

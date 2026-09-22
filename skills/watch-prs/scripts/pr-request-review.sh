@@ -58,7 +58,7 @@ if _marker="$(rb_reserved_marker_line "$BODY")"; then
     exit 1
 fi
 
-# Only where a pass is already queued: on the manual path this helper writes the mention itself.
+# Only where a pass is already queued: on the manual path a quoted mention is the request itself.
 if [ "$AUTO_REVIEW" = "yes" ]; then
     rb_review_trigger "$BODY"; _trig_rc=$?
     case "$_trig_rc" in
@@ -84,14 +84,21 @@ _rb_wh="$(rb_write_handoff "$BASELINE_FILE" "$NONCE ${PRIOR:-none}")" \
     || { echo "ABORT: the review baseline could not be written; nothing has been posted: $_rb_wh" >&2; exit 1; }
 
 # One comment on the manual path: the mention is the trigger, and an account posted apart from
-# it is one the pass may not read.
+# it is one the pass may not read; a body already carrying the mention is its own request.
+_PREFIX="@codex review
+
+"
 if [ "$AUTO_REVIEW" = "yes" ]; then
     gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$BODY" >&2 \
         || { echo "ABORT: could not post the PR context — do not enter the wait step." >&2; exit 1; }
 else
-    gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "@codex review
-
-$BODY" >&2 \
+    rb_review_trigger "$BODY"; _trig_rc=$?
+    case "$_trig_rc" in
+        1) ;;
+        0) _PREFIX="" ;;
+        *) echo "ABORT: could not tell whether the request body requests a review (rc=$_trig_rc); nothing has been posted" >&2; exit 1 ;;
+    esac
+    gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$_PREFIX$BODY" >&2 \
         || { echo "ABORT: could not post the @codex request — do not enter the wait step." >&2; exit 1; }
 fi
 exit 0
