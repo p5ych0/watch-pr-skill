@@ -103,10 +103,8 @@ rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if th
 }
 
 # Anywhere and in any case: the mention is the trigger wherever it sits, so a body quoting it requests a pass.
-# The case is carried in the pattern rather than folded by `tr`, so no command can fail here: `gate` asks
-# this before the threads are resolved and `post` asks it again afterwards, where a refusal would leave the
-# round half-closed with nothing posted.
-rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not, 2 could not tell
+# The case is carried in the pattern, since a caller asks this after work it cannot take back.
+rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not
     case "${1-}" in
         *'@'[Cc][Oo][Dd][Ee][Xx]' '[Rr][Ee][Vv][Ii][Ee][Ww]*) return 0 ;;
     esac

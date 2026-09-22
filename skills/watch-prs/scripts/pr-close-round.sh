@@ -194,9 +194,8 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 # A Copilot round's summary must not carry the Codex mention, which requests a pass on its own; in a
 # Codex round the comment carrying the summary IS the request, so a quoted mention asks for the same
 # pass and only decides whether this script writes one above it.
-# Asked in both stages, since each process decides its own prefix, and `post` asks it after the driver
-# has resolved the threads, where a refusal would leave the round half-closed with nothing posted:
-# `rb_review_trigger` runs no command, so the answer cannot be indeterminate in one stage and not the other.
+# `post` asks this after the driver has resolved the threads, where a refusal would leave the round
+# half-closed, so the question runs no command and cannot come back indeterminate.
 _PREFIX="@codex review
 
 "
@@ -261,7 +260,7 @@ request_review() {
             || { echo "ABORT: could not re-request Copilot."; return 1; }
     else
         # The mention and the summary share one comment: a separate summary is one the pass may not read.
-        # `$_PREFIX` is empty where the summary already carries the mention, decided before the gate.
+        # `$_PREFIX` is empty where the summary already carries the mention, decided above in this stage.
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$_PREFIX$SUMMARY" \
             || { echo "ABORT: could not request the review that carries this round's summary."; return 1; }
     fi

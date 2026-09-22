@@ -426,7 +426,10 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         /'"'"'\*\*(Review-Signoff|Review-Signoff-Revoked|Review-Pause-Acknowledged|Reviewed commit):\*\*'"'"'\*/ { print FILENAME ":" FNR ": reserved marker set" }
         # …and the review trigger. Two callers must refuse it and a third writes
         # it deliberately, which is exactly the split that ends up wrong in one.
+        # Both spellings: the library carries the case in the pattern now, and a copy of
+        # either one is the duplication this exists to find.
         /\*'"'"'@codex review'"'"'\*\)/ { print FILENAME ":" FNR ": review trigger" }
+        /\*'"'"'@'"'"'\[Cc\]\[Oo\]\[Dd\]\[Ee\]\[Xx\]/ { print FILENAME ":" FNR ": review trigger" }
         # …and the `PR_REVIEW_STATE` record shape. It was written out in
         # `pr-merge-gate.sh` and `pr-watch.sh` and was MISSING from
         # `pr-phase-state.sh`, which re-validated a recorded signoff on the exit
@@ -502,6 +505,16 @@ seen="$(scan_inline_rules "$DRIFT")"; drc5=$?
 { [ "$drc5" -eq 0 ] && grep -q 'pr-trigger-copy.sh' <<<"$seen"; } \
     && pass "…and catches a helper that re-implements the review trigger" \
     || die "the drift guard did not catch a planted trigger copy (rc=$drc5 out='$seen')"
+rm -f "$DRIFT/pr-trigger-copy.sh"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$_b" in\n'
+  printf "    *'@'[Cc][Oo][Dd][Ee][Xx]' '[Rr][Ee][Vv][Ii][Ee][Ww]*) return 0 ;;\n"
+  printf 'esac\n'
+} > "$DRIFT/pr-trigger-cased-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
+{ [ "$drc6" -eq 0 ] && grep -q 'pr-trigger-cased-copy.sh' <<<"$seen"; } \
+    && pass "…and catches one that copies the cased spelling the library carries now" \
+    || die "the drift guard did not catch a planted cased trigger copy (rc=$drc6 out='$seen')"
 rm -f "$DRIFT/pr-trigger-copy.sh"
 { printf '#!/usr/bin/env bash\n'
   printf "rx='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'\n"

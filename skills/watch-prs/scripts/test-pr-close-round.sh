@@ -725,13 +725,14 @@ got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 # AND THE COMMENT CARRIES IT ONCE. Written above a quoted one it reads as two
 # requests where one pass was asked for, which is what the operator sees.
 round_with() {   # round_with <summary text> ; a whole mention-mode Codex round
-    local g
+    local g p
     world; printf '%s\n' "$1" > "$TMP/summary.md"; : > "$HEADF"
     g="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
-    # A gate that did not pass is the whole answer here too: posting anyway would count
+    # A stage that did not pass is the whole answer here too: posting anyway would count
     # zero mentions and report an absent comment as a doubled one.
     [ "${g%%|*}" = 0 ] || die "the gate refused a round these cases are about: '${g}'"
-    stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" >/dev/null
+    p="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
+    [ "${p%%|*}" = 0 ] || die "post refused a round these cases are about: '${p}'"
 }
 mentions_in() {   # mentions_in <file> ; how many times the mention was posted
     grep -o -i '@codex review' "$1" | wc -l | tr -d ' '
