@@ -309,9 +309,8 @@ nothing_posted \
     && pass "…and nothing is posted" \
     || die "the quoted mention was posted: $(cat "$TMP/calls")"
 
-# THE MANUAL PATH ALLOWS IT, and that asymmetry is the point: the comment there IS
-# the request, so a body carrying the mention asks for the same single pass.
-# Refusing it in both would forbid a PR description that quotes the loop.
+# THE MANUAL PATH ALLOWS IT: the comment there IS the request, and refusing it in
+# both paths would forbid a PR description that quotes the loop.
 world; printf 'Superseding the earlier @codex review request described in #12.\n' > "$TMP/body.md"
 rc="$(run 7 no)"
 { [ "$rc" = 0 ] && posted; } \

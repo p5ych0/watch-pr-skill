@@ -353,8 +353,7 @@ for _t in 'codex review without the at' \
         && pass "…and text that would not is left alone: ${_t:0:28}" \
         || die "a non-trigger was reported (rc=$rc): '$_t'"
 done
-# THE THREE ANSWERS ARE DISTINGUISHED, because a caller that cannot tell must stop
-# rather than post. `0` requests, `1` does not, and anything else is unknown.
+# TWO ANSWERS: `0` requests a pass and `1` does not, so empty text is a `1`.
 rb_review_trigger ""; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and empty text requests nothing" \
@@ -421,9 +420,8 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # double quotes and with no glob, which is why the quote-and-glob shape is
         # what this looks for.
         /'"'"'\*\*(Review-Signoff|Review-Signoff-Revoked|Review-Pause-Acknowledged|Reviewed commit):\*\*'"'"'\*/ { print FILENAME ":" FNR ": reserved marker set" }
-        # …and the review trigger. Two callers must refuse it and a third writes
-        # it deliberately, which is exactly the split that ends up wrong in one.
-        # Both spellings: a copy of either is the duplication this exists to find.
+        # …and the review trigger, in both spellings. Two callers must refuse it and a
+        # third writes it deliberately, which is exactly the split that ends up wrong in one.
         /\*'"'"'@codex review'"'"'\*\)/ { print FILENAME ":" FNR ": review trigger" }
         /\*'"'"'@'"'"'\[Cc\]\[Oo\]\[Dd\]\[Ee\]\[Xx\]/ { print FILENAME ":" FNR ": review trigger" }
         # …and the `PR_REVIEW_STATE` record shape. It was written out in
