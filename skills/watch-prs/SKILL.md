@@ -149,6 +149,12 @@ opening request where automatic review is on, since a pass is already queued, an
 Copilot-round summary or the phase account whatever the mode, since it would start a Codex
 pass nobody asked for. Write the mention without the `@`, or broken up.
 
+Where this loop writes the mention itself — the opening request on the manual path, and a
+Codex round's summary — a body that already carries one is posted as it stands: the comment
+is the trigger either way, and a written mention above a quoted one reads as two requests.
+Indenting one or putting it in a fence does not stop it triggering, which is the same
+measurement the refusals above rest on.
+
 The nonce is generated fresh before every request and handed to both the writer and the
 watch, so a baseline left by an earlier round is refused rather than waited past.
 

@@ -713,14 +713,40 @@ grep -q 'git push' "$TMP/calls" \
     && die "it pushed with a summary that would request Codex" \
     || pass "…before anything was pushed"
 
-# IN A CODEX ROUND THE MENTION IS THE REQUEST, and this script writes it itself,
-# so a body that also carries one changes nothing and must not be refused —
-# quoting a finding is most of what a round summary does.
+# IN A CODEX ROUND THE MENTION IS THE REQUEST, and the comment carrying the summary
+# is that request, so a summary quoting one asks for the same single pass and must
+# not be refused — quoting a finding is most of what a round summary does.
 world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/summary.md"
 got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 [ "${got%%|*}" = 0 ] \
     && pass "…while a Codex round, whose request IS the mention, is left alone" \
     || die "a Codex summary quoting the trigger was refused: '${got}'"
+
+# AND THE COMMENT CARRIES IT ONCE. Written above a quoted one it reads as two
+# requests where one pass was asked for, which is what the operator sees.
+round_with() {   # round_with <summary text> ; a whole mention-mode Codex round
+    local g
+    world; printf '%s\n' "$1" > "$TMP/summary.md"; : > "$HEADF"
+    g="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
+    # A gate that did not pass is the whole answer here too: posting anyway would count
+    # zero mentions and report an absent comment as a doubled one.
+    [ "${g%%|*}" = 0 ] || die "the gate refused a round these cases are about: '${g}'"
+    stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" >/dev/null
+}
+mentions_in() {   # mentions_in <file> ; how many times the mention was posted
+    grep -o -i '@codex review' "$1" | wc -l | tr -d ' '
+}
+round_with 'the finding said to post `@codex review` afterwards'
+[ "$(mentions_in "$TMP/calls")" = 1 ] \
+    && pass "…and posts the mention exactly once, not written above quoted" \
+    || die "a Codex round posted the mention more than once: $(cat "$TMP/calls")"
+
+# A summary quoting none is still posted under the mention, which is every
+# ordinary round: dropping the prefix would post a summary nothing triggers on.
+round_with 'an ordinary round summary'
+[ "$(mentions_in "$TMP/calls")" = 1 ] \
+    && pass "…and a summary quoting none is posted under exactly one" \
+    || die "a summary without the mention was not posted under one: $(cat "$TMP/calls")"
 printf 'the round summary\n' > "$TMP/summary.md"
 
 # ── THE THREADS ARE ANSWERED BETWEEN THE STAGES ────────────────────────────

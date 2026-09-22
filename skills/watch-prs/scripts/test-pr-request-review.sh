@@ -309,14 +309,30 @@ nothing_posted \
     && pass "…and nothing is posted" \
     || die "the quoted mention was posted: $(cat "$TMP/calls")"
 
-# THE MANUAL PATH ALLOWS IT, and that asymmetry is the point: this script writes
-# the mention itself there, so a body that also carries one changes nothing.
+# THE MANUAL PATH ALLOWS IT, and that asymmetry is the point: the comment there IS
+# the request, so a body carrying the mention asks for the same single pass.
 # Refusing it in both would forbid a PR description that quotes the loop.
 world; printf 'Superseding the earlier @codex review request described in #12.\n' > "$TMP/body.md"
 rc="$(run 7 no)"
 { [ "$rc" = 0 ] && posted; } \
-    && pass "…while the manual path accepts one, because it writes the mention itself" \
+    && pass "…while the manual path accepts one, because the comment it posts IS the request" \
     || die "a quoted mention on the manual path was refused: rc=$rc '$(stderr)'"
+
+# AND IT IS POSTED ONCE. The written mention above a quoted one reads as two
+# requests where only one pass was asked for, which is what the operator sees.
+_cap bodies
+[ "$(grep -o -i '@codex review' <<<"$_CAP" | wc -l | tr -d ' ')" = 1 ] \
+    && pass "…carrying the mention exactly once, not the written one above the quoted one" \
+    || die "the manual path posted the mention more than once: $(bodies)"
+
+# The prefix is still written for a body that carries none, which is every
+# ordinary round: dropping it would post an account nothing triggers a pass on.
+world; printf 'An account that never names the trigger.\n' > "$TMP/body.md"
+rc="$(run 7 no)"
+_cap bodies
+{ [ "$rc" = 0 ] && [ "$(grep -o -i '@codex review' <<<"$_CAP" | wc -l | tr -d ' ')" = 1 ]; } \
+    && pass "…and a body carrying none is still posted under exactly one" \
+    || die "a body without the mention gave rc=$rc bodies=$(bodies)"
 
 # THE MENTION IS MATCHED WHATEVER ITS CASE, which is how GitHub triggers it — so
 # a body carrying `@Codex Review` on the automatic path queues the second pass an

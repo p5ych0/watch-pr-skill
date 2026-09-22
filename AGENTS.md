@@ -250,8 +250,8 @@ carries it; a step out of order; a request, summary or phase body that may carry
 a reserved marker, or a mention where a pass is already queued or another
 reviewer's round is being closed — the check-in acknowledgement is the one body
 the driver writes with a marker on purpose, and the mention the request and
-round-closing helpers add themselves on the manual path is the trigger, not a
-finding.
+round-closing helpers add themselves on the manual path, where the body carries
+none, is the trigger, not a finding.
 
 ### Comments, claims and prose
 
