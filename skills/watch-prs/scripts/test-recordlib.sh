@@ -509,7 +509,7 @@ seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
 { [ "$drc6" -eq 0 ] && grep -q 'pr-trigger-cased-copy.sh' <<<"$seen"; } \
     && pass "…and catches one that copies the cased spelling the library carries now" \
     || die "the drift guard did not catch a planted cased trigger copy (rc=$drc6 out='$seen')"
-rm -f "$DRIFT/pr-trigger-copy.sh"
+rm -f "$DRIFT/pr-trigger-cased-copy.sh"
 { printf '#!/usr/bin/env bash\n'
   printf "rx='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'\n"
 } > "$DRIFT/pr-record-copy.sh"
