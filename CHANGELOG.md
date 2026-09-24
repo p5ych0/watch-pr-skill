@@ -6,18 +6,19 @@
   relative — most Linux desktops, and a Claude Code session there — setup reserved
   `~/watch-pr-setup.<pid>.<random>`, and its retry was `~/watch-pr-setup-2.…` whatever
   `TMPDIR` was. Nothing under a setup directory is removed, so they piled up in `~` itself,
-  seventeen in two weeks on one workstation. Setup now works under `~/.cache/watch-pr` in
-  both places, created where missing; a `TMPDIR` the system sets to an absolute path is
+  seventeen in two weeks on one workstation. Setup now works under `~/.watch-pr` in both
+  places, created mode 700 where missing; a `TMPDIR` the system sets to an absolute path is
   still used first. The no-removal rule is unchanged, and directories earlier releases left
   in `~` stay where they are (#360).
 
-  The directory is created under `umask 077` because `pr-origin.sh` refuses a group-writable
-  ancestor: under a `umask 002`, `mkdir -m 700` would have left a freshly created `~/.cache`
-  at 775 and refused the session. One that cannot be created stops setup with an `ABORT:`
-  naming it, before any helper runs. `test-pr-skill-contract.sh` runs the setup fence with
-  `TMPDIR` unset under `umask 002` and asserts the session lands in `~/.cache/watch-pr` with
-  nothing else in `HOME`, and with `HOME` read-only asserts the abort and that no helper ran;
-  the retry and relative-`TMPDIR` cases now expect `~/.cache/watch-pr`. Closes #359.
+  The parent sits directly under `HOME` so the ancestry `pr-origin.sh` walks gains one
+  component, the one the fence creates: a parent under `~/.cache` would have refused every
+  session on a machine whose `~/.cache` some other tool had created group-writable. A parent
+  that cannot be created stops setup with an `ABORT:` naming it, on the first attempt before
+  any helper runs and on the retry before a second one does. `test-pr-skill-contract.sh` runs
+  the setup fence with `TMPDIR` unset under `umask 002` and asserts the session lands in
+  `~/.watch-pr` with nothing else in `HOME`, and with `HOME` read-only asserts the abort on
+  each path; the retry and relative-`TMPDIR` cases now expect `~/.watch-pr`. Closes #359.
 
 ## [2.11.2] — 2026-09-22
 
