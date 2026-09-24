@@ -327,20 +327,30 @@ fi
 
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the missing-HOME case"
-elif _sr9="$(mktemp_d)" && _base9="$(mktemp_d)" \
-     && git -C "$_sr9" init -q && git -C "$_sr9" remote add origin 'git@github.com:acme/widget.git'; then
-    _mrc=0
-    _mout="$(cd "$_sr9" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_base9/gone/home" \
-        run_limited 60 env -u TMPDIR bash -c "$setup_fence" 2>&1)" || _mrc=$?
-    _mls="$(ls -A "$_base9")" || _mls="unlisted"
-    case "$_mrc|$_mls|$_mout" in
-        0\|*) die "with HOME missing the setup fence exited 0 with: '$_mout'" ;;
-        *"PR_SETUP"*) die "with HOME missing a helper still ran: '$_mout'" ;;
-        "$_mrc||"*"ABORT: setup failed; $_base9/gone/home/.watch-pr could not be created"*)
-            pass "a HOME that does not exist stops setup, and nothing is created on the way to it" ;;
-        *) die "with HOME missing the setup fence exited $_mrc, left '$_mls', with: '$_mout'" ;;
-    esac
-    rm -rf "$_sr9" "$_base9"
+elif _sr9="$(mktemp_d)" && _ro9="$(mktemp_d)" \
+     && git -C "$_sr9" init -q && git -C "$_sr9" remote add origin 'git@github.com:acme/widget.git' \
+     && chmod 500 "$_ro9"; then
+    for _arm in first retry; do
+        if [ "$_arm" = retry ] && [ "$(id -u)" -eq 0 ]; then
+            pass "the missing-HOME retry is skipped as root, whom no directory mode refuses"
+            continue
+        fi
+        _base9="$(mktemp_d)" || { die "could not stage the missing-HOME $_arm"; continue; }
+        _tmpdir9=(-u TMPDIR); _want9=0; [ "$_arm" = retry ] && _tmpdir9=(TMPDIR="$_ro9") && _want9=1
+        _mrc=0
+        _mout="$(cd "$_sr9" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_base9/gone/home" \
+            run_limited 60 env "${_tmpdir9[@]}" bash -c "$setup_fence" 2>&1)" || _mrc=$?
+        _mn="$(grep -c 'PR_SETUP' <<<"$_mout")" || _mn=0
+        _mls="$(ls -A "$_base9")" || _mls="unlisted"
+        if [ "$_mrc" -ne 0 ] && [ "$_mn" -eq "$_want9" ] && [ -z "$_mls" ] \
+           && [[ $_mout == *"ABORT: setup failed; $_base9/gone/home/.watch-pr could not be created"* ]]; then
+            pass "a HOME that does not exist stops the $_arm attempt, and nothing is created on the way to it"
+        else
+            die "with HOME missing the $_arm attempt exited $_mrc after $_mn setup records, left '$_mls', with: '$_mout'"
+        fi
+        rm -rf "$_base9"
+    done
+    chmod 700 "$_ro9"; rm -rf "$_sr9" "$_ro9"
 else
     die "could not stage the missing-HOME case"
 fi
