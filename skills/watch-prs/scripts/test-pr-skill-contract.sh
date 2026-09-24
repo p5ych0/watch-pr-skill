@@ -250,6 +250,10 @@ elif _sr4="$(mktemp_d)" && _home4="$(mktemp_d)" && _col="$(mktemp_d)/RB_SETUP_DI
         "0|$_col/watch-pr-setup."*) pass "a scratch parent whose path spells the marker does not confuse the read" ;;
         *) die "with the marker in the parent's path the fence exited $_crc with: '$_cout'" ;;
     esac
+    _cls="$(ls -A "$_home4")" || _cls="unlisted"
+    [ -z "$_cls" ] \
+        && pass "…and an absolute TMPDIR leaves HOME untouched" \
+        || die "with an absolute TMPDIR setup left '$_cls' in HOME"
     rm -rf "$_sr4" "$_home4" "${_col%/RB_SETUP_DIR=here}"
 else
     die "could not stage the marker-collision case"

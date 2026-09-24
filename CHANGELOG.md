@@ -18,7 +18,8 @@
   any helper runs and on the retry before a second one does. `test-pr-skill-contract.sh` runs
   the setup fence with `TMPDIR` unset under `umask 002` and asserts the session lands in
   `~/.watch-pr` with nothing else in `HOME`, and with `HOME` read-only asserts the abort on
-  each path; the retry and relative-`TMPDIR` cases now expect `~/.watch-pr`. Closes #359.
+  each path; the retry and relative-`TMPDIR` cases now expect `~/.watch-pr`, and an absolute
+  `TMPDIR` is asserted to leave `HOME` untouched. Closes #359.
 
 ## [2.11.2] — 2026-09-22
 
