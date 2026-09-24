@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.11.3] — 2026-09-24
+
+- **Every session left a directory in the operator's home.** Where `TMPDIR` was unset or
+  relative — most Linux desktops, and a Claude Code session there — setup reserved
+  `~/watch-pr-setup.<pid>.<random>`, and its retry was `~/watch-pr-setup-2.…` whatever
+  `TMPDIR` was. Nothing under a setup directory is removed, so they piled up in `~` itself,
+  seventeen in two weeks on one workstation. Setup now works under `~/.cache/watch-pr` in
+  both places, created where missing; a `TMPDIR` the system sets to an absolute path is
+  still used first. The no-removal rule is unchanged, and directories earlier releases left
+  in `~` stay where they are (#360).
+
+  The directory is created under `umask 077` because `pr-origin.sh` refuses a group-writable
+  ancestor: under a `umask 002`, `mkdir -m 700` would have left a freshly created `~/.cache`
+  at 775 and refused the session. One that cannot be created stops setup with an `ABORT:`
+  naming it, before any helper runs. `test-pr-skill-contract.sh` runs the setup fence with
+  `TMPDIR` unset under `umask 002` and asserts the session lands in `~/.cache/watch-pr` with
+  nothing else in `HOME`, and with `HOME` read-only asserts the abort and that no helper ran;
+  the retry and relative-`TMPDIR` cases now expect `~/.cache/watch-pr`. Closes #359.
+
 ## [2.11.2] — 2026-09-22
 
 - **The request comment carried the mention twice.** On the manual path the opening request

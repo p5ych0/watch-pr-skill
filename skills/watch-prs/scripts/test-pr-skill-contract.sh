@@ -227,9 +227,9 @@ elif _sr="$(mktemp_d)" && _ro="$(mktemp_d)" && _home="$(mktemp_d)" \
     # them; anchored, since a scratch path may itself contain the marker's text.
     _srdir="$(printf '%s\n' "$_srout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
     case "$_srrc|$_srdir" in
-        "0|$_home/watch-pr-setup-2."*)
+        "0|$_home/.cache/watch-pr/watch-pr-setup-2."*)
             [ -f "$_srdir/origin" ] \
-                && pass "a first parent that refuses costs one retry under HOME, and the session goes on" \
+                && pass "a first parent that refuses costs one retry under ~/.cache/watch-pr, and the session goes on" \
                 || die "the retry reported success without a setup directory: '$_srout'" ;;
         *) die "with the first parent refusing, the setup fence exited $_srrc with: '$_srout'" ;;
     esac
@@ -264,12 +264,55 @@ elif _sr3="$(mktemp_d)" && _home3="$(mktemp_d)" \
         run_limited 60 env TMPDIR=relative/dir bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _rrc=$?
     _rdir="$(printf '%s\n' "$_rout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
     case "$_rrc|$_rdir" in
-        "0|$_home3/watch-pr-setup."*) pass "a relative TMPDIR sends setup under HOME on the first attempt" ;;
+        "0|$_home3/.cache/watch-pr/watch-pr-setup."*) pass "a relative TMPDIR sends setup under ~/.cache/watch-pr on the first attempt" ;;
         *) die "with a relative TMPDIR the setup fence exited $_rrc with: '$_rout'" ;;
     esac
     rm -rf "$_sr3" "$_home3"
 else
     die "could not stage the relative-TMPDIR case"
+fi
+
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the unset-TMPDIR case"
+elif _sr5="$(mktemp_d)" && _home5="$(mktemp_d)" \
+     && git -C "$_sr5" init -q && git -C "$_sr5" remote add origin 'git@github.com:acme/widget.git'; then
+    _urc=0
+    _uout="$(cd "$_sr5" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home5" \
+        run_limited 60 env -u TMPDIR bash -c "umask 002; $setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _urc=$?
+    _udir="$(printf '%s\n' "$_uout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
+    _uls="$(ls -A "$_home5")" || _uls="unlisted"
+    case "$_urc|$_udir|$_uls" in
+        "0|$_home5/.cache/watch-pr/watch-pr-setup."*"|.cache")
+            [ -f "$_udir/origin" ] \
+                && pass "an unset TMPDIR sends setup under ~/.cache/watch-pr, creating it private under any umask, and leaves nothing else in HOME" \
+                || die "with TMPDIR unset the fence reported success without a setup directory: '$_uout'" ;;
+        *) die "with TMPDIR unset the setup fence exited $_urc, HOME holds '$_uls', with: '$_uout'" ;;
+    esac
+    rm -rf "$_sr5" "$_home5"
+else
+    die "could not stage the unset-TMPDIR case"
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+    pass "the uncreatable-cache case is skipped as root, whom no directory mode refuses"
+elif [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the uncreatable-cache case"
+elif _sr6="$(mktemp_d)" && _home6="$(mktemp_d)" \
+     && git -C "$_sr6" init -q && git -C "$_sr6" remote add origin 'git@github.com:acme/widget.git' \
+     && chmod 500 "$_home6"; then
+    _nrc=0
+    _nout="$(cd "$_sr6" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home6" \
+        run_limited 60 env -u TMPDIR bash -c "$setup_fence" 2>&1)" || _nrc=$?
+    case "$_nrc|$_nout" in
+        0\|*) die "with no cache creatable the setup fence exited 0 with: '$_nout'" ;;
+        *"PR_SETUP"*) die "with no cache creatable a helper still ran: '$_nout'" ;;
+        *"ABORT: setup failed; $_home6/.cache/watch-pr could not be created"*)
+            pass "a cache parent that cannot be created stops setup before any helper runs" ;;
+        *) die "with no cache creatable the setup fence exited $_nrc with: '$_nout'" ;;
+    esac
+    chmod 700 "$_home6"; rm -rf "$_sr6" "$_home6"
+else
+    die "could not stage the uncreatable-cache case"
 fi
 
 if [ -z "$setup_fence" ]; then
