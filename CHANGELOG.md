@@ -7,7 +7,8 @@
   `~/watch-pr-setup.<pid>.<random>`, and its retry was `~/watch-pr-setup-2.…` whatever
   `TMPDIR` was. Nothing under a setup directory is removed, so they piled up in `~` itself,
   seventeen in two weeks on one workstation. Setup now works under `~/.watch-pr` in both
-  places, created mode 700 where missing; a `TMPDIR` the system sets to an absolute path is
+  places, created mode 700 where missing but never with a missing home directory above it,
+  which is refused as before; a `TMPDIR` the system sets to an absolute path is
   still used first. The no-removal rule is unchanged, and directories earlier releases left
   in `~` stay where they are (#360).
 
@@ -19,7 +20,9 @@
   the setup fence with `TMPDIR` unset under `umask 002` and asserts the session lands in
   `~/.watch-pr` with nothing else in `HOME`, and with `HOME` read-only asserts the abort on
   each path; the retry and relative-`TMPDIR` cases now expect `~/.watch-pr`, and an absolute
-  `TMPDIR` is asserted to leave `HOME` untouched. Closes #359.
+  `TMPDIR` is asserted to leave `HOME` untouched, a missing `HOME` to stop setup with nothing
+  created, and a `~/.watch-pr` left by an earlier session to be reused by either attempt.
+  Closes #359.
 
 ## [2.11.2] — 2026-09-22
 

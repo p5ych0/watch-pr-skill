@@ -83,9 +83,9 @@ RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || { echo "ABORT: the plugin helper scripts were not found"; exit 1; }
 export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
-case "${TMPDIR:-}" in /*) RB_SETUP_DIR="$TMPDIR/watch-pr-setup.$$.$RANDOM$RANDOM" ;; *) mkdir -p -m 700 "$HOME/.watch-pr" || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup.$$.$RANDOM$RANDOM" ;; esac
+case "${TMPDIR:-}" in /*) RB_SETUP_DIR="$TMPDIR/watch-pr-setup.$$.$RANDOM$RANDOM" ;; *) { mkdir -m 700 "$HOME/.watch-pr" 2>/dev/null || [ -d "$HOME/.watch-pr" ]; } || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup.$$.$RANDOM$RANDOM" ;; esac
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
-    || { [ $? -eq 2 ] && { mkdir -p -m 700 "$HOME/.watch-pr" || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; } && RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
+    || { [ $? -eq 2 ] && { mkdir -m 700 "$HOME/.watch-pr" 2>/dev/null || [ -d "$HOME/.watch-pr" ] || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; } && RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
     || { echo "ABORT: setup failed; the PR_SETUP line above says why"; exit 1; }
 export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"
 . "$RB_SCRIPTS/identitylib.sh" || { echo "ABORT: the identity parser could not be loaded"; exit 1; }

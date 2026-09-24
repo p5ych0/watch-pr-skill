@@ -297,6 +297,54 @@ else
     die "could not stage the unset-TMPDIR case"
 fi
 
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the existing-parent case"
+elif _sr8="$(mktemp_d)" && _ro8="$(mktemp_d)" \
+     && git -C "$_sr8" init -q && git -C "$_sr8" remote add origin 'git@github.com:acme/widget.git' \
+     && chmod 500 "$_ro8"; then
+    for _arm in first retry; do
+        if [ "$_arm" = retry ] && [ "$(id -u)" -eq 0 ]; then
+            pass "the existing-parent retry is skipped as root, whom no directory mode refuses"
+            continue
+        fi
+        _home8="$(mktemp_d)" && mkdir -m 700 "$_home8/.watch-pr" || { die "could not stage the existing-parent $_arm"; continue; }
+        _tmpdir8=(-u TMPDIR); [ "$_arm" = retry ] && _tmpdir8=(TMPDIR="$_ro8")
+        _erc=0
+        _eout="$(cd "$_sr8" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_home8" \
+            run_limited 60 env "${_tmpdir8[@]}" bash -c "$setup_fence"$'\n''printf "RB_SETUP_DIR=%s\n" "$RB_SETUP_DIR"' 2>&1)" || _erc=$?
+        _edir="$(printf '%s\n' "$_eout" | sed -n 's/^RB_SETUP_DIR=//p' | tail -1)"
+        case "$_arm|$_erc|$_edir" in
+            "first|0|$_home8/.watch-pr/watch-pr-setup."*|"retry|0|$_home8/.watch-pr/watch-pr-setup-2."*)
+                pass "a ~/.watch-pr an earlier session made is reused by the $_arm attempt" ;;
+            *) die "with ~/.watch-pr already present the $_arm attempt exited $_erc with: '$_eout'" ;;
+        esac
+        rm -rf "$_home8"
+    done
+    chmod 700 "$_ro8"; rm -rf "$_sr8" "$_ro8"
+else
+    die "could not stage the existing-parent case"
+fi
+
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the missing-HOME case"
+elif _sr9="$(mktemp_d)" && _base9="$(mktemp_d)" \
+     && git -C "$_sr9" init -q && git -C "$_sr9" remote add origin 'git@github.com:acme/widget.git'; then
+    _mrc=0
+    _mout="$(cd "$_sr9" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_base9/gone/home" \
+        run_limited 60 env -u TMPDIR bash -c "$setup_fence" 2>&1)" || _mrc=$?
+    _mls="$(ls -A "$_base9")" || _mls="unlisted"
+    case "$_mrc|$_mls|$_mout" in
+        0\|*) die "with HOME missing the setup fence exited 0 with: '$_mout'" ;;
+        *"PR_SETUP"*) die "with HOME missing a helper still ran: '$_mout'" ;;
+        "$_mrc||"*"ABORT: setup failed; $_base9/gone/home/.watch-pr could not be created"*)
+            pass "a HOME that does not exist stops setup, and nothing is created on the way to it" ;;
+        *) die "with HOME missing the setup fence exited $_mrc, left '$_mls', with: '$_mout'" ;;
+    esac
+    rm -rf "$_sr9" "$_base9"
+else
+    die "could not stage the missing-HOME case"
+fi
+
 if [ "$(id -u)" -eq 0 ]; then
     pass "the uncreatable-parent case is skipped as root, whom no directory mode refuses"
 elif [ -z "$setup_fence" ]; then
