@@ -415,7 +415,8 @@ credit use are Codex account and repository settings.
   directory when it refuses before writing.
 - **`ABORT: '…' is marked as carrying an access-control list or extended
   attributes`.** A directory on the way to setup's working directory carries an
-  ACL entry that grants access, or entries that cannot be listed. On macOS the
+  ACL entry that grants access, an entry it cannot parse, or entries that cannot
+  be listed. On macOS the
   `group:everyone deny delete` entry every home carries, and the extended
   attributes on the system `TMPDIR`, pass, since neither grants anything; on
   Linux any ACL refuses, since GNU `ls` cannot list the entries. Point `TMPDIR`

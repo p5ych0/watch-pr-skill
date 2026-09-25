@@ -915,12 +915,10 @@ rm -rf "$OPENDIR/dir"
     && pass "…while a symlink to a directory this user owns is followed as before" \
     || die "a safe symlinked path was refused; macOS reaches its temporary directories this way"
 
-# …AND AN ACL IS REFUSED, because the mode bits do not show it. A user-owned
-# `0700` directory can still grant another account write through an extended ACL
-# on macOS or a POSIX ACL on Linux, and `find -perm` sees none of it — every
-# ownership and mode check passes while that account can replace the directory.
-# What is asserted is the refusal, not the ACL's contents: reading those means
-# `getfacl` on one platform and `ls -e` on the other.
+# …AND AN ACL IS REFUSED where its entries cannot be listed, because the mode bits
+# do not show it: a user-owned `0700` directory can still grant another account
+# write through a POSIX ACL, and `find -perm` sees none of it. GNU `ls` has no
+# `-e`, so on Linux any `+` refuses.
 if command -v setfacl >/dev/null 2>&1; then
     ACLDIR="$TMP/aclcase"
     mkdir -p "$ACLDIR"
@@ -949,22 +947,15 @@ if command -v setfacl >/dev/null 2>&1; then
 else
     echo "ok   - (no setfacl on this machine; the ACL case did not run)"
 fi
-# THE `@` CASE NEEDS NO ACL TOOL, so it sits outside that conditional. Inside it,
-# a platform without `setfacl` — stock macOS, the one whose behaviour this case is
-# about — skipped the synthetic marker too, and a regression to accepting `@`
-# would have stayed green exactly there.
-# …AND THE `@` MARK IS REFUSED TOO, which is the one that matters on macOS:
-# there `ls -l` marks extended ATTRIBUTES with `@` and security information
-# with `+`, and a component carrying BOTH shows `@` ALONE — so an ACL granting
-# another account `delete_child` reads as clean beside any xattr. This machine
-# cannot stage that pairing, so the mark is staged directly: what is asserted
-# is that the refusal keys on either mark, not on `+` alone.
+# THE `@` CASE NEEDS NO ACL TOOL, so it sits outside that conditional. On macOS
+# `ls -l` shows `@` alone for a component carrying both an xattr and an ACL, so
+# under `@` the entries are read too, and an allow beside an xattr is refused.
 XADIR="$TMP/xattrcase"
 mkdir -p "$XADIR"
 chmod 700 "$XADIR"
 XASTUB="$TMP/xastub"
 mkdir -p "$XASTUB"
-printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\n[ "$1" = -led ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n 0: user:other allow add_file,delete_child\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
+printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\n[ "$1" = -led ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n 0: user:other allow add_file,delete_child\\n" "$2" && exit 0\nexec /bin/ls "$@"\n' > "$XASTUB/ls"
 chmod +x "$XASTUB/ls"
 xa_rc=0
 xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$XASTUB:$PATH" \
@@ -975,14 +966,13 @@ xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME=
     && pass "…and a component marked '@' whose entries grant access is refused, which is how macOS shows an ACL beside an xattr" \
     || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
 
-# …BUT A MARK WHOSE ENTRIES ONLY DENY IS NOT A GRANT. Stock macOS marks both parents setup uses: the system
-# TMPDIR carries an xattr and no entry, and every home one `deny delete` entry.
+# …BUT A MARK WHOSE ENTRIES ONLY DENY GRANTS NOTHING, and is accepted.
 acl_case() {
     local name="$1" mark="$2" entries="$3" lerc="$4" want="$5" d rc diag
     d="$TMP/aclstub.$name"
     mkdir -p "$d"
     printf '%s' "$entries" > "$d/entries"
-    printf '#!/usr/bin/env bash\ncase "$1" in\n    -ld) printf "drwx------%s 2 x y 40 Jan 1 00:00 %%s\\n" "$2"; exit 0 ;;\n    -led) printf "drwx------%s 2 x y 40 Jan 1 00:00 %%s\\n" "$2"; cat %q; exit %s ;;\nesac\nexec /usr/bin/ls "$@"\n' \
+    printf '#!/usr/bin/env bash\ncase "$1" in\n    -ld) printf "drwx------%s 2 x y 40 Jan 1 00:00 %%s\\n" "$2"; exit 0 ;;\n    -led) printf "drwx------%s 2 x y 40 Jan 1 00:00 %%s\\n" "$2"; cat %q; exit %s ;;\nesac\nexec /bin/ls "$@"\n' \
         "$mark" "$mark" "$d/entries" "$lerc" > "$d/ls"
     chmod +x "$d/ls"
     rm -rf "$XADIR/dir"
@@ -1008,7 +998,8 @@ acl_case "whose entry allows" '+' $' 0: user:other allow add_file,delete_child\n
 acl_case "whose inherited entry allows" '+' $' 0: user:other inherited allow delete_child\n' 0 refuse
 acl_case "marked '@' with a deny then an allow" '@' $' 0: group:everyone deny delete\n 1: user:other allow delete_child\n' 0 refuse
 acl_case "with an entry line that does not parse" '+' $' 0: group:everyone deny delete\nsomething else\n' 0 refuse
-acl_case "marked '+' whose entries cannot be listed" '+' '' 1 refuse
+acl_case "whose principal name holds spaces before an allow" '+' $' 0: group:staff deny delete allow add_file\n' 0 refuse
+acl_case "marked '+' whose listing fails after a deny" '+' $' 0: group:everyone deny delete\n' 1 refuse
 acl_case "marked '@' whose entries cannot be listed" '@' '' 1 refuse
 acl_case "marked '+' that lists no entry" '+' '' 0 refuse
 rm -rf "$XADIR/dir"
