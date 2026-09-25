@@ -39,7 +39,7 @@ _rb_dir="${RB_DIR%/*}"
 # Every component to the root, by ownership as well as mode: an account that can rename anything on the way
 # can replace the subtree, root is trusted, and a sticky world-writable directory is how `/tmp` passes.
 _rb_walk() {
-    local p="$1" bad frc next
+    local p="$1" bad frc next ents erc ln first grants re='^ *[0-9]+: [^ ]+ (inherited )?deny [^ ]+$'
     while : ; do
         # The probe's status is taken: a component renamed mid-probe makes `find` print nothing, which would read
         # as safe. `! -type l` on the mode clause only, since a symlink's own mode is `0777` everywhere.
@@ -54,7 +54,8 @@ _rb_walk() {
             return 1
         fi
         # An ACL is a permission the mode bits do not show, and `ls -l` marks one with `+`; on macOS an `@` can
-        # hide it, so either mark refuses.
+        # hide it. A deny entry only takes access away, so a mark whose every entry `ls -e` lists as a deny passes;
+        # GNU `ls` has no `-e`, so there every mark refuses.
         acl="$(ls -ld "$p" 2>/dev/null)"
         arc=$?
         if [[ $arc -ne 0 ]]; then
@@ -62,8 +63,21 @@ _rb_walk() {
             return 1
         fi
         case "${acl%% *}" in
-            *+|*@) echo "ABORT: '$p' is marked as carrying an access-control list or extended attributes, which the mode bits do not show; refusing rather than trusting a permission this cannot read" >&2
-                return 1 ;;
+            *+|*@)
+                ents="$(ls -led "$p" 2>/dev/null)"
+                erc=$?
+                grants=no
+                [[ $erc -eq 0 && -n $ents ]] || grants=yes
+                first=yes
+                while IFS= read -r ln; do
+                    [[ $first = yes ]] && { first=no; continue; }
+                    [[ $ln =~ $re ]] || grants=yes
+                done <<<"$ents"
+                case "${acl%% *}" in *+) [[ $ents == *$'\n'* ]] || grants=yes ;; esac
+                if [[ $grants = yes ]]; then
+                    echo "ABORT: '$p' is marked as carrying an access-control list or extended attributes, which the mode bits do not show; refusing rather than trusting a permission this cannot read" >&2
+                    return 1
+                fi ;;
         esac
         [[ $p = / ]] && break
         next="${p%/*}"

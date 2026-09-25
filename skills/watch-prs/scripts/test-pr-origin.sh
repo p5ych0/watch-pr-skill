@@ -964,7 +964,7 @@ mkdir -p "$XADIR"
 chmod 700 "$XADIR"
 XASTUB="$TMP/xastub"
 mkdir -p "$XASTUB"
-printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
+printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\n[ "$1" = -led ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n 0: user:other allow add_file,delete_child\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
 chmod +x "$XASTUB/ls"
 xa_rc=0
 xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$XASTUB:$PATH" \
@@ -972,8 +972,46 @@ xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME=
 { [ "$xa_rc" -ne 0 ] \
   && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
   && [ ! -e "$XADIR/dir" ]; } \
-    && pass "…and a component marked '@' is refused, which is how macOS shows an ACL beside an xattr" \
+    && pass "…and a component marked '@' whose entries grant access is refused, which is how macOS shows an ACL beside an xattr" \
     || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
+
+# …BUT A MARK WHOSE ENTRIES ONLY DENY IS NOT A GRANT. Stock macOS marks both parents setup uses: the system
+# TMPDIR carries an xattr and no entry, and every home one `deny delete` entry.
+acl_case() {
+    local name="$1" mark="$2" entries="$3" lerc="$4" want="$5" d rc diag
+    d="$TMP/aclstub.$name"
+    mkdir -p "$d"
+    printf '%s' "$entries" > "$d/entries"
+    printf '#!/usr/bin/env bash\ncase "$1" in\n    -ld) printf "drwx------%s 2 x y 40 Jan 1 00:00 %%s\\n" "$2"; exit 0 ;;\n    -led) printf "drwx------%s 2 x y 40 Jan 1 00:00 %%s\\n" "$2"; cat %q; exit %s ;;\nesac\nexec /usr/bin/ls "$@"\n' \
+        "$mark" "$mark" "$d/entries" "$lerc" > "$d/ls"
+    chmod +x "$d/ls"
+    rm -rf "$XADIR/dir"
+    rc=0
+    diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$d:$PATH" \
+        /usr/bin/env bash -p "$SCRIPT" read "$XADIR/dir" 2>&1 )" || rc=$?
+    if [ "$want" = accept ]; then
+        { [ "$rc" -eq 0 ] && [ "$(cat "$XADIR/dir/origin" 2>/dev/null)" = "$REAL" ] \
+          && case "$diag" in *"access-control list"*) false ;; *) true ;; esac; } \
+            && pass "…and a component $name is accepted" \
+            || die "a component $name was refused (rc=$rc diag='$diag')"
+    else
+        { [ "$rc" -ne 0 ] && [ ! -e "$XADIR/dir" ] \
+          && case "$diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac; } \
+            && pass "…and a component $name is refused" \
+            || die "a component $name was accepted (rc=$rc diag='$diag')"
+    fi
+}
+acl_case "marked '+' whose one entry denies, as a macOS home is" '+' $' 0: group:everyone deny delete\n' 0 accept
+acl_case "marked '@' with no entry, as the macOS TMPDIR is" '@' '' 0 accept
+acl_case "whose entries are all denies, inherited or not" '+' $' 0: group:everyone deny delete\n 1: group:staff inherited deny add_file,delete_child\n' 0 accept
+acl_case "whose entry allows" '+' $' 0: user:other allow add_file,delete_child\n' 0 refuse
+acl_case "whose inherited entry allows" '+' $' 0: user:other inherited allow delete_child\n' 0 refuse
+acl_case "marked '@' with a deny then an allow" '@' $' 0: group:everyone deny delete\n 1: user:other allow delete_child\n' 0 refuse
+acl_case "with an entry line that does not parse" '+' $' 0: group:everyone deny delete\nsomething else\n' 0 refuse
+acl_case "marked '+' whose entries cannot be listed" '+' '' 1 refuse
+acl_case "marked '@' whose entries cannot be listed" '@' '' 1 refuse
+acl_case "marked '+' that lists no entry" '+' '' 0 refuse
+rm -rf "$XADIR/dir"
 
 # …AND THE ACL PROBE FAILS CLOSED TOO. It is the second status-sensitive probe on
 # this path and the `find` case below does not cover it: the `ls` stub used for
