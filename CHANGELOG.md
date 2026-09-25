@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.11.4] — 2026-09-25
+
+- **No session could start on a stock Mac.** `pr-origin.sh` refused any component on the way
+  to setup's directory whose `ls -ld` mode field ended in `+` or `@`, reading the mark and
+  never what it stood for, and stock macOS marks both parents setup can use: the system
+  `TMPDIR` under `/var/folders` carries an extended attribute and no ACL entry, and every home
+  directory carries one ACL entry, `group:everyone deny delete`. Measured on a GitHub macOS 26
+  runner, the first attempt was refused under the system `TMPDIR`, the attempt under
+  `~/.watch-pr` with `TMPDIR` unset was refused at the home directory, and so was the retry,
+  each with terminal status 1. A marked component now has its entries listed with `ls -led`
+  and passes only when every entry is a deny, inherited or not, since a deny can only take
+  access away; an `allow` entry, a line that does not parse, a `+` with no entry listed and a
+  listing that fails all refuse as before. GNU `ls` has no `-e`, so on Linux every mark still
+  refuses. The same runner, on this change, reached `status=ready` in all three cases.
+  `test-pr-origin.sh` stages each shape through a stubbed `ls`: the home's single deny and the
+  `TMPDIR`'s bare xattr accepted, a deny list with an inherited deny accepted, and an allow, an
+  inherited allow, a deny then an allow behind `@`, an unparseable line, a `+` with no entry
+  and a failed listing under either mark refused; the existing `@` case now lists the allow it
+  guards against. Each was proved against its mutant. Closes #361.
+
 ## [2.11.3] — 2026-09-24
 
 - **Every session left a directory in the operator's home.** Where `TMPDIR` was unset or

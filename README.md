@@ -413,6 +413,14 @@ credit use are Codex account and repository settings.
   `pr-setup.sh`. `pr-setup.sh` removes nothing it created,
   deliberately; the origin helper gives back only its own empty transport
   directory when it refuses before writing.
+- **`ABORT: '…' is marked as carrying an access-control list or extended
+  attributes`.** A directory on the way to setup's working directory carries an
+  ACL entry that grants access, an entry it cannot parse, or entries that cannot
+  be listed. On macOS the
+  `group:everyone deny delete` entry every home carries, and the extended
+  attributes on the system `TMPDIR`, pass, since neither grants anything; on
+  Linux any ACL refuses, since GNU `ls` cannot list the entries. Point `TMPDIR`
+  at a directory without one.
 - **`ABORT: the origin read back is not a usable identity`.** Setup wrote the
   origin, but it is not a GitHub network transport the loop can address, or it
   spans more than one line. Fix `origin` and re-run.
