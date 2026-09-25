@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.11.3] — 2026-09-24
+
+- **Every session left a directory in the operator's home.** Where `TMPDIR` was unset or
+  relative — most Linux desktops, and a Claude Code session there — setup reserved
+  `~/watch-pr-setup.<pid>.<random>`, and its retry was `~/watch-pr-setup-2.…` whatever
+  `TMPDIR` was. Nothing under a setup directory is removed, so they piled up in `~` itself,
+  seventeen in two weeks on one workstation. Setup now works under `~/.watch-pr` in both
+  places, created mode 700 where missing but never with a missing home directory above it,
+  which is refused as before; a `TMPDIR` the system sets to an absolute path is
+  still used first. The no-removal rule is unchanged, and directories earlier releases left
+  in `~` stay where they are (#360).
+
+  The parent sits directly under `HOME` so the ancestry `pr-origin.sh` walks gains one
+  component, the one the fence creates: a parent under `~/.cache` would have refused every
+  session on a machine whose `~/.cache` some other tool had created group-writable. A parent
+  that cannot be created stops setup with an `ABORT:` naming it, on the first attempt before
+  any helper runs and on the retry before a second one does. `test-pr-skill-contract.sh` runs
+  the setup fence with `TMPDIR` unset under `umask 002` and asserts the session lands in
+  `~/.watch-pr` with nothing else in `HOME`, and with `HOME` read-only asserts the abort on
+  each path; the retry and relative-`TMPDIR` cases now expect `~/.watch-pr`, and an absolute
+  `TMPDIR` is asserted to leave `HOME` untouched, a missing `HOME` to stop setup with nothing
+  created, and a `~/.watch-pr` left by an earlier session to be reused by either attempt.
+  Closes #359.
+
 ## [2.11.2] — 2026-09-22
 
 - **The request comment carried the mention twice.** On the manual path the opening request

@@ -404,11 +404,13 @@ credit use are Codex account and repository settings.
   thirty minutes, and export it.
 - **`ABORT: setup failed`.** The `PR_SETUP status=error reason=…` line above it
   says why: the working directory could not be created, the checkout has no
-  usable `origin`, or the storage refused. A storage refusal under `TMPDIR` is
-  retried once under `HOME`; if both refused, point `TMPDIR` at a filesystem
-  with room. No such
-  line at all means the helper never got to report: an interrupted run, or an
-  installation missing `pr-setup.sh`. `pr-setup.sh` removes nothing it created,
+  usable `origin`, or the storage refused. Setup works under `TMPDIR` where
+  that is an absolute path and under `~/.watch-pr` otherwise, creating it, and
+  retries a storage refusal once under `~/.watch-pr`; if both refused, point
+  `TMPDIR` at a filesystem with room. `ABORT: setup failed; …/.watch-pr could not
+  be created` means that directory could not be made. No `PR_SETUP` line at all otherwise means the helper
+  never got to report: the run was interrupted, or the installation is missing
+  `pr-setup.sh`. `pr-setup.sh` removes nothing it created,
   deliberately; the origin helper gives back only its own empty transport
   directory when it refuses before writing.
 - **`ABORT: the origin read back is not a usable identity`.** Setup wrote the
