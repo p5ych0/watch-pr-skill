@@ -146,21 +146,22 @@ Once, before updating:
 
 ### Setup directories from before 2.11.3
 
-Where `TMPDIR` was unset or relative, earlier releases left one directory per
-session directly in your home: `~/watch-pr-setup.*` and `~/watch-pr-setup-2.*`,
-and before those `~/watch-pr-work.*` and `~/watch-pr-pin.*`. From 2.11.3 setup
-works under `~/.watch-pr` instead, and nothing removes what a session made. To
-tidy the old ones away, first make sure no session on an older release is
-running — each of those directories is its session's working files — then:
+Earlier releases could leave setup directories directly in your home:
+`~/watch-pr-setup.*` and `~/watch-pr-setup-2.*`, and before those
+`~/watch-pr.*`, `~/watch-pr-2.*`, `~/watch-pr-work.*`, `~/watch-pr-pin.*` and
+`~/watch-pr-pin-2.*`. From 2.11.3 setup works under `TMPDIR` or `~/.watch-pr`
+instead, and nothing removes what a session made. To tidy the old ones away,
+first make sure no session is running — each of those directories is a
+session's working files — then:
 
 ```
-mkdir -p -m 700 ~/.watch-pr && find ~ -mindepth 1 -maxdepth 1 -type d \( -name 'watch-pr-setup.*' -o -name 'watch-pr-setup-2.*' -o -name 'watch-pr-work.*' -o -name 'watch-pr-pin.*' \) -exec mv -n {} ~/.watch-pr/ \;
+{ [ -d ~/.watch-pr ] || mkdir -m 700 ~/.watch-pr; } && find -H ~ -mindepth 1 -maxdepth 1 -type d \( -name 'watch-pr.*' -o -name 'watch-pr-2.*' -o -name 'watch-pr-setup.*' -o -name 'watch-pr-setup-2.*' -o -name 'watch-pr-work.*' -o -name 'watch-pr-pin.*' -o -name 'watch-pr-pin-2.*' \) -exec mv -n {} ~/.watch-pr/ \;
 ```
 
 This only moves: `mv -n` never replaces a name already under `~/.watch-pr`, so a
 clash leaves the old directory where it is, and `-type d` leaves a symlink or a
-file with a matching name alone. What you
-keep under `~/.watch-pr` after that is yours to delete.
+file with a matching name alone. Once no session is running, what you keep under
+`~/.watch-pr` is yours to delete.
 
 ## Per-project setup
 
