@@ -144,6 +144,24 @@ Once, before updating:
 5. There is no request or close-round command to run: the skill drives the loop
    and stops where a decision is yours. Read *A session*.
 
+### Setup directories from before 2.11.3
+
+Where `TMPDIR` was unset or relative, earlier releases left one directory per
+session directly in your home: `~/watch-pr-setup.*` and `~/watch-pr-setup-2.*`,
+and before those `~/watch-pr-work.*` and `~/watch-pr-pin.*`. From 2.11.3 setup
+works under `~/.watch-pr` instead, and nothing removes what a session made. To
+tidy the old ones away, first make sure no session on an older release is
+running — each of those directories is its session's working files — then:
+
+```
+mkdir -p -m 700 ~/.watch-pr && find ~ -mindepth 1 -maxdepth 1 -type d \( -name 'watch-pr-setup.*' -o -name 'watch-pr-setup-2.*' -o -name 'watch-pr-work.*' -o -name 'watch-pr-pin.*' \) -exec mv -n {} ~/.watch-pr/ \;
+```
+
+This only moves: `mv -n` never replaces a name already under `~/.watch-pr`, so a
+clash leaves the old directory where it is, and `-type d` leaves a symlink or a
+file with a matching name alone. What you
+keep under `~/.watch-pr` after that is yours to delete.
+
 ## Per-project setup
 
 1. Authenticate `gh` for the repository.
