@@ -482,8 +482,12 @@ finding. The accepted records:
   nothing else, none of them a link; `hooks.json` is exactly an empty `hooks` record and
   one `modules` entry, the empty record being what a CLI that predates function hooks
   validates; the module registers one hook, `tool.call` for `Agent`, names nothing under
-  `.claude/` and holds no `deny` in its text. That it refuses no call is held by its own
-  cases, not by the suite, and a hook that refuses one is a finding. A second module, a
+  `.claude/` and holds no `deny` in its text. `test-hooks.sh` asks these of the module's
+  text and parses nothing: the registrar's name appears twice, where it is received and
+  where it is called, and a spelling that walks past a question, or one it over-reports, is
+  not a finding against the fixture, while a second registration by any spelling is a
+  finding against the module. That it refuses no call is held by its own cases, not by the
+  suite, and a hook that refuses one is a finding. A second module, a
   second hook, a hook on any other event, a command hook by any route, or a decision of the
   loop moved out of a helper into the module, is outside the record and is a finding.
 

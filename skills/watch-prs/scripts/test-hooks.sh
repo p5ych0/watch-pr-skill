@@ -18,7 +18,7 @@ ships_only_the_module() {
             && jq -e 'keys == ["hooks", "modules"] and .hooks == {} and (.modules | type == "array" and length == 1) and (.modules[0] | type == "string" and test("^\\./[a-z][a-z0-9-]*\\.ts$"))' "$dir/hooks.json" >/dev/null \
             && mod="$dir/$(jq -r '.modules[0]' "$dir/hooks.json")" && [ -f "$mod" ] && [ ! -L "$mod" ] \
             && [ "$(find "$dir/" -mindepth 1 | wc -l)" -eq 2 ] \
-            && [ "$(grep -oE '(^|[^[:alnum:]_.])on\(' "$mod" | wc -l)" -eq 1 ] && grep -qF "on('tool.call', { tool: 'Agent' }" "$mod" \
+            && [ "$(tr -c '[:alnum:]_$' '\n' < "$mod" | grep -cx 'on')" -eq 2 ] && grep -qF "on('tool.call', { tool: 'Agent' }" "$mod" \
             && ! grep -q 'deny' "$mod" && ! grep -qF '.claude/' "$mod" || return 1
     fi
     jq -e 'has("hooks") | not' "$1/.claude-plugin/plugin.json" >/dev/null \
@@ -42,7 +42,7 @@ mkdir -p "$tmp/root-dir/hooks" "$tmp/root-unread/.claude-plugin"
 printf '{"name":"p","hooks":"./h.json"}\n' > "$tmp/root-plugin/.claude-plugin/plugin.json"
 printf '{"plugins":[{"name":"p","source":"./","hooks":{}}]}\n' > "$tmp/root-market/.claude-plugin/marketplace.json"
 printf -- '---\nname: s\nhooks:\n  Stop: []\n---\n' > "$tmp/root-skill/skills/s/SKILL.md"
-for d in module command bare key two outside missing modlink jsonlink extra second oneline other refuse checkout; do stage_module "$tmp/root-$d"; done
+for d in module command bare key two outside missing modlink jsonlink extra second oneline spaced alias other refuse checkout; do stage_module "$tmp/root-$d"; done
 ln -s "$tmp/root-module/hooks" "$tmp/root-link/hooks"
 printf '{ "hooks": { "Stop": [] }, "modules": ["./tiering.ts"] }\n' > "$tmp/root-command/hooks/hooks.json"
 printf '{ "modules": ["./tiering.ts"] }\n' > "$tmp/root-bare/hooks/hooks.json"
@@ -56,6 +56,8 @@ mv "$tmp/root-jsonlink/hooks/hooks.json" "$tmp/root-jsonlink/hooks.json" && ln -
 printf 'exit 0\n' > "$tmp/root-extra/hooks/pre-push.sh"
 printf "export const also = on => on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n" >> "$tmp/root-second/hooks/tiering.ts"
 printf "export const register = on => { on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e)); on('prompt.submit', (\$, e, next) => next(e)) }\n" > "$tmp/root-oneline/hooks/tiering.ts"
+printf "export const register = on => {\n  on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n  on ('prompt.submit', (\$, e, next) => next(e))\n}\n" > "$tmp/root-spaced/hooks/tiering.ts"
+printf "export const register = on => {\n  on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n  const add = on\n  add('prompt.submit', (\$, e, next) => next(e))\n}\n" > "$tmp/root-alias/hooks/tiering.ts"
 printf "export const register = on => {\n  on('prompt.submit', (\$, e, next) => next(e))\n}\n" > "$tmp/root-other/hooks/tiering.ts"
 printf "export const refusal = { deny: 'no' }\n" >> "$tmp/root-refuse/hooks/tiering.ts"
 printf "export const hook = '.claude/hooks/pre-push.sh'\n" >> "$tmp/root-checkout/hooks/tiering.ts"
@@ -63,7 +65,7 @@ ships_only_the_module "$tmp/root-clean" && pass "a plugin root with no hook rout
     || die "the install check refuses a plugin root that ships no hook"
 ships_only_the_module "$tmp/root-module" && pass "…and so does one whose only hook route is the one module, beside an empty command-hook record" \
     || die "the install check refuses the module docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md bounds"
-for d in dir plugin market skill unread link command bare key two outside missing modlink jsonlink extra second oneline other refuse checkout; do
+for d in dir plugin market skill unread link command bare key two outside missing modlink jsonlink extra second oneline spaced alias other refuse checkout; do
     ships_only_the_module "$tmp/root-$d" && die "the $d decoy passed the install check" || pass "the $d decoy fails the install check"
 done
 ships_only_the_module "$ROOT" && pass "no hook ships with the plugin but the module its record bounds, so the evasion the authoring-tools record accepts stays in this checkout" \

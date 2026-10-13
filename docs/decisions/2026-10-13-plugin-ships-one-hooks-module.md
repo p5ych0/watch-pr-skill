@@ -44,6 +44,14 @@ record is the one exception to it, and the exception's bounds.
 
 A plugin root with no `hooks/` at all passes too.
 
+The suite asks these of the module's text and parses nothing. The registrar's name, `on`,
+appears in it twice, where it is received and where it is called, so a second call is caught
+whatever its spacing, and so is an alias; the one call is spelled for `tool.call` and
+`Agent`. A module written to walk past a question, through `arguments` or a renamed
+parameter, is an author evading the fixture, and no question asked of text withstands that.
+It is review's to catch, in a module short enough to read whole, and `claude plugin
+validate` prints what the engine itself reads the module to hook.
+
 That the module refuses no call is a behaviour, and text cannot hold it. The module's own
 cases hold it under `claude plugin test`: every call they stage reaches the tool.
 

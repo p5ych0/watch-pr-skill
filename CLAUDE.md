@@ -287,7 +287,8 @@ Each of these was found, fixed and made again. Read before writing a defence or 
 - **The suite does not run the hooks module.** `test-hooks.sh` pins its shape; its
   behaviour is the cases under `tests/` at the plugin root, run with `claude plugin test .`
   where the CLI is present, which CI is not. A change to the module is not done until they pass, each new
-  case proved against its mutant as a fixture is.
+  case proved against its mutant as a fixture is. `claude plugin validate .` prints what the
+  engine reads the module to hook, the exact answer the suite's text questions stand in for.
 - Every behaviour change ships its test in the same PR, proved to fail against the unfixed
   code for the reason it names.
 - Run the suite as CI does:
