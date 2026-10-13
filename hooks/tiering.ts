@@ -2,14 +2,16 @@ import type { EngineInterface, Register } from 'claude-code'
 
 const MODELS = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+const TIERS = ['small', 'medium', 'large'] as const
 
 type Kind = 'review' | 'fix'
 type Choice = { model?: (typeof MODELS)[number]; effort: (typeof EFFORTS)[number] }
-type Size = { count: number; text: string }
+type Tier = (typeof TIERS)[number]
+type Size = { text: string } & ({ count: number } | { tier: Tier })
 
 const PROBE_MS = 10_000
 const REMOTES = 'refs/remotes/'
-const STATED_COUNT = /^review-fix:\s*(\d+)\b/i
+const STATED = /^review-fix:\s*(?:([a-z]+)|(\d+))\b/i
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
@@ -76,7 +78,10 @@ async function changed($: EngineInterface, prompt: string): Promise<Size | undef
 }
 
 function stated(description: string): Size | undefined {
-  const count = Number(STATED_COUNT.exec(description)?.[1])
+  const [, word, digits] = STATED.exec(description) ?? []
+  const tier = word?.toLowerCase()
+  if (isOneOf(TIERS, tier)) return { tier, text: 'tier named by the session' }
+  const count = Number(digits)
   return count > 0 ? { count, text: counted(count, 'finding') } : undefined
 }
 
@@ -112,7 +117,8 @@ export const register: Register = (on, options) => {
       return next(e)
     }
 
-    const tier = size.count <= rung.smallMax ? 'small' : size.count >= rung.largeMin ? 'large' : 'medium'
+    const tier =
+      'tier' in size ? size.tier : size.count <= rung.smallMax ? 'small' : size.count >= rung.largeMin ? 'large' : 'medium'
     const pick = rung[tier]
     if (pick === undefined) return next(e)
 

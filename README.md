@@ -217,7 +217,10 @@ The session posts the request, waits, and reads the findings. For each one it
 reproduces the claim before acting on it, fixes the defect the finding names
 (including the same defect in another copy the PR already changes), and prefers
 removing a dependency over guarding it. Where a finding does not hold, it says so
-on the thread with evidence rather than changing code to satisfy it. Each fix
+on the thread with evidence rather than changing code to satisfy it. It decides
+each answer itself; the edits it hands to a subagent, unless you tell it to make
+them too, and it reads the result before committing. *Subagent model and effort*
+below says how that subagent is sized. Each fix
 commit is proved to fail without the fix; where that cannot be constructed, the
 session writes the limitation at the site and **stops for you**.
 
@@ -416,15 +419,20 @@ not run it and the loop runs as before.
   that place, so nothing depends on the text that follows a name. A base the
   checkout has not fetched is not among them, and a fetched ref whose name
   begins it is taken in its place, so fetch the base before the read.
-- **A fix pass the session delegates** is sized by the number of findings the
-  session states: it starts the subagent's description with `review-fix:` and
-  that number, as in `review-fix: 3 findings`.
+- **A fix pass** takes the tier the session names for it. The session decides
+  the answer to each finding and then has a subagent make the edits, starting
+  the subagent's description with `review-fix:` and `small`, `medium` or
+  `large`, as in `review-fix: large, 2 findings`. It names the tier by the
+  hardest finding, since one finding can need a redesign. Where it names no
+  tier, the number of findings it states decides, as in
+  `review-fix: 3 findings`.
 
 A call the module cannot size goes through as the session made it: a checkout
 holding untracked files, which the reviewer reads and the measure does not
-count; a `git` that fails or runs past ten seconds; a fix pass that states no
-number. So does every other subagent. Fixes the session makes itself are not
-subagent calls, so nothing sizes them.
+count; a `git` that fails or runs past ten seconds; a fix pass that names no
+tier and states no number. So does every other subagent. Edits the session
+makes itself, which it does where you tell it to, are not subagent calls, so
+nothing sizes them.
 
 Each kind has three rungs. The install asks for them, and
 `/plugin configure watch-pr-skill` in a session, or `claude plugin configure
@@ -434,8 +442,8 @@ watch-pr-skill` from a shell, shows and sets them afterwards:
 | --- | --- | --- |
 | `reviewSmall`, `reviewMedium`, `reviewLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a cold review of each size |
 | `reviewSmallLines`, `reviewLargeLines` | `60`, `200` | small up to, and large from, this many changed lines |
-| `fixSmall`, `fixMedium`, `fixLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a fix pass of each size |
-| `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | small up to, and large from, this many findings |
+| `fixSmall`, `fixMedium`, `fixLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a fix pass of each tier |
+| `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | where the session names no tier: small up to, and large from, this many findings |
 
 The small bound is read first. Where a kind's two bounds overlap, a size at or
 under the small bound is small whatever the large bound says, and the medium

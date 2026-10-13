@@ -83,6 +83,9 @@ read_keys="$(grep -o 'options\.[A-Za-z]*' "$MODULE" | LC_ALL=C sort -u)"
 conf_keys="$(jq -r '.userConfig | keys[] | "options." + .' "$MANIFEST" | LC_ALL=C sort -u)"
 [ -n "$conf_keys" ] && [ "$read_keys" = "$conf_keys" ] && pass "the module reads exactly the options plugin.json declares" \
     || die "the options the module reads and the ones plugin.json declares differ: one nobody reads, or one no install can set"
+grep -qF '`review-fix:`' "$ROOT/skills/watch-prs/SKILL.md" && grep -qF '^review-fix:' "$MODULE" \
+    && pass "the marker SKILL.md tells the session to start a fix pass with is the one the module reads" \
+    || die "SKILL.md no longer tells the session to mark a fix pass review-fix:, or the module no longer reads that marker, so no fix pass is tiered"
 
 BRIEF="$ROOT/agents/cold-reviewer.md"
 front_ok() {

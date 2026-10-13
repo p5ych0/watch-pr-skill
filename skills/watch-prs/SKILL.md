@@ -128,8 +128,9 @@ Codex and Copilot will. Give it the base ref, the PR body and word that there is
 summary yet. Name the base as its `origin/…` ref, ahead of any other such ref the prompt
 carries, and leave `model` and `effort` unset on the call: where the CLI runs the plugin's
 hooks module, it sets them from the size of the change against the first such ref the
-checkout holds. Fix what it names as a defect this change introduced, committing, running 5a
-and pushing before the request, and file the rest as issues. It is a pre-read, not a gate:
+checkout holds. Fix what it names as a defect this change introduced, handing the edits over
+as step 5 describes, committing, running 5a and pushing before the request, and file the
+rest as issues. It is a pre-read, not a gate:
 nothing refuses when it is skipped, and its findings are not a reviewer's.
 
 ## 2. Request the review — Codex first
@@ -251,8 +252,28 @@ not "fixed".
 
 ## 5. Fix, then close the round
 
-Fix the findings; where you disagree, say so on the thread rather than resolving it
-silently. Then, in this order:
+Decide the answer to each finding yourself: which stand, what makes each one false, and
+where you disagree, which you say on the thread rather than resolving silently. Then have a
+subagent make the edits, where the harness has subagents and the operator has not said to
+make them yourself.
+
+- **Mark the call.** Start its description with `review-fix:`, then the tier of the pass,
+  `small`, `medium` or `large`, then the number of findings, as in
+  `review-fix: large, 2 findings`. Leave `model` and `effort` unset: where the CLI runs the
+  plugin's hooks module, it sets them from the tier, and from the number where no tier is
+  named.
+- **Name the tier by the hardest finding in the pass.** `small` is an edit in one place that
+  changes no behaviour: a wording, a rename, an added assertion. `large` is a fix that
+  changes a contract or a design, or that reaches through code, tests and documents at once.
+  `medium` is the rest. A count alone misleads: one finding can need a redesign.
+- **Hand over what the pass needs, and its limits.** Each finding whole, the
+  answer you decided for it, and these limits: the smallest change that makes each finding
+  false, a test that fails without the fix where the project keeps tests, and nothing
+  committed, pushed, posted or resolved.
+- **Read its diff before you commit it.** The commit, the self-check, the thread replies,
+  the round summary and every judgment call stay with you.
+
+Then, in this order:
 
 1. **commit** — `fix(review): <what changed>`. In the Copilot phase add a
    `Review-Phase: copilot` trailer: it tells the merge gate the head advanced only through
@@ -274,8 +295,8 @@ silently. Then, in this order:
 2. **run the self-check — 5a — and fix what it finds**, before anything leaves the machine;
 3. **have the cold reviewer read the round's fixes**, as before the first request, now
    also given the newest round summary and each earlier finding with the reply it got; fix
-   what it names as a defect the change introduced, commit as in 1, run 5a again, and write
-   what the fix changed into the round summary;
+   what it names as a defect the change introduced, handing the edits over as above, commit
+   as in 1, run 5a again, and write what the fix changed into the round summary;
 4. **check the round boundary — step 6.** All three precede the push: with automatic review
    on the push itself requests the next review, so a check after it stops nothing. **The
    push is not here** — `gate` pushes, because the checks on what it pushes decide whether
@@ -285,11 +306,6 @@ silently. Then, in this order:
    back, so it follows the pushed, green head;
 6. **run `post`** — it re-proves that head, posts the summary and re-requests `$WHO`. The
    irreversible parts of a round come last.
-
-A mechanical fix may be handed to a subagent. Start the call's description with
-`review-fix:` and the number of findings handed over, as in `review-fix: 3 findings`, and
-leave `model` and `effort` unset, so the hooks module sizes the pass. The thread replies, the
-round summary and every judgment call stay with you.
 
 ### 5a. Self-check before the push
 
