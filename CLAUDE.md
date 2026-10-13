@@ -23,8 +23,9 @@ nothing for an operator to install. Two reviewers: Codex and Copilot, both GitHu
 
 **Structure.** `skills/watch-prs/SKILL.md` drives; `skills/watch-prs/scripts/pr-*.sh` are
 the helpers, `*lib.sh` the shared libraries, `test-*.sh` the fixtures;
-`agents/cold-reviewer.md` is the cold reviewer the plugin ships; `docs/decisions/` holds
-accepted limits; `README.md` is the only document written for a person.
+`agents/cold-reviewer.md` is the cold reviewer the plugin ships; `hooks/tiering.ts` is the
+hooks module and `tests/tiering.test.ts` its cases; `docs/decisions/` holds accepted limits;
+`README.md` is the only document written for a person.
 
 **Naming — for NEW names only.** Established names keep their spelling whatever it is.
 Files under `skills/watch-prs/scripts/` are `pr-<stage>.sh`, `<area>lib.sh`,
@@ -100,9 +101,11 @@ request of a PR, and after each round's fixes, have the `cold-reviewer` subagent
 changes, giving it the PR's base ref, its body, the newest round summary and the earlier
 rounds' findings with their replies; fix what names a defect this change introduced and file
 the rest. It is a cheap pre-read in the operator's own session, not a boundary, and a round
-is the expensive part of the loop. A mechanical fix pass may run as a subagent pinned to a
-smaller model, since answering a stated finding is bounded work; the judgment calls, the
-thread replies and the round summary stay with the session driving the loop.
+is the expensive part of the loop. A mechanical fix pass may run as a subagent, since
+answering a stated finding is bounded work: its description starts `review-fix:` and each
+finding is given with its `path:line`, so the hooks module sizes it as it sizes the cold
+read, with `model` and `effort` left unset on both calls. The judgment calls, the thread
+replies and the round summary stay with the session driving the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can
 recover. That is the PR number and branch; `REPO_DIR` and `RB_SCRIPTS` as setup resolved
@@ -160,7 +163,10 @@ history; an accepted limit is in `docs/decisions/`.
 | `scripts/testlib.sh` | The portable watchdog and the validated scratch directory; ships at runtime inside `pr-ci-state.sh`. |
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
 | `agents/cold-reviewer.md` | The cold reviewer: reads a branch against its base the way the reviewers will, before a round is bought. |
-| `.claude-plugin/` | Plugin and marketplace manifests. |
+| `hooks/hooks.json` | Names the one hooks module, beside the empty command-hook record a build without function hooks needs. |
+| `hooks/tiering.ts` | The hooks module: sets model and effort on a cold-reviewer run and a `review-fix:` pass from the size of the work, and gates nothing. |
+| `tests/tiering.test.ts` | The module's cases, run with `claude plugin test .`; the suite does not run them. |
+| `.claude-plugin/` | Plugin and marketplace manifests; `plugin.json` declares the module's options. |
 
 `scripts/` is `skills/watch-prs/scripts/`; the other paths are as written. Everything else
 is documentation.

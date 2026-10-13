@@ -125,7 +125,9 @@ review is on, before the PR is opened, since opening it queues a pass. The plugi
 `cold-reviewer` agent, `watch-pr-skill:cold-reviewer`; where the checkout keeps a
 project-level `cold-reviewer`, use that one. It reads the branch against the base the way
 Codex and Copilot will. Give it the base ref, the PR body and word that there is no round
-summary yet. Fix what it names as a defect this change introduced, committing, running 5a
+summary yet. Name the base as its `origin/…` ref, and leave `model` and `effort` unset on
+the call: where the CLI runs the plugin's hooks module, it sets them from the size of the
+change. Fix what it names as a defect this change introduced, committing, running 5a
 and pushing before the request, and file the rest as issues. It is a pre-read, not a gate:
 nothing refuses when it is skipped, and its findings are not a reviewer's.
 
@@ -282,6 +284,11 @@ silently. Then, in this order:
    back, so it follows the pushed, green head;
 6. **run `post`** — it re-proves that head, posts the summary and re-requests `$WHO`. The
    irreversible parts of a round come last.
+
+A mechanical fix may be handed to a subagent. Start the call's description with
+`review-fix:`, give each finding with its `path:line`, and leave `model` and `effort` unset,
+so the hooks module sizes the pass. The thread replies, the round summary and every judgment
+call stay with you.
 
 ### 5a. Self-check before the push
 

@@ -402,6 +402,39 @@ separate processes, and a value merely assigned in your shell never reaches them
 There are no reviewer knobs: model, effort, exhaustiveness, automatic review and
 credit use are Codex account and repository settings.
 
+### Subagent model and effort
+
+The plugin ships one hooks module that sets the effort of two kinds of subagent
+from the size of the work, and logs one line saying what it picked. It needs a
+Claude Code build with function hooks, measured on 2.1.296; an older build does
+not run it and the loop runs as before.
+
+- **A cold review** is sized by the lines added and deleted against the merge
+  base: the `origin/…` ref the session names to the reviewer, else `origin/HEAD`.
+- **A fix pass the session delegates** is sized by the distinct `path:line`
+  findings in its prompt. The session marks one by starting the subagent's
+  description with `review-fix:`.
+
+A call the module cannot size goes through as the session made it, and so does
+every other subagent. Fixes the session makes itself are not subagent calls, so
+nothing sizes them.
+
+Each kind has three rungs. The install asks for them, and
+`/plugin configure watch-pr-skill` in a session, or `claude plugin configure
+watch-pr-skill` from a shell, shows and sets them afterwards:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `reviewSmall`, `reviewMedium`, `reviewLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a cold review of each size |
+| `reviewSmallLines`, `reviewLargeLines` | `60`, `200` | small up to, and large from, this many changed lines |
+| `fixSmall`, `fixMedium`, `fixLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a fix pass of each size |
+| `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | small up to, and large from, this many findings |
+
+A rung is `<model>/<effort>`. The model `default` leaves the call's model alone,
+so out of the box only the effort moves and no session is sent to a model its
+account lacks. Name `haiku`, `sonnet`, `opus` or `fable` to have the module pick
+the model too; it then replaces whatever the call asked for.
+
 ## Troubleshooting
 
 - **`@codex` answers with a setup link.** The connector is not linked for this

@@ -72,6 +72,18 @@ done
 ships_only_the_module "$ROOT" && pass "no hook ships with the plugin but the module its record bounds, so the evasion the authoring-tools record accepts stays in this checkout" \
     || die "a hook ships with the plugin beyond the module docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md bounds, or a manifest could not be read"
 
+MODULE="$ROOT/hooks/tiering.ts"
+MANIFEST="$ROOT/.claude-plugin/plugin.json"
+[ -f "$MODULE" ] && [ -f "$ROOT/tests/tiering.test.ts" ] && pass "the module README.md says the plugin ships is there, and so are its cases" \
+    || die "hooks/tiering.ts or tests/tiering.test.ts is missing, and README.md says the plugin ships the module"
+jq -e '[.userConfig[] | select(.type == "string") | .default] | length > 0 and all(.[]; startswith("default/"))' "$MANIFEST" >/dev/null \
+    && pass "every rung's shipped default names no model, so no install is sent to one its account may lack" \
+    || die "a rung's default in plugin.json names a model, or the rungs could not be read"
+read_keys="$(grep -o 'options\.[A-Za-z]*' "$MODULE" | LC_ALL=C sort -u)"
+conf_keys="$(jq -r '.userConfig | keys[] | "options." + .' "$MANIFEST" | LC_ALL=C sort -u)"
+[ -n "$conf_keys" ] && [ "$read_keys" = "$conf_keys" ] && pass "the module reads exactly the options plugin.json declares" \
+    || die "the options the module reads and the ones plugin.json declares differ: one nobody reads, or one no install can set"
+
 BRIEF="$ROOT/agents/cold-reviewer.md"
 front_ok() {
     local fm
