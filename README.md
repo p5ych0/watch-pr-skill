@@ -402,6 +402,50 @@ separate processes, and a value merely assigned in your shell never reaches them
 There are no reviewer knobs: model, effort, exhaustiveness, automatic review and
 credit use are Codex account and repository settings.
 
+### Subagent model and effort
+
+The plugin ships one hooks module that sets the effort of two kinds of subagent
+from the size of the work, and logs one line saying what it picked. It needs a
+Claude Code build with function hooks, measured on 2.1.296; an older build does
+not run it and the loop runs as before.
+
+- **A cold review** is sized by the lines added and deleted against the merge
+  base with the remote-tracking `origin/…` ref the session's prompt names
+  first, else with `origin/HEAD`. Which names are refs is `git`'s answer: the
+  module asks it for the remote's refs and takes the longest one written at
+  that place, so nothing depends on the text that follows a name. A base the
+  checkout has not fetched is not among them, and a fetched ref whose name
+  begins it is taken in its place, so fetch the base before the read.
+- **A fix pass the session delegates** is sized by the number of findings the
+  session states: it starts the subagent's description with `review-fix:` and
+  that number, as in `review-fix: 3 findings`.
+
+A call the module cannot size goes through as the session made it: a checkout
+holding untracked files, which the reviewer reads and the measure does not
+count; a `git` that fails or runs past ten seconds; a fix pass that states no
+number. So does every other subagent. Fixes the session makes itself are not
+subagent calls, so nothing sizes them.
+
+Each kind has three rungs. The install asks for them, and
+`/plugin configure watch-pr-skill` in a session, or `claude plugin configure
+watch-pr-skill` from a shell, shows and sets them afterwards:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `reviewSmall`, `reviewMedium`, `reviewLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a cold review of each size |
+| `reviewSmallLines`, `reviewLargeLines` | `60`, `200` | small up to, and large from, this many changed lines |
+| `fixSmall`, `fixMedium`, `fixLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a fix pass of each size |
+| `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | small up to, and large from, this many findings |
+
+The small bound is read first. Where a kind's two bounds overlap, a size at or
+under the small bound is small whatever the large bound says, and the medium
+rung is not used.
+
+A rung is `<model>/<effort>`. The model `default` leaves the call's model alone,
+so out of the box only the effort moves and no session is sent to a model its
+account lacks. Name `haiku`, `sonnet`, `opus` or `fable` to have the module pick
+the model too; it then replaces whatever the call asked for.
+
 ## Troubleshooting
 
 - **`@codex` answers with a setup link.** The connector is not linked for this

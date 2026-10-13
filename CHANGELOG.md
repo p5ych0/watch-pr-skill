@@ -1,5 +1,42 @@
 # Changelog
 
+## [2.12.0] — 2026-10-13
+
+- **The loop's subagents are sized to the work.** A cold read of a ten-line fix and one of a
+  five-hundred-line change ran at whatever model and effort the session happened to pass,
+  and so did a fix pass handed to a subagent, whether it answered one finding or eight. The
+  plugin now ships the hooks module
+  `docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md` admits, `hooks/tiering.ts`,
+  which sets `effort` on two kinds of Agent call before the subagent starts and logs one
+  line saying what it picked and from what. A `cold-reviewer` run, the plugin's or a
+  project's, is sized by the lines added and deleted against the merge base with the
+  remote-tracking `origin/…` ref the prompt names first, else with `origin/HEAD`; which
+  names are refs is git's answer, the longest listed one written at that place, so no
+  pattern decides where a name ends; a base the checkout has not fetched is not listed,
+  and a fetched ref whose name begins it is taken in its place. A fix pass is sized by the number
+  of findings the session states, by starting the call's description with `review-fix:` and
+  that number, as in `review-fix: 3 findings`. Each kind has three rungs and two bounds
+  between them, ten options in `plugin.json` that `/plugin configure watch-pr-skill` sets.
+  The small bound is read first, so where an operator's two bounds overlap a size both
+  cover is small. A rung is `<model>/<effort>`,
+  and the shipped default names `default` for the model on every rung, which leaves the
+  call's model as it was: out of the box only effort moves, medium, high, then xhigh, and no
+  install is sent to a model its account may lack. A rung that names a model replaces the
+  call's. The last twelve merged changes here ran from 18 to 258 changed lines, and the
+  bounds of 60 and 200 split them six small, four medium and two large.
+
+  The module gates nothing. A call it cannot size goes through as the session made it: a
+  merge base git fails to compute, a checkout holding untracked files, which the reviewer
+  reads and the measure does not count, a `git` that fails or outlives its ten-second
+  bound, a fix pass that states no number. So does every other subagent and every fork. A Claude Code
+  build without function hooks reads the empty command-hook record beside the module and
+  runs nothing. `SKILL.md` says how a fix pass is
+  marked and that `model` and `effort` are left unset on both kinds of call. Eighteen cases
+  under `tests/` hold the behaviour under `claude plugin test`, each proved against its
+  mutant, and `test-hooks.sh` holds what the suite can: the module and its cases are
+  present, every rung's default names no model, and the options the module reads are
+  exactly the ones `plugin.json` declares. Closes #366.
+
 ## [2.11.4] — 2026-09-25
 
 - **No session could start on a stock Mac.** `pr-origin.sh` refused any component on the way
