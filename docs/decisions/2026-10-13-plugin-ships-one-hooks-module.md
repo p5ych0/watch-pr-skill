@@ -71,6 +71,9 @@ file that build rejects. With it those builds read an empty record and run no mo
 Staged under `claude plugin test` on 2.1.296, a hook that throws is skipped and the call
 reaches the tool with the model and effort its caller set.
 
+On the same staged root, `claude plugin validate` on 2.1.296 prints the engine's own reading
+of the module, one line for what it hooks: `./tiering.ts hooks: tool.call{tool=Agent}`.
+
 ## What does not change
 
 - No command hook installs, from this checkout or anywhere else. A `hooks` key in either
