@@ -7,8 +7,9 @@ type Kind = 'review' | 'fix'
 type Choice = { model?: (typeof MODELS)[number]; effort: (typeof EFFORTS)[number] }
 type Size = { count: number; text: string }
 
-const NAMED_REF = /(?<![\w./-])origin\/[\w./-]*\w/g
-const ANCHOR = /(?<![\w./-])(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z]\w*:\d+/g
+const PROBE_MS = 10_000
+const NAMED_REF = /(?<![\p{L}\p{N}_./-])origin\/[^\s\p{Cc}~^:?*\[\\]+/gu
+const STATED_COUNT = /^review-fix:\s*(\d+)\b/i
 
 const isOneOf = <T extends string>(list: readonly T[], value: string | undefined): value is T =>
   list.some(item => item === value)
@@ -28,19 +29,29 @@ function kindOf(type: string | undefined, description: string): Kind | undefined
 }
 
 async function git($: EngineInterface, args: readonly string[]): Promise<string | undefined> {
-  try {
-    const ran = await $.process.run(['git', '-c', 'core.fsmonitor=false', ...args], {
-      env: { GIT_OPTIONAL_LOCKS: '0' },
-    })
-    return ran.exitCode === 0 && !ran.isStdoutTruncated ? ran.stdout : undefined
-  } catch {
-    return undefined
+  const ran = await $.process.run(['git', '-c', 'core.fsmonitor=false', ...args], {
+    env: { GIT_OPTIONAL_LOCKS: '0' },
+    timeoutMs: PROBE_MS,
+  })
+  return ran.exitCode === 0 && !ran.isStdoutTruncated ? ran.stdout : undefined
+}
+
+// Prose may end a ref with punctuation a ref name may also hold, so git is asked, longest first.
+function namedRefs(prompt: string): string[] {
+  const refs: string[] = []
+  for (const [token] of prompt.matchAll(NAMED_REF)) {
+    for (let ref = token; ref.length > 'origin/'.length; ref = ref.slice(0, -1)) {
+      refs.push(ref)
+      if (/[\p{L}\p{N}]$/u.test(ref)) break
+    }
   }
+  return refs
 }
 
 async function changed($: EngineInterface, prompt: string): Promise<Size | undefined> {
-  const named = Array.from(prompt.matchAll(NAMED_REF), match => match[0])
-  for (const ref of new Set([...named, 'origin/HEAD'])) {
+  // The reviewer reads untracked files, and the numstat below counts none of them.
+  if ((await git($, ['ls-files', '--others', '--exclude-standard', '--', ':/'])) !== '') return undefined
+  for (const ref of new Set([...namedRefs(prompt), 'origin/HEAD'])) {
     const base = (await git($, ['merge-base', ref, 'HEAD']))?.trim()
     if (base === undefined || !/^[0-9a-f]{40,64}$/.test(base)) continue
     const stat = await git($, ['diff', '--numstat', '--no-renames', '--no-ext-diff', '--no-textconv', base])
@@ -55,9 +66,9 @@ async function changed($: EngineInterface, prompt: string): Promise<Size | undef
   return undefined
 }
 
-function findings(prompt: string): Size | undefined {
-  const count = new Set(Array.from(prompt.matchAll(ANCHOR), match => match[0])).size
-  return count === 0 ? undefined : { count, text: `${count} ${count === 1 ? 'finding' : 'findings'}` }
+function stated(description: string): Size | undefined {
+  const count = Number(STATED_COUNT.exec(description)?.[1])
+  return count > 0 ? { count, text: `${count} ${count === 1 ? 'finding' : 'findings'}` } : undefined
 }
 
 export const register: Register = (on, options) => {
@@ -85,7 +96,8 @@ export const register: Register = (on, options) => {
     if (kind === undefined) return next(e)
 
     const rung = ladder[kind]
-    const size = kind === 'review' ? await changed($, e.prompt) : findings(e.prompt)
+    // A git that cannot run, or outlives its bound, ends the sizing: the next probe would wait as long.
+    const size = kind === 'review' ? await changed($, e.prompt).catch(() => undefined) : stated(e.description)
     if (size === undefined) {
       $.ui.log(`${$.plugin.name}: ${rung.name} left as called, its size could not be measured`)
       return next(e)

@@ -411,14 +411,17 @@ not run it and the loop runs as before.
 
 - **A cold review** is sized by the lines added and deleted against the merge
   base with the first `origin/…` ref in the session's prompt that resolves,
-  else with `origin/HEAD`.
-- **A fix pass the session delegates** is sized by the distinct `path:line`
-  findings in its prompt. The session marks one by starting the subagent's
-  description with `review-fix:`.
+  else with `origin/HEAD`. A ref is read whole, whatever characters its name
+  holds, and `git` is asked where the prose around it ends.
+- **A fix pass the session delegates** is sized by the number of findings the
+  session states: it starts the subagent's description with `review-fix:` and
+  that number, as in `review-fix: 3 findings`.
 
-A call the module cannot size goes through as the session made it, and so does
-every other subagent. Fixes the session makes itself are not subagent calls, so
-nothing sizes them.
+A call the module cannot size goes through as the session made it: a checkout
+holding untracked files, which the reviewer reads and the measure does not
+count; a `git` that fails or runs past ten seconds; a fix pass that states no
+number. So does every other subagent. Fixes the session makes itself are not
+subagent calls, so nothing sizes them.
 
 Each kind has three rungs. The install asks for them, and
 `/plugin configure watch-pr-skill` in a session, or `claude plugin configure

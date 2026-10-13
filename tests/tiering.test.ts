@@ -10,15 +10,21 @@ const exited = (stdout: string, exitCode = 0) => ({
 })
 
 function stage(on: On) {
-  const staged: { numstat: string | undefined; seen: Seen[]; git: string[][] } = {
-    numstat: undefined,
-    seen: [],
-    git: [],
-  }
+  const staged: {
+    numstat: string | undefined
+    untracked: string
+    missing: string[]
+    seen: Seen[]
+    git: string[][]
+    bounds: (number | undefined)[]
+  } = { numstat: undefined, untracked: '', missing: [], seen: [], git: [], bounds: [] }
   on('process.run', ($, e) => {
     staged.git.push([...e.argv])
+    staged.bounds.push(e.init?.timeoutMs)
+    if (e.argv.includes('ls-files')) return exited(staged.untracked)
     if (staged.numstat === undefined) return exited('', 128)
-    return e.argv.includes('merge-base') ? exited(`${SHA}\n`) : exited(staged.numstat)
+    if (!e.argv.includes('merge-base')) return exited(staged.numstat)
+    return staged.missing.includes(e.argv.at(-2) ?? '') ? exited('', 128) : exited(`${SHA}\n`)
   })
   on('tool.call', { tool: 'Agent' }, ($, e) => {
     staged.seen.push({ model: e.model, effort: e.effort })
@@ -27,10 +33,14 @@ function stage(on: On) {
   return staged
 }
 
+const bases = (staged: { git: string[][] }) =>
+  staged.git.filter(argv => argv.includes('merge-base')).map(argv => argv.at(-2))
+
 const review = (prompt = 'Base ref origin/main; there is no round summary yet.') =>
   ({ tool: 'Agent', description: 'Cold read', prompt, subagent_type: 'cold-reviewer' }) as const
 
-const fix = (prompt: string) => ({ tool: 'Agent', description: 'review-fix: round 2', prompt }) as const
+const fix = (description: string) =>
+  ({ tool: 'Agent', description, prompt: 'a.sh:4 drops the status, and b.sh:9 does too.' }) as const
 
 test('a cold review is sized by the lines changed against the merge base', async ($, on) => {
   const staged = stage(on)
@@ -50,10 +60,9 @@ test('a cold review is sized by the lines changed against the merge base', async
 test('the base is the ref the prompt names, else the remote default', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '1\t1\ta.sh\n'
-  await $.tool.call({ ...review('Base ref origin/release-2. Body follows.'), subagent_type: 'watch-pr-skill:cold-reviewer' })
+  await $.tool.call({ ...review('Base ref origin/release-2 and the body follows.'), subagent_type: 'watch-pr-skill:cold-reviewer' })
   await $.tool.call(review('The base is main.'))
-  const bases = staged.git.filter(argv => argv.includes('merge-base')).map(argv => argv.at(-2))
-  expect(bases).toEqual(['origin/release-2', 'origin/HEAD'])
+  expect(bases(staged)).toEqual(['origin/release-2', 'origin/HEAD'])
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'medium' },
     { model: undefined, effort: 'medium' },
@@ -61,31 +70,43 @@ test('the base is the ref the prompt names, else the remote default', async ($, 
 })
 
 test('a named ref that does not resolve gives way to the next, then to the remote default', async ($, on) => {
-  const bases: (string | undefined)[] = []
-  const seen: Seen[] = []
-  on('process.run', ($, e) => {
-    if (!e.argv.includes('merge-base')) return exited('70\t0\ta.sh\n')
-    bases.push(e.argv.at(-2))
-    return e.argv.at(-2) === 'origin/gone' ? exited('', 128) : exited(`${SHA}\n`)
-  })
-  on('tool.call', { tool: 'Agent' }, ($, e) => {
-    seen.push({ model: e.model, effort: e.effort })
-    return { result: {} }
-  })
-  await $.tool.call(review('Base ref origin/gone, cut from origin/main.'))
-  await $.tool.call(review('Base ref origin/gone. Body follows.'))
-  expect(bases).toEqual(['origin/gone', 'origin/main', 'origin/gone', 'origin/HEAD'])
-  expect(seen).toEqual([
+  const staged = stage(on)
+  staged.numstat = '70\t0\ta.sh\n'
+  staged.missing = ['origin/gone']
+  await $.tool.call(review('Base ref origin/gone cut from origin/main and nothing else.'))
+  await $.tool.call(review('Base ref origin/gone and the body follows.'))
+  expect(bases(staged)).toEqual(['origin/gone', 'origin/main', 'origin/gone', 'origin/HEAD'])
+  expect(staged.seen).toEqual([
     { model: undefined, effort: 'high' },
     { model: undefined, effort: 'high' },
   ])
 })
 
-test('a review fix is sized by the distinct findings its prompt names', async ($, on) => {
+test('a named ref is taken whole, and git decides where the prose around it ends', async ($, on) => {
   const staged = stage(on)
-  await $.tool.call(fix('scripts/pr-watch.sh:37 — the timeout is read twice. Again at scripts/pr-watch.sh:37.'))
-  await $.tool.call(fix('AGENTS.md:397 names the old bound; SKILL.md:112 the new one.'))
-  await $.tool.call(fix('a/b.sh:1, a/b.sh:9, c.md:3 and d/e/f.sh:120 each need the guard.'))
+  staged.numstat = '1\t1\ta.sh\n'
+  staged.missing = ['origin/café.', 'origin/main;', '`origin/next`', 'origin/next`']
+  await $.tool.call(review('Base ref origin/release@beta and the body follows.'))
+  await $.tool.call(review('The base is origin/café.'))
+  await $.tool.call(review('Base ref origin/main; the reviewer brief names `origin/next` too.'))
+  expect(bases(staged)).toEqual(['origin/release@beta', 'origin/café.', 'origin/café', 'origin/main;', 'origin/main'])
+  expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'medium'])
+})
+
+test('a tree holding untracked files leaves the cold review as called', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '2\t0\ta.sh\n'
+  staged.untracked = 'notes/large.md\n'
+  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
+  expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
+  expect(bases(staged)).toEqual([])
+})
+
+test('a review fix is sized by the count its description states', async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call(fix('review-fix: 1 finding'))
+  await $.tool.call(fix('Review-Fix: 2 findings in pr-watch.sh'))
+  await $.tool.call(fix('review-fix:4'))
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'medium' },
     { model: undefined, effort: 'high' },
@@ -98,7 +119,7 @@ test('the shipped ladder sets the effort and leaves the model the caller set', a
   const staged = stage(on)
   staged.numstat = '2\t0\ta.sh\n'
   await $.tool.call({ ...review(), model: 'fable', effort: 'max' })
-  await $.tool.call({ ...fix('a.sh:4 drops the status.'), model: 'haiku', effort: 'low' })
+  await $.tool.call({ ...fix('review-fix: 1 finding'), model: 'haiku', effort: 'low' })
   expect(staged.seen).toEqual([
     { model: 'fable', effort: 'medium' },
     { model: 'haiku', effort: 'medium' },
@@ -108,17 +129,29 @@ test('the shipped ladder sets the effort and leaves the model the caller set', a
 test('a call whose size cannot be measured goes through as called', async ($, on) => {
   const staged = stage(on)
   await $.tool.call({ ...review(), model: 'fable', effort: 'xhigh' })
-  await $.tool.call({ ...fix('Fix what Codex raised in round 2.'), model: 'opus' })
+  await $.tool.call({ ...fix('review-fix: round 2'), model: 'opus' })
+  await $.tool.call({ ...fix('review-fix: 0 findings'), effort: 'max' })
   expect(staged.seen).toEqual([
     { model: 'fable', effort: 'xhigh' },
     { model: 'opus', effort: undefined },
+    { model: undefined, effort: 'max' },
   ])
 })
 
-test('a git that cannot start leaves the cold review as called', async ($, on) => {
+test('every git probe carries a bound', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '2\t0\ta.sh\n'
+  await $.tool.call(review())
+  expect(staged.bounds).toEqual([10000, 10000, 10000])
+})
+
+test('a probe that does not run, or outlives its bound, ends the sizing and the call goes through', async ($, on) => {
   const seen: Seen[] = []
-  on('process.run', () => {
-    throw new Error('no git on this machine')
+  const probes: string[][] = []
+  on('process.run', ($, e) => {
+    probes.push([...e.argv])
+    if (e.argv.includes('ls-files')) return exited('')
+    throw new Error('the child outlived its bound and was killed')
   })
   on('tool.call', { tool: 'Agent' }, ($, e) => {
     seen.push({ model: e.model, effort: e.effort })
@@ -126,13 +159,14 @@ test('a git that cannot start leaves the cold review as called', async ($, on) =
   })
   await $.tool.call({ ...review(), effort: 'low' })
   expect(seen).toEqual([{ model: undefined, effort: 'low' }])
+  expect(bases({ git: probes })).toEqual(['origin/main;'])
 })
 
 test('any other agent call, and a fork, is left alone and runs no git', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '900\t900\ta.sh\n'
-  await $.tool.call({ tool: 'Agent', description: 'Find the review fix helper', prompt: 'Where is a.sh:4 used?', model: 'haiku' })
-  await $.tool.call({ ...fix('a.sh:4 drops the status.'), subagent_type: 'fork' })
+  await $.tool.call({ tool: 'Agent', description: 'Find the review-fix: 9 helper', prompt: 'Where is a.sh:4 used?', model: 'haiku' })
+  await $.tool.call({ ...fix('review-fix: 9 findings'), subagent_type: 'fork' })
   expect(staged.seen).toEqual([
     { model: 'haiku', effort: undefined },
     { model: undefined, effort: undefined },
@@ -147,7 +181,7 @@ test(
     const staged = stage(on)
     staged.numstat = '300\t100\ta.sh\n'
     await $.tool.call({ ...review(), model: 'opus' })
-    await $.tool.call(fix('a.sh:4 and b.sh:9 drop the status.'))
+    await $.tool.call(fix('review-fix: 2 findings'))
     expect(staged.seen).toEqual([
       { model: 'haiku', effort: 'low' },
       { model: 'fable', effort: 'max' },
@@ -162,8 +196,8 @@ test('no call is refused: sized, unsized or unrelated, each reaches the tool onc
   answers.push(await $.tool.call(review()))
   staged.numstat = undefined
   answers.push(await $.tool.call(review()))
-  answers.push(await $.tool.call(fix('a.sh:4 drops the status.')))
-  answers.push(await $.tool.call(fix('No finding is named here.')))
+  answers.push(await $.tool.call(fix('review-fix: 1 finding')))
+  answers.push(await $.tool.call(fix('review-fix: the findings of round 2')))
   answers.push(await $.tool.call({ tool: 'Agent', description: 'Explore', prompt: 'Look around.' }))
   expect(answers.map(answer => answer.deny)).toEqual([undefined, undefined, undefined, undefined, undefined])
   expect(staged.seen.length).toBe(5)

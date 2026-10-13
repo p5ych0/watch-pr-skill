@@ -101,13 +101,13 @@
     "fixSmallFindings": {
       "type": "number",
       "title": "Review fix: small up to (findings)",
-      "description": "A fix pass naming at most this many findings is small.",
+      "description": "A fix pass stating at most this many findings is small.",
       "default": 1
     },
     "fixLargeFindings": {
       "type": "number",
       "title": "Review fix: large from (findings)",
-      "description": "A fix pass naming at least this many findings is large.",
+      "description": "A fix pass stating at least this many findings is large.",
       "default": 4
     }
   }

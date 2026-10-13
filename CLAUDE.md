@@ -102,9 +102,9 @@ changes, giving it the PR's base ref, its body, the newest round summary and the
 rounds' findings with their replies; fix what names a defect this change introduced and file
 the rest. It is a cheap pre-read in the operator's own session, not a boundary, and a round
 is the expensive part of the loop. A mechanical fix pass may run as a subagent, since
-answering a stated finding is bounded work: its description starts `review-fix:` and each
-finding is given with its `path:line`, so the hooks module sizes it as it sizes the cold
-read, with `model` and `effort` left unset on both calls. The judgment calls, the thread
+answering a stated finding is bounded work: its description starts `review-fix:` and the
+number of findings handed over, so the hooks module sizes it as it sizes the cold read, with
+`model` and `effort` left unset on both calls. The judgment calls, the thread
 replies and the round summary stay with the session driving the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can

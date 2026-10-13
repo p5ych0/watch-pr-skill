@@ -287,9 +287,9 @@ silently. Then, in this order:
    irreversible parts of a round come last.
 
 A mechanical fix may be handed to a subagent. Start the call's description with
-`review-fix:`, give each finding with its `path:line`, and leave `model` and `effort` unset,
-so the hooks module sizes the pass. The thread replies, the round summary and every judgment
-call stay with you.
+`review-fix:` and the number of findings handed over, as in `review-fix: 3 findings`, and
+leave `model` and `effort` unset, so the hooks module sizes the pass. The thread replies, the
+round summary and every judgment call stay with you.
 
 ### 5a. Self-check before the push
 
