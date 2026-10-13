@@ -37,10 +37,9 @@ async function git($: EngineInterface, args: readonly string[]): Promise<string 
 }
 
 // Text cannot say where a ref's name ends and the prose after it begins, so the names are git's.
-async function namedRef($: EngineInterface, prompt: string): Promise<string | undefined> {
-  const listed = await git($, ['for-each-ref', '--format=%(refname)', `${REMOTES}origin/`])
+function namedRef(listed: string, prompt: string): string | undefined {
   let named: { at: number; ref: string } | undefined
-  for (const line of listed?.split('\n') ?? []) {
+  for (const line of listed.split('\n')) {
     const ref = line.startsWith(REMOTES) ? line.slice(REMOTES.length) : ''
     const at = ref === '' ? -1 : prompt.indexOf(ref)
     if (at === -1) continue
@@ -54,7 +53,9 @@ async function namedRef($: EngineInterface, prompt: string): Promise<string | un
 async function changed($: EngineInterface, prompt: string): Promise<Size | undefined> {
   // The reviewer reads untracked files, and the numstat below counts none of them.
   if ((await git($, ['ls-files', '--others', '--exclude-standard', '--', ':/'])) !== '') return undefined
-  for (const ref of new Set([(await namedRef($, prompt)) ?? 'origin/HEAD', 'origin/HEAD'])) {
+  const listed = await git($, ['for-each-ref', '--format=%(refname)', `${REMOTES}origin/`])
+  if (listed === undefined) return undefined
+  for (const ref of new Set([namedRef(listed, prompt) ?? 'origin/HEAD', 'origin/HEAD'])) {
     const base = (await git($, ['merge-base', ref, 'HEAD']))?.trim()
     if (base === undefined || !/^[0-9a-f]{40,64}$/.test(base)) continue
     const stat = await git($, ['diff', '--numstat', '--no-renames', '--no-ext-diff', '--no-textconv', base])

@@ -413,7 +413,9 @@ not run it and the loop runs as before.
   base with the remote-tracking `origin/…` ref the session's prompt names
   first, else with `origin/HEAD`. Which names are refs is `git`'s answer: the
   module asks it for the remote's refs and takes the longest one written at
-  that place, so nothing depends on the text that follows a name.
+  that place, so nothing depends on the text that follows a name. A base the
+  checkout has not fetched is not among them, and a fetched ref whose name
+  begins it is taken in its place, so fetch the base before the read.
 - **A fix pass the session delegates** is sized by the number of findings the
   session states: it starts the subagent's description with `review-fix:` and
   that number, as in `review-fix: 3 findings`.

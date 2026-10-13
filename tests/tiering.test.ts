@@ -13,7 +13,7 @@ function stage(on: On) {
   const staged: {
     numstat: string | undefined
     untracked: string
-    refs: string[]
+    refs: string[] | undefined
     unrelated: string[]
     seen: Seen[]
     git: string[][]
@@ -23,7 +23,10 @@ function stage(on: On) {
     staged.git.push([...e.argv])
     staged.bounds.push(e.init?.timeoutMs)
     if (e.argv.includes('ls-files')) return exited(staged.untracked)
-    if (e.argv.includes('for-each-ref')) return exited(staged.refs.map(ref => `refs/remotes/origin/${ref}\n`).join(''))
+    if (e.argv.includes('for-each-ref')) {
+      if (staged.refs === undefined) return exited('', 128)
+      return exited(staged.refs.map(ref => `refs/remotes/origin/${ref}\n`).join(''))
+    }
     if (staged.numstat === undefined) return exited('', 128)
     if (!e.argv.includes('merge-base')) return exited(staged.numstat)
     return staged.unrelated.includes(e.argv.at(-2) ?? '') ? exited('', 1) : exited(`${SHA}\n`)
@@ -92,8 +95,9 @@ test('the base is the longest listed ref at the first place one is written, what
   await $.tool.call(review('Base ref origin/release\u2014the body follows.'))
   await $.tool.call(review('The base is origin/café.'))
   await $.tool.call(review('Base ref origin/main; the reviewer brief names `origin/next` too.'))
-  expect(bases(staged)).toEqual(['origin/release@beta', 'origin/release', 'origin/café', 'origin/main'])
-  expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'medium', 'medium'])
+  await $.tool.call(review('Base ref origin/release-2, which this checkout has not fetched.'))
+  expect(bases(staged)).toEqual(['origin/release@beta', 'origin/release', 'origin/café', 'origin/main', 'origin/release'])
+  expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'medium', 'medium', 'medium'])
 })
 
 test('a named ref with no merge base gives way to the remote default', async ($, on) => {
@@ -103,6 +107,15 @@ test('a named ref with no merge base gives way to the remote default', async ($,
   await $.tool.call(review())
   expect(bases(staged)).toEqual(['origin/main', 'origin/HEAD'])
   expect(staged.seen).toEqual([{ model: undefined, effort: 'high' }])
+})
+
+test('a listing of the remote\'s refs that fails leaves the cold review as called', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '2\t0\ta.sh\n'
+  staged.refs = undefined
+  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
+  expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
+  expect(bases(staged)).toEqual([])
 })
 
 test('a tree holding untracked files leaves the cold review as called', async ($, on) => {
