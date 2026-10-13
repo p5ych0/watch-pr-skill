@@ -9,8 +9,8 @@
   `docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md` admits, `hooks/tiering.ts`,
   which sets `effort` on two kinds of Agent call before the subagent starts and logs one
   line saying what it picked and from what. A `cold-reviewer` run, the plugin's or a
-  project's, is sized by the lines added and deleted against the merge base: the `origin/…`
-  ref the prompt names, else `origin/HEAD`. A fix pass, which the session marks by starting
+  project's, is sized by the lines added and deleted against the merge base with the first
+  `origin/…` ref the prompt names that resolves, else with `origin/HEAD`. A fix pass, which the session marks by starting
   the call's description with `review-fix:`, is sized by the distinct `path:line` findings
   in its prompt. Each kind has three rungs and two bounds between them, ten options in
   `plugin.json` that `/plugin configure watch-pr-skill` sets. A rung is `<model>/<effort>`,
@@ -24,7 +24,7 @@
   naming no `path:line`, goes through as the session made it, and so does every other
   subagent and every fork. A Claude Code build without function hooks reads the empty
   command-hook record beside the module and runs nothing. `SKILL.md` says how a fix pass is
-  marked and that `model` and `effort` are left unset on both kinds of call. Nine cases
+  marked and that `model` and `effort` are left unset on both kinds of call. Ten cases
   under `tests/` hold the behaviour under `claude plugin test`, each proved against its
   mutant, and `test-hooks.sh` holds what the suite can: the module and its cases are
   present, every rung's default names no model, and the options the module reads are

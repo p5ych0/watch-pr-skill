@@ -410,7 +410,8 @@ Claude Code build with function hooks, measured on 2.1.296; an older build does
 not run it and the loop runs as before.
 
 - **A cold review** is sized by the lines added and deleted against the merge
-  base: the `origin/…` ref the session names to the reviewer, else `origin/HEAD`.
+  base with the first `origin/…` ref in the session's prompt that resolves,
+  else with `origin/HEAD`.
 - **A fix pass the session delegates** is sized by the distinct `path:line`
   findings in its prompt. The session marks one by starting the subagent's
   description with `review-fix:`.

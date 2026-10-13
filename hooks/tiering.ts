@@ -4,7 +4,7 @@ const MODELS = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 type Kind = 'review' | 'fix'
-type Pick = { model?: (typeof MODELS)[number]; effort: (typeof EFFORTS)[number] }
+type Choice = { model?: (typeof MODELS)[number]; effort: (typeof EFFORTS)[number] }
 type Size = { count: number; text: string }
 
 const NAMED_REF = /(?<![\w./-])origin\/[\w./-]*\w/g
@@ -13,7 +13,7 @@ const ANCHOR = /(?<![\w./-])(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z]\w*:\d+/g
 const isOneOf = <T extends string>(list: readonly T[], value: string | undefined): value is T =>
   list.some(item => item === value)
 
-function pickOf(value: unknown): Pick | undefined {
+function pickOf(value: unknown): Choice | undefined {
   const [model, effort] = String(value).split('/')
   if (!isOneOf(EFFORTS, effort)) return undefined
   if (model === 'default') return { effort }

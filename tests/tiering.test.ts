@@ -60,6 +60,27 @@ test('the base is the ref the prompt names, else the remote default', async ($, 
   ])
 })
 
+test('a named ref that does not resolve gives way to the next, then to the remote default', async ($, on) => {
+  const bases: (string | undefined)[] = []
+  const seen: Seen[] = []
+  on('process.run', ($, e) => {
+    if (!e.argv.includes('merge-base')) return exited('70\t0\ta.sh\n')
+    bases.push(e.argv.at(-2))
+    return e.argv.at(-2) === 'origin/gone' ? exited('', 128) : exited(`${SHA}\n`)
+  })
+  on('tool.call', { tool: 'Agent' }, ($, e) => {
+    seen.push({ model: e.model, effort: e.effort })
+    return { result: {} }
+  })
+  await $.tool.call(review('Base ref origin/gone, cut from origin/main.'))
+  await $.tool.call(review('Base ref origin/gone. Body follows.'))
+  expect(bases).toEqual(['origin/gone', 'origin/main', 'origin/gone', 'origin/HEAD'])
+  expect(seen).toEqual([
+    { model: undefined, effort: 'high' },
+    { model: undefined, effort: 'high' },
+  ])
+})
+
 test('a review fix is sized by the distinct findings its prompt names', async ($, on) => {
   const staged = stage(on)
   await $.tool.call(fix('scripts/pr-watch.sh:37 — the timeout is read twice. Again at scripts/pr-watch.sh:37.'))
