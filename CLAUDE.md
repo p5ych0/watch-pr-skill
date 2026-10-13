@@ -104,11 +104,12 @@ request of a PR, and after each round's fixes, have the `cold-reviewer` subagent
 changes, giving it the PR's base ref, its body, the newest round summary and the earlier
 rounds' findings with their replies; fix what names a defect this change introduced and file
 the rest. It is a cheap pre-read in the operator's own session, not a boundary, and a round
-is the expensive part of the loop. A mechanical fix pass may run as a subagent, since
-answering a stated finding is bounded work: its description starts `review-fix:` and the
-number of findings handed over, so the hooks module sizes it as it sizes the cold read, with
-`model` and `effort` left unset on both calls. The judgment calls, the thread
-replies and the round summary stay with the session driving the loop.
+is the expensive part of the loop. A round's edits run in a subagent by default, since
+making an answer the session has already decided is bounded work: the call's description
+starts `review-fix:` and the tier the session names for the pass, so the hooks module sets
+its model and effort as it does the cold read's, with both left unset on the calls. The
+judgment calls, the commit, the thread replies and the round summary stay with the session
+driving the loop.
 
 **Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can
 recover. That is the PR number and branch; `REPO_DIR` and `RB_SCRIPTS` as setup resolved

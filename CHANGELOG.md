@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.13.0] — 2026-10-13
+
+- **A round's edits run in a subagent, at a tier the session names.** 2.12.0 sized a fix
+  pass only where the session chose to delegate one, and sized it by a count of findings. A
+  count is a weak measure of the work: one finding can need a redesign, and a pass of five
+  wordings is an afternoon's nothing. And a session that made every edit itself got no
+  tiering at all. `SKILL.md` now has the session decide the answer to each finding and then
+  hand the edits to a subagent by default, where the harness has subagents and the operator
+  has not said otherwise. It marks the call `review-fix:` and names the tier, `small`,
+  `medium` or `large`, by the hardest finding in the pass, as in
+  `review-fix: large, 2 findings`. The hooks module reads the tier where it comes first
+  after the marker and takes the rung for it; where no tier is named, the stated count
+  decides as before, so the 2.12.0 form keeps working. The commit, the self-check, the
+  thread replies, the round summary and every judgment call stay with the session, and the
+  subagent is told to commit, push, post and resolve nothing and to report, for each
+  finding, the mutation it ran and what failed. What an operator gains is the delegation
+  itself, a word to the session that keeps the edits there, and a tier the module reads.
+
+  No model call sits in the hook to judge the size: the session has already read the
+  findings, and a second judgment would add cost and delay to every pass. Twenty cases
+  under `tests/` hold the module, the two new ones proved against a module that ignores a
+  named tier, one that reads a tier anywhere in the description, and one that takes a word
+  that only starts like a tier, a hyphenated one included. `test-hooks.sh` holds that the
+  marker and the three tiers `SKILL.md` tells the session to write are the ones the module
+  reads. Closes #370.
+
 ## [2.12.0] — 2026-10-13
 
 - **The loop's subagents are sized to the work.** A cold read of a ten-line fix and one of a
