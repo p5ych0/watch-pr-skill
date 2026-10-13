@@ -29,7 +29,7 @@
   bound, a fix pass that states no number. So does every other subagent and every fork. A Claude Code
   build without function hooks reads the empty command-hook record beside the module and
   runs nothing. `SKILL.md` says how a fix pass is
-  marked and that `model` and `effort` are left unset on both kinds of call. Sixteen cases
+  marked and that `model` and `effort` are left unset on both kinds of call. Seventeen cases
   under `tests/` hold the behaviour under `claude plugin test`, each proved against its
   mutant, and `test-hooks.sh` holds what the suite can: the module and its cases are
   present, every rung's default names no model, and the options the module reads are

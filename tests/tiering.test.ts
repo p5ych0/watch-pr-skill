@@ -12,24 +12,25 @@ const exited = (stdout: string, exitCode = 0) => ({
 function stage(on: On) {
   const staged: {
     numstat: string | undefined
-    untracked: string
+    untracked: string | undefined
+    diffFails: boolean
     refs: string[] | undefined
     unrelated: string[]
     broken: string[]
     seen: Seen[]
     git: string[][]
     bounds: (number | undefined)[]
-  } = { numstat: undefined, untracked: '', refs: ['HEAD', 'main'], unrelated: [], broken: [], seen: [], git: [], bounds: [] }
+  } = { numstat: undefined, untracked: '', diffFails: false, refs: ['HEAD', 'main'], unrelated: [], broken: [], seen: [], git: [], bounds: [] }
   on('process.run', ($, e) => {
     staged.git.push([...e.argv])
     staged.bounds.push(e.init?.timeoutMs)
-    if (e.argv.includes('ls-files')) return exited(staged.untracked)
+    if (e.argv.includes('ls-files')) return staged.untracked === undefined ? exited('', 128) : exited(staged.untracked)
     if (e.argv.includes('for-each-ref')) {
       if (staged.refs === undefined) return exited('', 128)
       return exited(staged.refs.map(ref => `refs/remotes/origin/${ref}\n`).join(''))
     }
     if (staged.numstat === undefined) return exited('', 128)
-    if (!e.argv.includes('merge-base')) return exited(staged.numstat)
+    if (!e.argv.includes('merge-base')) return staged.diffFails ? exited('', 128) : exited(staged.numstat)
     if (staged.broken.includes(e.argv.at(-2) ?? '')) return exited('', 128)
     return staged.unrelated.includes(e.argv.at(-2) ?? '') ? exited('', 1) : exited(`${SHA}\n`)
   })
@@ -42,6 +43,8 @@ function stage(on: On) {
 
 const bases = (staged: { git: string[][] }) =>
   staged.git.filter(argv => argv.includes('merge-base')).map(argv => argv.at(-2))
+
+const remote = (...names: string[]) => names.map(name => `refs/remotes/origin/${name}`)
 
 const review = (prompt = 'Base ref origin/main; there is no round summary yet.') =>
   ({ tool: 'Agent', description: 'Cold read', prompt, subagent_type: 'cold-reviewer' }) as const
@@ -70,7 +73,7 @@ test('the base is the ref the prompt names, else the remote default', async ($, 
   staged.refs = ['HEAD', 'main', 'release-2']
   await $.tool.call({ ...review('Base ref origin/release-2 and the body follows.'), subagent_type: 'watch-pr-skill:cold-reviewer' })
   await $.tool.call(review('The base is main.'))
-  expect(bases(staged)).toEqual(['origin/release-2', 'origin/HEAD'])
+  expect(bases(staged)).toEqual(remote('release-2', 'HEAD'))
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'medium' },
     { model: undefined, effort: 'medium' },
@@ -82,7 +85,7 @@ test('a name git does not list is no base: the next named ref is, then the remot
   staged.numstat = '70\t0\ta.sh\n'
   await $.tool.call(review('Base ref origin/gone cut from origin/main and nothing else.'))
   await $.tool.call(review('Base ref origin/gone and the body follows.'))
-  expect(bases(staged)).toEqual(['origin/main', 'origin/HEAD'])
+  expect(bases(staged)).toEqual(remote('main', 'HEAD'))
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'high' },
     { model: undefined, effort: 'high' },
@@ -98,25 +101,25 @@ test('the base is the longest listed ref at the first place one is written, what
   await $.tool.call(review('The base is origin/café.'))
   await $.tool.call(review('Base ref origin/main; the reviewer brief names `origin/next` too.'))
   await $.tool.call(review('Base ref origin/release-2, which this checkout has not fetched.'))
-  expect(bases(staged)).toEqual(['origin/release@beta', 'origin/release', 'origin/café', 'origin/main', 'origin/release'])
+  expect(bases(staged)).toEqual(remote('release@beta', 'release', 'café', 'main', 'release'))
   expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'medium', 'medium', 'medium'])
 })
 
 test('a named ref with no merge base gives way to the remote default', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '70\t0\ta.sh\n'
-  staged.unrelated = ['origin/main']
+  staged.unrelated = remote('main')
   await $.tool.call(review())
-  expect(bases(staged)).toEqual(['origin/main', 'origin/HEAD'])
+  expect(bases(staged)).toEqual(remote('main', 'HEAD'))
   expect(staged.seen).toEqual([{ model: undefined, effort: 'high' }])
 })
 
 test('a merge base git fails to compute ends the sizing, where one it reports absent does not', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '70\t0\ta.sh\n'
-  staged.broken = ['origin/main']
+  staged.broken = remote('main')
   await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
-  expect(bases(staged)).toEqual(['origin/main'])
+  expect(bases(staged)).toEqual(remote('main'))
   expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
 })
 
@@ -127,6 +130,21 @@ test('a listing of the remote\'s refs that fails leaves the cold review as calle
   await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
   expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
   expect(bases(staged)).toEqual([])
+})
+
+test('a listing of untracked files, or a diff, that fails leaves the cold review as called', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '2\t0\ta.sh\n'
+  staged.untracked = undefined
+  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
+  staged.untracked = ''
+  staged.diffFails = true
+  await $.tool.call({ ...review(), model: 'fable', effort: 'max' })
+  expect(staged.seen).toEqual([
+    { model: 'opus', effort: 'low' },
+    { model: 'fable', effort: 'max' },
+  ])
+  expect(bases(staged)).toEqual(remote('main'))
 })
 
 test('a tree holding untracked files leaves the cold review as called', async ($, on) => {

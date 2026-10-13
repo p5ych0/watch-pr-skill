@@ -58,7 +58,7 @@ async function changed($: EngineInterface, prompt: string): Promise<Size | undef
   if (listed === undefined) return undefined
   for (const ref of new Set([namedRef(listed, prompt) ?? 'origin/HEAD', 'origin/HEAD'])) {
     // Status 1 is git's answer that the two share no ancestor; any other failure is an error.
-    const base = (await git($, ['merge-base', ref, 'HEAD'], 1))?.trim()
+    const base = (await git($, ['merge-base', `${REMOTES}${ref}`, 'HEAD'], 1))?.trim()
     if (base === '') continue
     if (base === undefined || !/^[0-9a-f]{40,64}$/.test(base)) return undefined
     const stat = await git($, ['diff', '--numstat', '--no-renames', '--no-ext-diff', '--no-textconv', base])
