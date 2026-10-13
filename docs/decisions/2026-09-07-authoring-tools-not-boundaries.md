@@ -5,7 +5,9 @@
 **Decided by:** the repository operator, in session, on the measurement below
 **Raised in:** #314
 **Amended:** 2026-09-11, #340, so that the acceptance covers an installed copy of the cold
-reviewer before #339 ships one
+reviewer before #339 ships one; 2026-10-13, #365, so that its last rule names the hooks it
+was written about, the checkout's, and leaves the plugin's own module to
+`docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md`
 
 `.claude/hooks/` and the cold reviewer's brief run inside the operator's own Claude Code
 session, on the operator's own checkout: this one for the hooks, and for an installed copy
@@ -61,7 +63,8 @@ again.
   change does not land there is nothing here to accept.
 - A finding that names a fail-closed guard going open, in a hook or anywhere else, is still
   a finding whatever this record says.
-- No hook installs. `test-hooks.sh` fails if the plugin root gains a `hooks/` directory,
-  either manifest declares hooks, or a Markdown file's frontmatter holds a line starting
-  `hooks:`, since the evasion accepted above would then reach every project that installs
-  the plugin.
+- None of the checkout's hooks installs, and no command hook does. `test-hooks.sh` fails if
+  either manifest declares hooks, a Markdown file's frontmatter holds a line starting
+  `hooks:`, or the plugin root's `hooks/` holds anything but the one module
+  `docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md` bounds, since the evasion
+  accepted above would then reach every project that installs the plugin.

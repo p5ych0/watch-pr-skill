@@ -16,8 +16,10 @@ rewrite the rules it is judged by.
 `bash -p` by its caller, with two exceptions the tests pin: `pr-selfcheck.sh`, which
 re-execs into a clean shell itself, and `pr-origin.sh`, which is not executable and is
 always started by a caller naming the interpreter. Runtime executables: `perl` (hard
-requirement), `jq`, `gh`, `git`, GNU or BSD coreutils. No Node, no Python at runtime. Two
-reviewers: Codex and Copilot, both GitHub apps; no daemon.
+requirement), `jq`, `gh`, `git`, GNU or BSD coreutils. No Node, no Python at runtime. A
+hooks module, where the plugin ships one, is the exception to bash: TypeScript the CLI's own
+engine runs, bounded by `docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md`, with
+nothing for an operator to install. Two reviewers: Codex and Copilot, both GitHub apps; no daemon.
 
 **Structure.** `skills/watch-prs/SKILL.md` drives; `skills/watch-prs/scripts/pr-*.sh` are
 the helpers, `*lib.sh` the shared libraries, `test-*.sh` the fixtures;
@@ -282,6 +284,12 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   fence against the real helper and stub setups, the head-proof and signoff-read fences
   against staged files. The rest of the document is pinned by text, and no Markdown parser
   is built for it.
+- **The suite does not run a hooks module.** Where the plugin ships one, `test-hooks.sh`
+  pins its shape; its behaviour is the cases under `tests/` at the plugin root, run with
+  `claude plugin test .` where the CLI is present, which CI is not. A change to the module
+  is not done until they pass, each new
+  case proved against its mutant as a fixture is. `claude plugin validate .` prints what the
+  engine reads the module to hook, the exact answer the suite's text questions stand in for.
 - Every behaviour change ships its test in the same PR, proved to fail against the unfixed
   code for the reason it names.
 - Run the suite as CI does:
@@ -307,8 +315,8 @@ user-visible change with no `README.md` update is incomplete.
 
 Bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry in the same
 PR whenever an installed file changes — the scripts, `SKILL.md`, `agents/cold-reviewer.md`,
-the manifests. A change confined to `test-*.sh`, to authoring documentation, or to the
-reviewer files bumps nothing:
+a hooks module where one ships, the manifests. A change confined to `test-*.sh`, to a
+module's cases under `tests/`, to authoring documentation, or to the reviewer files bumps nothing:
 the reviewer files are read from the base ref and nothing installs them.
 
 **The size of the bump.** MINOR (x.Y.0) only for a new capability: a switch, a command, a

@@ -11,31 +11,66 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 tmp="$(mktemp_d)" || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
-ships_no_hook() {
-    local found
-    [ ! -e "$1/hooks" ] && [ ! -L "$1/hooks" ] \
-        && jq -e 'has("hooks") | not' "$1/.claude-plugin/plugin.json" >/dev/null \
+ships_only_the_module() {
+    local found dir="$1/hooks" mod
+    if [ -e "$dir" ] || [ -L "$dir" ]; then
+        [ ! -L "$dir" ] && [ -f "$dir/hooks.json" ] && [ ! -L "$dir/hooks.json" ] \
+            && jq -e 'keys == ["hooks", "modules"] and .hooks == {} and (.modules | type == "array" and length == 1) and (.modules[0] | type == "string" and test("\\A\\./[a-z][a-z0-9-]*\\.ts\\z"))' "$dir/hooks.json" >/dev/null \
+            && mod="$dir/$(jq -r '.modules[0]' "$dir/hooks.json")" && [ -f "$mod" ] && [ ! -L "$mod" ] \
+            && [ "$(find "$dir/" -mindepth 1 | wc -l)" -eq 2 ] \
+            && [ "$(tr -c '[:alnum:]_$' '\n' < "$mod" | grep -cx 'on')" -eq 2 ] && grep -qF "on('tool.call', { tool: 'Agent' }" "$mod" \
+            && ! grep -q 'deny' "$mod" && ! grep -qF '.claude/' "$mod" || return 1
+    fi
+    jq -e 'has("hooks") | not' "$1/.claude-plugin/plugin.json" >/dev/null \
         && jq -e 'all(.plugins[]; has("hooks") | not)' "$1/.claude-plugin/marketplace.json" >/dev/null \
         && found="$(find "$1" -name .git -prune -o -name '*.md' -exec awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^hooks:/ { f = 1; exit } END { exit !f }' {} \; -print)" \
         && [ -z "$found" ]
 }
-for d in clean dir plugin market skill; do
-    mkdir -p "$tmp/root-$d/.claude-plugin" "$tmp/root-$d/skills/s"
-    printf '{"name":"p"}\n' > "$tmp/root-$d/.claude-plugin/plugin.json"
-    printf '{"plugins":[{"name":"p","source":"./"}]}\n' > "$tmp/root-$d/.claude-plugin/marketplace.json"
-    printf -- '---\nname: s\n---\n\nhooks: prose, not frontmatter\n' > "$tmp/root-$d/skills/s/SKILL.md"
-done
+stage_root() {
+    mkdir -p "$1/.claude-plugin" "$1/skills/s"
+    printf '{"name":"p"}\n' > "$1/.claude-plugin/plugin.json"
+    printf '{"plugins":[{"name":"p","source":"./"}]}\n' > "$1/.claude-plugin/marketplace.json"
+    printf -- '---\nname: s\n---\n\nhooks: prose, not frontmatter\n' > "$1/skills/s/SKILL.md"
+}
+stage_module() {
+    stage_root "$1" && mkdir -p "$1/hooks"
+    printf '{ "hooks": {}, "modules": ["./tiering.ts"] }\n' > "$1/hooks/hooks.json"
+    printf "export const register = on => {\n  on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n}\n" > "$1/hooks/tiering.ts"
+}
+for d in clean dir plugin market skill link; do stage_root "$tmp/root-$d"; done
 mkdir -p "$tmp/root-dir/hooks" "$tmp/root-unread/.claude-plugin"
 printf '{"name":"p","hooks":"./h.json"}\n' > "$tmp/root-plugin/.claude-plugin/plugin.json"
 printf '{"plugins":[{"name":"p","source":"./","hooks":{}}]}\n' > "$tmp/root-market/.claude-plugin/marketplace.json"
 printf -- '---\nname: s\nhooks:\n  Stop: []\n---\n' > "$tmp/root-skill/skills/s/SKILL.md"
-ships_no_hook "$tmp/root-clean" && pass "a plugin root with no hook route passes the install check" \
+for d in module command bare key two outside newline missing modlink jsonlink extra second oneline spaced alias other refuse checkout; do stage_module "$tmp/root-$d"; done
+ln -s "$tmp/root-module/hooks" "$tmp/root-link/hooks"
+printf '{ "hooks": { "Stop": [] }, "modules": ["./tiering.ts"] }\n' > "$tmp/root-command/hooks/hooks.json"
+printf '{ "modules": ["./tiering.ts"] }\n' > "$tmp/root-bare/hooks/hooks.json"
+printf '{ "hooks": {}, "modules": ["./tiering.ts"], "description": "one more key" }\n' > "$tmp/root-key/hooks/hooks.json"
+printf '{ "hooks": {}, "modules": ["./tiering.ts", "./tiering.ts"] }\n' > "$tmp/root-two/hooks/hooks.json"
+printf '{ "hooks": {}, "modules": ["../tiering.ts"] }\n' > "$tmp/root-outside/hooks/hooks.json"
+cp "$tmp/root-outside/hooks/tiering.ts" "$tmp/root-outside/tiering.ts"
+printf '{ "hooks": {}, "modules": ["./tiering.ts\\n"] }\n' > "$tmp/root-newline/hooks/hooks.json"
+rm "$tmp/root-missing/hooks/tiering.ts"
+mv "$tmp/root-modlink/hooks/tiering.ts" "$tmp/root-modlink/tiering.ts" && ln -s ../tiering.ts "$tmp/root-modlink/hooks/tiering.ts"
+mv "$tmp/root-jsonlink/hooks/hooks.json" "$tmp/root-jsonlink/hooks.json" && ln -s ../hooks.json "$tmp/root-jsonlink/hooks/hooks.json"
+printf 'exit 0\n' > "$tmp/root-extra/hooks/pre-push.sh"
+printf "export const also = on => on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n" >> "$tmp/root-second/hooks/tiering.ts"
+printf "export const register = on => { on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e)); on('prompt.submit', (\$, e, next) => next(e)) }\n" > "$tmp/root-oneline/hooks/tiering.ts"
+printf "export const register = on => {\n  on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n  on ('prompt.submit', (\$, e, next) => next(e))\n}\n" > "$tmp/root-spaced/hooks/tiering.ts"
+printf "export const register = on => {\n  on('tool.call', { tool: 'Agent' }, (\$, e, next) => next(e))\n  const add = on\n  add('prompt.submit', (\$, e, next) => next(e))\n}\n" > "$tmp/root-alias/hooks/tiering.ts"
+printf "export const register = on => {\n  on('prompt.submit', (\$, e, next) => next(e))\n}\n" > "$tmp/root-other/hooks/tiering.ts"
+printf "export const refusal = { deny: 'no' }\n" >> "$tmp/root-refuse/hooks/tiering.ts"
+printf "export const hook = '.claude/hooks/pre-push.sh'\n" >> "$tmp/root-checkout/hooks/tiering.ts"
+ships_only_the_module "$tmp/root-clean" && pass "a plugin root with no hook route passes the install check" \
     || die "the install check refuses a plugin root that ships no hook"
-for d in dir plugin market skill unread; do
-    ships_no_hook "$tmp/root-$d" && die "the $d decoy passed the install check" || pass "the $d decoy fails the install check"
+ships_only_the_module "$tmp/root-module" && pass "…and so does one whose only hook route is the one module, beside an empty command-hook record" \
+    || die "the install check refuses the module docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md bounds"
+for d in dir plugin market skill unread link command bare key two outside newline missing modlink jsonlink extra second oneline spaced alias other refuse checkout; do
+    ships_only_the_module "$tmp/root-$d" && die "the $d decoy passed the install check" || pass "the $d decoy fails the install check"
 done
-ships_no_hook "$ROOT" && pass "no hook ships with the plugin, so the evasion the authoring-tools record accepts stays in this checkout" \
-    || die "a hook ships with the plugin, or a manifest could not be read; docs/decisions/2026-09-07-authoring-tools-not-boundaries.md accepts neither"
+ships_only_the_module "$ROOT" && pass "no hook ships with the plugin but the module its record bounds, so the evasion the authoring-tools record accepts stays in this checkout" \
+    || die "a hook ships with the plugin beyond the module docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md bounds, or a manifest could not be read"
 
 BRIEF="$ROOT/agents/cold-reviewer.md"
 front_ok() {
