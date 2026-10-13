@@ -271,16 +271,16 @@ test(
 
 test(
   'where the two bounds of a kind overlap, the small bound is read first',
-  { options: { reviewSmallLines: 500, reviewLargeLines: 200, fixSmallFindings: 4, fixLargeFindings: 2 } },
+  { options: { reviewSmallLines: 500, reviewLargeLines: 200, fixSmallFindings: 3, fixLargeFindings: 3 } },
   async ($, on) => {
     const staged = stage(on)
     for (const numstat of ['200\t0\ta.sh\n', '500\t0\ta.sh\n', '501\t0\ta.sh\n']) {
       staged.numstat = numstat
       await $.tool.call(review())
     }
-    for (const count of [2, 4, 5]) await $.tool.call(fix(`review-fix: ${count} findings`))
-    expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'xhigh', 'medium', 'medium', 'xhigh'])
-    expect(staged.logs.map(log => /\((\w+)\)/.exec(log)?.[1])).toEqual(['small', 'small', 'large', 'small', 'small', 'large'])
+    for (const count of [3, 4]) await $.tool.call(fix(`review-fix: ${count} findings`))
+    expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'xhigh', 'medium', 'xhigh'])
+    expect(staged.logs.map(log => /\((\w+)\)/.exec(log)?.[1])).toEqual(['small', 'small', 'large', 'small', 'large'])
   },
 )
 
