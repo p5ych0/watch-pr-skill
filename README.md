@@ -410,9 +410,10 @@ Claude Code build with function hooks, measured on 2.1.296; an older build does
 not run it and the loop runs as before.
 
 - **A cold review** is sized by the lines added and deleted against the merge
-  base with the first `origin/…` ref in the session's prompt that resolves,
-  else with `origin/HEAD`. A ref is read whole, whatever characters its name
-  holds, and `git` is asked where the prose around it ends.
+  base with the remote-tracking `origin/…` ref the session's prompt names
+  first, else with `origin/HEAD`. Which names are refs is `git`'s answer: the
+  module asks it for the remote's refs and takes the longest one written at
+  that place, so nothing depends on the text that follows a name.
 - **A fix pass the session delegates** is sized by the number of findings the
   session states: it starts the subagent's description with `review-fix:` and
   that number, as in `review-fix: 3 findings`.

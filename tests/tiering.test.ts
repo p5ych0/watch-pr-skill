@@ -13,18 +13,20 @@ function stage(on: On) {
   const staged: {
     numstat: string | undefined
     untracked: string
-    missing: string[]
+    refs: string[]
+    unrelated: string[]
     seen: Seen[]
     git: string[][]
     bounds: (number | undefined)[]
-  } = { numstat: undefined, untracked: '', missing: [], seen: [], git: [], bounds: [] }
+  } = { numstat: undefined, untracked: '', refs: ['HEAD', 'main'], unrelated: [], seen: [], git: [], bounds: [] }
   on('process.run', ($, e) => {
     staged.git.push([...e.argv])
     staged.bounds.push(e.init?.timeoutMs)
     if (e.argv.includes('ls-files')) return exited(staged.untracked)
+    if (e.argv.includes('for-each-ref')) return exited(staged.refs.map(ref => `refs/remotes/origin/${ref}\n`).join(''))
     if (staged.numstat === undefined) return exited('', 128)
     if (!e.argv.includes('merge-base')) return exited(staged.numstat)
-    return staged.missing.includes(e.argv.at(-2) ?? '') ? exited('', 128) : exited(`${SHA}\n`)
+    return staged.unrelated.includes(e.argv.at(-2) ?? '') ? exited('', 1) : exited(`${SHA}\n`)
   })
   on('tool.call', { tool: 'Agent' }, ($, e) => {
     staged.seen.push({ model: e.model, effort: e.effort })
@@ -60,6 +62,7 @@ test('a cold review is sized by the lines changed against the merge base', async
 test('the base is the ref the prompt names, else the remote default', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '1\t1\ta.sh\n'
+  staged.refs = ['HEAD', 'main', 'release-2']
   await $.tool.call({ ...review('Base ref origin/release-2 and the body follows.'), subagent_type: 'watch-pr-skill:cold-reviewer' })
   await $.tool.call(review('The base is main.'))
   expect(bases(staged)).toEqual(['origin/release-2', 'origin/HEAD'])
@@ -69,28 +72,37 @@ test('the base is the ref the prompt names, else the remote default', async ($, 
   ])
 })
 
-test('a named ref that does not resolve gives way to the next, then to the remote default', async ($, on) => {
+test('a name git does not list is no base: the next named ref is, then the remote default', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '70\t0\ta.sh\n'
-  staged.missing = ['origin/gone']
   await $.tool.call(review('Base ref origin/gone cut from origin/main and nothing else.'))
   await $.tool.call(review('Base ref origin/gone and the body follows.'))
-  expect(bases(staged)).toEqual(['origin/gone', 'origin/main', 'origin/gone', 'origin/HEAD'])
+  expect(bases(staged)).toEqual(['origin/main', 'origin/HEAD'])
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'high' },
     { model: undefined, effort: 'high' },
   ])
 })
 
-test('a named ref is taken whole, and git decides where the prose around it ends', async ($, on) => {
+test('the base is the longest listed ref at the first place one is written, whatever text follows it', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '1\t1\ta.sh\n'
-  staged.missing = ['origin/café.', 'origin/main;', '`origin/next`', 'origin/next`']
+  staged.refs = ['HEAD', 'café', 'main', 'next', 'release', 'release@beta']
   await $.tool.call(review('Base ref origin/release@beta and the body follows.'))
+  await $.tool.call(review('Base ref origin/release\u2014the body follows.'))
   await $.tool.call(review('The base is origin/café.'))
   await $.tool.call(review('Base ref origin/main; the reviewer brief names `origin/next` too.'))
-  expect(bases(staged)).toEqual(['origin/release@beta', 'origin/café.', 'origin/café', 'origin/main;', 'origin/main'])
-  expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'medium'])
+  expect(bases(staged)).toEqual(['origin/release@beta', 'origin/release', 'origin/café', 'origin/main'])
+  expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'medium', 'medium'])
+})
+
+test('a named ref with no merge base gives way to the remote default', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '70\t0\ta.sh\n'
+  staged.unrelated = ['origin/main']
+  await $.tool.call(review())
+  expect(bases(staged)).toEqual(['origin/main', 'origin/HEAD'])
+  expect(staged.seen).toEqual([{ model: undefined, effort: 'high' }])
 })
 
 test('a tree holding untracked files leaves the cold review as called', async ($, on) => {
@@ -142,7 +154,7 @@ test('every git probe carries a bound', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '2\t0\ta.sh\n'
   await $.tool.call(review())
-  expect(staged.bounds).toEqual([10000, 10000, 10000])
+  expect(staged.bounds).toEqual([10000, 10000, 10000, 10000])
 })
 
 test('a probe that does not run, or outlives its bound, ends the sizing and the call goes through', async ($, on) => {
@@ -159,7 +171,7 @@ test('a probe that does not run, or outlives its bound, ends the sizing and the 
   })
   await $.tool.call({ ...review(), effort: 'low' })
   expect(seen).toEqual([{ model: undefined, effort: 'low' }])
-  expect(bases({ git: probes })).toEqual(['origin/main;'])
+  expect(probes.map(argv => argv.find(arg => arg === 'ls-files' || arg === 'for-each-ref'))).toEqual(['ls-files', 'for-each-ref'])
 })
 
 test('any other agent call, and a fork, is left alone and runs no git', async ($, on) => {
