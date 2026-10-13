@@ -56,7 +56,7 @@
     "reviewLargeLines": {
       "type": "number",
       "title": "Cold review: large from (lines)",
-      "description": "A change of at least this many added and deleted lines against its merge base is large.",
+      "description": "A change of at least this many added and deleted lines against its merge base is large, unless the small bound already covers it.",
       "default": 200
     },
     "fixSmall": {
@@ -107,7 +107,7 @@
     "fixLargeFindings": {
       "type": "number",
       "title": "Review fix: large from (findings)",
-      "description": "A fix pass stating at least this many findings is large.",
+      "description": "A fix pass stating at least this many findings is large, unless the small bound already covers it.",
       "default": 4
     }
   }

@@ -18,9 +18,10 @@ function stage(on: On) {
     unrelated: string[]
     broken: string[]
     seen: Seen[]
+    logs: string[]
     git: string[][]
     bounds: (number | undefined)[]
-  } = { numstat: undefined, untracked: '', diffFails: false, refs: ['HEAD', 'main'], unrelated: [], broken: [], seen: [], git: [], bounds: [] }
+  } = { numstat: undefined, untracked: '', diffFails: false, refs: ['HEAD', 'main'], unrelated: [], broken: [], seen: [], logs: [], git: [], bounds: [] }
   on('process.run', ($, e) => {
     staged.git.push([...e.argv])
     staged.bounds.push(e.init?.timeoutMs)
@@ -37,6 +38,10 @@ function stage(on: On) {
   on('tool.call', { tool: 'Agent' }, ($, e) => {
     staged.seen.push({ model: e.model, effort: e.effort })
     return { result: {} }
+  })
+  on('ui.log', ($, e) => {
+    staged.logs.push(e.text.replace(/^[^:]*: /, ''))
+    return { value: undefined }
   })
   return staged
 }
@@ -65,6 +70,12 @@ test('a cold review is sized by the lines changed against the merge base', async
     await $.tool.call(review())
   }
   expect(staged.seen).toEqual(cases.map(([, effort]) => ({ model: undefined, effort })))
+  expect(staged.logs).toEqual([
+    'cold review, 60 changed lines in 1 file (small): medium effort',
+    'cold review, 61 changed lines in 2 files (medium): high effort',
+    'cold review, 199 changed lines in 1 file (medium): high effort',
+    'cold review, 200 changed lines in 1 file (large): xhigh effort',
+  ])
 })
 
 test('the base is the ref the prompt names, else the remote default', async ($, on) => {
@@ -166,6 +177,11 @@ test('a review fix is sized by the count its description states', async ($, on) 
     { model: undefined, effort: 'high' },
     { model: undefined, effort: 'xhigh' },
   ])
+  expect(staged.logs).toEqual([
+    'review fix, 1 finding (small): medium effort',
+    'review fix, 2 findings (medium): high effort',
+    'review fix, 4 findings (large): xhigh effort',
+  ])
   expect(staged.git).toEqual([])
 })
 
@@ -189,6 +205,11 @@ test('a call whose size cannot be measured goes through as called', async ($, on
     { model: 'fable', effort: 'xhigh' },
     { model: 'opus', effort: undefined },
     { model: undefined, effort: 'max' },
+  ])
+  expect(staged.logs).toEqual([
+    'cold review left as called, its size could not be measured',
+    'review fix left as called, its size could not be measured',
+    'review fix left as called, its size could not be measured',
   ])
 })
 
@@ -225,6 +246,7 @@ test('any other agent call, and a fork, is left alone and runs no git', async ($
     { model: 'haiku', effort: undefined },
     { model: undefined, effort: undefined },
   ])
+  expect(staged.logs).toEqual([])
   expect(staged.git).toEqual([])
 })
 
@@ -240,6 +262,25 @@ test(
       { model: 'haiku', effort: 'low' },
       { model: 'fable', effort: 'max' },
     ])
+    expect(staged.logs).toEqual([
+      'cold review, 400 changed lines in 1 file (small): haiku at low effort',
+      'review fix, 2 findings (large): fable at max effort',
+    ])
+  },
+)
+
+test(
+  'where the two bounds of a kind overlap, the small bound is read first',
+  { options: { reviewSmallLines: 500, reviewLargeLines: 200, fixSmallFindings: 4, fixLargeFindings: 2 } },
+  async ($, on) => {
+    const staged = stage(on)
+    for (const numstat of ['200\t0\ta.sh\n', '500\t0\ta.sh\n', '501\t0\ta.sh\n']) {
+      staged.numstat = numstat
+      await $.tool.call(review())
+    }
+    for (const count of [2, 4, 5]) await $.tool.call(fix(`review-fix: ${count} findings`))
+    expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'xhigh', 'medium', 'medium', 'xhigh'])
+    expect(staged.logs.map(log => /\((\w+)\)/.exec(log)?.[1])).toEqual(['small', 'small', 'large', 'small', 'small', 'large'])
   },
 )
 

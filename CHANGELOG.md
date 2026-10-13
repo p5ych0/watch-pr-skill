@@ -16,7 +16,9 @@
   and a fetched ref whose name begins it is taken in its place. A fix pass is sized by the number
   of findings the session states, by starting the call's description with `review-fix:` and
   that number, as in `review-fix: 3 findings`. Each kind has three rungs and two bounds
-  between them, ten options in `plugin.json` that `/plugin configure watch-pr-skill` sets. A rung is `<model>/<effort>`,
+  between them, ten options in `plugin.json` that `/plugin configure watch-pr-skill` sets.
+  The small bound is read first, so where an operator's two bounds overlap a size both
+  cover is small. A rung is `<model>/<effort>`,
   and the shipped default names `default` for the model on every rung, which leaves the
   call's model as it was: out of the box only effort moves, medium, high, then xhigh, and no
   install is sent to a model its account may lack. A rung that names a model replaces the
@@ -29,7 +31,7 @@
   bound, a fix pass that states no number. So does every other subagent and every fork. A Claude Code
   build without function hooks reads the empty command-hook record beside the module and
   runs nothing. `SKILL.md` says how a fix pass is
-  marked and that `model` and `effort` are left unset on both kinds of call. Seventeen cases
+  marked and that `model` and `effort` are left unset on both kinds of call. Eighteen cases
   under `tests/` hold the behaviour under `claude plugin test`, each proved against its
   mutant, and `test-hooks.sh` holds what the suite can: the module and its cases are
   present, every rung's default names no model, and the options the module reads are

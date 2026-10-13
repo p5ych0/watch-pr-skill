@@ -11,6 +11,8 @@ const PROBE_MS = 10_000
 const REMOTES = 'refs/remotes/'
 const STATED_COUNT = /^review-fix:\s*(\d+)\b/i
 
+const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
+
 const isOneOf = <T extends string>(list: readonly T[], value: string | undefined): value is T =>
   list.some(item => item === value)
 
@@ -68,14 +70,14 @@ async function changed($: EngineInterface, prompt: string): Promise<Size | undef
       const [added, deleted] = row.split('\t')
       return sum + (Number(added) || 0) + (Number(deleted) || 0)
     }, 0)
-    return { count: lines, text: `${lines} changed lines in ${rows.length} files` }
+    return { count: lines, text: `${counted(lines, 'changed line')} in ${counted(rows.length, 'file')}` }
   }
   return undefined
 }
 
 function stated(description: string): Size | undefined {
   const count = Number(STATED_COUNT.exec(description)?.[1])
-  return count > 0 ? { count, text: `${count} ${count === 1 ? 'finding' : 'findings'}` } : undefined
+  return count > 0 ? { count, text: counted(count, 'finding') } : undefined
 }
 
 export const register: Register = (on, options) => {

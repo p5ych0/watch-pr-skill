@@ -437,6 +437,10 @@ watch-pr-skill` from a shell, shows and sets them afterwards:
 | `fixSmall`, `fixMedium`, `fixLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a fix pass of each size |
 | `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | small up to, and large from, this many findings |
 
+The small bound is read first. Where a kind's two bounds overlap, a size at or
+under the small bound is small whatever the large bound says, and the medium
+rung is not used.
+
 A rung is `<model>/<effort>`. The model `default` leaves the call's model alone,
 so out of the box only the effort moves and no session is sent to a model its
 account lacks. Name `haiku`, `sonnet`, `opus` or `fable` to have the module pick
