@@ -252,8 +252,8 @@ not "fixed".
 
 ## 5. Fix, then close the round
 
-Decide the answer to each finding yourself: which stand, what makes each one false, and
-where you disagree, which you say on the thread rather than resolving silently. Then have a
+Decide the answer to each finding yourself: which stand, and what makes each one false.
+Where you disagree, say so on the thread rather than resolving it silently. Then have a
 subagent make the edits, where the harness has subagents and the operator has not said to
 make them yourself.
 
@@ -269,9 +269,11 @@ make them yourself.
 - **Hand over what the pass needs, and its limits.** Each finding whole, the
   answer you decided for it, and these limits: the smallest change that makes each finding
   false, a test that fails without the fix where the project keeps tests, and nothing
-  committed, pushed, posted or resolved.
-- **Read its diff before you commit it.** The commit, the self-check, the thread replies,
-  the round summary and every judgment call stay with you.
+  committed, pushed, posted or resolved. Have it report, for each finding, the mutation it
+  ran and what failed, or that it could construct none.
+- **Read its diff and its report before you commit.** A fix it could not prove is yours to
+  prove or to stop on, as *Prove a fix can fail* says. The commit, the self-check, the
+  thread replies, the round summary and every judgment call stay with you.
 
 Then, in this order:
 

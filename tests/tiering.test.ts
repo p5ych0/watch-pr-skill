@@ -190,13 +190,16 @@ test('a tier is read only where it comes first and is one of the three', async (
   await $.tool.call(fix('review-fix: 9 findings, small'))
   await $.tool.call({ ...fix('review-fix: larger'), effort: 'low' })
   await $.tool.call({ ...fix('review-fix: the small ones'), effort: 'max' })
+  await $.tool.call({ ...fix('review-fix: small-scale rewrite, 6 findings'), effort: 'high' })
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'xhigh' },
     { model: undefined, effort: 'low' },
     { model: undefined, effort: 'max' },
+    { model: undefined, effort: 'high' },
   ])
   expect(staged.logs).toEqual([
     'review fix, 9 findings (large): xhigh effort',
+    'review fix left as called, its size could not be measured',
     'review fix left as called, its size could not be measured',
     'review fix left as called, its size could not be measured',
   ])

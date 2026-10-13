@@ -14,14 +14,17 @@
   after the marker and takes the rung for it; where no tier is named, the stated count
   decides as before, so the 2.12.0 form keeps working. The commit, the self-check, the
   thread replies, the round summary and every judgment call stay with the session, and the
-  subagent is told to commit, push, post and resolve nothing.
+  subagent is told to commit, push, post and resolve nothing and to report, for each
+  finding, the mutation it ran and what failed. What an operator gains is the delegation
+  itself, a word to the session that keeps the edits there, and a tier the module reads.
 
   No model call sits in the hook to judge the size: the session has already read the
   findings, and a second judgment would add cost and delay to every pass. Twenty cases
   under `tests/` hold the module, the two new ones proved against a module that ignores a
   named tier, one that reads a tier anywhere in the description, and one that takes a word
-  that only starts like a tier. `test-hooks.sh` holds that the marker `SKILL.md` tells the
-  session to write is the one the module reads. Closes #370.
+  that only starts like a tier, a hyphenated one included. `test-hooks.sh` holds that the
+  marker and the three tiers `SKILL.md` tells the session to write are the ones the module
+  reads. Closes #370.
 
 ## [2.12.0] — 2026-10-13
 

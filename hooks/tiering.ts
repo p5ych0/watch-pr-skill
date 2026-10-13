@@ -11,7 +11,7 @@ type Size = { text: string } & ({ count: number } | { tier: Tier })
 
 const PROBE_MS = 10_000
 const REMOTES = 'refs/remotes/'
-const STATED = /^review-fix:\s*(?:([a-z]+)|(\d+))\b/i
+const STATED = /^review-fix:\s*(?:([a-z]+)|(\d+))(?![\w-])/i
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
