@@ -65,9 +65,10 @@ against, restated here:
 - **No new runtime dependency** without a measured defect only it removes, and
   none where an existing one covers the case; `perl` is the precedent. The
   runtime is bash 3.2 or 5 with `perl`, `jq`, `gh`, `git` and GNU or BSD
-  coreutils: no Node and no Python at runtime, whatever the defect. The hooks
-  module and its cases are TypeScript the CLI's own engine runs: they add no
-  executable, and anything an operator must install to run them is a finding.
+  coreutils: no Node and no Python at runtime, whatever the defect. A hooks
+  module and its cases, where the plugin ships one, are TypeScript the CLI's
+  own engine runs: they add no executable, and anything an operator must
+  install to run them is a finding.
 - **No abstraction in anticipation.** A shared library or a new helper exists
   only for a rule written more than once and then found missing from a copy; a
   wrapper that only delegates is a finding, except the interface wrappers

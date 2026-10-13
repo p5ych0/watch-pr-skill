@@ -15,7 +15,7 @@ ships_only_the_module() {
     local found dir="$1/hooks" mod
     if [ -e "$dir" ] || [ -L "$dir" ]; then
         [ ! -L "$dir" ] && [ -f "$dir/hooks.json" ] && [ ! -L "$dir/hooks.json" ] \
-            && jq -e 'keys == ["hooks", "modules"] and .hooks == {} and (.modules | type == "array" and length == 1) and (.modules[0] | type == "string" and test("^\\./[a-z][a-z0-9-]*\\.ts\\z"))' "$dir/hooks.json" >/dev/null \
+            && jq -e 'keys == ["hooks", "modules"] and .hooks == {} and (.modules | type == "array" and length == 1) and (.modules[0] | type == "string" and test("\\A\\./[a-z][a-z0-9-]*\\.ts\\z"))' "$dir/hooks.json" >/dev/null \
             && mod="$dir/$(jq -r '.modules[0]' "$dir/hooks.json")" && [ -f "$mod" ] && [ ! -L "$mod" ] \
             && [ "$(find "$dir/" -mindepth 1 | wc -l)" -eq 2 ] \
             && [ "$(tr -c '[:alnum:]_$' '\n' < "$mod" | grep -cx 'on')" -eq 2 ] && grep -qF "on('tool.call', { tool: 'Agent' }" "$mod" \
