@@ -68,7 +68,9 @@ against, restated here:
 - **No new runtime dependency** without a measured defect only it removes, and
   none where an existing one covers the case; `perl` is the precedent. The
   runtime is bash 3.2 or 5 with `perl`, `jq`, `gh`, `git` and GNU or BSD
-  coreutils: no Node and no Python at runtime, whatever the defect.
+  coreutils: no Node and no Python at runtime, whatever the defect. The hooks
+  module and its cases are TypeScript the CLI's own engine runs: they add no
+  executable, and anything an operator must install to run them is a finding.
 - **No abstraction in anticipation.** A shared library or a new helper exists
   only for a rule written more than once and then found missing from a copy; a
   wrapper that only delegates is a finding, except the interface wrappers
@@ -123,7 +125,10 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   walks past that gate, or one it over-reports, is not a finding against the
   gate. Any other producer is review's job.
 - **Behaviour changes need tests** in `skills/watch-prs/scripts/test-*.sh`,
-  self-contained: throwaway git repositories, stubbed `gh`, no network.
+  self-contained: throwaway git repositories, stubbed `gh`, no network. The
+  hooks module is the exception: its cases sit under `tests/` and run under
+  `claude plugin test`, which the suite cannot, so a change to it ships a case
+  there and the suite pins only its shape.
 - **No runtime script or `SKILL.md` may hard-code an owner, repository or
   branch**, and **no repository but this one is named anywhere**, prose and
   changelog included: a measurement taken elsewhere is evidence for its count
@@ -269,7 +274,7 @@ reason for a change by its changelog entry or its commit message.
 ### Releases
 
 A change to an installed file — the scripts, `SKILL.md`, the agent brief, the
-manifests — bumps the version and adds a changelog entry. Minor only for a new
+hooks module, the manifests — bumps the version and adds a changelog entry. Minor only for a new
 capability: a switch, a command, a stop, a knob the operator did not have before. Patch for
 everything else — a fix however visible, a tightening, a compression, a comment
 or prose change — with an entry that explains the failure fixed or says what the
@@ -442,9 +447,11 @@ finding. The accepted records:
   as holding secrets is a guard against an accident, not containment — a copy
   under another name, a link, an ignored original stay readable by the session
   itself, and an `open:` line in a project's `.cold-review.md` unmarks a name on
-  that project's own word. No hook installs, and `skills/watch-prs/scripts/test-hooks.sh` fails if
-  the plugin root gains a `hooks/` directory, either manifest declares hooks, or a
-  Markdown file's frontmatter holds a line starting `hooks:`. An installed copy of the brief is covered: it runs in the installing operator's
+  that project's own word. None of the checkout's hooks installs and no command hook does:
+  `skills/watch-prs/scripts/test-hooks.sh` fails if either manifest declares hooks, a
+  Markdown file's frontmatter holds a line starting `hooks:`, or the plugin root's `hooks/`
+  holds anything but the module `docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md`
+  bounds. An installed copy of the brief is covered: it runs in the installing operator's
   own session, and the disclosure is accepted there on the same argument. A
   fail-closed guard going open in either hook — an unreadable envelope, a missing or unparseable self-check, a
   bound outside the deadline, a run the deadline cut short — is still a finding, and so is
@@ -463,6 +470,20 @@ finding. The accepted records:
   the push does not send. Running `pr-selfcheck.sh` by hand answers a dirty tree, not a
   refspec that names another commit. A refusal that fires on a mere mention of a push is not the fix: it
   breaks the rule that a mention costs a check run and nothing more.
+
+- `docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md`: the plugin ships one
+  function-hooks module at its root, and it gates nothing. It runs in every installing
+  session and rewrites `model` and `effort` on an Agent call, so it fails open: a hook that
+  throws, a module a later CLI no longer loads, a call it cannot size, each leaves the call
+  as its caller made it, and a request that it fail closed is not a finding. The suite pins
+  its shape and cannot run it; its own cases run under `claude plugin test`. Removing any
+  of these bounds is a finding: `hooks/` holds `hooks.json` and the one module it names and
+  nothing else, none of them a link; `hooks.json` is exactly an empty `hooks` record and
+  one `modules` entry, the empty record being what a CLI that predates function hooks
+  validates; the module registers one hook, `tool.call` for `Agent`, never refuses a call
+  and names nothing under `.claude/`. A second module, a second hook, a hook on any other
+  event, a command hook by any route, or a decision of the loop moved out of a helper into
+  the module, is outside the record and is a finding.
 
 ## A resolved thread is not proof a finding was fixed
 
@@ -483,7 +504,9 @@ that a reply added after the operator recorded a signoff restarts that clock.
 
 **This is a read-only review. Do not set up an environment, install
 dependencies, run the test suite, or execute any script.** Everything here is
-shell and Markdown; the diff and this document are sufficient. Where you would
+shell and Markdown, and one TypeScript hooks module where
+`docs/decisions/2026-10-13-plugin-ships-one-hooks-module.md` admits it; the diff
+and this document are sufficient. Where you would
 have run a test, say what you expect the failing case to be and let the author
 verify it. A claim that cannot be settled by reading is a question in the review
 body, not an inline finding.
