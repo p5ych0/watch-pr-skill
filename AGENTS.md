@@ -136,12 +136,13 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   changelog included: a measurement taken elsewhere is evidence for its count
   and shape, never for whose repository it was. Not mentions: this plugin's own
   metadata and install commands, a functional dependency coordinate such as
-  `uses: actions/checkout@v4`, an API path in its generic form, the links an
-  authoring tool writes to its own documentation and source in a configuration
-  file it generates and rewrites itself, which `.serena/project.yml` is, and the
+  `uses: actions/checkout@v4`, an API path in its generic form, the
   placeholder identity a fixture supplies as a value (`test-pr-identity.sh` keys
-  on the owner and the shape so those pass; this paragraph does not spell them).
-  The same link written by hand, or into any other file, is a mention.
+  on the owner and the shape so those pass; this paragraph does not spell them),
+  and the links an authoring tool writes to its own documentation and source in
+  a configuration file it generates and rewrites itself, which
+  `.serena/project.yml` is. Such a link written by hand, or into a file the tool
+  does not generate, is a mention.
 - **Identity is pinned once per session.** `pr-setup.sh` reads the origin
   through the privileged `pr-origin.sh`, proves it parses, and hands it to the
   driver, which exports `REVIEW_BUS_REMOTE` once so every helper routes by it
@@ -269,9 +270,10 @@ A comment is written only where the code looks wrong and is not: the non-obvious
 why, one or two lines, sentence case; never what the code does, never a ticket,
 a round, a measurement or a history. **Flag** a comment that describes what the
 code does, one gone stale against the code beside it, one carrying history, and a
-rationale paragraph where a line would do. The comments in a configuration file
-a tool generates and rewrites itself, which `.serena/project.yml` is, are the
-tool's and not authored ones: do not flag them. **Do not ask for** a comment, a claim,
+rationale paragraph where a line would do. The comments a tool writes into a
+configuration file it generates and rewrites itself, which
+`.serena/project.yml` is, are not authored ones: do not flag them. A comment
+added by hand there is flagged as any other. **Do not ask for** a comment, a claim,
 a `# WHY:` marker, a rationale section, a paragraph in this file, or a checker
 that decides which comments are non-obvious, as the answer to a finding: a
 behavioural defect is answered by code and a fixture, a comment finding by

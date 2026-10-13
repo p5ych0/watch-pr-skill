@@ -52,8 +52,9 @@ issue number, a review round, a measurement or a history in a comment: those go 
 it is not, and to `docs/decisions/` where a limit is accepted rather than closed. A comment
 that contradicts the code beside it will be followed as an instruction, so a stale comment
 is a defect to delete, never prose to preserve. Fixture comments follow the same rule. The
-comments in a configuration file a tool generates and rewrites itself, which
-`.serena/project.yml` is, are the tool's and this rule does not reach them.
+comments a tool writes into a configuration file it generates and rewrites itself, which
+`.serena/project.yml` is, are not authored ones and this rule does not reach them; a comment
+added by hand there it does.
 
 **Tests.** Never weaken an existing test to make a change pass: where the behaviour it
 covers is meant to stay, a failing test means the change is wrong. A test that encodes a
@@ -247,12 +248,12 @@ Each of these was found, fixed and made again. Read before writing a defence or 
 - **No repository but this one is named anywhere, prose included.** A measurement taken
   elsewhere is evidence for its count and shape, never for whose repository it was. Not
   mentions: this plugin's own metadata and install commands, a dependency coordinate such as
-  `uses: actions/checkout@v4`, an API path in its generic form, the links an authoring tool
-  writes to its own documentation and source in a configuration file it generates and
-  rewrites itself, which `.serena/project.yml` is, and the placeholder identity
+  `uses: actions/checkout@v4`, an API path in its generic form, the placeholder identity
   a fixture supplies as a value — the suite uses one placeholder pair throughout, keyed by
-  `test-pr-identity.sh` on the owner and the shape, and this paragraph does not spell it.
-  The same link written by hand, or into any other file, is a mention.
+  `test-pr-identity.sh` on the owner and the shape, and this paragraph does not spell it —
+  and the links an authoring tool writes to its own documentation and source in a
+  configuration file it generates and rewrites itself, which `.serena/project.yml` is. Such
+  a link written by hand, or into a file the tool does not generate, is a mention.
 - Identity derives from `git remote get-url origin` in one place, `rb_identity` in
   `identitylib.sh`, which sets `HOST`, `OWNER` and `REPO` rather than printing them.
   `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` override it; `SKILL.md`
