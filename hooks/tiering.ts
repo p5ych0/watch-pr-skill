@@ -28,11 +28,12 @@ function kindOf(type: string | undefined, description: string): Kind | undefined
   return /^review-fix\b/i.test(description) ? 'fix' : undefined
 }
 
-async function git($: EngineInterface, args: readonly string[]): Promise<string | undefined> {
+async function git($: EngineInterface, args: readonly string[], emptyAt?: number): Promise<string | undefined> {
   const ran = await $.process.run(['git', '-c', 'core.fsmonitor=false', ...args], {
     env: { GIT_OPTIONAL_LOCKS: '0' },
     timeoutMs: PROBE_MS,
   })
+  if (ran.exitCode === emptyAt) return ''
   return ran.exitCode === 0 && !ran.isStdoutTruncated ? ran.stdout : undefined
 }
 
@@ -56,8 +57,10 @@ async function changed($: EngineInterface, prompt: string): Promise<Size | undef
   const listed = await git($, ['for-each-ref', '--format=%(refname)', `${REMOTES}origin/`])
   if (listed === undefined) return undefined
   for (const ref of new Set([namedRef(listed, prompt) ?? 'origin/HEAD', 'origin/HEAD'])) {
-    const base = (await git($, ['merge-base', ref, 'HEAD']))?.trim()
-    if (base === undefined || !/^[0-9a-f]{40,64}$/.test(base)) continue
+    // Status 1 is git's answer that the two share no ancestor; any other failure is an error.
+    const base = (await git($, ['merge-base', ref, 'HEAD'], 1))?.trim()
+    if (base === '') continue
+    if (base === undefined || !/^[0-9a-f]{40,64}$/.test(base)) return undefined
     const stat = await git($, ['diff', '--numstat', '--no-renames', '--no-ext-diff', '--no-textconv', base])
     if (stat === undefined) return undefined
     const rows = stat.split('\n').filter(row => row !== '')

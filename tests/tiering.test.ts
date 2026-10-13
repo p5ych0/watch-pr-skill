@@ -15,10 +15,11 @@ function stage(on: On) {
     untracked: string
     refs: string[] | undefined
     unrelated: string[]
+    broken: string[]
     seen: Seen[]
     git: string[][]
     bounds: (number | undefined)[]
-  } = { numstat: undefined, untracked: '', refs: ['HEAD', 'main'], unrelated: [], seen: [], git: [], bounds: [] }
+  } = { numstat: undefined, untracked: '', refs: ['HEAD', 'main'], unrelated: [], broken: [], seen: [], git: [], bounds: [] }
   on('process.run', ($, e) => {
     staged.git.push([...e.argv])
     staged.bounds.push(e.init?.timeoutMs)
@@ -29,6 +30,7 @@ function stage(on: On) {
     }
     if (staged.numstat === undefined) return exited('', 128)
     if (!e.argv.includes('merge-base')) return exited(staged.numstat)
+    if (staged.broken.includes(e.argv.at(-2) ?? '')) return exited('', 128)
     return staged.unrelated.includes(e.argv.at(-2) ?? '') ? exited('', 1) : exited(`${SHA}\n`)
   })
   on('tool.call', { tool: 'Agent' }, ($, e) => {
@@ -107,6 +109,15 @@ test('a named ref with no merge base gives way to the remote default', async ($,
   await $.tool.call(review())
   expect(bases(staged)).toEqual(['origin/main', 'origin/HEAD'])
   expect(staged.seen).toEqual([{ model: undefined, effort: 'high' }])
+})
+
+test('a merge base git fails to compute ends the sizing, where one it reports absent does not', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '70\t0\ta.sh\n'
+  staged.broken = ['origin/main']
+  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
+  expect(bases(staged)).toEqual(['origin/main'])
+  expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
 })
 
 test('a listing of the remote\'s refs that fails leaves the cold review as called', async ($, on) => {

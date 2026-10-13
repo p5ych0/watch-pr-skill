@@ -23,13 +23,13 @@
   call's. The last twelve merged changes here ran from 18 to 258 changed lines, and the
   bounds of 60 and 200 split them six small, four medium and two large.
 
-  The module gates nothing. A call it cannot size goes through as the session made it: an
-  unreadable merge base, a checkout holding untracked files, which the reviewer reads and
-  the measure does not count, a `git` that fails or outlives its ten-second bound, a fix
-  pass that states no number. So does every other subagent and every fork. A Claude Code
+  The module gates nothing. A call it cannot size goes through as the session made it: a
+  merge base git fails to compute, a checkout holding untracked files, which the reviewer
+  reads and the measure does not count, a `git` that fails or outlives its ten-second
+  bound, a fix pass that states no number. So does every other subagent and every fork. A Claude Code
   build without function hooks reads the empty command-hook record beside the module and
   runs nothing. `SKILL.md` says how a fix pass is
-  marked and that `model` and `effort` are left unset on both kinds of call. Fifteen cases
+  marked and that `model` and `effort` are left unset on both kinds of call. Sixteen cases
   under `tests/` hold the behaviour under `claude plugin test`, each proved against its
   mutant, and `test-hooks.sh` holds what the suite can: the module and its cases are
   present, every rung's default names no model, and the options the module reads are
