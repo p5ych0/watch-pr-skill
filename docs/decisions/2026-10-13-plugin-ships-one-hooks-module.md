@@ -38,11 +38,14 @@ record is the one exception to it, and the exception's bounds.
   nothing else.
 - `hooks.json` is exactly an empty `hooks` record and one `modules` entry, a `.ts` file
   beside it. No command hook can ship through it.
-- The module registers one hook, `tool.call` for `Agent`. It never refuses a call and names
-  nothing under `.claude/`.
+- The module registers one hook, `tool.call` for `Agent`, and names nothing under
+  `.claude/`. Its text holds no `deny`, the engine's spelling of a refusal.
 - Neither manifest declares hooks, and no Markdown file's frontmatter does.
 
 A plugin root with no `hooks/` at all passes too.
+
+That the module refuses no call is a behaviour, and text cannot hold it. The module's own
+cases hold it under `claude plugin test`: every call they stage reaches the tool.
 
 ## What it cost to learn
 

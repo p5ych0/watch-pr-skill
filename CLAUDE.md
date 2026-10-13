@@ -285,8 +285,8 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   against staged files. The rest of the document is pinned by text, and no Markdown parser
   is built for it.
 - **The suite does not run the hooks module.** `test-hooks.sh` pins its shape; its
-  behaviour is the cases under `tests/`, run with `claude plugin test .` where the CLI is
-  present, which CI is not. A change to the module is not done until they pass, each new
+  behaviour is the cases under `tests/` at the plugin root, run with `claude plugin test .`
+  where the CLI is present, which CI is not. A change to the module is not done until they pass, each new
   case proved against its mutant as a fixture is.
 - Every behaviour change ships its test in the same PR, proved to fail against the unfixed
   code for the reason it names.
@@ -313,8 +313,8 @@ user-visible change with no `README.md` update is incomplete.
 
 Bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry in the same
 PR whenever an installed file changes — the scripts, `SKILL.md`, `agents/cold-reviewer.md`,
-the hooks module, the manifests. A change confined to `test-*.sh`, to authoring documentation, or to the
-reviewer files bumps nothing:
+the hooks module, the manifests. A change confined to `test-*.sh`, to the module's cases
+under `tests/`, to authoring documentation, or to the reviewer files bumps nothing:
 the reviewer files are read from the base ref and nothing installs them.
 
 **The size of the bump.** MINOR (x.Y.0) only for a new capability: a switch, a command, a

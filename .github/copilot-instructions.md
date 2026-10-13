@@ -123,9 +123,9 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   gate. Any other producer is review's job.
 - **Behaviour changes need tests** in `skills/watch-prs/scripts/test-*.sh`,
   self-contained: throwaway git repositories, stubbed `gh`, no network. The
-  hooks module is the exception: its cases sit under `tests/` and run under
-  `claude plugin test`, which the suite cannot, so a change to it ships a case
-  there and the suite pins only its shape.
+  hooks module is the exception: its cases sit under `tests/` at the plugin
+  root and run under `claude plugin test`, which the suite cannot, so a change
+  to it ships a case there and the suite pins only its shape.
 - **No runtime script or `SKILL.md` may hard-code an owner, repository or
   branch**, and **no repository but this one is named anywhere**, prose and
   changelog included: a measurement taken elsewhere is evidence for its count
@@ -276,7 +276,8 @@ capability: a switch, a command, a stop, a knob the operator did not have before
 everything else — a fix however visible, a tightening, a compression, a comment
 or prose change — with an entry that explains the failure fixed or says what the
 text now records. A fix that makes the loop behave differently is still a patch.
-Tests, authoring documentation and these files bump nothing.
+Tests, the module's cases among them, authoring documentation and these files
+bump nothing.
 
 ## Shadowable names: where a finding is, and is not
 
@@ -477,10 +478,11 @@ finding. The accepted records:
   of these bounds is a finding: `hooks/` holds `hooks.json` and the one module it names and
   nothing else, none of them a link; `hooks.json` is exactly an empty `hooks` record and
   one `modules` entry, the empty record being what a CLI that predates function hooks
-  validates; the module registers one hook, `tool.call` for `Agent`, never refuses a call
-  and names nothing under `.claude/`. A second module, a second hook, a hook on any other
-  event, a command hook by any route, or a decision of the loop moved out of a helper into
-  the module, is outside the record and is a finding.
+  validates; the module registers one hook, `tool.call` for `Agent`, names nothing under
+  `.claude/` and holds no `deny` in its text. That it refuses no call is held by its own
+  cases, not by the suite, and a hook that refuses one is a finding. A second module, a
+  second hook, a hook on any other event, a command hook by any route, or a decision of the
+  loop moved out of a helper into the module, is outside the record and is a finding.
 
 ## A resolved thread is not proof a finding was fixed
 
