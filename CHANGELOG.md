@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.13.1] — 2026-10-16
+
+- **The watch is armed with parameters the Monitor tool takes.** Step 3 told a Claude Code
+  session to run the watch as a Monitor with `timeout_ms` `3600000` and `persistent`
+  `true`. The tool takes `command`, `description`, `timeout_ms` and `ws` and refuses any
+  other property, so an arming written as told failed validation. The tool also keeps a
+  monitor for at most 30 minutes, while `pr-watch.sh` waits an hour by default, so the
+  monitor was killed before the watch could return its own status 1. The table had no row
+  for that, which left a session to guess whether to re-request. Step 3 now names
+  `timeout_ms` `1800000` and no other parameter, and says under the table that a monitor
+  the tool ends before the watch returns has no status and is handled as a 1: re-arm the
+  same watch, with no new request.
+  Closes #378.
+
 ## [2.13.0] — 2026-10-13
 
 - **A round's edits run in a subagent, at a tier the session names.** 2.12.0 sized a fix
