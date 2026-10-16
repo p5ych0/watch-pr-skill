@@ -108,7 +108,8 @@ is the expensive part of the loop. A round's edits run in a subagent by default,
 making an answer the session has already decided is bounded work: the call's description
 starts `review-fix:` and the tier the session names for the pass, so the hooks module sets
 its model and effort as it does the cold read's, with both left unset on the calls. Here the
-working tree's module runs only in a session started as § Repo arming says. The
+working tree's module runs only where the session loads the working tree as the plugin, as
+§ Repo arming describes. The
 judgment calls, the commit, the thread replies and the round summary stay with the session
 driving the loop.
 
@@ -379,13 +380,12 @@ needs lands first as its own PR.
 ## Repo arming
 
 `.claude/settings.json` runs the two hooks in `.claude/hooks/` that `test-hooks.sh` proves,
-enables no plugin, and is committed, so the checkout loads no released copy by itself. The
-checkout commits no route that loads the plugin: a session loads the working tree as the
-plugin when it is started from the checkout with `claude --plugin-dir .`, which takes the
-place of an installed copy of the same name unless settings other than the committed
-`.claude/settings.json` override the flag, as by disabling the inline copy or by enabling an
-installed one through managed settings. The module's options are read from user,
-`--settings` or managed settings, not the project's. `.claude/agents/cold-reviewer.md` is a
+names no plugin, since it carries no `enabledPlugins`, and is committed, so the checkout
+loads no released copy by itself. The checkout commits no route that loads the plugin: a
+session loads the working tree as the plugin when it is started from the checkout with
+`claude --plugin-dir .`. Which copy runs when the plugin is loaded more than one way is the
+CLI's decision, and settings outside the checkout can change it. The module's options are
+not read from the project's settings. `.claude/agents/cold-reviewer.md` is a
 link to `agents/cold-reviewer.md`, so that a session started without the flag still reads
 the branch's brief rather than an installed release's. None of these installs; the brief the
 link names does. The Codex connector is account-level

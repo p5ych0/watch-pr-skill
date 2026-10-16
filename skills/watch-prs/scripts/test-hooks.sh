@@ -208,16 +208,19 @@ wired() {
 }
 wired "$SETTINGS" && pass "settings.json runs both hooks by their full path, each under its event and matcher, the push one with a 600 s timeout" \
     || die "settings.json does not run both hooks as the harness must"
-enables_none() { jq -r '.enabledPlugins | if . == null then true elif type == "object" then all(.[]; . == false) else "malformed" end' "$1" 2>/dev/null; }
-jq '.enabledPlugins["renamed-entry@x"] = true' "$SETTINGS" > "$tmp/decoy-enabled.json" || die "the enabled decoy was not written"
-jq '.enabledPlugins["other@x"] = false' "$SETTINGS" > "$tmp/decoy-disabled.json" || die "the disabled decoy was not written"
-jq '.enabledPlugins["other@x"] = "yes"' "$SETTINGS" > "$tmp/decoy-nonboolean.json" || die "the non-boolean decoy was not written"
-jq '.enabledPlugins = ["other@x"]' "$SETTINGS" > "$tmp/decoy-array.json" || die "the array decoy was not written"
-[ "$(enables_none "$SETTINGS")" = true ] && [ "$(enables_none "$tmp/decoy-disabled.json")" = true ] \
-    && [ "$(enables_none "$tmp/decoy-enabled.json")" = false ] && [ "$(enables_none "$tmp/decoy-nonboolean.json")" = false ] \
-    && [ "$(enables_none "$tmp/decoy-array.json")" = malformed ] \
-    && pass "settings.json enables no plugin, so a session here loads no released copy under any name; an entry set to false passes, one set to true or to a non-boolean is caught, and so is an enabledPlugins that is not an object" \
-    || die "settings.json enables a plugin, or the check cannot tell an entry set to false from one set to true, a non-boolean or a malformed enabledPlugins"
+names_none() { jq -r 'has("enabledPlugins") | not' "$1" 2>/dev/null; }
+jq '.enabledPlugins = null' "$SETTINGS" > "$tmp/decoy-null.json" || die "the null decoy was not written"
+jq '.enabledPlugins = {}' "$SETTINGS" > "$tmp/decoy-empty.json" || die "the empty decoy was not written"
+jq '.enabledPlugins["p@inline"] = false' "$SETTINGS" > "$tmp/decoy-inline.json" || die "the inline decoy was not written"
+jq '.enabledPlugins["p@m"] = false' "$SETTINGS" > "$tmp/decoy-disabled.json" || die "the disabled decoy was not written"
+jq '.enabledPlugins["p@m"] = true' "$SETTINGS" > "$tmp/decoy-enabled.json" || die "the enabled decoy was not written"
+named=0
+for d in null empty inline disabled enabled; do
+    [ "$(names_none "$tmp/decoy-$d.json")" = true ] && { die "the $d enabledPlugins decoy passed the no-plugin check"; named=1; }
+done
+[ "$(names_none "$SETTINGS")" = true ] && [ "$named" -eq 0 ] \
+    && pass "settings.json names no plugin: it has no enabledPlugins key, and a null, an empty object, an entry set to false for an inline or a marketplace id, or one set to true is caught" \
+    || die "settings.json names a plugin, carries an enabledPlugins key, or could not be read"
 jq '(.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[]).command = "/usr/bin/env bash -p echo hooks/pre-push.sh"' "$SETTINGS" > "$tmp/decoy-pre.json" || die "the pre decoy was not written"
 jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit") | .hooks[]).command = "/usr/bin/env bash -p echo hooks/post-edit.sh"' "$SETTINGS" > "$tmp/decoy-post.json" || die "the post decoy was not written"
 jq '(.hooks.PostToolUse[] | select(.matcher == "Write|Edit")).matcher = "WriteEdit"' "$SETTINGS" > "$tmp/decoy-matcher.json" || die "the matcher decoy was not written"
