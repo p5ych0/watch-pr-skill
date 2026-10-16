@@ -530,11 +530,13 @@ is fixed before the round is bought.
 Start a session here with `claude --plugin-dir .` from the checkout. The session
 then runs the working tree as the plugin, its skill, agent and hooks module, in
 place of an installed copy, so the cold reads and fix passes are sized by the
-module under development. Managed settings that enable an installed copy take
-precedence over the flag. The checkout commits no route that loads the plugin
-and enables no released copy. `.claude/agents/cold-reviewer.md` links to
-`agents/cold-reviewer.md`, so that a session started without the flag still
-reads the branch's brief rather than an installed release's.
+module under development. Your own or managed settings can override the flag,
+by disabling the inline copy or by enabling an installed one through managed
+settings, and the session then runs that copy instead. The checkout commits no
+route that loads the plugin and enables no released copy.
+`.claude/agents/cold-reviewer.md` links to `agents/cold-reviewer.md`, so that a
+session started without the flag still reads the branch's brief rather than an
+installed release's.
 
 CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
 mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the

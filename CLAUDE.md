@@ -382,8 +382,9 @@ needs lands first as its own PR.
 enables no plugin, and is committed, so the checkout loads no released copy by itself. The
 checkout commits no route that loads the plugin: a session loads the working tree as the
 plugin when it is started from the checkout with `claude --plugin-dir .`, which takes the
-place of an installed copy of the same name unless managed settings enable that copy, since
-they take precedence. The module's options are read from user, `--settings` or managed
+place of an installed copy of the same name unless user or managed settings override the
+flag, as by disabling the inline copy or by enabling an installed one through managed
+settings. The module's options are read from user, `--settings` or managed
 settings, not the project's. `.claude/agents/cold-reviewer.md` is a link to
 `agents/cold-reviewer.md`, so that a session started without the flag still reads the
 branch's brief rather than an installed release's. None of these installs; the brief the
