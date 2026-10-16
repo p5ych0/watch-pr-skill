@@ -407,7 +407,8 @@ finding. The accepted records:
   gate and closes nothing; a claim that it closes the race is a finding.
 - `docs/decisions/2026-08-26-transport-candidate-in-argv.md`: the transport
   name is published in argv before the `mkdir` reserves it; a squatter costs a
-  denial of service bounded by the second-parent retry, never a forged identity.
+  denial of service bounded by the one setup retry, under `~/.watch-pr` or under
+  a second leaf, never a forged identity.
 - `docs/decisions/2026-08-26-reservation-inference.md`: the reservation is an
   inference from `RB_OWNED` and `RB_PREEXISTED`, and the races cost one empty
   directory, lost or left behind.
