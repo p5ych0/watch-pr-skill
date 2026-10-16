@@ -379,15 +379,14 @@ needs lands first as its own PR.
 ## Repo arming
 
 `.claude/settings.json` runs the two hooks in `.claude/hooks/` that `test-hooks.sh` proves,
-enables no copy of this plugin, and is committed, so the checkout loads no released copy by
-itself. A session loads
-the working tree as the plugin when it is started from the checkout with
-`claude --plugin-dir .`, which takes the place of any installed copy of the same name. The
-CLI takes a plugin folder only from that flag or the operator's own settings, never a
-project's, so nothing committed can load it, and the module's options are read from the
-operator's settings too. `.claude/agents/cold-reviewer.md` is a link to
-`agents/cold-reviewer.md`, so that a session started without the flag still reads the
-branch's brief rather than an installed release's. None of these installs; the brief the
+enables no plugin, and is committed, so the checkout loads no released copy by itself. The
+checkout commits no route that loads the plugin: a session loads the working tree as the
+plugin when it is started from the checkout with `claude --plugin-dir .`, which takes the
+place of an installed copy of the same name unless managed settings enable that copy, since
+they take precedence. The module's options are read from the operator's own settings, not
+the project's. `.claude/agents/cold-reviewer.md` is a link to `agents/cold-reviewer.md`, so
+that a session started without the flag still reads the branch's brief rather than an
+installed release's. None of these installs; the brief the
 link names does. The Codex connector is account-level
 (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.

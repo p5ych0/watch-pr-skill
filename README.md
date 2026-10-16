@@ -529,10 +529,10 @@ is fixed before the round is bought.
 
 Start a session here with `claude --plugin-dir .` from the checkout. The session
 then runs the working tree as the plugin, its skill, agent and hooks module, in
-place of any installed copy, so the cold reads and fix passes are sized by the
-module under development. Nothing committed can do this for you: the CLI takes a
-plugin folder only from that flag or your own settings. The checkout enables no
-released copy. `.claude/agents/cold-reviewer.md` links to
+place of an installed copy, so the cold reads and fix passes are sized by the
+module under development. Managed settings that enable an installed copy take
+precedence over the flag. The checkout commits no route that loads the plugin
+and enables no released copy. `.claude/agents/cold-reviewer.md` links to
 `agents/cold-reviewer.md`, so that a session started without the flag still
 reads the branch's brief rather than an installed release's.
 
