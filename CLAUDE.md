@@ -107,7 +107,9 @@ the rest. It is a cheap pre-read in the operator's own session, not a boundary, 
 is the expensive part of the loop. A round's edits run in a subagent by default, since
 making an answer the session has already decided is bounded work: the call's description
 starts `review-fix:` and the tier the session names for the pass, so the hooks module sets
-its model and effort as it does the cold read's, with both left unset on the calls. The
+its model and effort as it does the cold read's, with both left unset on the calls. Here the
+working tree's module runs only where the session loads the working tree as the plugin, as
+§ Repo arming describes. The
 judgment calls, the commit, the thread replies and the round summary stay with the session
 driving the loop.
 
@@ -377,10 +379,13 @@ needs lands first as its own PR.
 
 ## Repo arming
 
-`.claude/settings.json` enables this plugin for the checkout, runs the two hooks in
-`.claude/hooks/` that `test-hooks.sh` proves, and is committed;
+`.claude/settings.json` runs the two hooks in `.claude/hooks/` that `test-hooks.sh` proves,
+names no plugin, since it carries no `enabledPlugins`, and is committed, so the settings
+load no released copy. A session loads the working tree as the plugin when it is started
+from the checkout with `claude --plugin-dir .`. Which copy runs when the plugin is loaded
+more than one way is the CLI's decision, and settings outside the checkout can change it.
 `.claude/agents/cold-reviewer.md` is a link to `agents/cold-reviewer.md`, so that a session
-here reads the branch's brief rather than an installed release's. None of these installs;
-the brief the link names does. The Codex connector is account-level
+started without the flag still reads the branch's brief rather than an installed release's.
+None of these installs; the brief the link names does. The Codex connector is account-level
 (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.

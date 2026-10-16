@@ -525,9 +525,17 @@ In a Claude Code session, this checkout's `.claude/settings.json` runs it as a
 hook before a `git push` or the round gate. Before the first review request of a
 pull request and after each round's fixes, the cold reviewer reads the changes
 the way the reviewers will; a finding that names a defect the change introduced
-is fixed before the round is bought. Here `.claude/agents/cold-reviewer.md` links
-to `agents/cold-reviewer.md`, so that the session reads the branch's brief rather
-than the installed release's.
+is fixed before the round is bought.
+
+Start a session here with `claude --plugin-dir .` from the checkout to run the
+working tree as the plugin, its skill, agent and hooks module, so the module
+under development is the one that sizes the cold reads and fix passes. Settings
+outside the checkout can change which copy a session runs. The checkout's
+settings name no plugin.
+`.claude/agents/cold-reviewer.md` links to `agents/cold-reviewer.md`, so that a
+session started without the flag still reads the branch's brief rather than an
+installed release's.
+
 CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
 mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the
 suite executes fails there before it reaches a macOS contributor. A path the
