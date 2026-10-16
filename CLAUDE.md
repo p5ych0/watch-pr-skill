@@ -380,14 +380,12 @@ needs lands first as its own PR.
 ## Repo arming
 
 `.claude/settings.json` runs the two hooks in `.claude/hooks/` that `test-hooks.sh` proves,
-names no plugin, since it carries no `enabledPlugins`, and is committed, so the checkout
-loads no released copy by itself. The checkout commits no route that loads the plugin: a
-session loads the working tree as the plugin when it is started from the checkout with
-`claude --plugin-dir .`. Which copy runs when the plugin is loaded more than one way is the
-CLI's decision, and settings outside the checkout can change it. The module's options are
-not read from the project's settings. `.claude/agents/cold-reviewer.md` is a
-link to `agents/cold-reviewer.md`, so that a session started without the flag still reads
-the branch's brief rather than an installed release's. None of these installs; the brief the
-link names does. The Codex connector is account-level
+names no plugin, since it carries no `enabledPlugins`, and is committed, so the settings
+load no released copy. A session loads the working tree as the plugin when it is started
+from the checkout with `claude --plugin-dir .`. Which copy runs when the plugin is loaded
+more than one way is the CLI's decision, and settings outside the checkout can change it.
+`.claude/agents/cold-reviewer.md` is a link to `agents/cold-reviewer.md`, so that a session
+started without the flag still reads the branch's brief rather than an installed release's.
+None of these installs; the brief the link names does. The Codex connector is account-level
 (`chatgpt.com/codex/cloud/settings/connectors`); per-repository
 review behaviour lives on the Codex **Code review** settings page.
