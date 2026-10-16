@@ -131,6 +131,13 @@ for row in '| `0` |' '| `1` |' '| `2` |' '| `4` |'; do
 done
 has 'fail closed' && has 're-arm the same watch' \
     && pass "…a 2 fails closed and a 1 re-arms" || die "the watch's 1 or 2 is not acted on"
+arming="$(awk '/run it as this session.s \*\*Monitor\*\*/{f=1} f&&/^$/{exit} f' "$SKILL")"
+grep -qF '`timeout_ms`' <<<"$arming" && grep -qF '`1800000`' <<<"$arming" \
+    && ! grep -q 'persistent' <<<"$arming" && ! grep -qF '3600000' <<<"$arming" \
+    && pass "…the Monitor is armed at the deadline the tool keeps, with no parameter it refuses" \
+    || die "the Monitor arming names a parameter the tool refuses or a deadline it does not keep"
+hasf 'A Monitor the tool ends at its deadline before the watch returns has no status: handle it as a `1`, re-arming the same watch without a new request.' \
+    && pass "…and a Monitor that expires first is handled as a 1" || die "a Monitor that expires before the watch returns is not handled"
 has 'STOP. Do not go to step 4' \
     && pass "…and a 4 is a stop" || die "a replies-only review is not a stop"
 hasf '3: the operator decides at a round boundary' \

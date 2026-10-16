@@ -186,9 +186,10 @@ wait step.
 
 **Claude Code** — run it as this session's **Monitor**, so the verdict surfaces into the
 chat by itself: `command` as above, `description` `Review verdict for PR N`, `timeout_ms`
-`3600000`, `persistent` `true`. **Arm it as part of the round, and re-arm it the same way —
-do not ask.** One arming covers one verdict. A harness that prompts anyway is a permissions
-gap, which `README.md § Watching without prompts` answers.
+`1800000`, the longest the tool keeps one, and no other parameter. **Arm it as part of the
+round, and re-arm it the same way — do not ask.** One arming covers one verdict. A harness
+that prompts anyway is a permissions gap, which `README.md § Watching without prompts`
+answers.
 
 | status | meaning | what to do |
 | --- | --- | --- |
@@ -196,6 +197,9 @@ gap, which `README.md § Watching without prompts` answers.
 | `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask. |
 | `2` | the state could not be read | **fail closed** — never "no findings" |
 | `4` | the review carried comments and **every one was a reply** | **STOP. Do not go to step 4.** Nothing to list and not a signoff. Put the comment to the operator. |
+
+A Monitor the tool ends at its deadline before the watch returns has no status: handle it as
+a `1`, re-arming the same watch without a new request.
 
 States: `none` no review on this head · `pending` a draft is open · `reviewed` a
 submitted APPROVED/COMMENTED review · `blocked` CHANGES_REQUESTED — findings, plus its
