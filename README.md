@@ -202,6 +202,13 @@ settings: granting a tool that runs background commands is each user's decision
 for their own checkout. An unattended session needs it: a wait that prompts is a
 stop.
 
+In Claude Code a watch lasts at most 30 minutes, the longest the `Monitor` tool
+keeps one, or `PR_WATCH_TIMEOUT` seconds where that is shorter. A review still
+in flight when it ends gets a new watch, armed without requesting another
+review, and with `Monitor` allowed as above without a prompt either, so a slow
+review shows a fresh watch at least every half hour. A `PR_WATCH_TIMEOUT` above
+1800 seconds, the default 3600 included, does not lengthen a watch there.
+
 ## A session
 
 Invoke the skill with `/watch-pr-skill:watch-prs` from a checkout of the
