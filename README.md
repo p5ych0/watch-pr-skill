@@ -213,10 +213,11 @@ review shows a fresh watch at least every half hour. A `PR_WATCH_TIMEOUT` above
 
 Invoke the skill with `/watch-pr-skill:watch-prs` from a checkout of the
 repository, on the PR's branch. The session pins itself to that repository's
-`origin` at the start, so changing directory later does not retarget anything;
-to work on another repository, start a new session. The loop drives
-same-repository pull requests only: a PR whose head is in a fork is refused at
-the first push.
+`origin` at the start and proves the pin again in every command, so changing
+directory later does not retarget anything: a command run from another
+checkout stops. To work on another repository, start a new session. The loop
+drives same-repository pull requests only: a PR whose head is in a fork is
+refused at the first push.
 
 ### The Codex phase
 
@@ -503,9 +504,10 @@ the model too; it then replaces whatever the call asked for.
   origin, but it is not a GitHub network transport the loop can address, or it
   spans more than one line. Fix `origin` and re-run.
 - **`ABORT: the pin is not this checkout's origin`.** The origin read back from
-  setup's file and the checkout's `origin` disagree: `origin` or the git
-  configuration resolving it changed mid-setup, or the file was replaced after
-  setup wrote it. Nothing was addressed. Re-run.
+  setup's file and the checkout's `origin` disagree: the command ran from
+  another checkout, `origin` or the git configuration resolving it changed after
+  setup, or the file was replaced after setup wrote it. Nothing was addressed.
+  Run the command again from the checkout setup ran in, or start a new session.
 - **Reviews go to the wrong repository.** The session is pinned to the `origin`
   of the checkout it started in. Start a new session in the intended checkout.
 - **A stale review after a push.** The merge gate refuses a moved head. Post a

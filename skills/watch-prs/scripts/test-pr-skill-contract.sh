@@ -83,12 +83,12 @@ done < <(awk '/^```bash$/{f=1; print; next} /^```$/{ if (f) print; f=0; next } f
 for f in "$TMP"/fence.*; do
     bash -n "$f" 2>/dev/null \
         || die "fence ${f##*.} does not parse: $(bash -n "$f" 2>&1 | head -1)"
-    # One helper per fence, so a status is never another invocation's; setup's two retries are the exception.
+    # One helper per fence, so a status is never another invocation's; setup's retry and the prelude's are the exception.
     c="$(grep -c 'bash -p "$RB_SCRIPTS"/pr-' "$f" || true)"
-    lim=1; [ "${f##*.}" -eq 1 ] && lim=4
+    lim=1; [ "${f##*.}" -le 2 ] && lim=2
     [ "$c" -le "$lim" ] || die "fence ${f##*.} invokes $c helpers; one per step"
 done
-pass "every fence parses, and none but setup invokes more than one helper"
+pass "every fence parses, and none but setup and the prelude invokes more than one helper"
 
 before 'pr-setup.sh "$RB_SETUP_DIR"' 'pr-request-review.sh N' \
     && pass "setup precedes the request" || die "the request precedes setup"
@@ -189,6 +189,12 @@ bad="$(grep -F 'pr-watch.sh N' <<<"$fences" | grep -v -F -- '--after-review-file
 [ -z "$bad" ] && pass "every watch carries the baseline file and the nonce" || die "a watch runs without its baseline or nonce: $bad"
 [ "$(grep -c -F 'RB_NONCE="$(perl -e' <<<"$fences")" -ge 3 ] \
     && pass "…and the nonce is generated afresh before each request" || die "a request reuses a nonce"
+bad="$(grep -F 'RB_NONCE="$(perl -e' <<<"$fences" | grep -v -F '; echo "RB_NONCE=$RB_NONCE"' || true)"
+_nl="$(grep -m1 -F 'RB_NONCE="$(perl -e' <<<"$fences" || true)"
+_nv="$(run_limited 10 bash -c "$_nl" 2>/dev/null)" || _nv="rc=$?"
+{ [ -z "$bad" ] && [ -n "$_nl" ] && grep -qxE 'RB_NONCE=[0-9]{23}' <<<"$_nv"; } \
+    && pass "…and printed as the RB_NONCE= line a later command carries" \
+    || die "a nonce is generated without printing the line a later command carries: '${bad:-$_nv}'"
 odd="$(grep -F -- '--nonce' <<<"$fences" | grep -v -F -- '--nonce "$RB_NONCE"' | grep -v -F -- '--require-nonce "$RB_NONCE"' || true)"
 [ -n "$odd" ] \
     && die "a nonce is passed as something other than \$RB_NONCE: $odd" \
@@ -219,6 +225,63 @@ has 'Nothing under `$RB_SETUP_DIR` is ever removed' \
 
 # `docs/decisions/2026-08-26-transport-candidate-in-argv.md` bounds a squat at that retry.
 setup_fence="$(awk '/^```bash$/{f=1; n++; next} /^```$/{f=0} f && n == 1' "$SKILL")" || setup_fence=
+_pl="$(awk '/^```bash$/{f=1; n++; next} /^```$/{f=0} f && n == 2' "$SKILL")" || _pl=
+prelude=""
+if [ "${_pl%%$'\n'*}" = 'RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…' ] && [ -n "$export_line" ] \
+    && grep -qxF -- "$export_line" <<<"$_pl"; then
+    prelude="${_pl#*$'\n'}"
+    pass "the fence after setup is the step prelude, opening on the line setup prints and exporting the knobs setup does"
+else
+    die "the fence after setup is not the step prelude, or exports other knobs than setup: '${_pl%%$'\n'*}'"
+fi
+# A later command as SKILL.md builds one: the line setup printed, the rest of the prelude, the step.
+later() {
+    local first
+    first="$(grep '^RB_SCRIPTS=' <<<"$1" | tail -1)" || first=
+    printf '%s\n%s\n%s\n' "$first" "$prelude" "$2"
+}
+hasf 'Claude Code and Codex run each command in a fresh shell' \
+    && has 'Never write the origin itself into a command or a file' \
+    && pass "…every later command is told it starts in a fresh shell, and never to carry the origin itself" \
+    || die "SKILL.md does not say a later command starts in a fresh shell, or lets the origin be written down"
+
+if [ -z "$setup_fence" ]; then
+    die "the setup fence could not be lifted for the fresh-shell case"
+elif _fs="$(mktemp_d)" && _fsh="$(mktemp_d)" && _fsr="$(mktemp_d)" && _fso="$(mktemp_d)" \
+     && git -C "$_fsr" init -q && git -C "$_fsr" remote add origin 'git@github.com:acme/widget.git' \
+     && git -C "$_fso" init -q && git -C "$_fso" remote add origin 'git@github.com:acme/other.git' \
+     && _fstop="$(git -C "$_fsr" rev-parse --show-toplevel)"; then
+    _farc=0
+    _faout="$(cd "$_fsr" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_fsh" TMPDIR="$_fs" \
+        run_limited 60 bash -c "$setup_fence" 2>&1)" || _farc=$?
+    _probe='PR_CI_TIMEOUT=7
+printf "IDENTITY %s %s %s\n" "${HOST-}" "${OWNER-}" "${REPO-}"
+/usr/bin/env bash -p -c '"'"'printf "CHILD %s %s\n" "${REVIEW_BUS_REMOTE-}" "${PR_CI_TIMEOUT-unset}"'"'"'
+[ -f "${PRIOR_FILE-}" ] && [ -f "${HEAD_FILE-}" ] && [ -f "${SUMMARY_FILE-}" ] && [ -f "${REQUEST_FILE-}" ] && printf "FILES %s\n" "${REPO_DIR-}"'
+    _fwant="IDENTITY github.com acme widget
+CHILD git@github.com:acme/widget.git 7
+FILES $_fstop"
+    # Three runs, since each later command proves the pin again and must not collide with the last.
+    _fbad=""
+    for _k in 1 2 3; do
+        _fbrc=0
+        _fbout="$(cd "$_fsr" && run_limited 60 bash -c "$(later "$_faout" "$_probe")" 2>&1)" || _fbrc=$?
+        { [ "$_fbrc" -eq 0 ] && [ "$_fbout" = "$_fwant" ]; } || _fbad="$_fbad [run $_k rc=$_fbrc: $_fbout]"
+    done
+    { [ "$_farc" -eq 0 ] && [ -z "$_fbad" ]; } \
+        && pass "a later command in a fresh shell gets setup's identity, pin and files, every time it runs" \
+        || die "a later command in a fresh shell did not get setup's values (setup rc=$_farc):$_fbad"
+    _fcrc=0
+    _fcout="$(cd "$_fso" && run_limited 60 bash -c "$(later "$_faout" "$_probe")" 2>&1)" || _fcrc=$?
+    case "$_fcrc|$_fcout" in
+        0\|*) die "a later command run from another repository went on: '$_fcout'" ;;
+        *'not this checkout'*) pass "…and one run from another repository stops at the pin" ;;
+        *) die "a later command run from another repository gave rc=$_fcrc with: '$_fcout'" ;;
+    esac
+    rm -rf "$_fs" "$_fsh" "$_fsr" "$_fso"
+else
+    die "could not stage the fresh-shell case"
+fi
 if [ "$(id -u)" -eq 0 ]; then
     pass "the setup retry case is skipped as root, whom no directory mode refuses"
 elif [ -z "$setup_fence" ]; then
@@ -415,8 +478,8 @@ elif _st="$(mktemp_d)" && mkdir -p "$_st/skills/watch-prs/scripts" \
      && chmod +x "$_st/skills/watch-prs/scripts/pr-setup.sh" \
      && _sh="$(mktemp_d)" && _sr2="$(mktemp_d)" && git -C "$_sr2" init -q; then
     _mrc=0
-    _mout="$(cd "$_sr2" && CLAUDE_PLUGIN_ROOT="$_st" TMPDIR="$_sh" HOME="$_sh" \
-        run_limited 60 bash -c "$setup_fence"$'\n''printf "PINNED %s\n" "$REVIEW_BUS_REMOTE"' 2>&1)" || _mrc=$?
+    _mout="$(cd "$_sr2" && CLAUDE_PLUGIN_ROOT="$_st" TMPDIR="$_sh" HOME="$_sh" run_limited 60 bash -c "$setup_fence" 2>&1)" \
+        && _mout="$(cd "$_sr2" && run_limited 60 bash -c "$(later "$_mout" 'printf "PINNED %s\n" "$REVIEW_BUS_REMOTE"')" 2>&1)" || _mrc=$?
     case "$_mrc|$_mout" in
         0*) die "a two-line origin handed over was pinned: '$_mout'" ;;
         *'not a usable identity'*) pass "a two-line origin handed over is refused before anything is pinned" ;;
@@ -437,8 +500,8 @@ elif _sw="$(mktemp_d)" && mkdir -p "$_sw/skills/watch-prs/scripts" \
      && _swh="$(mktemp_d)" && _swr="$(mktemp_d)" && git -C "$_swr" init -q \
      && git -C "$_swr" remote add origin 'git@github.com:acme/widget.git'; then
     _wrc=0
-    _wout="$(cd "$_swr" && CLAUDE_PLUGIN_ROOT="$_sw" TMPDIR="$_swh" HOME="$_swh" \
-        run_limited 60 bash -c "$setup_fence"$'\n''printf "PINNED %s\n" "$REVIEW_BUS_REMOTE"' 2>&1)" || _wrc=$?
+    _wout="$(cd "$_swr" && CLAUDE_PLUGIN_ROOT="$_sw" TMPDIR="$_swh" HOME="$_swh" run_limited 60 bash -c "$setup_fence" 2>&1)" \
+        && _wout="$(cd "$_swr" && run_limited 60 bash -c "$(later "$_wout" 'printf "PINNED %s\n" "$REVIEW_BUS_REMOTE"')" 2>&1)" || _wrc=$?
     case "$_wrc|$_wout" in
         0*) die "an origin that is not this checkout's was pinned: '$_wout'" ;;
         *'not this checkout'*) pass "a valid origin that is not this checkout's is refused by the pin" ;;
@@ -479,15 +542,20 @@ elif before 'rb_handoff_is_sha' 'resolveReviewThread' && _hd="$(mktemp_d)"; then
     elif grep -qF '$(<"$HEAD_FILE")' <<<"$fences"; then
         die "the head file is opened a second time after its proof"
     else
-        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/bad\"; $sp; printf '%s' \"\${CODEX_SHA-unset}\"" 2>/dev/null)" || _src=$?
-        { [ "$_src" -ne 0 ] && [ "$_sout" != "$(cat "$_hd/bad")" ]; } \
-            && pass "…and a head file corrupted after record is refused before the decision stop" \
-            || die "a corrupt head file was taken as the signoff sha (rc=$_src, '$_sout')"
-        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
-        { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
-            && pass "…while a proven head is taken as the signoff sha" || die "a proven head was not taken (rc=$_src, '$_sout')"
+        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/bad\"; { $sp
+} > \"$_hd/printed.bad\"; printf '%s' \"\${CODEX_SHA-unset}\"" 2>/dev/null)" || _src=$?
+        { [ "$_src" -ne 0 ] && [ "$_sout" != "$(cat "$_hd/bad")" ] && ! grep -q '^CODEX_SHA=' "$_hd/printed.bad"; } \
+            && pass "…and a head file corrupted after record is refused before the decision stop, with no CODEX_SHA= line" \
+            || die "a corrupt head file was taken as the signoff sha (rc=$_src, '$_sout', printed '$(cat "$_hd/printed.bad")')"
+        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$SCRIPT_DIR\"; HEAD_FILE=\"$_hd/good\"; { $sp
+} > \"$_hd/printed.good\"; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
+        { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ] \
+            && [ "$(cat "$_hd/printed.good")" = CODEX_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
+            && pass "…while a proven head is taken as the signoff sha, and printed as the line a later command carries" \
+            || die "a proven head was not taken, or not printed as CODEX_SHA= (rc=$_src, '$_sout')"
         mkdir "$_hd/race" && printf '%s\n' 'rb_handoff_is_sha() { printf "%s\n" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb > "$1"; printf "%s\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }' > "$_hd/race/writelib.sh"
-        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$_hd/race\"; HEAD_FILE=\"$_hd/good\"; $sp; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
+        _src=0; _sout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$_hd/race\"; HEAD_FILE=\"$_hd/good\"; { $sp
+} >/dev/null; printf '%s' \"\$CODEX_SHA\"" 2>/dev/null)" || _src=$?
         { [ "$_src" -eq 0 ] && [ "$_sout" = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ]; } \
             && pass "…and the sha is the reader's answer, not a re-read of a path replaced meanwhile" \
             || die "the fence re-read the head path after the proof (rc=$_src, '$_sout')"
@@ -501,6 +569,9 @@ _sr="$(grep -F 'pr-signoff.sh sha N' <<<"$fences" | grep -F 'CODEX_SHA' || true)
 { [ -n "$_sr" ] && grep -qF '${CODEX_SHA//[0123456789abcdef]/}' <<<"$_sr"; } \
     && pass "the signoff read-back spells its hex class out, where a range collates by locale on bash 3.2" \
     || die "the signoff read-back does not spell its hex class out: '$_sr'"
+grep -qF '; echo "CODEX_SHA=$CODEX_SHA"' <<<"$_sr" \
+    && pass "…and prints the CODEX_SHA= line a later command carries" \
+    || die "the signoff read-back prints no CODEX_SHA= line for a later command: '$_sr'"
 
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?

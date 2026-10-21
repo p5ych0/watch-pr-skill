@@ -143,12 +143,16 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   a configuration file it generates and rewrites itself, which
   `.serena/project.yml` is. Such a link written by hand, or into a file the tool
   does not generate, is a mention.
-- **Identity is pinned once per session.** `pr-setup.sh` reads the origin
-  through the privileged `pr-origin.sh`, proves it parses, and hands it to the
-  driver, which exports `REVIEW_BUS_REMOTE` once so every helper routes by it
-  whatever the current directory is. Dropping the pin or re-deriving per call is
-  a blocking finding, and `(cd "$REPO_DIR" && …)` per call is no substitute: a
-  list of call sites is missing the next one.
+- **Identity is pinned once per session and proved by every command.**
+  `pr-setup.sh` reads the origin through the privileged `pr-origin.sh`, proves it
+  parses, and writes it into the setup directory. Each command runs in a fresh
+  shell, so the step prelude every later command starts with reads it back from
+  that file, exports it as `REVIEW_BUS_REMOTE` so every helper routes by it
+  whatever the current directory is, and proves it through `pr-origin.sh pin`.
+  Dropping the pin, re-deriving it from the checkout per call, or writing the
+  origin itself into a command or a file the session writes is a blocking
+  finding, and `(cd "$REPO_DIR" && …)` per call is no substitute: a list of call
+  sites is missing the next one.
 - **A guard where a removal would do is a finding.** A check is a name that can
   be shadowed, mis-parsed or forgotten; a removed dependency stays removed. The
   author is required to say **on the thread** which of the two they took and why;

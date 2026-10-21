@@ -87,31 +87,64 @@ case "${TMPDIR:-}" in /*) RB_SETUP_DIR="$TMPDIR/watch-pr-setup.$$.$RANDOM$RANDOM
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
     || { [ $? -eq 2 ] && { mkdir -m 700 "$HOME/.watch-pr" 2>/dev/null || [ -d "$HOME/.watch-pr" ] || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; } && RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
     || { echo "ABORT: setup failed; the PR_SETUP line above says why"; exit 1; }
+REPO_DIR="$(git rev-parse --show-toplevel)" || { echo "ABORT: not in a git checkout"; exit 1; }
+printf 'RB_SCRIPTS=%q RB_SETUP_DIR=%q REPO_DIR=%q\n' "$RB_SCRIPTS" "$RB_SETUP_DIR" "$REPO_DIR"
+```
+
+The configuration knobs `README.md` lists are exported before the first helper runs, so a
+value assigned in the same command reaches the helpers, which are separate processes.
+`pr-setup.sh` reads the origin through `pr-origin.sh`, refuses one that is not a GitHub
+network transport, writes it into `$RB_SETUP_DIR/origin` as data, and creates the four
+empty working files under `$RB_SETUP_DIR/work`; its record ends `mode=unattended` or
+`mode=attended`. An unset or relative `$TMPDIR` is not a parent; `~/.watch-pr` is, created
+mode 700 where missing, so what setup leaves stays out of `$HOME` itself. Status 2 from
+`pr-setup.sh`, or from the pin below, means the storage refused, and the one retry — under
+`~/.watch-pr`, or under a second leaf — is the bound
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a squat at; 1 is
+terminal. Nothing under `$RB_SETUP_DIR` is ever removed. Setup's last line,
+`RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…`, is what every later command starts from.
+
+### Every later command starts with the step prelude
+
+Claude Code and Codex run each command in a fresh shell: the working directory carries over
+and no variable does, and step 3's Monitor is a process of its own. So every command after
+setup, each fence below and the watch's Monitor alike, is this prelude with its first line
+replaced by the line setup printed, then the values the step takes from earlier steps, then
+the step's fence. Run it once on its own right after setup, so the pin is proved before
+step 1.
+
+```bash
+RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…
+export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
 export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"
 . "$RB_SCRIPTS/identitylib.sh" || { echo "ABORT: the identity parser could not be loaded"; exit 1; }
 [ -n "$REVIEW_BUS_REMOTE" ] && [[ $REVIEW_BUS_REMOTE != *$'\n'* ]] && rb_identity || { echo "ABORT: the origin read back is not a usable identity"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin" || { [ $? -eq 2 ] && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_SETUP_DIR/pin2"; } || { echo "ABORT: the pin is not this checkout's origin; nothing is addressed until it is"; exit 1; }
-REPO_DIR="$(git rev-parse --show-toplevel)" || { echo "ABORT: not in a git checkout"; exit 1; }
+RB_PIN="$RB_SETUP_DIR/pin.$$.$RANDOM$RANDOM"
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN" || { [ $? -eq 2 ] && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN-2"; } || { echo "ABORT: the pin is not this checkout's origin; nothing is addressed until it is"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 SUMMARY_FILE="$RB_SETUP_DIR/work/summary.md"; REQUEST_FILE="$RB_SETUP_DIR/work/request.md"
 PRIOR_FILE="$RB_SETUP_DIR/work/prior.txt"; HEAD_FILE="$RB_SETUP_DIR/work/head.txt"
 ```
 
-The configuration knobs `README.md` lists are exported before the first helper runs, so a
-value assigned in this session reaches the helpers, which are separate processes.
-`pr-setup.sh` reads the origin through `pr-origin.sh`, refuses one that is not a GitHub
-network transport, writes it into `$RB_SETUP_DIR/origin` as data, and creates the four
-empty working files under `$RB_SETUP_DIR/work`; its record ends `mode=unattended` or
-`mode=attended`. The driver reads the origin back, exports it as `REVIEW_BUS_REMOTE` — the
-pin every helper routes by whatever the current directory is — proves it a GitHub identity
-through the parser the helpers use, which sets `HOST`, `OWNER` and `REPO`, and proves
-through `pr-origin.sh pin` that a child sees the pin and that it is this checkout's origin,
-so an origin file replaced after setup addresses nothing. An unset or relative `$TMPDIR`
-is not a parent; `~/.watch-pr` is, created mode 700 where missing, so what setup leaves
-stays out of `$HOME` itself. Status 2 from either helper means the storage refused, and the one
-retry — under `~/.watch-pr`, or under a second leaf — is the bound
-`docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a squat at; 1 is
-terminal. Nothing under `$RB_SETUP_DIR` is ever removed.
+The prelude reads the origin back from the file setup wrote, exports it as
+`REVIEW_BUS_REMOTE` — the pin every helper routes by whatever the current directory is —
+proves it a GitHub identity through the parser the helpers use, which sets `HOST`, `OWNER`
+and `REPO`, and proves through `pr-origin.sh pin` that a child sees the pin and that it is
+this checkout's origin. Setup sets the pin once and every command proves it again, so an
+origin file replaced after setup, or a checkout whose `origin` changed, stops the command
+that would have used it. Never write the origin itself into a command or a file: it can
+hold a credential, and the prelude reads it from where setup left it.
+
+Between the prelude and the step's fence, write as assignments the values earlier steps
+decided or printed:
+
+- `AUTO_REVIEW` as step 2 settles it, and `REVIEWERS` as step 7's stop settles it;
+- `WHO="$CODEX_BOT"`, or `WHO="$COPILOT_BOT"` once step 7's `open` has returned 0;
+- `RB_NONCE` as the `RB_NONCE=` line the latest request printed: step 2's, `post`'s or
+  `open`'s;
+- `CODEX_SHA` as the `CODEX_SHA=` line its read-back printed;
+- a knob the operator set in this session, as `NAME=value`, which the prelude's export
+  carries to the helpers.
 
 ## 1. State the task on the PR
 
@@ -166,7 +199,7 @@ watch, so a baseline left by an earlier round is refused rather than waited past
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
 WHO="$CODEX_BOT"
-RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)')"
+RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)')"; echo "RB_NONCE=$RB_NONCE"
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" --baseline-file "$PRIOR_FILE" --nonce "$RB_NONCE" < "$REQUEST_FILE"
 ```
 
@@ -177,15 +210,17 @@ wait step.
 
 ## 3. Wait for the verdict
 
-`$WHO` is the active reviewer — set in step 2, switched in step 7 — and `$PRIOR_FILE` and
-`$RB_NONCE` are what the step that made the request left. Do not poll by hand.
+`$WHO` is the active reviewer, Codex until step 7 opens the Copilot phase, and
+`$PRIOR_FILE` and `$RB_NONCE` are what the step that made the request left: the file it
+wrote and the `RB_NONCE=` line it printed. Do not poll by hand.
 
 ```bash
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"
 ```
 
 **Claude Code** — run it as this session's **Monitor**, so the verdict surfaces into the
-chat by itself: `command` as above, `description` `Review verdict for PR N`, `timeout_ms`
+chat by itself: `command` the prelude and the watch above, as every later command is,
+`description` `Review verdict for PR N`, `timeout_ms`
 `1800000`, the longest the tool keeps one, and no other parameter. **Arm it as part of the
 round, and re-arm it the same way — do not ask.** One arming covers one verdict. A harness
 that prompts anyway is a permissions gap, which `README.md § Watching without prompts`
@@ -375,7 +410,7 @@ else: the round did not close and nothing has been resolved or posted; the reaso
 do not retry it blind. Then, and only then:
 
 ```bash
-RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)')"
+RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)')"; echo "RB_NONCE=$RB_NONCE"
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE" "$RB_NONCE"
 ```
 
@@ -460,7 +495,7 @@ head. On 0 or 3, and only then, take the head it signed from the library's one n
 read, which validates what it hands back:
 
 ```bash
-CODEX_SHA="$(/usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE")" && [ "${#CODEX_SHA}" -eq 40 ] || { echo "ABORT: $HEAD_FILE holds no usable signoff sha; step 8 would have nothing to gate on"; exit 1; }
+CODEX_SHA="$(/usr/bin/env bash -p -c 'rb_handoff_is_sha() { return 127; }; . "$1"/writelib.sh 2>/dev/null || exit 9; rb_handoff_is_sha "$2"' _ "$RB_SCRIPTS" "$HEAD_FILE")" && [ "${#CODEX_SHA}" -eq 40 ] || { echo "ABORT: $HEAD_FILE holds no usable signoff sha; step 8 would have nothing to gate on"; exit 1; }; echo "CODEX_SHA=$CODEX_SHA"
 ```
 
 **STOP — the next phase is the operator's decision.** The signoff is on the PR, so either
@@ -489,11 +524,11 @@ and `both` where it is that head; open nothing.
 Ask, then stop, unless unattended. Only on the second answer:
 
 ```bash
-RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)')"
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE" "$RB_NONCE" && WHO="$COPILOT_BOT"
+RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)')"; echo "RB_NONCE=$RB_NONCE"
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" "$PRIOR_FILE" "$RB_NONCE"
 ```
 
-0: the phase is open, Copilot is requested, and `$WHO` is Copilot. 3: paused at a round
+0: the phase is open and Copilot is requested; from here `WHO` is `$COPILOT_BOT`. 3: paused at a round
 boundary — not permission to skip the pass; decide with the operator. Anything else: the
 phase did not open — not permission to skip the pass either.
 
@@ -547,7 +582,7 @@ straight to the merge gate.
 
 ### Resuming after a stop
 
-A later session has none of the variables the stop was reached with. Run this before step
+A later session has none of the values the stop was reached with. Run this before step
 8, or before continuing into the Copilot phase. `pr-phase-state.sh` reads the phase off the
 PR's own records and re-validates the one that has to stand: 0 readable and standing; 1
 stopped — no signoff, a moved head, or a verdict that no longer stands, and its record says
@@ -560,7 +595,7 @@ which; 2 unreadable, which is not "no signoff".
 Only on 0, read the Codex signoff back; it must read back as a 40-hex sha:
 
 ```bash
-CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")" && [ "${#CODEX_SHA}" -eq 40 ] && [ -z "${CODEX_SHA//[0123456789abcdef]/}" ] || { echo "ABORT: the recorded Codex signoff did not read back as a sha"; exit 1; }
+CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")" && [ "${#CODEX_SHA}" -eq 40 ] && [ -z "${CODEX_SHA//[0123456789abcdef]/}" ] || { echo "ABORT: the recorded Codex signoff did not read back as a sha"; exit 1; }; echo "CODEX_SHA=$CODEX_SHA"
 ```
 
 ### Then: the gate

@@ -259,8 +259,9 @@ Each of these was found, fixed and made again. Read before writing a defence or 
   a link written by hand, or into a file the tool does not generate, is a mention.
 - Identity derives from `git remote get-url origin` in one place, `rb_identity` in
   `identitylib.sh`, which sets `HOST`, `OWNER` and `REPO` rather than printing them.
-  `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` override it; `SKILL.md`
-  exports `REVIEW_BUS_REMOTE` once at setup to pin the session, so a `cd` retargets nothing.
+  `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` override it; `SKILL.md`'s
+  step prelude exports `REVIEW_BUS_REMOTE` in every command from the origin setup wrote, to
+  pin the session, so a `cd` retargets nothing.
   A second copy of the parser is a defect, and the contract test fails if `SKILL.md` grows
   one.
 
