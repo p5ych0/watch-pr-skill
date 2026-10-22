@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.13.2] — 2026-10-22
+
+- **Every command after setup gets setup's values, in a harness that runs each command in a
+  fresh shell.** `SKILL.md` assigned the scripts path, the setup directory, the checkout,
+  the working-file paths and the pin in the setup block, and every later block read them as
+  if they were still set. Claude Code's Bash tool keeps the working directory between calls
+  and no variable, Codex runs each command in a new shell, and the watch's Monitor is a
+  process of its own, so each later block started with all of them unset. A session worked
+  around that by itself: one wrote dozens of shell files that exported the values,
+  `REVIEW_BUS_REMOTE` among them, which can hold a credential, and sourced them over a
+  thousand times, a shape § Driving shell rules out. Setup now ends by printing one line,
+  `RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…`, and every later command starts with a step
+  prelude that opens on that line. The prelude reads the origin back from the file setup
+  wrote, exports it as the pin, proves it through the shipped parser and `pr-origin.sh pin`,
+  and sets the bot names and the working-file paths. A command run from a checkout of
+  another repository, or after the origin file was replaced, stops at the pin; each one's
+  pin leaves one more copy of the origin in the setup directory, which is mode 700 as the
+  origin file is. The nonce and the Codex signoff
+  sha are printed as `RB_NONCE=` and `CODEX_SHA=` lines that the session writes into the
+  commands that use them, and the origin is written into no command and no file the session writes.
+  `test-pr-skill-contract.sh` runs the real setup in one shell and the prelude in three
+  more, and holds that each gets the identity, the pin, a knob and the working files, and
+  that one run from another repository stops.
+  Closes #391.
+
 ## [2.13.1] — 2026-10-16
 
 - **The watch is armed with parameters the Monitor tool takes.** Step 3 told a Claude Code

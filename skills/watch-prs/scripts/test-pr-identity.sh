@@ -15,7 +15,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── THE IDENTITY OVERRIDES ARE CLEARED, AND THIS FILE IS WHY THEY MUST BE ──
 #
-# `SKILL.md`'s setup exports `REVIEW_BUS_REMOTE` to pin the session's repository,
+# `SKILL.md`'s step prelude exports `REVIEW_BUS_REMOTE` to pin the session's repository,
 # and step 5a then runs this whole suite through `pr-selfcheck.sh` — so an
 # operator following the documented flow reaches this file with the pin already in
 # the environment. `rb_identity` prefers it over `git remote get-url origin`, so
