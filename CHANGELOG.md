@@ -10,13 +10,14 @@
   `SKILL.md` now has § What a compaction summary keeps: the PR and branch, setup's printed
   line, the phase, every value later commands are written with, the operator's unenacted
   answers, the round's findings and replies, the cold read's result, the round counts and
-  the next stop. It also says the summary never keeps the origin or `REVIEW_BUS_REMOTE`,
-  and keeps no identity in their place, since the prelude reads the origin back from
-  setup's file and pins it again in every command. `CLAUDE.md` points at it rather than
+  the next stop. It also says the summary never keeps the origin or `REVIEW_BUS_REMOTE`. The
+  list no longer carries `HOST`, `OWNER` and `REPO`, which the earlier one did: nothing
+  prints them to the session, and the prelude reads the origin back from setup's file and
+  pins it again in every command. `CLAUDE.md` points at it rather than
   keeping a second copy.
-  `test-pr-skill-contract.sh` derives the names from the step prelude's list of carried
-  values and fails when the values bullet omits one, or when the section outside its
-  never-keeps paragraph names the origin or `REVIEW_BUS_REMOTE`. Closes #394.
+  `test-pr-skill-contract.sh` derives the names from the list of values written between the
+  prelude and a step's fence and fails when the values bullet omits one, or when the section
+  outside its never-keeps paragraph names the origin or `REVIEW_BUS_REMOTE`. Closes #394.
 
 ## [2.13.2] — 2026-10-22
 

@@ -305,7 +305,9 @@ fi
 _cl="$(awk '/^### What a compaction summary keeps$/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _cl=
 _al="$(awk '/^Between the prelude and the step.s fence/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _al=
 _kept="$(awk '/^It never keeps /{exit} {print}' <<<"$_cl")" || _kept=
-_rest="$(awk '/^It never keeps /{s=1} s && (/^$/ || /^- /){s=0} !s' <<<"$_cl")" || _rest=
+_bl="$(grep '^- ' <<<"$_kept")" || _bl=
+_rest="$(grep -vxF -e 'It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude' \
+    -e 'reads the origin back from the file setup wrote and pins it again in every command.' <<<"$_cl")" || _rest=
 _vb="$(awk 'f && (/^- / || /^$/){exit} /^- every value the list above writes/{f=1} f' <<<"$_kept")" || _vb=
 _names="$(grep -oE '`[A-Z][A-Z0-9_]+[=`]' <<<"$_al" | tr -d '`=' | sort -u)" || _names=
 _nk=0; _miss=""
@@ -316,12 +318,12 @@ for _v in $_names; do
     grep -qF "\`$_v\`" <<<"$_vb" || _miss="$_miss $_v"
 done
 { [ "$_nk" -ge 5 ] && [ -z "$_miss" ] && [ -n "$prelude" ] \
-    && grep -qF -- "${_pl%%$'\n'*}" <<<"$_kept" \
-    && grep -qF 'which reviewer the loop is on and therefore which phase' <<<"$_kept" \
+    && grep -qF -- "${_pl%%$'\n'*}" <<<"$_bl" \
+    && grep -qF 'which reviewer the loop is on and therefore which phase' <<<"$_bl" \
     && grep -qF 'every knob' <<<"$_vb"; } \
     && pass "a compaction summary keeps setup's line, the phase and each of the $_nk values a later command is written with" \
     || die "the compaction list is missing, or omits what a later command is written with (of $_nk):${_miss:- the line setup printed, the phase or the knobs}"
-{ [ -n "$_kept" ] && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" && ! grep -qiF origin <<<"$_rest" \
+{ [ -n "$_kept" ] && [ -n "$_rest" ] && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" && ! grep -qiF origin <<<"$_rest" \
     && grep -qF 'It never keeps the origin or `REVIEW_BUS_REMOTE`' <<<"$_cl"; } \
     && pass "…and never the origin or REVIEW_BUS_REMOTE, which can hold a credential" \
     || die "the compaction list keeps the origin or REVIEW_BUS_REMOTE, or does not say it never does"
