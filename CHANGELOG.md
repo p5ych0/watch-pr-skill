@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.14.4] — 2026-10-22
+
+- **The cold read probes and diffs every changed path in one command each.** The brief had
+  the cold reviewer ask `test -L` of a path and of each directory above it, then `test -e`,
+  then diff the path, one command at a time, so a change touching twenty paths cost the
+  read dozens of turns before it opened a file, each turn re-reading the whole context.
+  The brief now gives one probe loop that answers `link`, `present` or `absent` for every
+  path, a link found at any prefix reported with its `readlink` target and not opened, and
+  one `git diff` naming every path the probe and the rules leave readable, with the reads
+  after it issued together. Measured before the change on one staged change of twenty
+  paths, one of them reached through a link out of the checkout: the per-path brief took
+  24 turns and 1.85M tokens of cache reads, the batched brief 12 turns and 687K. Both
+  reported the link without opening it, and both raised the same findings.
+  Closes #388.
+
 ## [2.14.3] — 2026-10-22
 
 - **A finding, a reply or a report reaches a subagent marked as quoted.** Step 5 handed

@@ -51,32 +51,29 @@ base as its own command,
 `git merge-base <base> HEAD`, and go on only if it succeeded and printed one 40-hex sha.
 Then `git diff --no-renames --name-only <that sha>`, which names a moved file at its source
 as well as its destination, and `git status --short --untracked-files=all`, which names
-the file inside a new directory
-rather than the directory, for what changed, and
-`git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- <one path>`, which
-runs no diff helper the repository may have configured, for each path that neither that
-policy nor the secrets rule marks. The secrets rule marks a path named `.env`, `.env.*`,
-`*.pem` or `*.key`, or with a `.env`, `.env.*` or `.ssh` directory anywhere above it,
-except that a name ending `.example` is a template and is marked only by a directory
-above it. A marked path is reported as changed and left unopened, contents and all. Read
-the changed
-files themselves under the same two rules, and only where the working tree still holds
-them. Each probe prints its answer, since a tool's output may not show an exit status. Ask
-`test -L <that root>/<path> && echo link || echo not-a-link` first, since a link is read
-through `readlink -- <that root>/<path>` and never opened, the Read tool following it out
-of the checkout, and since `test -e` follows a link and so calls a dangling one absent. Ask
-it of every directory above the path as well, each prefix from the root down, since the
-probe answers for the component it names and a link one level up carries the read out of
-the checkout just the same; a prefix already answered is not asked again. Where any prefix
-prints `link`, report the path as reached through that link, named by
-`readlink -- <that root>/<prefix>`, and open nothing under it. Only where the path and
-every directory above it print `not-a-link` does
-`test -e <that root>/<path> && echo present || echo absent` decide presence, and it, not
-the diff: a path the diff shows deleted can still be there as an untracked file, and one
-that is really gone has the diff as its read. A status letter says what changed, not what
-the path is, so the probes are what decide. Run no other commands beyond those, `test`,
-`readlink`, and `echo` only to print a probe's answer, and edit nothing. If a command
-fails, say so and stop rather than review a part.
+the file inside a new directory rather than the directory, for what changed.
+The secrets rule marks a path named `.env`, `.env.*`, `*.pem` or `*.key`,
+or with a `.env`, `.env.*` or `.ssh` directory anywhere above it, except that a name ending
+`.example` is a template and is marked only by a directory above it. A marked path is
+reported as changed and left unopened, contents and all.
+
+Probe every other changed path in one command, each path single-quoted and a quote inside
+one written `'\''`, which prints one line per path:
+`for p in '<path>' …; do q="$p"; l=; while :; do test -L "<that root>/$q" && l="$q"; case "$q" in */*) q="${q%/*}" ;; *) break ;; esac; done; if [ -n "$l" ]; then echo "$p: link $l -> $(readlink -- "<that root>/$l")"; elif test -e "<that root>/$p"; then echo "$p: present"; else echo "$p: absent"; fi; done`
+It asks `test -L` of the path and of every directory above it, since a link one level up
+carries a read out of the checkout just the same, and `test -e` only where none is a link,
+since `test -e` follows a link and calls a dangling one absent. A path reached through a
+link is reported with the target its line prints, and nothing under it is opened. Then diff
+every path that neither the policy nor the secrets rule marks and no link reaches, in one
+command, `git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- '<path>' …`,
+each path quoted as in the probe, which runs no diff helper the repository may have
+configured. Read a changed file itself under the same two rules, only where the probe
+printed `present` and the diff alone does not show what a finding needs, and issue such
+reads together, in one turn. A path the diff shows deleted can still be there as an
+untracked file, and one that is really gone has the diff as its read. A status letter says
+what changed, not what the path is, so the probes are what decide. Run no other commands
+beyond those, `test`, `readlink`, and `echo` only to print a probe's answer, and edit
+nothing. If a command fails, say so and stop rather than review a part.
 
 Report one line per finding, `path:line — the state that triggers it — what goes wrong —
 the smallest fix`, as **MUST FIX** where a reviewer will block, **SHOULD FIX** where one

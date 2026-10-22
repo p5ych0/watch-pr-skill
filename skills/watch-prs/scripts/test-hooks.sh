@@ -131,34 +131,38 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     else
         die "the repository with a moved file was not built"
     fi
-    grep -q 'test -e <that root>/<path>' "$BRIEF" && pass "…and what the tree still holds is decided by a probe" \
-        || die "the brief no longer probes for the path before reading it"
-    [ "$(grep -n 'test -L <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" -lt "$(grep -n 'test -e <that root>/<path>' "$BRIEF" | head -1 | cut -d: -f1)" ] \
-        && pass "…with the link probe first, since -e follows a link and calls a dangling one absent" \
-        || die "the brief asks -e before -L, so a dangling link reads as absent"
-    grep -q 'readlink -- <that root>/<path>' "$BRIEF" && pass "…and a link is read without following it" \
+    bp="$(grep -m1 -o 'for p in .*; done' "$BRIEF")" || bp=
+    { grep -qF 'test -L "<that root>/$q"' <<<"$bp" && grep -qF 'test -e "<that root>/$p"' <<<"$bp" \
+        && [ "$(grep -o 'test -[Le]' <<<"$bp" | head -1)" = 'test -L' ]; } \
+        && pass "…and what the tree still holds is decided by one probe over every path, the link test asked before -e, since -e follows a link and calls a dangling one absent" \
+        || die "the brief no longer probes every path in one command with the link test first: '$bp'"
+    grep -qF 'readlink -- "<that root>/$l"' <<<"$bp" && pass "…and a link is read without following it" \
         || die "the brief no longer reads a link with readlink at the root"
     pd="$tmp/probe"
-    mkdir -p "$pd" "$tmp/outside" && : > "$pd/file" && : > "$tmp/outside/child" && ln -s "$pd/nowhere" "$pd/dangling" \
-        && ln -s "$tmp/outside" "$pd/tree" || die "the probe directory was not built"
-    lp="$(grep -m1 -o 'test -L <that root>/<path> && echo [a-z-]* || echo [a-z-]*' "$BRIEF")"
-    ep="$(grep -m1 -o 'test -e <that root>/<path> && echo [a-z-]* || echo [a-z-]*' "$BRIEF")"
-    run_probe() { (cd "$pd" && bash -c "${1//<that root>\/<path>/$2}"); }
-    [ -n "$lp" ] && [ -n "$ep" ] \
-        && [ "$(run_probe "$lp" dangling)" = link ] && [ "$(run_probe "$lp" file)" = not-a-link ] \
-        && [ "$(run_probe "$ep" file)" = present ] && [ "$(run_probe "$ep" missing)" = absent ] \
-        && grep -qF 'Only where the path and every directory above it print `not-a-link` does' <<<"$fb" \
-        && ! grep -qF 'Only where that prints' "$BRIEF" \
-        && pass "…and each probe the brief states prints its answer, for a dangling link, a file and a path that is gone, the second asked only where the first says not-a-link" \
-        || die "a probe in the brief prints no answer, or not the word the sentence after it tests (link probe: $lp; presence probe: $ep)"
-    # A link one level up is why the brief probes every prefix: the child itself answers not-a-link.
-    [ "$(run_probe "$lp" tree/child)" = not-a-link ] && [ "$(run_probe "$ep" tree/child)" = present ] \
-        && [ "$(run_probe "$lp" tree)" = link ] \
-        && grep -qF 'Ask it of every directory above the path as well, each prefix from the root down' <<<"$fb" \
-        && grep -qF 'Where any prefix prints `link`, report the path as reached through that link' <<<"$fb" \
-        && grep -qF 'and open nothing under it' <<<"$fb" \
-        && pass "…and a path under a linked directory, which probes not-a-link and present itself, is caught by the probe the brief asks of every prefix" \
-        || die "the brief probes only the final component, so a directory replaced by a link carries the read out of the checkout (link probe: $lp; tree/child answered $(run_probe "$lp" tree/child), tree answered $(run_probe "$lp" tree))"
+    mkdir -p "$pd" "$tmp/outside" && : > "$pd/file" && : > "$tmp/outside/child" && : > "$pd/it's" && : > "$pd/a b" \
+        && ln -s "$pd/nowhere" "$pd/dangling" && ln -s "$tmp/outside" "$pd/tree" || die "the probe directory was not built"
+    pc="$(PD="$pd" perl -pe 's/\x27<path>\x27 …/\x27dangling\x27 \x27file\x27 \x27missing\x27 \x27tree\/child\x27 \x27it\x27\\\x27\x27s\x27 \x27a b\x27/; s/<that root>/$ENV{PD}/g' <<<"$bp")" || pc=
+    pout="$( (cd "$pd" && bash -c "$pc") 2>&1)" || pout="rc=$?: $pout"
+    pwant="dangling: link dangling -> $pd/nowhere
+file: present
+missing: absent
+tree/child: link tree -> $tmp/outside
+it's: present
+a b: present"
+    # A link one level up is why every prefix is probed: tree/child itself is no link and is present.
+    [ -n "$bp" ] && [ "$pout" = "$pwant" ] \
+        && pass "…and the brief's own probe, run on a dangling link, a file, a missing path, a path under a linked directory, a quoted name and a name with a space, prints one right answer for each" \
+        || die "the brief's probe printed '$pout' where '$pwant' was due"
+    grep -qF 'A path reached through a link is reported with the target its line prints, and nothing under it is opened' <<<"$fb" \
+        && pass "…and a path reached through a link is reported with its target and nothing under it is opened" \
+        || die "the brief no longer says: A path reached through a link is reported with the target its line prints, and nothing under it is opened"
+    grep -qF "each path single-quoted and a quote inside one written \`'\''\`" <<<"$fb" \
+        && pass "…and the brief says how a quote inside a single-quoted path is written" \
+        || die "the brief no longer says: each path single-quoted and a quote inside one written \`'\''\`"
+    grep -qF "git --literal-pathspecs diff --no-ext-diff --no-textconv <that sha> -- '<path>' …" "$BRIEF" \
+        && grep -qF 'and no link reaches, in one command' <<<"$fb" \
+        && pass "…and every unmarked path that no link reaches is diffed in one command that runs no diff helper" \
+        || die "the brief no longer diffs the unmarked paths in one command with diff helpers off"
     grep -qF 'and `echo` only to print a probe' "$BRIEF" && pass "…and echo is allowed for printing a probe's answer and nothing else" \
         || die "the brief's command list does not allow the echo its probes print through"
     grep -qF 'policy nor the secrets rule marks' "$BRIEF" && grep -qF 'under the same two rules' "$BRIEF" \
