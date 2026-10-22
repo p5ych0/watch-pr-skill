@@ -234,25 +234,25 @@ if [ "${_pl%%$'\n'*}" = 'RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…' ] && [ -n
 else
     die "the fence after setup is not the step prelude, or exports other knobs than setup: '${_pl%%$'\n'*}'"
 fi
-# A later command as SKILL.md builds one: the line setup printed, the rest of the prelude, the step.
 later() {
     local first
     first="$(grep '^RB_SCRIPTS=' <<<"$1" | tail -1)" || first=
     printf '%s\n%s\n%s\n' "$first" "$prelude" "$2"
 }
-hasf 'Claude Code and Codex run each command in a fresh shell' \
+hasf 'Each command runs in a fresh shell: Claude Code carries the working directory over and no variable, Codex carries neither' \
     && has 'Never write the origin itself into a command or a file' \
     && pass "…every later command is told it starts in a fresh shell, and never to carry the origin itself" \
     || die "SKILL.md does not say a later command starts in a fresh shell, or lets the origin be written down"
 
 if [ -z "$setup_fence" ]; then
     die "the setup fence could not be lifted for the fresh-shell case"
-elif _fs="$(mktemp_d)" && _fsh="$(mktemp_d)" && _fsr="$(mktemp_d)" && _fso="$(mktemp_d)" \
+elif _fs="$(mktemp_d)" && mkdir -m 700 "$_fs/a tmp" && _fsh="$(mktemp_d)" && _fsb="$(mktemp_d)" \
+     && _fsr="$_fsb/a repo" && mkdir "$_fsr" && _fso="$(mktemp_d)" \
      && git -C "$_fsr" init -q && git -C "$_fsr" remote add origin 'git@github.com:acme/widget.git' \
      && git -C "$_fso" init -q && git -C "$_fso" remote add origin 'git@github.com:acme/other.git' \
      && _fstop="$(git -C "$_fsr" rev-parse --show-toplevel)"; then
     _farc=0
-    _faout="$(cd "$_fsr" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_fsh" TMPDIR="$_fs" \
+    _faout="$(cd "$_fsr" && CLAUDE_PLUGIN_ROOT="$ROOT" HOME="$_fsh" TMPDIR="$_fs/a tmp" \
         run_limited 60 bash -c "$setup_fence" 2>&1)" || _farc=$?
     _probe='PR_CI_TIMEOUT=7
 printf "IDENTITY %s %s %s\n" "${HOST-}" "${OWNER-}" "${REPO-}"
@@ -278,7 +278,7 @@ FILES $_fstop"
         *'not this checkout'*) pass "…and one run from another repository stops at the pin" ;;
         *) die "a later command run from another repository gave rc=$_fcrc with: '$_fcout'" ;;
     esac
-    rm -rf "$_fs" "$_fsh" "$_fsr" "$_fso"
+    rm -rf "$_fs" "$_fsh" "$_fsb" "$_fso"
 else
     die "could not stage the fresh-shell case"
 fi

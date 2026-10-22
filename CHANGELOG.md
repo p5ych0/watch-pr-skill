@@ -14,10 +14,12 @@
   `RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…`, and every later command starts with a step
   prelude that opens on that line. The prelude reads the origin back from the file setup
   wrote, exports it as the pin, proves it through the shipped parser and `pr-origin.sh pin`,
-  and sets the bot names and the working-file paths. A command run from another checkout,
-  or after the origin file was replaced, stops at the pin. The nonce and the Codex signoff
+  and sets the bot names and the working-file paths. A command run from a checkout of
+  another repository, or after the origin file was replaced, stops at the pin; each one's
+  pin leaves one more copy of the origin in the setup directory, which is mode 700 as the
+  origin file is. The nonce and the Codex signoff
   sha are printed as `RB_NONCE=` and `CODEX_SHA=` lines that the session writes into the
-  commands that use them, and the origin is written into no command and no file.
+  commands that use them, and the origin is written into no command and no file the session writes.
   `test-pr-skill-contract.sh` runs the real setup in one shell and the prelude in three
   more, and holds that each gets the identity, the pin, a knob and the working files, and
   that one run from another repository stops.

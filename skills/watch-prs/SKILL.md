@@ -6,8 +6,9 @@ description: Use when driving a pull request through review to merge. Requests r
 # /watch-prs — native PR review loop
 
 Both reviewers are first-party GitHub apps; nothing runs locally. You drive the loop with
-the helper scripts, one invocation per step. Every status is branched on, an `ABORT:` ends
-the session, and every "cannot tell" is a stop rather than "no findings". The driving shell
+the helper scripts, one invocation per step after the prelude's proof of the pin. Every
+status is branched on, an `ABORT:` ends the session, and every "cannot tell" is a stop
+rather than "no findings". The driving shell
 is trusted (`docs/decisions/2026-09-05-driving-shell-trusted.md`): the helpers are what
 prove, mutate and gate, each started as `/usr/bin/env bash -p "$RB_SCRIPTS"/<helper>`
 except `pr-selfcheck.sh`, which re-execs into a clean shell itself and is run directly.
@@ -106,12 +107,12 @@ terminal. Nothing under `$RB_SETUP_DIR` is ever removed. Setup's last line,
 
 ### Every later command starts with the step prelude
 
-Claude Code and Codex run each command in a fresh shell: the working directory carries over
-and no variable does, and step 3's Monitor is a process of its own. So every command after
-setup, each fence below and the watch's Monitor alike, is this prelude with its first line
-replaced by the line setup printed, then the values the step takes from earlier steps, then
-the step's fence. Run it once on its own right after setup, so the pin is proved before
-step 1.
+Each command runs in a fresh shell: Claude Code carries the working directory over and no
+variable, Codex carries neither, and step 3's Monitor is a process of its own. So every
+command after setup, each fence below and the watch's Monitor alike, is this prelude with
+its first line replaced by the line setup printed, then the values the step takes from
+earlier steps, then the step's fence. Run it once on its own right after setup, so the pin
+is proved before step 1.
 
 ```bash
 RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…
@@ -132,17 +133,20 @@ proves it a GitHub identity through the parser the helpers use, which sets `HOST
 and `REPO`, and proves through `pr-origin.sh pin` that a child sees the pin and that it is
 this checkout's origin. Setup sets the pin once and every command proves it again, so an
 origin file replaced after setup, or a checkout whose `origin` changed, stops the command
-that would have used it. Never write the origin itself into a command or a file: it can
+that would have used it. A refusal here prints `ABORT:` and exits 1 before the step's
+helper runs, and it ends the session whatever the step's table says 1 means: a Monitor
+ended by one is not re-armed. Never write the origin itself into a command or a file: it can
 hold a credential, and the prelude reads it from where setup left it.
 
 Between the prelude and the step's fence, write as assignments the values earlier steps
 decided or printed:
 
 - `AUTO_REVIEW` as step 2 settles it, and `REVIEWERS` as step 7's stop settles it;
-- `WHO="$CODEX_BOT"`, or `WHO="$COPILOT_BOT"` once step 7's `open` has returned 0;
+- `WHO="$COPILOT_BOT"` from step 7's `open` returning 0 until the fault-tolerance pass of
+  step 8 begins, and `WHO="$CODEX_BOT"` otherwise;
 - `RB_NONCE` as the `RB_NONCE=` line the latest request printed: step 2's, `post`'s or
   `open`'s;
-- `CODEX_SHA` as the `CODEX_SHA=` line its read-back printed;
+- `CODEX_SHA` as the latest `CODEX_SHA=` line a read-back printed;
 - a knob the operator set in this session, as `NAME=value`, which the prelude's export
   carries to the helpers.
 
@@ -210,9 +214,9 @@ wait step.
 
 ## 3. Wait for the verdict
 
-`$WHO` is the active reviewer, Codex until step 7 opens the Copilot phase, and
-`$PRIOR_FILE` and `$RB_NONCE` are what the step that made the request left: the file it
-wrote and the `RB_NONCE=` line it printed. Do not poll by hand.
+`$WHO` is the active reviewer, Copilot from step 7's `open` until step 8's fault-tolerance
+pass and Codex otherwise, and `$PRIOR_FILE` and `$RB_NONCE` are what the step that made the
+request left: the file it wrote and the `RB_NONCE=` line it printed. Do not poll by hand.
 
 ```bash
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review-file "$PRIOR_FILE" --require-nonce "$RB_NONCE"
@@ -566,8 +570,8 @@ a menu and asks; do not run the merge gate until the operator has answered.
 
 **Unattended:** on the first menu, merge, with `REVIEWERS=both`. On the second, the
 fault-tolerance pass: post the revocation the menu describes, write the account of the
-Copilot-phase commits into `$REQUEST_FILE`, and run steps 2–6 — step 2's block sets
-`$WHO` to `$CODEX_BOT` again, and this one request is made with the auto-review argument
+Copilot-phase commits into `$REQUEST_FILE`, and run steps 2–6 — from step 2 on
+`WHO` is `$CODEX_BOT` again, and this one request is made with the auto-review argument
 `no` whatever `$AUTO_REVIEW` is, since no push precedes it: the mention is its only trigger
 and the baseline must be the verdict before the revocation — until Codex is clean; then
 `record` from step 7 once more, with a body saying what the pass changed, which writes the
