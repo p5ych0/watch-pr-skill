@@ -670,6 +670,24 @@ sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
     && grep -q '^- each host rule that differs' <<<"$_kept"; } \
     && pass "…the host-rules stop asks before step 1, names on the PR the rule that applied, lifts no gate, keeps this document's rule unattended, and survives a compaction" \
     || die "the host-rules stop is incomplete, misplaced, or not kept across a compaction"
+_hhave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _hhave=
+_hwant='The loop runs inside a host project whose own instructions, its `CLAUDE.md`, `AGENTS.md`
+and project skills, can state a rule this document also states, and state it differently:
+the model a subagent gets, where a PR'\''s notes go, the form of a commit message. Before
+step 1, compare the two for the rules the session itself follows. For each one that
+differs, **stop and ask the operator which applies**, naming both. The answer holds for
+this session; a new session asks again. Which rule applied and which it differed from go
+into the next body this loop posts, or into a PR comment before the merge where no body
+follows; each rule is named by its file and its subject, never quoted, since a host'\''s
+instructions need not be committed. A host rule replaces this document'\''s only on the
+operator'\''s word, and never what a helper proves or gates: a helper'\''s refusal stays a stop
+whatever a host rule says.
+
+**Unattended:** keep this document'\''s rule.'
+_hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_hwant")" || _hwant=
+{ [ -n "$_hhave" ] && [ "$_hhave" = "$_hwant" ]; } \
+    && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
+    || die "the host-rules section is not the text the test pins"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
