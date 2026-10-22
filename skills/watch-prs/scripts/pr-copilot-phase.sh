@@ -129,6 +129,10 @@ if [[ $STAGE = open ]]; then
 
     phase_still_open || exit 1
 
+    # Read on both sides of the request: GitHub can answer it with success and register nothing on the PR.
+    REQ_BEFORE=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh request-id "$PR" "$RB_COPILOT_BOT") \
+        || { echo "ABORT: could not read the PR's review requests; Copilot has NOT been requested."; exit 1; }
+
     # Read after the revocation and immediately before the request: a pass finishing during the probes would
     # otherwise answer a request made after it.
     PRIOR_REVIEW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
@@ -147,6 +151,17 @@ if [[ $STAGE = open ]]; then
         echo "ABORT: could not request Copilot — do not enter the Copilot phase."
         echo "This is not permission to skip the pass: decide with the operator."
         exit 1; }
+
+    REQ_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh request-registered "$PR" "$RB_COPILOT_BOT" "$REQ_BEFORE"); REQ_RC=$?
+    case "$REQ_RC" in
+        0) ;;
+        1) echo "ABORT: the Copilot request registered nothing on the PR ($REQ_NOW), so Copilot is unavailable to this account or repository; the Copilot phase is not open."
+           echo "This is not permission to skip the pass: decide with the operator."
+           exit 1 ;;
+        *) echo "ABORT: could not tell whether the Copilot request registered on the PR (rc=$REQ_RC); the Copilot phase is not reported open."
+           echo "This is not permission to skip the pass: decide with the operator."
+           exit 1 ;;
+    esac
 
     echo "PR_COPILOT_PHASE_OPENED pr=$PR head=$CODEX_SHA prior-review=$PRIOR_REVIEW"
     exit 0

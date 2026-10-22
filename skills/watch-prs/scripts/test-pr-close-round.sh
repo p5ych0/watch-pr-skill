@@ -78,6 +78,17 @@ if [ "\$_n" = pr-ci-gate ] && [ -f "\$W/plant" ]; then
     read -r _pp _pt < "\$W/plant"; rm -f "\$W/plant"
     rm -f "\$_pp" && ln -s "\$_pt" "\$_pp"
 fi
+# Kept apart from the baseline's answer, and a registered request by default, so a case about
+# something else never stops on registration.
+if [ "\$_n" = pr-review-state ]; then
+    case "\${1:-}" in
+        request-id) cat "\$W/request-id.out" 2>/dev/null || printf 'none\n'
+                    exit "\$(cat "\$W/request-id.rc" 2>/dev/null || echo 0)" ;;
+        request-registered)
+                    cat "\$W/request-registered.out" 2>/dev/null || printf 'pending\n'
+                    exit "\$(cat "\$W/request-registered.rc" 2>/dev/null || echo 0)" ;;
+    esac
+fi
 # A SECOND ANSWER, WHEN A CASE NEEDS THE WORLD TO CHANGE MID-RUN. The
 # push-triggered pass can FINISH while the CI gate is still settling, and the
 # whole question is which side of that the baseline was read on — so the stub can
@@ -658,6 +669,77 @@ grep -q -- '--add-reviewer\|@codex review' "$TMP/calls" \
 # announced a pass that will never come.
 world; printf '1' > "$W/edit.rc"
 case_is 1 "could not re-request Copilot" "a failed Copilot re-request stops the round" "$COPILOTBOT" no
+world; printf '1' > "$W/edit.rc"; got="$(run "$COPILOTBOT" no)"
+{ [ "${got%%|*}" = 1 ] && before 'gh pr comment' 'gh pr edit' \
+    && grep -qF 'the round summary is posted' <<<"${got#*|}" \
+    && grep -qF "Do not run 'post' again" <<<"${got#*|}"; } \
+    && pass "…and, the summary being posted, says so and not to post again" \
+    || die "a failed Copilot re-request after the summary gave '${got}'"
+grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}" \
+    && die "the round was reported closed on a failed Copilot re-request: '${got}'" \
+    || pass "…with no PR_ROUND_CLOSED record"
+
+# ── A COPILOT RE-REQUEST THAT REGISTERED NOTHING DOES NOT CLOSE THE ROUND ──
+# GitHub can answer `--add-reviewer` with success and record no request, and a round
+# reported closed on that has the watch wait for a review nobody asked for.
+world; got="$(run "$COPILOTBOT" no)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}"; } \
+    && pass "a Copilot re-request that registered closes the round" \
+    || die "a registered Copilot re-request gave '${got}'"
+{ before 'pr-review-state.sh request-id' 'gh pr comment' \
+    && before 'gh pr edit' 'pr-review-state.sh request-registered'; } \
+    && pass "…the requests read before the summary and the registration read after --add-reviewer" \
+    || die "the registration reads are out of order: $(cat "$TMP/calls")"
+
+world; printf 'RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
+printf 'PR_REVIEW_STATE pr=7 reviewer=%s status=unregistered\n' "$COPILOTBOT" > "$W/request-registered.out"
+got="$(run "$COPILOTBOT" no)"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing on the PR' <<<"${got#*|}" \
+    && grep -qF "Do not run 'post' again" <<<"${got#*|}"; } \
+    && pass "a Copilot re-request that registered nothing stops the round, and says not to post again" \
+    || die "an unregistered Copilot re-request gave '${got}'"
+grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}" \
+    && die "the round was reported closed on a request that registered nothing: '${got}'" \
+    || pass "…with no PR_ROUND_CLOSED record"
+grep -qF "pr-review-state.sh request-registered 7 $COPILOTBOT RRE_before" "$TMP/calls" \
+    && pass "…the registration read being given the token read before the request" \
+    || die "the registration read was not given the before token: $(cat "$TMP/calls")"
+
+world; printf '2\n' > "$W/request-registered.rc"; : > "$W/request-registered.out"
+got="$(run "$COPILOTBOT" no)"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not be told whether the Copilot request registered' <<<"${got#*|}"; } \
+    && pass "an unreadable Copilot registration stops the round" \
+    || die "an unreadable Copilot registration gave '${got}'"
+grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}" \
+    && die "the round was reported closed on a registration nothing could read: '${got}'" \
+    || pass "…with no PR_ROUND_CLOSED record"
+grep -qF 'registered nothing' <<<"${got#*|}" \
+    && die "an unreadable registration was reported as a request that registered nothing: '${got}'" \
+    || pass "…and not reported as a request that registered nothing"
+
+world; printf '2\n' > "$W/request-id.rc"; : > "$W/request-id.out"
+got="$(run "$COPILOTBOT" no)"
+{ [ "${got%%|*}" = 1 ] && grep -qF "could not read the PR's review requests" <<<"${got#*|}"; } \
+    && pass "an unreadable request list before a Copilot re-request stops the round" \
+    || die "an unreadable request list gave '${got}'"
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "the summary was posted with no request token to compare against" \
+    || pass "…with no summary posted"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was re-requested with no request token to compare against" \
+    || pass "…and Copilot not re-requested"
+grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}" \
+    && die "the round was reported closed with no request token read: '${got}'" \
+    || pass "…and no PR_ROUND_CLOSED record"
+
+world; printf '2\n' > "$W/request-id.rc"; printf '2\n' > "$W/request-registered.rc"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}"; } \
+    && pass "a Codex round closes whatever the request reads would answer" \
+    || die "a Codex round with failing request reads gave '${got}'"
+grep -q 'pr-review-state.sh request-' "$TMP/calls" \
+    && die "a Codex round read Copilot's request registration: $(cat "$TMP/calls")" \
+    || pass "…since it reads neither"
 
 # ── the arguments ──────────────────────────────────────────────────────────
 world

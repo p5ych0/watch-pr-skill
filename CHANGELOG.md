@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.14.5] — 2026-10-22
+
+- **A Copilot request GitHub drops is a stop, not an open phase.** `pr-copilot-phase.sh
+  open` and a Copilot round's `pr-close-round.sh post` asked for Copilot with
+  `gh pr edit --add-reviewer @copilot` and took exit 0 as a request made. While the
+  account's Copilot premium quota was spent, GitHub answered that call with success and
+  registered nothing: no review-request event and no requested reviewer on the PR. `open`
+  then printed `PR_COPILOT_PHASE_OPENED`, and the watch waited its full 30 minutes for a
+  review nobody had requested. `pr-review-state.sh` now has two stages for this.
+  `request-id` reads, in one GraphQL response, whether the reviewer is among the PR's review
+  requests (`pending`), else the id of its newest review-request event, which may be in
+  GitHub's older base64 form, else `none`. `request-registered` reads that token up to three
+  times, two seconds apart, and answers 0 when it is `pending` or an event id other than the
+  one read before the request, and 1 with `status=unregistered` when neither happens after
+  three reads, a read of `none` included. A truncated request list, an `errors` key, a
+  malformed event id, a failed read, a bad token and a failed sleep are each unreadable,
+  status 2. Both callers read the token before the request and ask after it. `open` aborts
+  on 1 with "registered nothing", Copilot unavailable to this account or repository, and the
+  phase not open; `post` aborts the same way after its summary is posted, and says not to
+  run `post` again. A Codex round reads neither. `SKILL.md` and README say what the abort
+  means. `test-pr-review-state.sh` runs both stages against a stubbed `gh`, and the two
+  callers' fixtures hold each abort, the order of the reads and the Codex round.
+  Closes #396.
+
 ## [2.14.4] — 2026-10-22
 
 - **The cold read probes and diffs every changed path in one command each.** The brief had

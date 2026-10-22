@@ -507,7 +507,10 @@ RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)'
 0: closed on the head it prints, and the wait step is next. 3: the pass left only replies,
 so there is nothing to fix and no signoff — read it with the operator, as on `4` above.
 Anything else: the threads are answered but no summary was posted and no pass was
-requested; the reason is above, do not retry it blind.
+requested; the reason is above, do not retry it blind. In a Copilot round, an abort that
+says the summary is posted is the exception: decide with the operator, and do not run
+`post` again, since it would post the summary twice. Where it says the request registered
+nothing, Copilot is unavailable to this account or repository.
 
 In the Copilot phase the request is `gh pr edit --add-reviewer @copilot`, which no push
 triggers, so the summary goes first. Re-request **only the active reviewer**.
@@ -620,7 +623,9 @@ RB_NONCE="$(perl -e 'printf "%010d%07d%06d", time, $$ % 10000000, int(rand 1e6)'
 
 0: the phase is open and Copilot is requested; from here `WHO` is `$COPILOT_BOT`. 3: paused at a round
 boundary — not permission to skip the pass; decide with the operator. Anything else: the
-phase did not open — not permission to skip the pass either.
+phase did not open — not permission to skip the pass either. An abort that says the
+request registered nothing is Copilot unavailable to this account or repository; as the
+paragraph below says, that is not permission to skip the pass.
 
 Then run steps 3–6 again with `$WHO` set to Copilot until its verdict is clean, every fix
 commit carrying `Review-Phase: copilot`. **Codex is not re-requested during this phase**:
