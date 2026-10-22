@@ -360,12 +360,13 @@ make them yourself.
 - **Point it at a code graph where the checkout holds one.** Where the checkout holds
   `graphify-out/graph.json`, tell the pass to ask `graphify query "<question>" --budget 2000`
   for callers and impact before it searches by hand; where it holds `.trail/`, to ask
-  `trail callers <symbol>` and `trail ask "<task>"`; where the command does not run, the
-  pass searches by hand. A graph locates code and proves nothing: the pass reads what it
-  points at before editing. Where the checkout holds neither, tell the operator once per
-  session that a code graph built by `graphify` or `trail`, its output ignored by git, can
-  cut what a fix pass spends on finding callers. The skill installs neither and needs
-  neither.
+  `trail callers <symbol>` and `trail ask "<task>"`. Where the command does not run, or
+  the session's permissions do not already allow it, the pass searches by hand, since a
+  permission prompt in an unattended pass waits for nobody. A graph locates code and
+  proves nothing: the pass reads what it points at before editing. Where the checkout
+  holds neither, or holds one git shows as untracked, tell the operator once per session
+  that a code graph built by `graphify` or `trail`, its output ignored by git, can cut
+  what a fix pass spends on finding callers. The skill installs neither and needs neither.
 - **Read its diff and its report before you commit.** A fix it could not prove is yours to
   prove or to stop on, as *Prove a fix can fail* says. The commit, the self-check, the
   thread replies, the round summary and every judgment call stay with you.
