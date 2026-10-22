@@ -236,12 +236,14 @@ Each of these was found, fixed and made again. Read before writing a defence or 
 - **No repository but this one is named anywhere, prose included.** A measurement taken
   elsewhere is evidence for its count and shape, never for whose repository it was. Not
   mentions: this plugin's own metadata and install commands, a dependency coordinate such as
-  `uses: actions/checkout@v4`, an API path in its generic form, the placeholder identity
-  a fixture supplies as a value — the suite uses one placeholder pair throughout, keyed by
-  `test-pr-identity.sh` on the owner and the shape, and this paragraph does not spell it —
-  and the links an authoring tool writes to its own documentation and source in a
-  configuration file it generates and rewrites itself, which `.serena/project.yml` is. Such
-  a link written by hand, or into a file the tool does not generate, is a mention.
+  `uses: actions/checkout@v4`, a tool `SKILL.md` names by its command and the marker it
+  leaves in a checkout, without its repository, an API path in its generic form, the
+  placeholder identity a fixture supplies as a value — the suite uses one placeholder pair
+  throughout, keyed by `test-pr-identity.sh` on the owner and the shape, and this paragraph
+  does not spell it — and the links an authoring tool writes to its own documentation and
+  source in a configuration file it generates and rewrites itself, which
+  `.serena/project.yml` is. Such a link written by hand, or into a file the tool does not
+  generate, is a mention.
 - Identity derives from `git remote get-url origin` in one place, `rb_identity` in
   `identitylib.sh`, which sets `HOST`, `OWNER` and `REPO` rather than printing them.
   `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` override it; `SKILL.md`'s

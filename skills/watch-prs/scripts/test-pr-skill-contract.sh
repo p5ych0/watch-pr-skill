@@ -689,6 +689,17 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 { [ -n "$_hhave" ] && [ "$_hhave" = "$_hwant" ]; } \
     && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
     || die "the host-rules section is not the text the test pins"
+s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
+sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
+{ grep -qF '`graphify-out/graph.json`' <<<"$sf" && grep -qF -- '--budget 2000`' <<<"$sf" \
+    && grep -qF '`.trail/`' <<<"$sf" && grep -qF '`trail callers <symbol>`' <<<"$sf" \
+    && grep -qF 'where the command does not run, the pass searches by hand' <<<"$sf" \
+    && grep -qF 'A graph locates code and proves nothing' <<<"$sf" \
+    && grep -qF 'tell the operator once per session' <<<"$sf" && grep -qF 'its output ignored by git' <<<"$sf" \
+    && grep -qF 'The skill installs neither and needs neither.' <<<"$sf" \
+    && before '**Point it at a code graph' '**Read its diff and its report'; } \
+    && pass "a fix pass is pointed at a code graph the checkout holds, with a budget, and the skill needs none" \
+    || die "the fix-pass hand-over does not point at a code graph by its marker, or makes one a requirement"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'

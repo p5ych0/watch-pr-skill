@@ -245,8 +245,11 @@ removing a dependency over guarding it. Where a finding does not hold, it says s
 on the thread with evidence rather than changing code to satisfy it. It decides
 each answer itself; the edits it hands to a subagent, unless you tell it to make
 them too, and it reads the result before committing. *Subagent model and effort*
-below says how that subagent is sized. Each fix
-commit is proved to fail without the fix; where that cannot be constructed, the
+below says how that subagent is sized. Where your checkout holds a code graph
+built by `graphify` or `trail`, the session tells the subagent to query it for
+callers before it searches by hand; where it holds neither, the session mentions
+once that one could cut the cost, its output ignored by git. The plugin installs
+neither. Each fix commit is proved to fail without the fix; where that cannot be constructed, the
 session writes the limitation at the site and **stops for you**.
 
 Before closing a round the session runs this plugin's own pre-push self-check,

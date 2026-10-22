@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.14.1] — 2026-10-22
+
+- **A fix pass is pointed at a code graph where the checkout holds one.** A fix subagent
+  found callers and related code by hand, one `grep` or file read per turn, and each turn
+  reads the whole subagent context again: measured over nine days of use, a fix pass
+  averaged 27 turns, and a large one 57. Step 5's hand-over now tells the pass, where the
+  checkout holds `graphify-out/graph.json`, to ask `graphify query "<question>" --budget
+  2000` for callers and impact first, and where it holds `.trail/`, to ask
+  `trail callers <symbol>` and `trail ask "<task>"`, searching by hand where the command
+  does not run. A graph locates code and proves nothing, so the pass still reads what it
+  is pointed at. Where the checkout holds neither, the session tells the operator once
+  that a code graph, its output ignored by git, can cut the cost. The skill installs
+  neither and needs neither. `CLAUDE.md` and `AGENTS.md` admit a tool named
+  by its command and marker in the repository-agnostic rule, and
+  `test-pr-skill-contract.sh` holds the hand-over.
+  Closes #386.
+
 ## [2.14.0] — 2026-10-22
 
 - **A stop for a host project's rule that differs from the skill's.** The loop runs inside
