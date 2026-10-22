@@ -76,7 +76,12 @@ Install once at user scope. To update:
 /reload-plugins
 ```
 
-What that takes is this repository as it stands, since the marketplace tracks it
+An automatic update needs the last step too. A running session reads the new
+`SKILL.md` at its next invocation but keeps the hooks module it loaded at start,
+so after an automatic update run `/reload-plugins` or restart the session before
+the skill is invoked again, and the module matches the `SKILL.md` it serves.
+
+What an update takes is this repository as it stands, since the marketplace tracks it
 rather than a tag, so `CHANGELOG.md` is the record of what an update brings. The
 newest versions are also tagged and released at
 [github.com/p5ych0/watch-pr-skill/releases](https://github.com/p5ych0/watch-pr-skill/releases),
