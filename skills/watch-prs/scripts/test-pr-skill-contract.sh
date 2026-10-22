@@ -332,6 +332,8 @@ of it costs a round:
 - every answer the operator has given that a helper has not yet enacted, a replies-only
   classification among them;
 - each host rule that differs from this document'\''s, and which of the two applies;
+- whether the operator has had step 5'\''s note on a code graph, which is given once per
+  session;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
@@ -690,16 +692,21 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
     && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
     || die "the host-rules section is not the text the test pins"
 s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
-sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
-{ grep -qF '`graphify-out/graph.json`' <<<"$sf" && grep -qF -- '--budget 2000`' <<<"$sf" \
-    && grep -qF '`.trail/`' <<<"$sf" && grep -qF '`trail callers <symbol>`' <<<"$sf" \
-    && grep -qF 'where the command does not run, the pass searches by hand' <<<"$sf" \
-    && grep -qF 'A graph locates code and proves nothing' <<<"$sf" \
-    && grep -qF 'tell the operator once per session' <<<"$sf" && grep -qF 'its output ignored by git' <<<"$sf" \
-    && grep -qF 'The skill installs neither and needs neither.' <<<"$sf" \
+_ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
+_gwant='`graphify-out/graph.json`, tell the pass to ask `graphify query "<question>" --budget 2000`
+for callers and impact before it searches by hand; where it holds `.trail/`, to ask
+`trail callers <symbol>` and `trail ask "<task>"`; where the command does not run, the
+pass searches by hand. A graph locates code and proves nothing: the pass reads what it
+points at before editing. Where the checkout holds neither, tell the operator once per
+session that a code graph built by `graphify` or `trail`, its output ignored by git, can
+cut what a fix pass spends on finding callers. The skill installs neither and needs
+neither.'
+_gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_gwant")" || _gwant=
+{ [ -n "$_ghave" ] && [ -n "$_gwant" ] && [ "$_ghave" = "$_gwant" ] \
+    && grep -qxF -- '- **Point it at a code graph where the checkout holds one.** Where the checkout holds' "$SKILL" \
     && before '**Point it at a code graph' '**Read its diff and its report'; } \
-    && pass "a fix pass is pointed at a code graph the checkout holds, with a budget, and the skill needs none" \
-    || die "the fix-pass hand-over does not point at a code graph by its marker, or makes one a requirement"
+    && pass "a fix pass is pointed at a code graph the checkout holds, the bullet pinned whole, before the report is read" \
+    || die "the code-graph bullet is not the text the test pins, or does not come before the report is read"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'

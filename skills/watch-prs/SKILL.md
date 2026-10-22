@@ -167,6 +167,8 @@ of it costs a round:
 - every answer the operator has given that a helper has not yet enacted, a replies-only
   classification among them;
 - each host rule that differs from this document's, and which of the two applies;
+- whether the operator has had step 5's note on a code graph, which is given once per
+  session;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
