@@ -662,7 +662,7 @@ at() {
         && pass "…one at the $3" || die "the $3 carries no unattended answer"
 }
 at "### When the host project's rules differ" '## 1. ' 'host-rules stop'
-s="$(section "### When the host project's rules differ" '## 1. ')" || s=
+s="$(section "### When the host project's rules differ" '#')" || s=
 sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
 { grep -q 'stop and ask the operator which applies' <<<"$s" && grep -q 'a new session asks again' <<<"$s" \
     && grep -qF "only on the operator's word" <<<"$sf" && grep -q "never what a helper proves or gates" <<<"$sf" \
@@ -691,6 +691,41 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 { [ -n "$_hhave" ] && [ "$_hhave" = "$_hwant" ]; } \
     && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
     || die "the host-rules section is not the text the test pins"
+s="$(section '### Where the host project keeps its notes' '## 1. ')" || s=
+_nhave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _nhave=
+_nwant='Before step 1, or before resuming after a stop, name where the host project keeps its
+durable notes, taking it from its `CLAUDE.md` and `AGENTS.md`: a changelog, decision
+records, a wiki, a notes vault. Where they say nothing, take `CHANGELOG.md` where the
+checkout has one, and otherwise none. The loop adds no notes store of its own.
+
+- **A note the checkout tracks**, such as a changelog entry, goes into the PR with the
+  change, before the first review request, so the reviewers read it and no later commit
+  moves a signed-off head.
+- **A note outside the checkout**, such as a vault or a wiki, gets the PR'\''s record at each
+  STOP and after the merge, in the form those notes already use: what the PR set out to do,
+  what changed, the rounds per reviewer, what was skipped with its issue number, and the
+  stop it waits at or the merge.
+- **At each STOP**, end the message with a continuation prompt a later session can start
+  from: the PR and its branch, the round count per reviewer, and the stop it waits at. It
+  says where to resume and nothing more: the later session runs setup, compares the host'\''s
+  rules again, and takes the phase and the signoffs from *Resuming after a stop*.
+
+Neither a note nor the prompt carries the origin or `REVIEW_BUS_REMOTE`, which can hold a
+credential.'
+_nwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_nwant")" || _nwant=
+{ [ -n "$_nhave" ] && [ -n "$_nwant" ] && [ "$_nhave" = "$_nwant" ] \
+    && before '### What a compaction summary keeps' '### Where the host project keeps its notes' \
+    && before '### Where the host project keeps its notes' '## 1. State the task on the PR'; } \
+    && pass "the notes section is pinned whole: found before step 1 and on resuming, a tracked note in before the first request, a prompt that says only where to resume, no origin" \
+    || die "the notes section is misplaced or not the text the test pins"
+_rf="$(tr '\n' ' ' <"$README" | tr -s ' ')" || _rf=
+grep -qF 'Each stop ends with a continuation prompt naming the PR, its branch, the rounds and the stop, so a later session knows where to resume; that session still runs setup and reads the phase from the PR.' <<<"$_rf" \
+    && pass "…and README names what the continuation prompt carries and that a later session still runs setup" \
+    || die "README does not say what the continuation prompt carries and what a later session still does"
+_af="$(tr '\n' ' ' <"$ROOT/AGENTS.md" | tr -s ' ')" || _af=
+grep -qF 'Nor does a host note or a continuation prompt that `SKILL.md` § Where the host project keeps its notes writes.' <<<"$_af" \
+    && pass "…and AGENTS.md holds a host note and a continuation prompt to the no-origin rule" \
+    || die "AGENTS.md does not hold a host note or a continuation prompt to the no-origin rule"
 s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
 _ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
 _gwant='  `graphify-out/graph.json`, tell the pass that file'\''s absolute path, as the path itself

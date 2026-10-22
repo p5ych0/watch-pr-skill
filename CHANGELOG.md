@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.14.2] — 2026-10-22
+
+- **A PR's record reaches the notes the host project keeps, and each stop leaves a
+  continuation prompt.** The loop wrote the PR body, the round summaries and the signoffs
+  to GitHub only. A host project that keeps durable notes, a changelog, decision records,
+  a wiki or a notes vault, started its next session without the PR's result. And a stop
+  left nothing a later session could start from but the signoffs. `SKILL.md` § Setup now
+  has the session name where the host project keeps its notes before step 1 and before
+  resuming after a stop: from its `CLAUDE.md` and `AGENTS.md`, or else `CHANGELOG.md`
+  where the checkout has one. A note the checkout tracks goes into the PR with the
+  change, before the first review request. A note outside it gets the PR's record at each
+  STOP and after the merge, in the form those notes already use. Each STOP ends with a
+  continuation prompt naming the PR, its branch, the round count per reviewer and the
+  stop it waits at; a later session started from it still runs setup, asks the host-rule
+  question again and takes the phase from *Resuming after a stop*. The loop adds no notes
+  store, and neither a note nor the prompt carries the origin, a rule `AGENTS.md` now
+  names. README describes it, and `test-pr-skill-contract.sh` holds the passage whole.
+  Closes #387.
+
 ## [2.14.1] — 2026-10-22
 
 - **A fix pass is pointed at a code graph where the checkout holds one.** A fix subagent
