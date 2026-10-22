@@ -16,8 +16,9 @@
   pins it again in every command. `CLAUDE.md` points at it rather than
   keeping a second copy.
   `test-pr-skill-contract.sh` derives the names from the list of values written between the
-  prelude and a step's fence and fails when the values bullet omits one, or when the section
-  outside its never-keeps paragraph names the origin or `REVIEW_BUS_REMOTE`. Closes #394.
+  prelude and a step's fence, and pins the section's whole text, wrapping ignored, with
+  those names in its values bullet; it also fails where the section names the origin or
+  `REVIEW_BUS_REMOTE` outside its never-keeps paragraph. Closes #394.
 
 ## [2.13.2] — 2026-10-22
 

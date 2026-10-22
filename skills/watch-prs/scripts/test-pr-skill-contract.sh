@@ -305,11 +305,9 @@ fi
 _cl="$(awk '/^### What a compaction summary keeps$/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _cl=
 _al="$(awk '/^Between the prelude and the step.s fence/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _al=
 _kept="$(awk '/^It never keeps /{exit} {print}' <<<"$_cl")" || _kept=
-_bj="$(awk '/^- /{if (b != "") print b; b = $0; next} b != "" && /^ /{sub(/^ +/, ""); b = b " " $0; next}
-    {if (b != "") print b; b = ""} END{if (b != "") print b}' <<<"$_kept")" || _bj=
-_rest="$(grep -vxF -e 'It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude' \
-    -e 'reads the origin back from the file setup wrote and pins it again in every command.' <<<"$_cl")" || _rest=
-_vb="$(grep '^- every value the list above writes' <<<"$_bj")" || _vb=
+_have="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_cl")" || _have=
+_nkp='It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude reads the origin back from the file setup wrote and pins it again in every command.'
+_rest="${_have/$_nkp/}"
 _names="$(grep -oE '`[A-Z][A-Z0-9_]+[=`]' <<<"$_al" | tr -d '`=' | awk '!s[$0]++')" || _names=
 _nk=0; _miss=""; _enum=""
 for _v in $_names; do
@@ -317,19 +315,35 @@ for _v in $_names; do
     [ "$_v" = NAME ] && continue
     _nk=$((_nk + 1))
     _enum="${_enum:+$_enum, }\`$_v\`"
-    grep -qF "\`$_v\`" <<<"$_vb" || _miss="$_miss $_v"
+    grep -qF "\`$_v\`" <<<"$_have" || _miss="$_miss $_v"
 done
-_vx="- every value the list above writes between the prelude and a step's fence, each with the value it had: $_enum and every knob the operator set;"
-_sx="- setup's line, \`${_pl%%$'\n'*}\`, as setup printed it;"
-_px='- which reviewer the loop is on and therefore which phase, since `WHO` names Codex in the fault-tolerance pass as in the opening phase;'
-{ [ "$_nk" -ge 5 ] && [ -z "$_miss" ] && [ -n "$prelude" ] \
-    && grep -qxF -- "$_sx" <<<"$_bj" \
-    && grep -qxF -- "$_px" <<<"$_bj" \
-    && grep -qxF -- "$_vx" <<<"$_bj"; } \
+_sl="${_pl%%$'\n'*}"
+_want='When the context is compacted mid-loop, the summary keeps the following, since losing any
+of it costs a round:
+
+- the PR number and its branch;
+- setup'\''s line, `'"$_sl"'`, as setup printed it;
+- which reviewer the loop is on and therefore which phase, since `WHO` names Codex in the
+  fault-tolerance pass as in the opening phase;
+- every value the list above writes between the prelude and a step'\''s fence, each with the
+  value it had: '"$_enum"' and every knob the operator set;
+- whether the opening Codex verdict was clean, since that decides between merging and
+  buying a Copilot phase;
+- every answer the operator has given that a helper has not yet enacted, a replies-only
+  classification among them;
+- each finding of the round with the reply it was answered with, until the cold read that
+  follows those fixes has had them, and each open finding'\''s thread and comment ids;
+- the cold read'\''s result: clean, or a finding not yet fixed or filed;
+- the round count per reviewer, and which stop is next.
+
+It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude
+reads the origin back from the file setup wrote and pins it again in every command.'
+_want="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_want")" || _want=
+{ [ "$_nk" -ge 5 ] && [ -n "$prelude" ] && [ -n "$_have" ] && [ "$_have" = "$_want" ]; } \
     && pass "a compaction summary keeps setup's line, the phase and each of the $_nk values a later command is written with" \
-    || die "the compaction list is missing, or omits what a later command is written with, or a bullet is not worded as the list requires (of $_nk):${_miss:- the line setup printed, the phase or the knobs}"
-{ [ -n "$_kept" ] && [ -n "$_rest" ] && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" && ! grep -qiF origin <<<"$_rest" \
-    && grep -qF 'It never keeps the origin or `REVIEW_BUS_REMOTE`' <<<"$_cl"; } \
+    || die "the compaction section is not the text the test pins, built from the $_nk carried names${_miss:+; missing:$_miss}"
+{ [ -n "$_kept" ] && [ -n "$_rest" ] && [ "$_rest" != "$_have" ] \
+    && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" && ! grep -qiF origin <<<"$_rest"; } \
     && pass "…and never the origin or REVIEW_BUS_REMOTE, which can hold a credential" \
     || die "the compaction list keeps the origin or REVIEW_BUS_REMOTE, or does not say it never does"
 
