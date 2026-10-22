@@ -663,8 +663,9 @@ at "### When the host project's rules differ" '## 1. ' 'host-rules stop'
 s="$(section "### When the host project's rules differ" '## 1. ')" || s=
 sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
 { grep -q 'stop and ask the operator which applies' <<<"$s" && grep -q 'a new session asks again' <<<"$s" \
-    && grep -qF "only on the operator's word" <<<"$sf" && grep -q "never what a helper proves or gates" <<<"$s" \
+    && grep -qF "only on the operator's word" <<<"$sf" && grep -q "never what a helper proves or gates" <<<"$sf" \
     && grep -qF 'named by its file and its subject' <<<"$sf" && grep -qF 'before the merge where no body follows' <<<"$sf" \
+    && grep -qF 'before resuming after a stop' <<<"$sf" && grep -qF 'under the body rules of step 2' <<<"$sf" \
     && grep -qxF "**Unattended:** keep this document's rule." <<<"$s" \
     && before "### When the host project's rules differ" '## 1. State the task on the PR' \
     && grep -q '^- each host rule that differs' <<<"$_kept"; } \
@@ -674,14 +675,14 @@ _hhave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 _hwant='The loop runs inside a host project whose own instructions, its `CLAUDE.md`, `AGENTS.md`
 and project skills, can state a rule this document also states, and state it differently:
 the model a subagent gets, where a PR'\''s notes go, the form of a commit message. Before
-step 1, compare the two for the rules the session itself follows. For each one that
-differs, **stop and ask the operator which applies**, naming both. The answer holds for
-this session; a new session asks again. Which rule applied and which it differed from go
-into the next body this loop posts, or into a PR comment before the merge where no body
-follows; each rule is named by its file and its subject, never quoted, since a host'\''s
-instructions need not be committed. A host rule replaces this document'\''s only on the
-operator'\''s word, and never what a helper proves or gates: a helper'\''s refusal stays a stop
-whatever a host rule says.
+step 1, or before resuming after a stop, compare the two for the rules the session itself
+follows. For each one that differs, **stop and ask the operator which applies**, naming
+both. The answer holds for this session; a new session asks again. Which rule applied and
+which it differed from go into the next body this loop posts, or into a PR comment before
+the merge where no body follows, under the body rules of step 2; each rule is named by its
+file and its subject, never quoted, since a host'\''s instructions need not be committed. A
+host rule replaces this document'\''s only on the operator'\''s word, and never what a helper
+proves or gates: a helper'\''s refusal stays a stop whatever a host rule says.
 
 **Unattended:** keep this document'\''s rule.'
 _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_hwant")" || _hwant=

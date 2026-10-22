@@ -224,12 +224,13 @@ another repository stops. To work on another repository, start a new session. Th
 drives same-repository pull requests only: a PR whose head is in a fork is
 refused at the first push.
 
-Before the first request, the session compares your project's own instructions,
-its `CLAUDE.md`, `AGENTS.md` and project skills, with the skill's rules. Where
-one states a rule differently, such as the form of a commit message, the session
-names both rules and asks which applies. Your answer holds for that session.
-The session says on the PR which rule applied, naming it by its file and
-subject. A project rule never lifts a gate a helper enforces.
+Before the first request, or before it resumes a stopped loop, the session
+compares your project's own instructions, its `CLAUDE.md`, `AGENTS.md` and
+project skills, with the skill's rules. Where one states a rule differently,
+such as the form of a commit message, the session names both rules and asks
+which applies. Your answer holds for that session. The session says on the PR
+which rule applied, naming it by its file and subject. A project rule never
+lifts a gate a helper enforces.
 
 When the conversation is compacted mid-loop, the session keeps what `SKILL.md`
 lists: the PR, the paths setup printed, the phase, the open findings and the next
