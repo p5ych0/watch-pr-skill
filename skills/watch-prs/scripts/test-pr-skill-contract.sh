@@ -694,14 +694,15 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
 _ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
 _gwant='`graphify-out/graph.json`, tell the pass to ask `graphify query "<question>" --budget 2000`
-for callers and impact before it searches by hand; where it holds `.trail/`, to ask
-`trail callers <symbol>` and `trail ask "<task>"`. Where the command does not run, or
-the session'\''s permissions do not already allow it, the pass searches by hand, since a
-permission prompt in an unattended pass waits for nobody. A graph locates code and
-proves nothing: the pass reads what it points at before editing. Where the checkout
-holds neither, or holds one git shows as untracked, tell the operator once per session
-that a code graph built by `graphify` or `trail`, its output ignored by git, can cut
-what a fix pass spends on finding callers. The skill installs neither and needs neither.'
+for callers and impact before it searches by hand; where it holds
+`graft/.graph/wiring.json`, to ask `trail callers <symbol>` and `trail ask "<task>"`.
+Where the command does not run, or the session'\''s permissions do not already allow it,
+the pass searches by hand, since a permission prompt in an unattended pass waits for
+nobody. A graph locates code and proves nothing: the pass reads what it points at before
+editing. Where the checkout holds neither, or holds one git shows as untracked, tell the
+operator once per session that a code graph built by `graphify` or `trail`, its output
+ignored by git, can cut what a fix pass spends on finding callers. The skill installs
+neither and needs neither.'
 _gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_gwant")" || _gwant=
 { [ -n "$_ghave" ] && [ -n "$_gwant" ] && [ "$_ghave" = "$_gwant" ] \
     && grep -qxF -- '- **Point it at a code graph where the checkout holds one.** Where the checkout holds' "$SKILL" \
