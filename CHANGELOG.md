@@ -15,8 +15,8 @@
   setup's file and pins it again in every command. `CLAUDE.md` points at it rather than
   keeping a second copy.
   `test-pr-skill-contract.sh` derives the names from the step prelude's list of carried
-  values and fails when the compaction list omits one, or when it keeps `REVIEW_BUS_REMOTE`.
-  Closes #394.
+  values and fails when the values bullet omits one, or when the section outside its
+  never-keeps paragraph names the origin or `REVIEW_BUS_REMOTE`. Closes #394.
 
 ## [2.13.2] — 2026-10-22
 
