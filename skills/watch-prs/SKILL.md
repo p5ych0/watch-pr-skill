@@ -150,6 +150,30 @@ decided or printed:
 - a knob the operator set in this session, as `NAME=value`, which the prelude's export
   carries to the helpers.
 
+### What a compaction summary keeps
+
+When the context is compacted mid-loop, the summary keeps the following, since losing any
+of it costs a round:
+
+- the PR number and its branch;
+- setup's line, `RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…`, as setup printed it;
+- which reviewer the loop is on and therefore which phase, since `WHO` names Codex in the
+  fault-tolerance pass as in the opening phase;
+- every value the list above writes between the prelude and a step's fence, each with the
+  value it had: `AUTO_REVIEW`, `REVIEWERS`, `WHO`, `RB_NONCE`, `CODEX_SHA` and every knob
+  the operator set;
+- whether the opening Codex verdict was clean, since that decides between merging and
+  buying a Copilot phase;
+- every answer the operator has given that a helper has not yet enacted, a replies-only
+  classification among them;
+- each finding of the round with the reply it was answered with, until the cold read that
+  follows those fixes has had them, and each open finding's thread and comment ids;
+- the cold read's result: clean, or a finding not yet fixed or filed;
+- the round count per reviewer, and which stop is next.
+
+It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude
+reads the origin back from the file setup wrote and pins it again in every command.
+
 ## 1. State the task on the PR
 
 The reviewers judge relevance against what the PR says it set out to do. Before the first

@@ -113,23 +113,8 @@ working tree's module runs only where the session loads the working tree as the 
 judgment calls, the commit, the thread replies and the round summary stay with the session
 driving the loop.
 
-**Compaction.** When the context is compacted mid-loop, the summary keeps what no probe can
-recover. That is the PR number and branch; `REPO_DIR` and `RB_SCRIPTS` as setup resolved
-them, and the setup directory with its four working files; the pinned identity as the three
-components `rb_identity` sets, host, owner and repository, which the resumed session re-pins
-from and refuses to continue if the checkout's origin names another host or repository, and
-which are recorded only when none of them carries a credential, a query or a fragment —
-where one does, the summary says the identity could not be recorded and the resumed session
-stops for the operator rather than pinning a fresh one; every value the configuration export
-line in `SKILL.md` carries and every knob the operator set, each with the value it had, that
-line being the list rather than a copy of it here, and never `REVIEW_BUS_REMOTE` itself,
-which can hold a credential; which reviewer the loop is on and therefore which phase;
-whether the opening Codex verdict was clean, since that decides between merging and buying a
-Copilot phase; every answer the operator has given that a helper has not yet enacted, a
-replies-only classification among them; the current nonce; each finding of the round with the
-reply it was answered with, until the cold read that follows those fixes has had them, and
-each open finding's thread and comment ids; the cold read's result, whether clean or a
-finding not yet fixed or filed; the round count per reviewer; and which stop is next. Losing any of them costs a round.
+**Compaction.** `SKILL.md` § What a compaction summary keeps is the list a summary keeps when
+the context is compacted mid-loop, in this checkout as in any other; it is not restated here.
 
 **Communication.** A round summary or a report says what changed, what was skipped (a
 past-tense disposition and an issue number, never the unfixed defect), and any judgment

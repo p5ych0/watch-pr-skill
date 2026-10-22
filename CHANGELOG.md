@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.13.3] — 2026-10-22
+
+- **`SKILL.md` lists what a compaction summary keeps, for a session in any project.** The
+  list of state a summary must carry across a compaction lived in this checkout's
+  `CLAUDE.md`, which does not ship, so a session driving the loop in another project had
+  none. A summary that dropped the nonce, the signoff sha or an open finding's thread id
+  cost a round, and one that kept `REVIEW_BUS_REMOTE` could record a credential.
+  `SKILL.md` now has § What a compaction summary keeps: the PR and branch, setup's printed
+  line, the phase, every value later commands are written with, the operator's unenacted
+  answers, the round's findings and replies, the cold read's result, the round counts and
+  the next stop. It also says the summary never keeps the origin or `REVIEW_BUS_REMOTE`. The
+  list no longer carries `HOST`, `OWNER` and `REPO`, which the earlier one did: nothing
+  prints them to the session, and the prelude reads the origin back from setup's file and
+  pins it again in every command. `CLAUDE.md` points at it rather than
+  keeping a second copy.
+  `test-pr-skill-contract.sh` derives the names from the list of values written between the
+  prelude and a step's fence, and pins the section's whole text, wrapping ignored, with
+  those names in its values bullet; it also fails where the section names the origin or
+  `REVIEW_BUS_REMOTE` outside its never-keeps paragraph. Closes #394.
+
 ## [2.13.2] — 2026-10-22
 
 - **Every command after setup gets setup's values, in a harness that runs each command in a

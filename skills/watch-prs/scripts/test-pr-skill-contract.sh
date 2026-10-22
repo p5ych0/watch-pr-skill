@@ -301,6 +301,52 @@ FILES $_fstop"
 else
     die "could not stage the fresh-shell case"
 fi
+
+_cl="$(awk '/^### What a compaction summary keeps$/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _cl=
+_al="$(awk '/^Between the prelude and the step.s fence/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _al=
+_kept="$(awk '/^It never keeps /{exit} {print}' <<<"$_cl")" || _kept=
+_have="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_cl")" || _have=
+_nkp='It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude reads the origin back from the file setup wrote and pins it again in every command.'
+_rest="${_have/$_nkp/}"
+_names="$(grep -oE '`[A-Z][A-Z0-9_]+[=`]' <<<"$_al" | tr -d '`=' | awk '!s[$0]++')" || _names=
+_nk=0; _miss=""; _enum=""
+for _v in $_names; do
+    # `NAME=value` is the knob placeholder, which the bullet's closing "every knob the operator set" covers.
+    [ "$_v" = NAME ] && continue
+    _nk=$((_nk + 1))
+    _enum="${_enum:+$_enum, }\`$_v\`"
+    grep -qF "\`$_v\`" <<<"$_have" || _miss="$_miss $_v"
+done
+_sl="${_pl%%$'\n'*}"
+_want='When the context is compacted mid-loop, the summary keeps the following, since losing any
+of it costs a round:
+
+- the PR number and its branch;
+- setup'\''s line, `'"$_sl"'`, as setup printed it;
+- which reviewer the loop is on and therefore which phase, since `WHO` names Codex in the
+  fault-tolerance pass as in the opening phase;
+- every value the list above writes between the prelude and a step'\''s fence, each with the
+  value it had: '"$_enum"' and every knob the operator set;
+- whether the opening Codex verdict was clean, since that decides between merging and
+  buying a Copilot phase;
+- every answer the operator has given that a helper has not yet enacted, a replies-only
+  classification among them;
+- each finding of the round with the reply it was answered with, until the cold read that
+  follows those fixes has had them, and each open finding'\''s thread and comment ids;
+- the cold read'\''s result: clean, or a finding not yet fixed or filed;
+- the round count per reviewer, and which stop is next.
+
+It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude
+reads the origin back from the file setup wrote and pins it again in every command.'
+_want="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_want")" || _want=
+{ [ "$_nk" -ge 5 ] && [ -n "$prelude" ] && [ -n "$_have" ] && [ "$_have" = "$_want" ]; } \
+    && pass "a compaction summary keeps setup's line, the phase and each of the $_nk values a later command is written with" \
+    || die "the compaction section is not the text the test pins, built from the $_nk carried names${_miss:+; missing:$_miss}"
+{ [ -n "$_kept" ] && [ -n "$_rest" ] && [ "$_rest" != "$_have" ] \
+    && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" && ! grep -qiF origin <<<"$_rest"; } \
+    && pass "…and never the origin or REVIEW_BUS_REMOTE, which can hold a credential" \
+    || die "the compaction list keeps the origin or REVIEW_BUS_REMOTE, or does not say it never does"
+
 if [ "$(id -u)" -eq 0 ]; then
     pass "the setup retry case is skipped as root, whom no directory mode refuses"
 elif [ -z "$setup_fence" ]; then
