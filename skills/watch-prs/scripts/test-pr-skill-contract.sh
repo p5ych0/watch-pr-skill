@@ -331,6 +331,7 @@ of it costs a round:
   buying a Copilot phase;
 - every answer the operator has given that a helper has not yet enacted, a replies-only
   classification among them;
+- each host rule that differs from this document'\''s, and which of the two applies;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
@@ -650,14 +651,44 @@ fi
 
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
-{ [ "$_rc" -le 1 ] && [ "$_n" -eq 4 ]; } \
-    && pass "…and exactly four stops carry an unattended answer" || die "expected four unattended answers, found '$_n'"
+{ [ "$_rc" -le 1 ] && [ "$_n" -eq 5 ]; } \
+    && pass "…and exactly five stops carry an unattended answer" || die "expected five unattended answers, found '$_n'"
 section() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL"; }
 at() {
     local s; s="$(section "$1" "$2")" || { die "the $3 could not be read"; return 0; }
     [ "$(grep -c '^\*\*Unattended:\*\*' <<<"$s" || true)" -eq 1 ] \
         && pass "…one at the $3" || die "the $3 carries no unattended answer"
 }
+at "### When the host project's rules differ" '## 1. ' 'host-rules stop'
+s="$(section "### When the host project's rules differ" '## 1. ')" || s=
+sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
+{ grep -q 'stop and ask the operator which applies' <<<"$s" && grep -q 'a new session asks again' <<<"$s" \
+    && grep -qF "only on the operator's word" <<<"$sf" && grep -q "never what a helper proves or gates" <<<"$sf" \
+    && grep -qF 'named by its file and its subject' <<<"$sf" && grep -qF 'before the merge where no body follows' <<<"$sf" \
+    && grep -qF 'before resuming after a stop' <<<"$sf" && grep -qF 'under the body rules of step 2' <<<"$sf" \
+    && grep -qxF "**Unattended:** keep this document's rule." <<<"$s" \
+    && before "### When the host project's rules differ" '## 1. State the task on the PR' \
+    && grep -q '^- each host rule that differs' <<<"$_kept"; } \
+    && pass "…the host-rules stop asks before step 1, names on the PR the rule that applied, lifts no gate, keeps this document's rule unattended, and survives a compaction" \
+    || die "the host-rules stop is incomplete, misplaced, or not kept across a compaction"
+_hhave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _hhave=
+_hwant='The loop runs inside a host project whose own instructions, its `CLAUDE.md`, `AGENTS.md`
+and project skills, can state a rule this document also states, and state it differently:
+the model a subagent gets, where a PR'\''s notes go, the form of a commit message. Before
+step 1, or before resuming after a stop, compare the two for the rules the session itself
+follows. For each one that differs, **stop and ask the operator which applies**, naming
+both. The answer holds for this session; a new session asks again. Which rule applied and
+which it differed from go into the next body this loop posts, or into a PR comment before
+the merge where no body follows, under the body rules of step 2; each rule is named by its
+file and its subject, never quoted, since a host'\''s instructions need not be committed. A
+host rule replaces this document'\''s only on the operator'\''s word, and never what a helper
+proves or gates: a helper'\''s refusal stays a stop whatever a host rule says.
+
+**Unattended:** keep this document'\''s rule.'
+_hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_hwant")" || _hwant=
+{ [ -n "$_hhave" ] && [ "$_hhave" = "$_hwant" ]; } \
+    && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
+    || die "the host-rules section is not the text the test pins"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
@@ -697,6 +728,12 @@ if [ -f "$README" ]; then
     grep -q '^### Running unattended' "$README" && grep -q 'WATCH_PR_AUTONOMOUS' "$README" \
         && grep -q 'It answers decisions, never readings' "$README" \
         && pass "README documents running unattended and what it leaves alone" || die "README's unattended section drifted"
+    s="$(awk '$0 == "### Running unattended" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || s=
+    grep -q 'a host rule that differs' <<<"$s" \
+        && pass "…and lists the host-rules answer among the unattended ones" || die "README's Running unattended does not list the host-rules answer"
+    s="$(awk '$0 == "### The stops" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || s=
+    grep -q '^[0-9][0-9]*\. \*\*A host rule that differs\.\*\*' <<<"$s" \
+        && pass "README's list of the stops names the host-rules stop" || die "README's The stops does not name the host-rules stop"
     grep -q 'Review-Pause-Acknowledged' "$README" \
         && pass "README names the record markers a body may not carry" || die "README no longer names the markers"
     grep -q 'PR_WATCH_PROBE_TIMEOUT' "$README" \

@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.14.0] — 2026-10-22
+
+- **A stop for a host project's rule that differs from the skill's.** The loop runs inside
+  a host project whose `CLAUDE.md`, `AGENTS.md` and project skills can state a rule the
+  skill also states, such as the model a subagent gets, where a PR's notes go or the form of
+  a commit message. `SKILL.md` did not say which rule applies, so a session picked one and
+  told nobody. `SKILL.md` § Setup now has the session compare the two before step 1, or
+  before resuming after a stop, and stop for each rule that differs, naming both and asking
+  which applies. The answer holds
+  for the session, and a compaction summary keeps it; a new session asks again. A host rule
+  never lifts what a helper proves or gates. The session records on the PR which rule
+  applied, by file and subject, in the next body the loop posts or a comment before the
+  merge; unattended, the skill's rule is kept. README adds the stop to *The stops* and
+  lists the answer under *Running unattended*, and `test-pr-skill-contract.sh` holds the
+  section's whole text, the stop, its place before step 1, its unattended answer and its
+  entry in the compaction list. Minor: a new stop. Closes #385.
+
 ## [2.13.3] — 2026-10-22
 
 - **`SKILL.md` lists what a compaction summary keeps, for a session in any project.** The

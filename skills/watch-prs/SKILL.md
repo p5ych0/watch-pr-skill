@@ -166,6 +166,7 @@ of it costs a round:
   buying a Copilot phase;
 - every answer the operator has given that a helper has not yet enacted, a replies-only
   classification among them;
+- each host rule that differs from this document's, and which of the two applies;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
@@ -173,6 +174,22 @@ of it costs a round:
 
 It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude
 reads the origin back from the file setup wrote and pins it again in every command.
+
+### When the host project's rules differ
+
+The loop runs inside a host project whose own instructions, its `CLAUDE.md`, `AGENTS.md`
+and project skills, can state a rule this document also states, and state it differently:
+the model a subagent gets, where a PR's notes go, the form of a commit message. Before
+step 1, or before resuming after a stop, compare the two for the rules the session itself
+follows. For each one that differs, **stop and ask the operator which applies**, naming
+both. The answer holds for this session; a new session asks again. Which rule applied and
+which it differed from go into the next body this loop posts, or into a PR comment before
+the merge where no body follows, under the body rules of step 2; each rule is named by its
+file and its subject, never quoted, since a host's instructions need not be committed. A
+host rule replaces this document's only on the operator's word, and never what a helper
+proves or gates: a helper's refusal stays a stop whatever a host rule says.
+
+**Unattended:** keep this document's rule.
 
 ## 1. State the task on the PR
 
