@@ -189,12 +189,18 @@ bad="$(grep -F 'pr-watch.sh N' <<<"$fences" | grep -v -F -- '--after-review-file
 [ -z "$bad" ] && pass "every watch carries the baseline file and the nonce" || die "a watch runs without its baseline or nonce: $bad"
 [ "$(grep -c -F 'RB_NONCE="$(perl -e' <<<"$fences")" -ge 3 ] \
     && pass "…and the nonce is generated afresh before each request" || die "a request reuses a nonce"
-bad="$(grep -F 'RB_NONCE="$(perl -e' <<<"$fences" | grep -v -F '; echo "RB_NONCE=$RB_NONCE"' || true)"
-_nl="$(grep -m1 -F 'RB_NONCE="$(perl -e' <<<"$fences" || true)"
-_nv="$(run_limited 10 bash -c "$_nl" 2>/dev/null)" || _nv="rc=$?"
-{ [ -z "$bad" ] && [ -n "$_nl" ] && grep -qxE 'RB_NONCE=[0-9]{23}' <<<"$_nv"; } \
-    && pass "…and printed as the RB_NONCE= line a later command carries" \
-    || die "a nonce is generated without printing the line a later command carries: '${bad:-$_nv}'"
+bad=""; _nn=0
+while IFS= read -r _nl; do
+    _nn=$((_nn + 1))
+    _nv="$(run_limited 10 bash -c "$_nl"$'\n''printf "SET=%s\n" "${RB_NONCE-}"' 2>/dev/null)" || _nv="rc=$?"
+    _nset="$(grep '^SET=' <<<"$_nv")" || _nset=
+    _nprt="$(grep -vx -F -- "$_nset" <<<"$_nv")" || _nprt=
+    { [ "$_nprt" = "RB_NONCE=${_nset#SET=}" ] && grep -qxE 'RB_NONCE=[0-9]{23}' <<<"$_nprt"; } \
+        || bad="$bad [$_nl gave '$_nv']"
+done < <(grep -F 'RB_NONCE="$(perl -e' <<<"$fences" || true)
+{ [ -z "$bad" ] && [ "$_nn" -ge 3 ]; } \
+    && pass "…and each prints the RB_NONCE= line a later command carries, for the value it set" \
+    || die "a nonce is generated without printing the line a later command carries:$bad"
 odd="$(grep -F -- '--nonce' <<<"$fences" | grep -v -F -- '--nonce "$RB_NONCE"' | grep -v -F -- '--require-nonce "$RB_NONCE"' || true)"
 [ -n "$odd" ] \
     && die "a nonce is passed as something other than \$RB_NONCE: $odd" \
@@ -569,9 +575,19 @@ _sr="$(grep -F 'pr-signoff.sh sha N' <<<"$fences" | grep -F 'CODEX_SHA' || true)
 { [ -n "$_sr" ] && grep -qF '${CODEX_SHA//[0123456789abcdef]/}' <<<"$_sr"; } \
     && pass "the signoff read-back spells its hex class out, where a range collates by locale on bash 3.2" \
     || die "the signoff read-back does not spell its hex class out: '$_sr'"
-grep -qF '; echo "CODEX_SHA=$CODEX_SHA"' <<<"$_sr" \
-    && pass "…and prints the CODEX_SHA= line a later command carries" \
-    || die "the signoff read-back prints no CODEX_SHA= line for a later command: '$_sr'"
+if [ -n "$_sr" ] && _sg="$(mktemp_d)" && mkdir "$_sg/good" "$_sg/bad" \
+   && printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" cccccccccccccccccccccccccccccccccccccccc' > "$_sg/good/pr-signoff.sh" \
+   && printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" cccccccccccccccccccccccccccccccccccccccC' > "$_sg/bad/pr-signoff.sh"; then
+    _sgrc=0; _sgout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$_sg/good\"; $_sr" 2>/dev/null)" || _sgrc=$?
+    _sbrc=0; _sbout="$(run_limited 10 bash -c "RB_SCRIPTS=\"$_sg/bad\"; $_sr" 2>/dev/null)" || _sbrc=$?
+    { [ "$_sgrc" -eq 0 ] && [ "$_sgout" = CODEX_SHA=cccccccccccccccccccccccccccccccccccccccc ] \
+        && [ "$_sbrc" -ne 0 ] && ! grep -q '^CODEX_SHA=' <<<"$_sbout"; } \
+        && pass "…and prints the CODEX_SHA= line a later command carries for a sha, and none for a refused one" \
+        || die "the signoff read-back printed '$_sgout' (rc=$_sgrc) for a sha and '$_sbout' (rc=$_sbrc) for a refused one"
+    rm -rf "$_sg"
+else
+    die "the signoff read-back could not be staged"
+fi
 
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
