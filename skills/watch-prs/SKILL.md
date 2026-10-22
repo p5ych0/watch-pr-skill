@@ -131,10 +131,10 @@ The prelude reads the origin back from the file setup wrote, exports it as
 `REVIEW_BUS_REMOTE` — the pin every helper routes by whatever the current directory is —
 proves it a GitHub identity through the parser the helpers use, which sets `HOST`, `OWNER`
 and `REPO`, and proves through `pr-origin.sh pin` that a child sees the pin and that it is
-this checkout's origin. Setup sets the pin once and every command proves it again, so an
-origin file replaced after setup, or a checkout whose `origin` changed, stops the command
-that would have used it. A refusal here prints `ABORT:` and exits 1 before the step's
-helper runs, and it ends the session whatever the step's table says 1 means: a Monitor
+this checkout's origin. Setup writes the origin once and every command pins and proves it
+again, so an origin file replaced after setup, or a checkout whose `origin` changed, stops
+the command that would have used it. A refusal here prints `ABORT:` and exits 1 before the
+step's helper runs, and it ends the session whatever the step's table says 1 means: a Monitor
 ended by one is not re-armed. Never write the origin itself into a command or a file: it can
 hold a credential, and the prelude reads it from where setup left it.
 
