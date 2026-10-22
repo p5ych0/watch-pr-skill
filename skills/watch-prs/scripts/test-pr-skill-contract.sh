@@ -305,24 +305,29 @@ fi
 _cl="$(awk '/^### What a compaction summary keeps$/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _cl=
 _al="$(awk '/^Between the prelude and the step.s fence/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _al=
 _kept="$(awk '/^It never keeps /{exit} {print}' <<<"$_cl")" || _kept=
-_bl="$(grep '^- ' <<<"$_kept")" || _bl=
+_bj="$(awk '/^- /{if (b != "") print b; b = $0; next} b != "" && /^ /{sub(/^ +/, ""); b = b " " $0; next}
+    {if (b != "") print b; b = ""} END{if (b != "") print b}' <<<"$_kept")" || _bj=
 _rest="$(grep -vxF -e 'It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude' \
     -e 'reads the origin back from the file setup wrote and pins it again in every command.' <<<"$_cl")" || _rest=
-_vb="$(awk 'f && (/^- / || /^$/){exit} /^- every value the list above writes/{f=1} f' <<<"$_kept")" || _vb=
-_names="$(grep -oE '`[A-Z][A-Z0-9_]+[=`]' <<<"$_al" | tr -d '`=' | sort -u)" || _names=
-_nk=0; _miss=""
+_vb="$(grep '^- every value the list above writes' <<<"$_bj")" || _vb=
+_names="$(grep -oE '`[A-Z][A-Z0-9_]+[=`]' <<<"$_al" | tr -d '`=' | awk '!s[$0]++')" || _names=
+_nk=0; _miss=""; _enum=""
 for _v in $_names; do
-    # `NAME=value` is the knob placeholder, which the knob check below covers.
+    # `NAME=value` is the knob placeholder, which the bullet's closing "every knob the operator set" covers.
     [ "$_v" = NAME ] && continue
     _nk=$((_nk + 1))
+    _enum="${_enum:+$_enum, }\`$_v\`"
     grep -qF "\`$_v\`" <<<"$_vb" || _miss="$_miss $_v"
 done
+_vx="- every value the list above writes between the prelude and a step's fence, each with the value it had: $_enum and every knob the operator set;"
+_sx="- setup's line, \`${_pl%%$'\n'*}\`, as setup printed it;"
+_px='- which reviewer the loop is on and therefore which phase, since `WHO` names Codex in the fault-tolerance pass as in the opening phase;'
 { [ "$_nk" -ge 5 ] && [ -z "$_miss" ] && [ -n "$prelude" ] \
-    && grep -qF -- "${_pl%%$'\n'*}" <<<"$_bl" \
-    && grep -qF 'which reviewer the loop is on and therefore which phase' <<<"$_bl" \
-    && grep -qF 'every knob' <<<"$_vb"; } \
+    && grep -qxF -- "$_sx" <<<"$_bj" \
+    && grep -qxF -- "$_px" <<<"$_bj" \
+    && grep -qxF -- "$_vx" <<<"$_bj"; } \
     && pass "a compaction summary keeps setup's line, the phase and each of the $_nk values a later command is written with" \
-    || die "the compaction list is missing, or omits what a later command is written with (of $_nk):${_miss:- the line setup printed, the phase or the knobs}"
+    || die "the compaction list is missing, or omits what a later command is written with, or a bullet is not worded as the list requires (of $_nk):${_miss:- the line setup printed, the phase or the knobs}"
 { [ -n "$_kept" ] && [ -n "$_rest" ] && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" && ! grep -qiF origin <<<"$_rest" \
     && grep -qF 'It never keeps the origin or `REVIEW_BUS_REMOTE`' <<<"$_cl"; } \
     && pass "…and never the origin or REVIEW_BUS_REMOTE, which can hold a credential" \
