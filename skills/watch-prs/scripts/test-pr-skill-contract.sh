@@ -301,6 +301,30 @@ FILES $_fstop"
 else
     die "could not stage the fresh-shell case"
 fi
+
+_cl="$(awk '/^### What a compaction summary keeps$/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _cl=
+_al="$(awk '/^Between the prelude and the step.s fence/{f=1; next} f && /^#/{f=0} f' "$SKILL")" || _al=
+_kept="$(awk '/^It never keeps /{exit} {print}' <<<"$_cl")" || _kept=
+_rest="$(grep -v '^It never keeps ' <<<"$_cl")" || _rest=
+_names="$(grep -oE '`[A-Z][A-Z0-9_]+[=`]' <<<"$_al" | tr -d '`=' | sort -u)" || _names=
+_nk=0; _miss=""
+for _v in $_names; do
+    # `NAME=value` is the knob placeholder, which the knob check below covers.
+    [ "$_v" = NAME ] && continue
+    _nk=$((_nk + 1))
+    grep -qF "\`$_v\`" <<<"$_kept" || _miss="$_miss $_v"
+done
+{ [ "$_nk" -ge 5 ] && [ -z "$_miss" ] && [ -n "$prelude" ] \
+    && grep -qF -- "${_pl%%$'\n'*}" <<<"$_kept" \
+    && grep -qF 'which reviewer the loop is on and therefore which phase' <<<"$_kept" \
+    && grep -qF 'every knob' <<<"$_kept"; } \
+    && pass "a compaction summary keeps setup's line, the phase and each of the $_nk values a later command is written with" \
+    || die "the compaction list is missing, or omits what a later command is written with (of $_nk):${_miss:- the line setup printed, the phase or the knobs}"
+{ [ -n "$_kept" ] && ! grep -qF 'REVIEW_BUS_REMOTE' <<<"$_rest" \
+    && grep -qF 'It never keeps the origin or `REVIEW_BUS_REMOTE`' <<<"$_cl"; } \
+    && pass "…and never the origin or REVIEW_BUS_REMOTE, which can hold a credential" \
+    || die "the compaction list keeps REVIEW_BUS_REMOTE, or does not say it never does"
+
 if [ "$(id -u)" -eq 0 ]; then
     pass "the setup retry case is skipped as root, whom no directory mode refuses"
 elif [ -z "$setup_fence" ]; then

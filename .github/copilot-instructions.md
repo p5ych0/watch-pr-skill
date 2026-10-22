@@ -150,6 +150,10 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   origin itself into a command or a file the session writes is a blocking
   finding, and `(cd "$REPO_DIR" && …)` per call is no substitute: a list of call
   sites is missing the next one.
+- **A compaction summary never keeps the origin.** `SKILL.md` § What a compaction
+  summary keeps is the list a summary carries across a compaction. A list that keeps
+  `REVIEW_BUS_REMOTE` or the origin, or that omits a value later commands are written
+  with, is a finding.
 - **A guard where a removal would do is a finding.** A check is a name that can
   be shadowed, mis-parsed or forgotten; a removed dependency stays removed. The
   author is required to say **on the thread** which of the two they took and why;

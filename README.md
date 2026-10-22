@@ -219,6 +219,10 @@ another repository stops. To work on another repository, start a new session. Th
 drives same-repository pull requests only: a PR whose head is in a fork is
 refused at the first push.
 
+When the conversation is compacted mid-loop, the session keeps what `SKILL.md`
+lists: the PR, the paths setup printed, the phase, the open findings and the next
+stop. It never keeps the origin itself, which can hold a credential.
+
 ### The Codex phase
 
 The session posts the request, waits, and reads the findings. For each one it
