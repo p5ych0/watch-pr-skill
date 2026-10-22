@@ -48,7 +48,7 @@ keep finding defects in the *fixes* usually mean the change is too large.
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
   Until it is linked, `@codex` replies with a setup link instead of a review.
 - **Copilot code review** on the repository, for the two-reviewer loop. A
-  Codex-only merge is supported as a decision you make at the first stop. What
+  Codex-only merge is supported as a decision you make when Codex is clean. What
   there is deliberately no switch for is skipping a reviewer silently: the mode
   is chosen at the stop, by you or by the unattended rule below, recorded on the
   PR and passed to the merge gate by name.
@@ -224,6 +224,13 @@ another repository stops. To work on another repository, start a new session. Th
 drives same-repository pull requests only: a PR whose head is in a fork is
 refused at the first push.
 
+Before the first request, the session compares your project's own instructions,
+its `CLAUDE.md`, `AGENTS.md` and project skills, with the skill's rules. Where
+one states a rule differently, such as the form of a commit message, the session
+names both rules and asks which applies. Your answer holds for that session.
+The session says on the PR which rule applied, naming it by its file and
+subject. A project rule never lifts a gate a helper enforces.
+
 When the conversation is compacted mid-loop, the session keeps what `SKILL.md`
 lists: the PR, the paths setup printed, the phase, the open findings and the next
 stop. It never keeps the origin itself, which can hold a credential.
@@ -317,22 +324,24 @@ Without the file, the reviewer behaves exactly as above.
 
 The loop stops and asks at these points:
 
-1. **A review that is only replies.** Reviewers sometimes deliver a clean
+1. **A host rule that differs.** Where your project's instructions state a rule
+   differently from the skill's, the session stops and asks which applies.
+2. **A review that is only replies.** Reviewers sometimes deliver a clean
    verdict, or a retraction, as a reply. Nothing in the text separates the two,
    so the session stops and asks you to read it. If it was a clean verdict, say
    so and a signoff is recorded for that head; if it was a finding, fix it and
    push.
-2. **A limitation it cannot test**, as above. Accepting it is your call, and it
+3. **A limitation it cannot test**, as above. Accepting it is your call, and it
    becomes binding as a dated record landed on the base branch by its own PR,
    under `docs/decisions/`.
-3. **The round check-in.** Every `REVIEW_ROUND_THRESHOLD` distinct reviewed
+4. **The round check-in.** Every `REVIEW_ROUND_THRESHOLD` distinct reviewed
    heads per reviewer (default 10), the session stops: continue, merge, leave
    the PR open, or abandon. Saying "continue" is recorded on the PR, so the next
    check-in is a further threshold past that count.
-4. **Codex is clean.** Merge on that signoff alone, or open the Copilot phase on
+5. **Codex is clean.** Merge on that signoff alone, or open the Copilot phase on
    the same head. The Codex-only merge is the narrower gate, not a looser one: it
    requires the head to *be* the commit Codex signed.
-5. **Copilot is clean.** Merge, leave the PR open, or, only if the Copilot
+6. **Copilot is clean.** Merge, leave the PR open, or, only if the Copilot
    phase produced commits, ask Codex once more as fault tolerance over what it
    changed. Where the phase
    produced no commits, both signoffs name the same head and the pass is not
@@ -363,6 +372,7 @@ reads the records back and resumes from the right stop.
 Export `WATCH_PR_AUTONOMOUS=1` and the session takes these answers at the decision
 stops instead of asking, recording each on the PR as it would your word:
 
+- **a host rule that differs**: keep the skill's rule;
 - **the round check-in**: acknowledge and continue, so the record of a long loop
   stays on the PR;
 - **Codex is clean**: merge on that signoff alone if Codex approved the opening
