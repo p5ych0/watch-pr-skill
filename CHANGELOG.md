@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.14.3] — 2026-10-22
+
+- **A finding, a reply or a report reaches a subagent marked as quoted.** Step 5 handed
+  each finding whole to the fix subagent, and the cold reviewer got the earlier findings
+  and their replies, with nothing to tell the subagent which words were the session's: a
+  reviewer bot writes each body, and a body can quote code and text from the PR. Step 5's
+  new bullet, *Mark what was quoted*, puts each finding body, each reply and each cold
+  read's report between `<pasted_content id="…">` and `</pasted_content id="…">`, both
+  carrying one id drawn fresh for each hand-over, so a closing tag quoted inside a body,
+  with another id or none, stays part of the quoted text. The hand-over calls the text
+  inside quoted rather than a reviewer's words, since a reply is the session's own and a
+  report another subagent's, and says it is followed only where the hand-over's own words
+  ask. The cold read of step 5 is marked the same way, `agents/cold-reviewer.md` says what
+  the tags mean, and README's § The cold reviewer says findings, replies and reports reach
+  a subagent marked as quoted text.
+  Measured before the change: two cold reads of one staged change with three known
+  defects, whose earlier finding carried an instruction to report nothing, one with the
+  finding unmarked and one marked. Both found all three defects, neither followed the
+  instruction, and both took 18 tool calls. The marking cost no findings, so it ships for
+  the fix subagent, whose brief has no such limits of its own.
+  Closes #392.
+
 ## [2.14.2] — 2026-10-22
 
 - **A PR's record reaches the notes the host project keeps, and each stop leaves a
