@@ -82,6 +82,12 @@ case "${1:-}" in
                    && { cat "$W/review-id.after.out"; exit 0; }
                cat "$W/review-id.out" 2>/dev/null
                exit "$(cat "$W/review-id.rc" 2>/dev/null || echo 0)" ;;
+    # A registered request by default, so a case about something else never stops on registration.
+    request-id) cat "$W/request-id.out" 2>/dev/null || printf 'idle:none\n'
+                exit "$(cat "$W/request-id.rc" 2>/dev/null || echo 0)" ;;
+    request-registered)
+                cat "$W/request-registered.out" 2>/dev/null || printf 'pending:none\n'
+                exit "$(cat "$W/request-registered.rc" 2>/dev/null || echo 0)" ;;
 esac
 exit 2
 STATESH
@@ -1609,6 +1615,58 @@ case "$_ar" in
     "") die "a refusal past the write left the baseline empty, not the captured id" ;;
     *) die "the baseline file holds '$_ar', which is not the nonced captured id '5551 42'" ;;
 esac
+
+# ── A REQUEST THAT REGISTERED NOTHING DOES NOT OPEN THE PHASE ──────────────
+# GitHub can answer `--add-reviewer` with success and record no request, and a phase
+# reported open on that has the watch wait for a review nobody asked for.
+world; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'PR_COPILOT_PHASE_OPENED' <<<"${got#*|}"; } \
+    && pass "a request that registered opens the phase" \
+    || die "a registered request gave '${got}'"
+{ before 'pr-review-state.sh request-id' 'pr-review-state.sh review-id' \
+    && before 'pr-review-state.sh review-id' 'gh pr edit' \
+    && before 'gh pr edit' 'pr-review-state.sh request-registered'; } \
+    && pass "…the requests read before the baseline, the baseline before --add-reviewer and the registration read after it" \
+    || die "the registration reads are out of order: $(cat "$TMP/calls")"
+
+world; printf 'idle:RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
+printf 'PR_REVIEW_STATE pr=7 reviewer=%s status=unregistered\n' "$COPILOTBOT" > "$W/request-registered.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing new on the PR' <<<"${got#*|}" \
+    && grep -qF 'for example because Copilot is unavailable to this account or repository' <<<"${got#*|}" \
+    && grep -qF 'not permission to skip the pass' <<<"${got#*|}"; } \
+    && pass "a request that registered nothing stops the phase, gives the cause as an example, and says it is not permission to skip" \
+    || die "an unregistered request gave '${got}'"
+grep -qF 'PR_COPILOT_PHASE_OPENED' <<<"${got#*|}" \
+    && die "the phase was reported open on a request that registered nothing: '${got}'" \
+    || pass "…with no PR_COPILOT_PHASE_OPENED record"
+grep -qF "pr-review-state.sh request-registered 7 $COPILOTBOT idle:RRE_before" "$TMP/calls" \
+    && pass "…the registration read being given the token read before the request" \
+    || die "the registration read was not given the before token: $(cat "$TMP/calls")"
+
+world; printf '2\n' > "$W/request-registered.rc"; : > "$W/request-registered.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not tell whether the Copilot request registered' <<<"${got#*|}"; } \
+    && pass "an unreadable registration stops the phase from being reported open" \
+    || die "an unreadable registration gave '${got}'"
+grep -qF 'PR_COPILOT_PHASE_OPENED' <<<"${got#*|}" \
+    && die "the phase was reported open on a registration nothing could read: '${got}'" \
+    || pass "…with no PR_COPILOT_PHASE_OPENED record"
+grep -qF 'registered nothing' <<<"${got#*|}" \
+    && die "an unreadable registration was reported as a request that registered nothing: '${got}'" \
+    || pass "…and not reported as a request that registered nothing"
+
+world; printf '2\n' > "$W/request-id.rc"; : > "$W/request-id.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && grep -qF "could not read the PR's review requests" <<<"${got#*|}"; } \
+    && pass "an unreadable request list before the request stops the phase" \
+    || die "an unreadable request list gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested with no request token to compare against" \
+    || pass "…with Copilot not requested"
+grep -qF 'PR_COPILOT_PHASE_OPENED' <<<"${got#*|}" \
+    && die "the phase was reported open with no request token read: '${got}'" \
+    || pass "…and no PR_COPILOT_PHASE_OPENED record"
 
 # ── THE NONCE IS REQUIRED, FOURTH, AND PREFIXES BOTH WRITES — #264, second half ──
 # The baseline above reads `5551 42` and the sentinel `5551 refused-no-baseline`: the nonce

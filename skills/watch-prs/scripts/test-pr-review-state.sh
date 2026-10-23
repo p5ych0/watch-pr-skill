@@ -937,5 +937,229 @@ out="$(run escape-snapshot 7 'copilot-pull-request-reviewer[bot]' 2>&1)"; rc=$?
     && pass "…and a review by another reviewer is not this reviewer's" \
     || die "another reviewer's review answered (rc=$rc out='$out')"
 
+# ── `request-id` and `request-registered` — WHETHER A REQUEST REGISTERED ───
+# GitHub can answer `--add-reviewer` with success and record no request.
+CPBOT='copilot-pull-request-reviewer[bot]'
+CP='{"__typename":"Bot","login":"copilot-pull-request-reviewer"}'
+cat > "$TMP/bin/gh" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *graphql*)
+    _n=\$(( \$(cat "$TMP/rq.n" 2>/dev/null || echo 0) + 1 )); printf '%s' "\$_n" > "$TMP/rq.n"
+    [ -f "$TMP/rq.rc" ] && exit "\$(cat "$TMP/rq.rc")"
+    if [ -f "$TMP/rq.\$_n" ]; then cat "$TMP/rq.\$_n"; else cat "$TMP/rq.1"; fi ;;
+  *) printf '{}' ;;
+esac
+SH
+cat > "$TMP/bin/sleep" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TMP/naps"
+exit "\$(cat "$TMP/nap.rc" 2>/dev/null || echo 0)"
+SH
+chmod +x "$TMP/bin/gh" "$TMP/bin/sleep"
+rq_reset() { rm -f "$TMP"/rq.* "$TMP/nap.rc"; : > "$TMP/naps"; }
+rq() {
+    printf '{"data":{"repository":{"pullRequest":{"reviewRequests":{"pageInfo":{"hasNextPage":%s},"nodes":%s},"timelineItems":{"nodes":%s}}}}}' \
+        "${4:-false}" "$2" "$3" > "$TMP/rq.$1"
+}
+reads() { cat "$TMP/rq.n" 2>/dev/null || echo 0; }
+
+rq_reset; rq 1 "[{\"requestedReviewer\":$CP}]" "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP}]"
+out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = pending:RRE_old ]; } \
+    && pass "request-id: a reviewer listed in the PR's review requests is pending, beside its newest event" \
+    || die "request-id with Copilot requested gave (rc=$rc out='$out')"
+
+rq_reset; rq 1 '[]' "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP},{\"id\":\"RRE_new\",\"requestedReviewer\":$CP},{\"id\":\"RRE_codex\",\"requestedReviewer\":{\"__typename\":\"Bot\",\"login\":\"chatgpt-codex-connector\"}}]"
+out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = idle:RRE_new ]; } \
+    && pass "…and otherwise idle, beside the id of its newest request event, not another reviewer's" \
+    || die "request-id with no pending request gave (rc=$rc out='$out')"
+
+# Base64 is the old node-id format, so another reviewer's event in it must not refuse the
+# whole response.
+_b64='MDE5OlJldmlld1JlcXVlc3RlZEV2ZW50MTIz+/='
+rq_reset; rq 1 '[]' "[{\"id\":\"RRE_new\",\"requestedReviewer\":$CP},{\"id\":\"$_b64\",\"requestedReviewer\":{\"__typename\":\"Bot\",\"login\":\"chatgpt-codex-connector\"}}]"
+out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = idle:RRE_new ]; } \
+    && pass "…and another reviewer's event with a base64 id leaves the response readable" \
+    || die "request-id beside another reviewer's base64 event id gave (rc=$rc out='$out')"
+rq_reset; rq 1 '[]' "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP},{\"id\":\"$_b64\",\"requestedReviewer\":$CP}]"
+out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = "idle:$_b64" ]; } \
+    && pass "…and a Copilot event with a base64 id is that id" \
+    || die "request-id over a Copilot base64 event id gave (rc=$rc out='$out')"
+out="$(run request-registered 7 "$CPBOT" "idle:$_b64" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ "$out" = "PR_REVIEW_STATE pr=7 reviewer=$CPBOT status=unregistered" ]; } \
+    && pass "…which, left as it was, registered nothing" \
+    || die "request-registered with a base64 token unchanged gave (rc=$rc out='$out')"
+
+rq_reset; rq 1 '[]' '[]'
+out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = idle:none ]; } \
+    && pass "…and none where it was never requested" \
+    || die "request-id with no events gave (rc=$rc out='$out')"
+
+# The GraphQL login carries no `[bot]`, so a User of that login, a longer Bot login or a
+# login already ending `[bot]` is each a different account.
+_others='[{"__typename":"User","login":"copilot-pull-request-reviewer"},{"__typename":"Bot","login":"copilot-pull-request-reviewer-beta"},{"__typename":"Bot","login":"copilot-pull-request-reviewer[bot]"},null]'
+rq_reset
+rq 1 "$(jq -nc --argjson o "$_others" '[ $o[] | {requestedReviewer: .} ]')" \
+    "$(jq -nc --argjson o "$_others" '[ $o | to_entries[] | {id: ("RRE_" + (.key | tostring)), requestedReviewer: .value} ]')"
+out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = idle:none ]; } \
+    && pass "…and a User of the login, another Bot, a doubled suffix or a deleted account is not the reviewer" \
+    || die "request-id over other accounts gave (rc=$rc out='$out')"
+
+rq_reset; rq 1 '[]' '[]'; printf '1\n' > "$TMP/rq.rc"
+out="$(run request-id 7 "$CPBOT" 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'status=error reason=unreadable' "$TMP/rq.err"; } \
+    && pass "…and a failed read is 2 with nothing on stdout" \
+    || die "request-id over a failed read gave (rc=$rc out='$out' err='$(cat "$TMP/rq.err")')"
+
+rq_reset; rq 1 "[{\"requestedReviewer\":$CP}]" '[]'
+out="$(run request-registered 7 "$CPBOT" idle:none 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = pending:none ]; } \
+    && pass "request-registered: a request now pending registered" \
+    || die "request-registered on pending gave (rc=$rc out='$out')"
+out="$(run request-registered 7 "$CPBOT" pending:none 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = pending:none ]; } \
+    && pass "…even where it was already pending before the request" \
+    || die "request-registered on pending before and after gave (rc=$rc out='$out')"
+
+rq_reset; rq 1 '[]' "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP},{\"id\":\"RRE_new\",\"requestedReviewer\":$CP}]"
+out="$(run request-registered 7 "$CPBOT" idle:RRE_old 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = idle:RRE_new ]; } \
+    && pass "…and so did one that added a request event" \
+    || die "request-registered on a new event gave (rc=$rc out='$out')"
+rq_reset; rq 1 "[{\"requestedReviewer\":$CP}]" "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP}]"
+out="$(run request-registered 7 "$CPBOT" idle:RRE_old 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = pending:RRE_old ]; } \
+    && pass "…and so did one now pending with its newest event unchanged" \
+    || die "request-registered on pending over an unchanged event gave (rc=$rc out='$out')"
+
+rq_reset; rq 1 '[]' "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP}]"
+out="$(run request-registered 7 "$CPBOT" pending:RRE_old 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 1 ] && [ "$out" = "PR_REVIEW_STATE pr=7 reviewer=$CPBOT status=unregistered" ]; } \
+    && pass "…while one whose earlier request finished, adding no event, registered nothing" \
+    || die "request-registered from pending to idle over the same event gave (rc=$rc out='$out' err='$(cat "$TMP/rq.err")')"
+grep -qE '^(pending|idle):' <<<"$out" \
+    && die "a request whose earlier one finished printed a success token: '$out'" \
+    || pass "…with no success token printed"
+[ "$(reads)" -eq 3 ] \
+    && pass "…after three reads" \
+    || die "a request whose earlier one finished was read $(reads) times"
+
+for _rr in 'idle:RRE_old|[{"id":"RRE_old","requestedReviewer":'"$CP"'}]' 'idle:none|[]'; do
+    _bt="${_rr%%|*}"; _ev="${_rr#*|}"
+    rq_reset; rq 1 '[]' "$_ev"
+    out="$(run request-registered 7 "$CPBOT" "$_bt" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && [ "$out" = "PR_REVIEW_STATE pr=7 reviewer=$CPBOT status=unregistered" ]; } \
+        && pass "…while one that left $_bt as it was registered nothing" \
+        || die "request-registered with $_bt unchanged gave (rc=$rc out='$out')"
+    grep -qE '^(pending|idle):' <<<"$out" \
+        && die "an unregistered request printed a success token: '$out'" \
+        || pass "…with no success token printed"
+    [ "$(reads)" -eq 3 ] && [ "$(cat "$TMP/naps")" = "2
+2" ] \
+        && pass "…after three reads two seconds apart" \
+        || die "an unregistered request was read $(reads) times with naps '$(cat "$TMP/naps")'"
+done
+
+# A token gone to `none` is a request that dropped out of the window or vanished, not a new one.
+for _bt in idle:RRE_old pending:RRE_old; do
+    rq_reset; rq 1 '[]' '[]'
+    out="$(run request-registered 7 "$CPBOT" "$_bt" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && [ "$out" = "PR_REVIEW_STATE pr=7 reviewer=$CPBOT status=unregistered" ]; } \
+        && pass "…and one that left $_bt answering none registered nothing" \
+        || die "request-registered with $_bt then none gave (rc=$rc out='$out')"
+    grep -qE '^(pending|idle):' <<<"$out" \
+        && die "a request answering none printed a success token: '$out'" \
+        || pass "…with no success token printed"
+    [ "$(reads)" -eq 3 ] \
+        && pass "…after three reads" \
+        || die "a request answering none was read $(reads) times"
+done
+
+rq_reset; rq 1 '[]' '[]'; rq 2 "[{\"requestedReviewer\":$CP}]" '[]'
+out="$(run request-registered 7 "$CPBOT" idle:none 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = pending:none ] && [ "$(reads)" -eq 2 ]; } \
+    && pass "…and a request that appears on the second read registered" \
+    || die "a late registration gave (rc=$rc out='$out' reads=$(reads))"
+
+rq_reset; rq 1 '[]' '[]'; printf '1\n' > "$TMP/nap.rc"
+out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=sleep_failed' "$TMP/rq.err"; } \
+    && pass "…and a wait that cannot sleep is 2, not reads too close to see a late request" \
+    || die "a failed sleep gave (rc=$rc out='$out' err='$(cat "$TMP/rq.err")')"
+
+rq_reset; rq 1 '[]' '[]'; printf '1\n' > "$TMP/rq.rc"
+out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
+    && pass "…and a failed read is 2, never unregistered" \
+    || die "request-registered over a failed read gave (rc=$rc out='$out')"
+
+rq_reset
+printf '{"errors":[{"message":"nope"}],"data":{"repository":{"pullRequest":{"reviewRequests":{"pageInfo":{"hasNextPage":false},"nodes":[]},"timelineItems":{"nodes":[]}}}}}' > "$TMP/rq.1"
+out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
+    && pass "…and so is a response carrying errors beside data" \
+    || die "an errors-bearing response gave (rc=$rc out='$out')"
+
+rq_reset; rq 1 '[]' '[]' true
+out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
+    && pass "…and a truncated list of review requests, which could hold the reviewer" \
+    || die "a truncated request list gave (rc=$rc out='$out')"
+
+for _bad in '"RRE.1"' '"RRE 1"' '""' '42' 'null' '"pending"' '"none"'; do
+    rq_reset; rq 1 '[]' "[{\"id\":$_bad,\"requestedReviewer\":$CP}]"
+    out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
+    { [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
+        && pass "…and an event id of $_bad is unreadable" \
+        || die "an event id of $_bad gave (rc=$rc out='$out')"
+done
+
+rq_unreadable() {
+    out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
+    { [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
+        && pass "…and $1 is unreadable" \
+        || die "$1 gave (rc=$rc out='$out' err='$(cat "$TMP/rq.err")')"
+}
+rq_reset; rq 1 '[42]' '[]'; rq_unreadable 'a review request that is not an object'
+rq_reset; rq 1 '[{"requestedReviewer":{"__typename":"Bot"}}]' '[]'; rq_unreadable 'a Bot review request with no login'
+rq_reset; printf '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}' > "$TMP/rq.1"
+rq_unreadable 'a pull request with no review requests'
+rq_reset; printf '{"data":{"repository":{"pullRequest":{"reviewRequests":{"nodes":[]},"timelineItems":{"nodes":[]}}}}}' > "$TMP/rq.1"
+rq_unreadable 'a list of review requests with no pageInfo'
+rq_reset; printf '{"data":[]}' > "$TMP/rq.1"; rq_unreadable 'a response whose data is not an object'
+
+# A deleted account's request carries `requestedReviewer` as null; a node without the field is incomplete.
+for _rr in 'a review request with no requestedReviewer|[{}]|[]' \
+           'a request event with no requestedReviewer|[]|[{"id":"RRE_old"}]'; do
+    _lb="${_rr%%|*}"; _rr="${_rr#*|}"
+    rq_reset; rq 1 "${_rr%%|*}" "${_rr#*|}"
+    out="$(run request-id 7 "$CPBOT" 2>"$TMP/rq.err")"; rc=$?
+    { [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
+        && pass "…and to request-id $_lb is unreadable" \
+        || die "request-id over $_lb gave (rc=$rc out='$out' err='$(cat "$TMP/rq.err")')"
+    rq_reset; rq 1 "${_rr%%|*}" "${_rr#*|}"; rq_unreadable "to request-registered $_lb"
+done
+
+for _bt in '' 'RRE_old' 'none' 'pending' 'idle' 'pending:' 'idle:' 'busy:RRE_old' ':RRE_old' \
+           'idle:RRE 1' 'idle:RRE.1' 'idle:a;b' 'idle:RRE_old:RRE_new' 'Idle:RRE_old'; do
+    rq_reset; rq 1 '[]' '[]'
+    out="$(run request-registered 7 "$CPBOT" "$_bt" 2>"$TMP/rq.err")"; rc=$?
+    { [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=bad_before_token' "$TMP/rq.err" && [ "$(reads)" -eq 0 ]; } \
+        && pass "…and a before token of '$_bt' is refused before anything is read" \
+        || die "a before token of '$_bt' gave (rc=$rc out='$out' reads=$(reads))"
+done
+rq_reset; rq 1 '[]' "[{\"id\":\"RRE_new\",\"requestedReviewer\":$CP}]"
+out="$(run request-registered 7 "$CPBOT" 'idle:a+b/c=' 2>"$TMP/rq.err")"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = idle:RRE_new ] && ! grep -q 'bad_before_token' "$TMP/rq.err"; } \
+    && pass "…while a before token whose event is in base64's alphabet is accepted" \
+    || die "a before token of 'idle:a+b/c=' gave (rc=$rc out='$out' err='$(cat "$TMP/rq.err")')"
+rm -f "$TMP/bin/sleep"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

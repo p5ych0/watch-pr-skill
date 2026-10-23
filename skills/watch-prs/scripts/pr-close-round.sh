@@ -242,7 +242,7 @@ report_gated() {
 request_review() {
     # Read immediately before the request: a pass that finished during the CI wait must not be
     # accepted as the answer to a request made after it.
-    local prior _back
+    local prior _back req_before req_now req_rc
     prior=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; return 1; }
     # Written before the request with its status taken, since after it there is nothing left to
@@ -251,10 +251,26 @@ request_review() {
     _rb_wh="$(rb_write_handoff "$PRIOR_FILE" "$NONCE $prior")" \
         || { echo "ABORT: could not write the review baseline to '$PRIOR_FILE'; nothing has been posted: $_rb_wh"; return 1; }
     if [ "$WHO" = "$COPILOT_BOT" ]; then
+        # Read on both sides of the request, since GitHub can answer it with success and register nothing;
+        # the first read goes ahead of the summary, so a refusal there leaves nothing posted.
+        req_before=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh request-id "$PR" "$WHO") \
+            || { echo "ABORT: could not read the PR's review requests; nothing has been posted."; return 1; }
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
             || { echo "ABORT: could not post the round summary."; return 1; }
-        gh pr edit "$PR" --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot \
-            || { echo "ABORT: could not re-request Copilot."; return 1; }
+        gh pr edit "$PR" --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot || {
+            echo "ABORT: could not re-request Copilot, and the round summary is posted."
+            echo "Decide with the operator. Do not run 'post' again: it would post the summary twice."
+            return 1; }
+        req_now=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh request-registered "$PR" "$WHO" "$req_before"); req_rc=$?
+        case "$req_rc" in
+            0) ;;
+            1) echo "ABORT: the round summary is posted, but the Copilot request registered nothing new on the PR ($req_now), for example because Copilot is unavailable to this account or repository."
+               echo "Decide with the operator. Do not run 'post' again: it would post the summary twice."
+               return 1 ;;
+            *) echo "ABORT: the round summary is posted, but it could not be told whether the Copilot request registered on the PR (rc=$req_rc)."
+               echo "Decide with the operator. Do not run 'post' again: it would post the summary twice."
+               return 1 ;;
+        esac
     else
         # The mention and the summary share one comment: a separate summary is one the pass may not read.
         gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$_PREFIX$SUMMARY" \

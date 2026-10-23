@@ -509,7 +509,10 @@ the model too; it then replaces whatever the call asked for.
 - **The review stops with a usage message.** The account hit its rate limit.
   Wait for the reset or turn on credit use in the Codex settings.
 - **`--add-reviewer @copilot` fails.** Copilot review is not available to the
-  repository. The session stops rather than skipping the pass; decide.
+  repository. The session stops rather than skipping the pass; decide. GitHub can
+  also accept the request and register nothing, as it does while the account's
+  Copilot premium quota is spent; the helpers read the PR's review requests on
+  both sides of the request and stop with "registered nothing" in the same way.
 - **The session stops on a review with no findings listed.** The review was only
   replies. Read it and answer, as described under the stops.
 - **A round stops with "the head you just pushed is RED".** Working as intended:
