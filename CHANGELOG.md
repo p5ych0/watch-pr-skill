@@ -5,14 +5,14 @@
 - **A fix pass is pointed at a code graph where the checkout holds one.** A fix subagent
   found callers and related code by hand, one `grep` or file read per turn, and each turn
   reads the whole subagent context again: measured over nine days of use, a fix pass
-  averaged 27 turns, and a large one 57. Step 5's hand-over now tells the pass, where the
-  checkout holds `graphify-out/graph.json`, to ask
-  `graphify query '<question>' --graph '<graph>' --budget 2000`, the graph named by its
-  absolute path, for callers and impact first, and where it holds
-  `graft/.graph/wiring.json`, to ask `trail callers '<symbol>'` and `trail ask '<task>'`,
-  pointed at it only where the session's permissions already allow the command, and
-  searching by hand where the command does not run. Each placeholder is single-quoted, so
-  the pass's shell expands nothing in it. A graph locates code and proves nothing, so the
+  averaged 27 turns, and a large one 57. Step 5's hand-over now tells the pass that,
+  where the checkout holds `graphify-out/graph.json`, `graphify query`, given `--graph`
+  with the graph file's absolute path, unescaped, and `--budget 2000`, and, where it
+  holds `graft/.graph/wiring.json`, `trail callers` and `trail ask`, run from inside the
+  checkout, answer questions about callers and impact, and that it passes each question,
+  task or symbol as one shell word. It asks them before it searches by hand, is pointed
+  at one only where the session's permissions already allow the command, and searches by
+  hand where the command does not run. A graph locates code and proves nothing, so the
   pass still reads what it is pointed at. Where the checkout holds neither, or holds one
   git shows as untracked, the session tells the operator once that a code graph, its
   output ignored by git, can cut the cost. The skill installs neither and needs neither.
