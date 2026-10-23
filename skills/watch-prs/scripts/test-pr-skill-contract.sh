@@ -694,10 +694,9 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
 _ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
 _gwant='`graphify-out/graph.json`, tell the pass to ask
-`graphify query "<question>" --graph "<root>/graphify-out/graph.json" --budget 2000`,
-with `<root>` the checkout root `REPO_DIR` holds, written out as the path itself rather
-than as setup'\''s escaped form, since the pass'\''s shell holds no variable of the session'\''s,
-for callers and impact before it searches by hand; where it holds
+`graphify query "<question>" --graph "$(git rev-parse --show-toplevel)/graphify-out/graph.json" --budget 2000`,
+the root found by the pass'\''s own shell, so nothing of the session'\''s is pasted into the
+path, for callers and impact before it searches by hand; where it holds
 `graft/.graph/wiring.json`, to ask `trail callers <symbol>` and `trail ask "<task>"`.
 Where the session'\''s permissions do not already allow the command, do not point the pass
 at it, since a permission prompt in an unattended pass waits for nobody; where the
