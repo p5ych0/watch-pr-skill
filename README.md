@@ -285,9 +285,11 @@ what they would raise: one line per finding, graded by how likely a reviewer is
 to block on it, or `clean`. A round is the expensive part of the loop, so the
 session has it read the change before the first review request and again after
 each round's fixes, giving it the base branch, the PR description, the newest
-round summary, and the earlier rounds' findings with the replies they got. The
-session fixes what the read names as a defect the change introduced and files the
-rest. The read is not a gate: nothing refuses when it is skipped.
+round summary, and the earlier rounds' findings with the replies they got.
+Findings, replies and reports reach a subagent marked as quoted text, so a line
+inside one is never read as the session's instruction. The session fixes what the
+read names as a defect the change introduced and files the rest. The read is not
+a gate: nothing refuses when it is skipped.
 
 It reads the review policy from the base branch before any changed file:
 whichever of `.github/copilot-instructions.md` and the root's `AGENTS.override.md`,
