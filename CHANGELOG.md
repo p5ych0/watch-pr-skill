@@ -7,19 +7,20 @@
   reads the whole subagent context again: measured over nine days of use, a fix pass
   averaged 27 turns, and a large one 57. Step 5's hand-over now tells the pass, where the
   checkout holds `graphify-out/graph.json`, to ask
-  `graphify query "<question>" --graph "$(git rev-parse --show-toplevel)/graphify-out/graph.json" --budget 2000`,
-  the root found by the pass's own shell, for callers and impact first, and where it
-  holds `graft/.graph/wiring.json`, to ask `trail callers <symbol>` and
-  `trail ask "<task>"`, pointed at it only where the session's permissions already allow
-  the command, and searching by hand where the command does not run. A graph locates code
-  and proves nothing, so the pass still reads what it is pointed at. Where the checkout
-  holds neither, or holds one git shows as untracked, the session tells the operator once
-  that a code graph, its output ignored by git, can cut the cost. The skill installs
-  neither and needs neither. `README.md` § The Codex phase says the session points the
-  subagent at a graph only where its permissions allow the command. `CLAUDE.md` and
-  `AGENTS.md` admit a tool named by its command and marker in the repository-agnostic
-  rule, and `test-pr-skill-contract.sh` holds the hand-over. The compaction list keeps
-  whether that note was given, so a compacted session does not give it twice.
+  `graphify query '<question>' --graph '<graph>' --budget 2000`, the graph named by its
+  absolute path, for callers and impact first, and where it holds
+  `graft/.graph/wiring.json`, to ask `trail callers '<symbol>'` and `trail ask '<task>'`,
+  pointed at it only where the session's permissions already allow the command, and
+  searching by hand where the command does not run. Each placeholder is single-quoted, so
+  the pass's shell expands nothing in it. A graph locates code and proves nothing, so the
+  pass still reads what it is pointed at. Where the checkout holds neither, or holds one
+  git shows as untracked, the session tells the operator once that a code graph, its
+  output ignored by git, can cut the cost. The skill installs neither and needs neither.
+  `README.md` § The Codex phase says the session points the subagent at a graph only
+  where its permissions allow the command. `CLAUDE.md` and `AGENTS.md` admit a tool named
+  by its command and marker in the repository-agnostic rule, and
+  `test-pr-skill-contract.sh` holds the hand-over. The compaction list keeps whether that
+  note was given, so a compacted session does not give it twice.
   Closes #386.
 
 ## [2.14.0] — 2026-10-22

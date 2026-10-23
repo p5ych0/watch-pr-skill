@@ -694,17 +694,18 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
 _ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
 _gwant='`graphify-out/graph.json`, tell the pass to ask
-`graphify query "<question>" --graph "$(git rev-parse --show-toplevel)/graphify-out/graph.json" --budget 2000`,
-the root found by the pass'\''s own shell, so nothing of the session'\''s is pasted into the
-path, for callers and impact before it searches by hand; where it holds
-`graft/.graph/wiring.json`, to ask `trail callers <symbol>` and `trail ask "<task>"`.
-Where the session'\''s permissions do not already allow the command, do not point the pass
-at it, since a permission prompt in an unattended pass waits for nobody; where the
-command does not run, the pass searches by hand. A graph locates code and proves
-nothing: the pass reads what it points at before editing. Where the checkout holds
-neither, or holds one git shows as untracked, tell the operator once per session that a
-code graph built by `graphify` or `trail`, its output ignored by git, can cut what a fix
-pass spends on finding callers. The skill installs neither and needs neither.'
+`graphify query '\''<question>'\'' --graph '\''<graph>'\'' --budget 2000`, with `<graph>` that
+file'\''s absolute path, for callers and impact before it searches by hand; where it holds
+`graft/.graph/wiring.json`, to ask `trail callers '\''<symbol>'\''` and `trail ask '\''<task>'\''`.
+Each placeholder is written single-quoted, a quote inside it written `'\''\'\'''\''`, so the
+pass'\''s shell expands nothing in a question, a task or a path. Where the session'\''s
+permissions do not already allow the command, do not point the pass at it, since a
+permission prompt in an unattended pass waits for nobody; where the command does not
+run, the pass searches by hand. A graph locates code and proves nothing: the pass reads
+what it points at before editing. Where the checkout holds neither, or holds one git
+shows as untracked, tell the operator once per session that a code graph built by
+`graphify` or `trail`, its output ignored by git, can cut what a fix pass spends on
+finding callers. The skill installs neither and needs neither.'
 _gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_gwant")" || _gwant=
 { [ -n "$_ghave" ] && [ -n "$_gwant" ] && [ "$_ghave" = "$_gwant" ] \
     && grep -qxF -- '- **Point it at a code graph where the checkout holds one.** Where the checkout holds' "$SKILL" \
