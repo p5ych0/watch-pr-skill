@@ -938,8 +938,7 @@ out="$(run escape-snapshot 7 'copilot-pull-request-reviewer[bot]' 2>&1)"; rc=$?
     || die "another reviewer's review answered (rc=$rc out='$out')"
 
 # ── `request-id` and `request-registered` — WHETHER A REQUEST REGISTERED ───
-# GitHub can answer `--add-reviewer` with success and record no request, so the token is
-# what the PR lists, the reviewer pending or idle, beside the id of its newest request event.
+# GitHub can answer `--add-reviewer` with success and record no request.
 CPBOT='copilot-pull-request-reviewer[bot]'
 CP='{"__typename":"Bot","login":"copilot-pull-request-reviewer"}'
 cat > "$TMP/bin/gh" <<SH
@@ -959,7 +958,7 @@ exit "\$(cat "$TMP/nap.rc" 2>/dev/null || echo 0)"
 SH
 chmod +x "$TMP/bin/gh" "$TMP/bin/sleep"
 rq_reset() { rm -f "$TMP"/rq.* "$TMP/nap.rc"; : > "$TMP/naps"; }
-rq() {   # rq <n> <request-nodes> <event-nodes> [hasNextPage] ; the answer to read n
+rq() {
     printf '{"data":{"repository":{"pullRequest":{"reviewRequests":{"pageInfo":{"hasNextPage":%s},"nodes":%s},"timelineItems":{"nodes":%s}}}}}' \
         "${4:-false}" "$2" "$3" > "$TMP/rq.$1"
 }
@@ -1123,7 +1122,7 @@ for _bad in '"RRE.1"' '"RRE 1"' '""' '42' 'null' '"pending"' '"none"'; do
         || die "an event id of $_bad gave (rc=$rc out='$out')"
 done
 
-rq_unreadable() {   # rq_unreadable <label> ; the answer staged in rq.1 is refused as unreadable
+rq_unreadable() {
     out="$(run request-registered 7 "$CPBOT" idle:none 2>"$TMP/rq.err")"; rc=$?
     { [ "$rc" -eq 2 ] && [ -z "$out" ] && grep -q 'reason=unreadable' "$TMP/rq.err"; } \
         && pass "…and $1 is unreadable" \
