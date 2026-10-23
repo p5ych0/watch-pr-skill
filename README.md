@@ -298,9 +298,12 @@ place of `AGENTS.md` as Codex does, and it says which it found. An `AGENTS.md`,
 `AGENTS.override.md` or `CLAUDE.md` below the root is not read unless a
 `policy:` line in your `.cold-review.md` names it, so a finding one would
 otherwise produce goes unpredicted. It is read-only by instruction and runs only
-`git`, `test` and `readlink`, with `echo` printing each path probe's answer. It
-leaves unopened a path that policy says not to open, any path named `.env`,
-`.env.*`, `*.pem` or `*.key` whose name does not end `.example`, and anything
+`git`, `test` and `readlink`, with `echo` printing each path probe's answer. A
+file whose name git prints escaped, holding a quote, a backslash or a control
+character, is reported as changed and left unread, as is any listed path the
+read could not reach. It leaves unopened a path that policy says not to open,
+any path named `.env`, `.env.*`, `*.pem` or `*.key` whose name does not end
+`.example`, and anything
 under a `.env`, `.env.*` or `.ssh` directory, templates included. It reads a
 link without following it, and probes every directory above a path as well, so
 a folder replaced by a link out of the checkout is reported rather than read

@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.14.6] — 2026-10-23
+
+- **The cold read lists a non-ASCII name as the path, and names each file left unread.**
+  The brief listed what changed with `git diff --no-renames --name-only` and
+  `git status --short --untracked-files=all`, then probed and diffed each name
+  single-quoted as printed. Git prints a name C-quoted when it holds a `"`, a `\`, a
+  control character or, under the default `core.quotePath`, a byte above 0x7f:
+  `"caf\303\251.md"`, `"q\"x.md"`. The quoted form is not the path, so the probe answered
+  `absent` for a file that was there and the diff matched nothing: a changed file with
+  such a name was reported absent and never read. Every command the brief gives now runs
+  with `-c core.quotePath=false`, so a name with a byte above 0x7f is listed as the path
+  itself. A name git prints between double quotes with no backslash inside, as
+  `git status` quotes a name with a space, is the path once the quotes are dropped. One
+  with a backslash inside is C-escaped, holding a quote, a backslash or a control
+  character that the setting leaves quoted, and is reported as changed, by the name
+  printed, and left unprobed and unread. A name whose bytes are not valid UTF-8 prints
+  raw and cannot be written back, so a listed path that probes `absent` and whose diff
+  prints nothing is reported as listed but unread. README's § The cold reviewer says an
+  escaped name, and any listed path the read could not reach, is reported and left
+  unread. `test-hooks.sh` runs the brief's own command prefix with `diff --name-only`
+  on a commit adding `café.md` and `q"x.md`, and with `status --short` on an untracked
+  `a b.md`, and pins both new sentences.
+  Closes #401.
+
 ## [2.14.5] — 2026-10-22
 
 - **A Copilot request GitHub drops is a stop, not an open phase.** `pr-copilot-phase.sh
