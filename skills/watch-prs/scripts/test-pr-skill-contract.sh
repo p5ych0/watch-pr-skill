@@ -764,9 +764,9 @@ if [ -f "$README" ]; then
     grep -q 'Watching without prompts' "$README" \
         && pass "README explains the Monitor permission SKILL.md points at" || die "README's Monitor section is gone"
     _grflat="$(tr '\n' ' ' < "$README" | tr -s ' ')" || _grflat=
-    grep -qF -- "before it searches by hand, where the session's permissions already allow the command;" <<<"$_grflat" \
-        && pass "…and README says the subagent is pointed at a graph only where the session's permissions allow the command" \
-        || die "README does not say the subagent is pointed at a graph only where the session's permissions allow the command"
+    grep -qF -- "Where your checkout holds a code graph built by \`graphify\` or \`trail\`, the session tells the subagent to query it for callers before it searches by hand, where the session's permissions already allow the command and, for \`trail\`, where the session's own directory is inside the checkout; where it holds neither, or holds one git shows as untracked, the session mentions once per session that one could cut the cost, its output ignored by git. The plugin installs neither." <<<"$_grflat" \
+        && pass "…and README's code-graph passage is the text the test pins" \
+        || die "README's code-graph passage is not the text the test pins"
 fi
 
 # ── the accepted merge-mode limitation is recorded on the base ref ────────
