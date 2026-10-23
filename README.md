@@ -232,6 +232,14 @@ which applies. Your answer holds for that session. The session says on the PR
 which rule applied, naming it by its file and subject. A project rule never
 lifts a gate a helper enforces.
 
+The session also finds where your project keeps its notes, from its `CLAUDE.md`
+and `AGENTS.md`, or else its `CHANGELOG.md`. A note the checkout tracks goes
+into the PR with the change; a vault or a wiki outside it gets the PR's record
+at each stop and after the merge. Each stop ends with a continuation prompt
+naming the PR, its branch, the rounds and the stop, so a later session knows
+where to resume; that session still runs setup and reads the phase from the PR.
+Neither carries the origin itself.
+
 When the conversation is compacted mid-loop, the session keeps what `SKILL.md`
 lists: the PR, the paths setup printed, the phase, the open findings and the next
 stop. It never keeps the origin itself, which can hold a credential.

@@ -193,6 +193,28 @@ proves or gates: a helper's refusal stays a stop whatever a host rule says.
 
 **Unattended:** keep this document's rule.
 
+### Where the host project keeps its notes
+
+Before step 1, or before resuming after a stop, name where the host project keeps its
+durable notes, taking it from its `CLAUDE.md` and `AGENTS.md`: a changelog, decision
+records, a wiki, a notes vault. Where they say nothing, take `CHANGELOG.md` where the
+checkout has one, and otherwise none. The loop adds no notes store of its own.
+
+- **A note the checkout tracks**, such as a changelog entry, goes into the PR with the
+  change, before the first review request, so the reviewers read it and no later commit
+  moves a signed-off head.
+- **A note outside the checkout**, such as a vault or a wiki, gets the PR's record at each
+  STOP and after the merge, in the form those notes already use: what the PR set out to do,
+  what changed, the rounds per reviewer, what was skipped with its issue number, and the
+  stop it waits at or the merge.
+- **At each STOP**, end the message with a continuation prompt a later session can start
+  from: the PR and its branch, the round count per reviewer, and the stop it waits at. It
+  says where to resume and nothing more: the later session runs setup, compares the host's
+  rules again, and takes the phase and the signoffs from *Resuming after a stop*.
+
+Neither a note nor the prompt carries the origin or `REVIEW_BUS_REMOTE`, which can hold a
+credential.
+
 ## 1. State the task on the PR
 
 The reviewers judge relevance against what the PR says it set out to do. Before the first

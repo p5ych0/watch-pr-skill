@@ -157,7 +157,8 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
 - **A compaction summary never keeps the origin.** `SKILL.md` § What a compaction
   summary keeps is the list a summary carries across a compaction. A list that keeps
   `REVIEW_BUS_REMOTE` or the origin, or that omits a value later commands are written
-  with, is a finding.
+  with, is a finding. Nor does a host note or a continuation prompt that `SKILL.md`
+  § Where the host project keeps its notes writes.
 - **A host rule replaces `SKILL.md`'s only on the operator's word.** The stop before
   step 1 asks, and in either mode the rule that applied is named on the PR; unattended,
   `SKILL.md`'s rule is kept. A change that lets a host rule lift what a helper proves or
