@@ -695,26 +695,23 @@ s="$(section '- **Point it at a code graph where the checkout holds one.**' '- *
 _ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
 _gwant='`graphify-out/graph.json`, tell the pass to ask
 `graphify query "<question>" --graph "<root>/graphify-out/graph.json" --budget 2000`,
-with `<root>` the `REPO_DIR` setup printed, written out, since the pass'\''s shell holds no
-variable of the session'\''s, for callers and impact before it searches by hand; where it
-holds `graft/.graph/wiring.json`, to ask `trail callers <symbol>` and
-`trail ask "<task>"`. Where the session'\''s permissions do not already allow the command,
-do not point the pass at it, since a permission prompt in an unattended pass waits for
-nobody; where the command does not run, the pass searches by hand. A graph locates code
-and proves nothing: the pass reads what it points at before editing. Where the checkout
-holds neither, or holds one git shows as untracked, tell the operator once per session
-that a code graph built by `graphify` or `trail`, its output ignored by git, can cut
-what a fix pass spends on finding callers. The skill installs neither and needs neither.'
+with `<root>` the checkout root `REPO_DIR` holds, written out as the path itself rather
+than as setup'\''s escaped form, since the pass'\''s shell holds no variable of the session'\''s,
+for callers and impact before it searches by hand; where it holds
+`graft/.graph/wiring.json`, to ask `trail callers <symbol>` and `trail ask "<task>"`.
+Where the session'\''s permissions do not already allow the command, do not point the pass
+at it, since a permission prompt in an unattended pass waits for nobody; where the
+command does not run, the pass searches by hand. A graph locates code and proves
+nothing: the pass reads what it points at before editing. Where the checkout holds
+neither, or holds one git shows as untracked, tell the operator once per session that a
+code graph built by `graphify` or `trail`, its output ignored by git, can cut what a fix
+pass spends on finding callers. The skill installs neither and needs neither.'
 _gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_gwant")" || _gwant=
 { [ -n "$_ghave" ] && [ -n "$_gwant" ] && [ "$_ghave" = "$_gwant" ] \
     && grep -qxF -- '- **Point it at a code graph where the checkout holds one.** Where the checkout holds' "$SKILL" \
     && before '**Point it at a code graph' '**Read its diff and its report'; } \
     && pass "a fix pass is pointed at a code graph the checkout holds, the bullet pinned whole, before the report is read" \
     || die "the code-graph bullet is not the text the test pins, or does not come before the report is read"
-_grflat="$(tr '\n' ' ' < "$README" | tr -s ' ')" || _grflat=
-grep -qF -- "before it searches by hand, where the session's permissions already allow the command;" <<<"$_grflat" \
-    && pass "…and README says the subagent is pointed at a graph only where the session's permissions allow the command" \
-    || die "README does not say the subagent is pointed at a graph only where the session's permissions allow the command"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
@@ -766,6 +763,10 @@ if [ -f "$README" ]; then
         && pass "README documents the watch's probe bound" || die "README lacks PR_WATCH_PROBE_TIMEOUT"
     grep -q 'Watching without prompts' "$README" \
         && pass "README explains the Monitor permission SKILL.md points at" || die "README's Monitor section is gone"
+    _grflat="$(tr '\n' ' ' < "$README" | tr -s ' ')" || _grflat=
+    grep -qF -- "before it searches by hand, where the session's permissions already allow the command;" <<<"$_grflat" \
+        && pass "…and README says the subagent is pointed at a graph only where the session's permissions allow the command" \
+        || die "README does not say the subagent is pointed at a graph only where the session's permissions allow the command"
 fi
 
 # ── the accepted merge-mode limitation is recorded on the base ref ────────

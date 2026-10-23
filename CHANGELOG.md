@@ -15,9 +15,9 @@
   nothing, so the pass still reads what it is pointed at. Where the checkout holds
   neither, or holds one git shows as untracked, the session tells the operator once that
   a code graph, its output ignored by git, can cut the cost. The skill installs neither
-  and needs neither. `README.md` now says the session points the subagent at a graph only
-  where its permissions allow the command. `CLAUDE.md` and `AGENTS.md` admit a tool named
-  by its command and marker in the repository-agnostic rule, and
+  and needs neither. `README.md` § The Codex phase says the session points the subagent
+  at a graph only where its permissions allow the command. `CLAUDE.md` and `AGENTS.md`
+  admit a tool named by its command and marker in the repository-agnostic rule, and
   `test-pr-skill-contract.sh` holds the hand-over. The compaction list keeps whether that
   note was given, so a compacted session does not give it twice.
   Closes #386.
