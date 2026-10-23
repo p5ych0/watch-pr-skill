@@ -83,10 +83,10 @@ case "${1:-}" in
                cat "$W/review-id.out" 2>/dev/null
                exit "$(cat "$W/review-id.rc" 2>/dev/null || echo 0)" ;;
     # A registered request by default, so a case about something else never stops on registration.
-    request-id) cat "$W/request-id.out" 2>/dev/null || printf 'none\n'
+    request-id) cat "$W/request-id.out" 2>/dev/null || printf 'idle:none\n'
                 exit "$(cat "$W/request-id.rc" 2>/dev/null || echo 0)" ;;
     request-registered)
-                cat "$W/request-registered.out" 2>/dev/null || printf 'pending\n'
+                cat "$W/request-registered.out" 2>/dev/null || printf 'pending:none\n'
                 exit "$(cat "$W/request-registered.rc" 2>/dev/null || echo 0)" ;;
 esac
 exit 2
@@ -1629,7 +1629,7 @@ world; got="$(run open 7 "$HEAD40")"
     && pass "…the requests read before the baseline, the baseline before --add-reviewer and the registration read after it" \
     || die "the registration reads are out of order: $(cat "$TMP/calls")"
 
-world; printf 'RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
+world; printf 'idle:RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
 printf 'PR_REVIEW_STATE pr=7 reviewer=%s status=unregistered\n' "$COPILOTBOT" > "$W/request-registered.out"
 got="$(run open 7 "$HEAD40")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing on the PR' <<<"${got#*|}" \
@@ -1639,7 +1639,7 @@ got="$(run open 7 "$HEAD40")"
 grep -qF 'PR_COPILOT_PHASE_OPENED' <<<"${got#*|}" \
     && die "the phase was reported open on a request that registered nothing: '${got}'" \
     || pass "…with no PR_COPILOT_PHASE_OPENED record"
-grep -qF "pr-review-state.sh request-registered 7 $COPILOTBOT RRE_before" "$TMP/calls" \
+grep -qF "pr-review-state.sh request-registered 7 $COPILOTBOT idle:RRE_before" "$TMP/calls" \
     && pass "…the registration read being given the token read before the request" \
     || die "the registration read was not given the before token: $(cat "$TMP/calls")"
 

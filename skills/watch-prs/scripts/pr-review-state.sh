@@ -195,8 +195,8 @@ clean_verdict() {
     return 0
 }
 
-# A request GitHub answers with success can register nothing, so what is compared is the newest request event:
-# a re-request after a submitted review adds one, and a dropped request adds none and lists no reviewer.
+# A request GitHub answers with success can register nothing, so the token carries both what the PR lists and its
+# newest request event: a review finishing between the reads empties the list and leaves the event where it was.
 request_token() {
     local pr="$1" who="$2" page tok
     page=$(gh api --hostname "$HOST" graphql -F number="$pr" -f owner="$OWNER" -f repo="$REPO" \
@@ -221,21 +221,26 @@ request_token() {
                or ($p.timelineItems | type) != "object" or ($p.timelineItems.nodes | type) != "array"
             then error("bad shape")
             elif $p.reviewRequests.pageInfo.hasNextPage then error("truncated requests")
-            elif any($p.reviewRequests.nodes[]; type != "object" or (.requestedReviewer | reviewer_ok | not))
+            elif any($p.reviewRequests.nodes[];
+                     type != "object" or (has("requestedReviewer") | not) or (.requestedReviewer | reviewer_ok | not))
             then error("bad request node")
             # A truncated timeline is still read: `last:100` holds the newest events, and only the newest is compared.
             elif any($p.timelineItems.nodes[];
                      type != "object"
                      or (.id | type) != "string" or (.id | test("\\A[A-Za-z0-9_+/=-]+\\z") | not)
                      or .id == "pending" or .id == "none"
-                     or (.requestedReviewer | reviewer_ok | not))
+                     or (has("requestedReviewer") | not) or (.requestedReviewer | reviewer_ok | not))
             then error("bad event node")
-            elif any($p.reviewRequests.nodes[]; .requestedReviewer | is_who) then "pending"
             else ([ $p.timelineItems.nodes[] | select(.requestedReviewer | is_who) ] | last) as $e
-              | if $e == null then "none" else $e.id end
+              | (if any($p.reviewRequests.nodes[]; .requestedReviewer | is_who) then "pending" else "idle" end)
+                + ":" + (if $e == null then "none" else $e.id end)
             end
         end' 2>/dev/null)" || return 2
     case "$tok" in
+        pending:*|idle:*) ;;
+        *) return 2 ;;
+    esac
+    case "${tok#*:}" in
         ""|*[!A-Za-z0-9_+/=-]*) return 2 ;;
     esac
     printf '%s' "$tok"
@@ -267,7 +272,10 @@ main() {
     if [ "$cmd" = "request-registered" ]; then
         local before="${4:-}" rnow rn
         case "$before" in
-            pending|none) ;;
+            pending:*|idle:*) ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=bad_before_token" >&2; return 2 ;;
+        esac
+        case "${before#*:}" in
             ""|*[!A-Za-z0-9_+/=-]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=bad_before_token" >&2; return 2 ;;
         esac
         for rn in 1 2 3; do
@@ -275,7 +283,7 @@ main() {
                 echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
                 return 2
             }
-            if [ "$rnow" = pending ] || { [ "$rnow" != none ] && [ "$rnow" != "$before" ]; }; then
+            if [ "${rnow%%:*}" = pending ] || { [ "${rnow#*:}" != none ] && [ "${rnow#*:}" != "${before#*:}" ]; }; then
                 printf '%s\n' "$rnow"
                 return 0
             fi

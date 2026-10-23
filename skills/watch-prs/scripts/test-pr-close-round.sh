@@ -82,10 +82,10 @@ fi
 # something else never stops on registration.
 if [ "\$_n" = pr-review-state ]; then
     case "\${1:-}" in
-        request-id) cat "\$W/request-id.out" 2>/dev/null || printf 'none\n'
+        request-id) cat "\$W/request-id.out" 2>/dev/null || printf 'idle:none\n'
                     exit "\$(cat "\$W/request-id.rc" 2>/dev/null || echo 0)" ;;
         request-registered)
-                    cat "\$W/request-registered.out" 2>/dev/null || printf 'pending\n'
+                    cat "\$W/request-registered.out" 2>/dev/null || printf 'pending:none\n'
                     exit "\$(cat "\$W/request-registered.rc" 2>/dev/null || echo 0)" ;;
     esac
 fi
@@ -691,7 +691,7 @@ world; got="$(run "$COPILOTBOT" no)"
     && pass "…the requests read before the summary and the registration read after --add-reviewer" \
     || die "the registration reads are out of order: $(cat "$TMP/calls")"
 
-world; printf 'RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
+world; printf 'idle:RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
 printf 'PR_REVIEW_STATE pr=7 reviewer=%s status=unregistered\n' "$COPILOTBOT" > "$W/request-registered.out"
 got="$(run "$COPILOTBOT" no)"
 { [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing on the PR' <<<"${got#*|}" \
@@ -701,7 +701,7 @@ got="$(run "$COPILOTBOT" no)"
 grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}" \
     && die "the round was reported closed on a request that registered nothing: '${got}'" \
     || pass "…with no PR_ROUND_CLOSED record"
-grep -qF "pr-review-state.sh request-registered 7 $COPILOTBOT RRE_before" "$TMP/calls" \
+grep -qF "pr-review-state.sh request-registered 7 $COPILOTBOT idle:RRE_before" "$TMP/calls" \
     && pass "…the registration read being given the token read before the request" \
     || die "the registration read was not given the before token: $(cat "$TMP/calls")"
 

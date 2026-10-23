@@ -10,11 +10,14 @@
   then printed `PR_COPILOT_PHASE_OPENED`, and the watch waited its full 30 minutes for a
   review nobody had requested. `pr-review-state.sh` now has two stages for this.
   `request-id` reads, in one GraphQL response, whether the reviewer is among the PR's review
-  requests (`pending`), else the id of its newest review-request event, which may be in
-  GitHub's older base64 form, else `none`. `request-registered` reads that token up to three
-  times, two seconds apart, and answers 0 when it is `pending` or an event id other than the
-  one read before the request, and 1 with `status=unregistered` when neither happens after
-  three reads, a read of `none` included. A truncated request list, an `errors` key, a
+  requests and the id of its newest review-request event, which may be in GitHub's older
+  base64 form, and prints both as one token, `<state>:<event>`: `pending` or `idle`, then
+  that id or `none`. `request-registered` reads that token up to three times, two seconds
+  apart, and answers 0 when the reviewer is pending or the event is an id other than the one
+  read before the request, and 1 with `status=unregistered` when neither happens after three
+  reads, a read of `none` included. A pending review that finishes between the two reads
+  leaves the event where it was, so a reviewer gone from pending to idle is not a request
+  made. A truncated request list, an `errors` key, a node without `requestedReviewer`, a
   malformed event id, a failed read, a bad token and a failed sleep are each unreadable,
   status 2. Both callers read the token before the request and ask after it. `open` aborts
   on 1 with "registered nothing", Copilot unavailable to this account or repository, and the
