@@ -155,7 +155,7 @@ if [[ $STAGE = open ]]; then
     REQ_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh request-registered "$PR" "$RB_COPILOT_BOT" "$REQ_BEFORE"); REQ_RC=$?
     case "$REQ_RC" in
         0) ;;
-        1) echo "ABORT: the Copilot request registered nothing on the PR ($REQ_NOW), so Copilot is unavailable to this account or repository; the Copilot phase is not open."
+        1) echo "ABORT: the Copilot request registered nothing new on the PR ($REQ_NOW), for example because Copilot is unavailable to this account or repository; the Copilot phase is not open."
            echo "This is not permission to skip the pass: decide with the operator."
            exit 1 ;;
         *) echo "ABORT: could not tell whether the Copilot request registered on the PR (rc=$REQ_RC); the Copilot phase is not reported open."

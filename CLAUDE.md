@@ -132,7 +132,7 @@ history; an accepted limit is in `docs/decisions/`.
 | `skills/watch-prs/SKILL.md` | The driver contract, read on every invocation: one helper invocation per step, statuses in prose, an **Unattended:** answer at each decision stop. |
 | `scripts/pr-setup.sh` | Session start: the reservation, the origin, the four working files, the mode. |
 | `scripts/pr-request-review.sh` | The opening Codex request, and the baseline the watch is given. |
-| `scripts/pr-review-state.sh` | A reviewer's verdict on a head, and the replies-only escape. |
+| `scripts/pr-review-state.sh` | A reviewer's verdict on a head, the replies-only escape, and whether a review request registered. |
 | `scripts/pr-merge-range.sh` | Whether every commit since the reviewed sha is a Copilot-phase fix. |
 | `scripts/pr-findings.sh` | The unresolved findings, and a blocking review's body. |
 | `scripts/pr-round-count.sh` | Rounds per reviewer, the check-in boundary, the acknowledgements. |

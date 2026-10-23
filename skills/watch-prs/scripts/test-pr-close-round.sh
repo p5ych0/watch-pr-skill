@@ -694,9 +694,10 @@ world; got="$(run "$COPILOTBOT" no)"
 world; printf 'idle:RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
 printf 'PR_REVIEW_STATE pr=7 reviewer=%s status=unregistered\n' "$COPILOTBOT" > "$W/request-registered.out"
 got="$(run "$COPILOTBOT" no)"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing on the PR' <<<"${got#*|}" \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing new on the PR' <<<"${got#*|}" \
+    && grep -qF 'for example because Copilot is unavailable to this account or repository' <<<"${got#*|}" \
     && grep -qF "Do not run 'post' again" <<<"${got#*|}"; } \
-    && pass "a Copilot re-request that registered nothing stops the round, and says not to post again" \
+    && pass "a Copilot re-request that registered nothing stops the round, gives the cause as an example, and says not to post again" \
     || die "an unregistered Copilot re-request gave '${got}'"
 grep -qF 'PR_ROUND_CLOSED' <<<"${got#*|}" \
     && die "the round was reported closed on a request that registered nothing: '${got}'" \

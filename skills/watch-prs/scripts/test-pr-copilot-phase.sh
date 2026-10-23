@@ -1632,9 +1632,10 @@ world; got="$(run open 7 "$HEAD40")"
 world; printf 'idle:RRE_before\n' > "$W/request-id.out"; printf '1\n' > "$W/request-registered.rc"
 printf 'PR_REVIEW_STATE pr=7 reviewer=%s status=unregistered\n' "$COPILOTBOT" > "$W/request-registered.out"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing on the PR' <<<"${got#*|}" \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'request registered nothing new on the PR' <<<"${got#*|}" \
+    && grep -qF 'for example because Copilot is unavailable to this account or repository' <<<"${got#*|}" \
     && grep -qF 'not permission to skip the pass' <<<"${got#*|}"; } \
-    && pass "a request that registered nothing stops the phase, and says it is not permission to skip" \
+    && pass "a request that registered nothing stops the phase, gives the cause as an example, and says it is not permission to skip" \
     || die "an unregistered request gave '${got}'"
 grep -qF 'PR_COPILOT_PHASE_OPENED' <<<"${got#*|}" \
     && die "the phase was reported open on a request that registered nothing: '${got}'" \

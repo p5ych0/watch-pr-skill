@@ -264,7 +264,7 @@ request_review() {
         req_now=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh request-registered "$PR" "$WHO" "$req_before"); req_rc=$?
         case "$req_rc" in
             0) ;;
-            1) echo "ABORT: the round summary is posted, but the Copilot request registered nothing on the PR ($req_now), so Copilot is unavailable to this account or repository."
+            1) echo "ABORT: the round summary is posted, but the Copilot request registered nothing new on the PR ($req_now), for example because Copilot is unavailable to this account or repository."
                echo "Decide with the operator. Do not run 'post' again: it would post the summary twice."
                return 1 ;;
             *) echo "ABORT: the round summary is posted, but it could not be told whether the Copilot request registered on the PR (rc=$req_rc)."
