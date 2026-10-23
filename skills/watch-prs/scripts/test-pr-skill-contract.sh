@@ -332,6 +332,8 @@ of it costs a round:
 - every answer the operator has given that a helper has not yet enacted, a replies-only
   classification among them;
 - each host rule that differs from this document'\''s, and which of the two applies;
+- whether the operator has had step 5'\''s note on a code graph, which is given once per
+  session;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
@@ -689,6 +691,27 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 { [ -n "$_hhave" ] && [ "$_hhave" = "$_hwant" ]; } \
     && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
     || die "the host-rules section is not the text the test pins"
+s="$(section '- **Point it at a code graph where the checkout holds one.**' '- **Read its diff and its report')" || s=
+_ghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ghave=
+_gwant='  `graphify-out/graph.json`, tell the pass that file'\''s absolute path, as the path itself
+  rather than setup'\''s escaped form, and that `graphify query`, given that path with
+  `--graph` and `--budget 2000`, answers a question about callers and impact; where it
+  holds `graft/.graph/wiring.json` and the session'\''s own directory is inside the checkout,
+  which the pass'\''s shell starts in, that `trail callers` and `trail ask` do. Have it ask
+  before it searches by hand, passing the path and each question, task or symbol as one
+  shell word. Where the session'\''s permissions do not already allow the command, do not
+  point the pass at it, since a permission prompt in an unattended pass waits for nobody;
+  where the command does not run, the pass searches by hand. A graph locates code and
+  proves nothing: the pass reads what it points at before editing. Where the checkout
+  holds neither, or holds one git shows as untracked, tell the operator once per session
+  that a code graph built by `graphify` or `trail`, its output ignored by git, can cut
+  what a fix pass spends on finding callers. The skill installs neither and needs neither.'
+_gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_gwant")" || _gwant=
+{ [ -n "$_ghave" ] && [ -n "$_gwant" ] && [ "$_ghave" = "$_gwant" ] \
+    && grep -qxF -- '- **Point it at a code graph where the checkout holds one.** Where the checkout holds' "$SKILL" \
+    && before '**Point it at a code graph' '**Read its diff and its report'; } \
+    && pass "a fix pass is pointed at a code graph the checkout holds, the bullet pinned whole, before the report is read" \
+    || die "the code-graph bullet is not the text the test pins, or does not come before the report is read"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
@@ -740,6 +763,10 @@ if [ -f "$README" ]; then
         && pass "README documents the watch's probe bound" || die "README lacks PR_WATCH_PROBE_TIMEOUT"
     grep -q 'Watching without prompts' "$README" \
         && pass "README explains the Monitor permission SKILL.md points at" || die "README's Monitor section is gone"
+    _grflat="$(tr '\n' ' ' < "$README" | tr -s ' ')" || _grflat=
+    grep -qF -- "Where your checkout holds a code graph built by \`graphify\` or \`trail\`, at \`graphify-out/graph.json\` or \`graft/.graph/wiring.json\` from its root, the session tells the subagent to query it for callers before it searches by hand, where the session's permissions already allow the command and, for \`trail\`, where the session's own directory is inside the checkout; where it holds neither, or holds one git shows as untracked, the session mentions once per session that one could cut the cost, its output ignored by git. The plugin installs neither." <<<"$_grflat" \
+        && pass "…and README's code-graph passage is the text the test pins" \
+        || die "README's code-graph passage is not the text the test pins"
 fi
 
 # ── the accepted merge-mode limitation is recorded on the base ref ────────

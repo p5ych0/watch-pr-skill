@@ -133,13 +133,14 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   changelog included: a measurement taken elsewhere is evidence for its count
   and shape, never for whose repository it was. Not mentions: this plugin's own
   metadata and install commands, a functional dependency coordinate such as
-  `uses: actions/checkout@v4`, an API path in its generic form, the
-  placeholder identity a fixture supplies as a value (`test-pr-identity.sh` keys
-  on the owner and the shape so those pass; this paragraph does not spell them),
-  and the links an authoring tool writes to its own documentation and source in
-  a configuration file it generates and rewrites itself, which
-  `.serena/project.yml` is. Such a link written by hand, or into a file the tool
-  does not generate, is a mention.
+  `uses: actions/checkout@v4`, a tool `SKILL.md` names by its command and the
+  marker it leaves in a checkout, without its repository, an API path in its
+  generic form, the placeholder identity a fixture supplies as a value
+  (`test-pr-identity.sh` keys on the owner and the shape so those pass; this
+  paragraph does not spell them), and the links an authoring tool writes to its
+  own documentation and source in a configuration file it generates and rewrites
+  itself, which `.serena/project.yml` is. Such a link written by hand, or into a
+  file the tool does not generate, is a mention.
 - **Identity is pinned once per session and proved by every command.**
   `pr-setup.sh` reads the origin through the privileged `pr-origin.sh`, proves it
   parses, and writes it into the setup directory. Each command runs in a fresh

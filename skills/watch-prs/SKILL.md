@@ -167,6 +167,8 @@ of it costs a round:
 - every answer the operator has given that a helper has not yet enacted, a replies-only
   classification among them;
 - each host rule that differs from this document's, and which of the two applies;
+- whether the operator has had step 5's note on a code graph, which is given once per
+  session;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
@@ -355,6 +357,20 @@ make them yourself.
   false, a test that fails without the fix where the project keeps tests, and nothing
   committed, pushed, posted or resolved. Have it report, for each finding, the mutation it
   ran and what failed, or that it could construct none.
+- **Point it at a code graph where the checkout holds one.** Where the checkout holds
+  `graphify-out/graph.json`, tell the pass that file's absolute path, as the path itself
+  rather than setup's escaped form, and that `graphify query`, given that path with
+  `--graph` and `--budget 2000`, answers a question about callers and impact; where it
+  holds `graft/.graph/wiring.json` and the session's own directory is inside the checkout,
+  which the pass's shell starts in, that `trail callers` and `trail ask` do. Have it ask
+  before it searches by hand, passing the path and each question, task or symbol as one
+  shell word. Where the session's permissions do not already allow the command, do not
+  point the pass at it, since a permission prompt in an unattended pass waits for nobody;
+  where the command does not run, the pass searches by hand. A graph locates code and
+  proves nothing: the pass reads what it points at before editing. Where the checkout
+  holds neither, or holds one git shows as untracked, tell the operator once per session
+  that a code graph built by `graphify` or `trail`, its output ignored by git, can cut
+  what a fix pass spends on finding callers. The skill installs neither and needs neither.
 - **Read its diff and its report before you commit.** A fix it could not prove is yours to
   prove or to stop on, as *Prove a fix can fail* says. The commit, the self-check, the
   thread replies, the round summary and every judgment call stay with you.
