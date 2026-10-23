@@ -21,10 +21,10 @@
   malformed event id, a failed read, a bad token and a failed sleep are each unreadable,
   status 2. Both callers read the token before the request and ask after it. `open` aborts
   on 1 with "registered nothing new", most often Copilot unavailable to this account or
-  repository, and the phase not open; `post` aborts the same way after its summary is posted, and says not to
-  run `post` again. Every Copilot abort in `post` after the summary is posted, a failed
-  `--add-reviewer` included, now says the summary is posted and not to run `post` again. A
-  Codex round reads neither. `SKILL.md` and README say what the abort means.
+  repository, and the phase not open, and `post` the same way. Every Copilot abort in `post`
+  after the summary is posted, a failed `--add-reviewer` included, now says the summary is
+  posted and not to run `post` again. A Codex round reads neither. `SKILL.md` and README say
+  what the abort means.
   `test-pr-review-state.sh` runs both stages against a stubbed `gh`, and the two callers'
   fixtures hold each abort, the order of the reads and the Codex round.
   Closes #396.

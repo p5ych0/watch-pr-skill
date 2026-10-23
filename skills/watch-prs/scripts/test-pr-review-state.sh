@@ -977,7 +977,7 @@ out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
     || die "request-id with no pending request gave (rc=$rc out='$out')"
 
 # Base64 is the old node-id format, so another reviewer's event in it must not refuse the
-# whole response, and Copilot's own is a token like any other.
+# whole response.
 _b64='MDE5OlJldmlld1JlcXVlc3RlZEV2ZW50MTIz+/='
 rq_reset; rq 1 '[]' "[{\"id\":\"RRE_new\",\"requestedReviewer\":$CP},{\"id\":\"$_b64\",\"requestedReviewer\":{\"__typename\":\"Bot\",\"login\":\"chatgpt-codex-connector\"}}]"
 out="$(run request-id 7 "$CPBOT" 2>&1)"; rc=$?
@@ -1038,8 +1038,6 @@ out="$(run request-registered 7 "$CPBOT" idle:RRE_old 2>&1)"; rc=$?
     && pass "…and so did one now pending with its newest event unchanged" \
     || die "request-registered on pending over an unchanged event gave (rc=$rc out='$out')"
 
-# A pending review that finishes between the reads empties the list and adds no event, so
-# the event read before the request is still the newest and nothing new was requested.
 rq_reset; rq 1 '[]' "[{\"id\":\"RRE_old\",\"requestedReviewer\":$CP}]"
 out="$(run request-registered 7 "$CPBOT" pending:RRE_old 2>"$TMP/rq.err")"; rc=$?
 { [ "$rc" -eq 1 ] && [ "$out" = "PR_REVIEW_STATE pr=7 reviewer=$CPBOT status=unregistered" ]; } \
