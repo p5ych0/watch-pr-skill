@@ -107,7 +107,7 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     done
     fb="$(tr '\n' ' ' < "$BRIEF" | tr -s ' ')"
     # The brief is prose a subagent follows, so its commands are pinned by shape, not by running,
-    # except the listing and the path probes: taken from the brief and run, since their output decides what is read.
+    # except the command prefix, the listing and the path probes: taken from the brief and run, since their output decides what is read.
     grep -q 'GIT_OPTIONAL_LOCKS=0 git -C' "$BRIEF" && pass "the cold reviewer's commands write no index" \
         || die "the brief no longer disables optional locks, so its status can rewrite the index"
     grep -q 'core.fsmonitor=false' "$BRIEF" && pass "…and run no configured monitor hook" \
@@ -131,6 +131,38 @@ if [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ]; then
     else
         die "the repository with a moved file was not built"
     fi
+    qd="$tmp/quoted"
+    if git init -q "$qd" && git -C "$qd" config user.email t@t && git -C "$qd" config user.name t \
+        && git -C "$qd" config commit.gpgsign false && : > "$qd/base.txt" && git -C "$qd" add base.txt \
+        && git -C "$qd" commit -q -m base && qbase="$(git -C "$qd" rev-parse HEAD)" \
+        && : > "$qd/café.md" && : > "$qd/q\"x.md" && git -C "$qd" add -A && git -C "$qd" commit -q -m names \
+        && : > "$qd/a b.md"; then
+        pre="$(grep -m1 -o '`GIT_OPTIONAL_LOCKS=0 git -C <that root>[^`]*`' "$BRIEF" | tr -d '`')" || pre=
+        read -r -a pw <<<"${pre/<that root>/@root@}"
+        qlisted=""
+        qwant='café.md
+"q\"x.md"'
+        [ "${pw[0]:-}" = GIT_OPTIONAL_LOCKS=0 ] && [ "${pw[1]:-}" = git ] && [ "${pw[2]:-}" = -C ] && [ "${pw[3]:-}" = @root@ ] \
+            && pw[3]="$qd" \
+            && qlisted="$(env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "${pw[@]}" diff --no-renames --name-only "$qbase")" \
+            && [ "$qlisted" = "$qwant" ] \
+            && pass "…and the brief's own command prefix lists a name with a byte above 0x7f as the path itself, and a name with a quote still quoted" \
+            || die "the brief's prefix ($pre) listed '$qlisted' where '$qwant' was due"
+        qstatus=""
+        [ "${pw[3]:-}" = "$qd" ] \
+            && qstatus="$(env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "${pw[@]}" status --short --untracked-files=all)" \
+            && [ "$qstatus" = '?? "a b.md"' ] \
+            && pass "…and its status prints a name with a space between double quotes with no backslash inside, the path once they are dropped" \
+            || die "the brief's prefix ($pre) printed status '$qstatus' where '?? \"a b.md\"' was due"
+    else
+        die "the repository with a non-ASCII, a quoted and a spaced name was not built"
+    fi
+    grep -qF 'A name git prints between double quotes with no backslash inside them is the path once the quotes are dropped, as `git status` quotes a name with a space. One with a backslash inside is C-escaped, holding a quote, a backslash or a control character that `core.quotePath=false` leaves quoted, and is not the path: report it as changed, by the name printed, and leave it unprobed and unread.' <<<"$fb" \
+        && pass "…and a quoted name with no backslash is the path once the quotes are dropped, while one with a backslash is reported as changed by that name, and neither probed nor read" \
+        || die "the brief no longer says: A name git prints between double quotes with no backslash inside them is the path once the quotes are dropped … One with a backslash inside … leave it unprobed and unread"
+    grep -qF 'A listed path that probes `absent` and whose diff prints nothing was not reached by the name it was given: report it as listed but unread.' <<<"$fb" \
+        && pass "…and a listed path that probes absent with an empty diff is reported as listed but unread" \
+        || die "the brief no longer says: A listed path that probes \`absent\` and whose diff prints nothing was not reached by the name it was given: report it as listed but unread."
     bp="$(grep -m1 -o 'for p in .*; done' "$BRIEF")" || bp=
     { grep -qF 'test -L "<that root>/$q"' <<<"$bp" && grep -qF 'test -e "<that root>/$p"' <<<"$bp" \
         && [ "$(grep -o 'test -[Le]' <<<"$bp" | head -1)" = 'test -L' ]; } \
