@@ -1,6 +1,6 @@
 {
   "name": "watch-pr-skill",
-  "version": "2.14.6",
+  "version": "2.15.0",
   "description": "Native PR review loop, 2.x \u2014 drives the Codex and Copilot GitHub reviewers to a clean signoff, then gates the merge. No daemon: the 1.x file bus is retired.",
   "author": {
     "name": "p5ych0"
@@ -11,9 +11,10 @@
     "reviewSmall": {
       "type": "string",
       "title": "Cold review, small change",
-      "description": "Model and effort for a cold review of a small change, written model/effort. The model `default` leaves the model of the call as it was.",
-      "default": "default/medium",
+      "description": "Model and effort for a cold review of a small change, written model/effort. The model `default` leaves the model of the call as it was. `ask`, the default, leaves the choice to the operator. Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin's recommendation there, medium effort, and any other value is used there in its place.",
+      "default": "ask",
       "options": [
+        "ask",
         "default/low", "default/medium", "default/high", "default/xhigh", "default/max",
         "haiku/low", "haiku/medium", "haiku/high", "haiku/xhigh", "haiku/max",
         "sonnet/low", "sonnet/medium", "sonnet/high", "sonnet/xhigh", "sonnet/max",
@@ -24,9 +25,10 @@
     "reviewMedium": {
       "type": "string",
       "title": "Cold review, medium change",
-      "description": "Model and effort for a cold review of a medium change.",
-      "default": "default/high",
+      "description": "Model and effort for a cold review of a medium change. `ask`, the default, leaves the choice to the operator. Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin's recommendation there, high effort, and any other value is used there in its place.",
+      "default": "ask",
       "options": [
+        "ask",
         "default/low", "default/medium", "default/high", "default/xhigh", "default/max",
         "haiku/low", "haiku/medium", "haiku/high", "haiku/xhigh", "haiku/max",
         "sonnet/low", "sonnet/medium", "sonnet/high", "sonnet/xhigh", "sonnet/max",
@@ -37,9 +39,10 @@
     "reviewLarge": {
       "type": "string",
       "title": "Cold review, large change",
-      "description": "Model and effort for a cold review of a large change.",
-      "default": "default/xhigh",
+      "description": "Model and effort for a cold review of a large change. `ask`, the default, leaves the choice to the operator. Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin's recommendation there, xhigh effort, and any other value is used there in its place.",
+      "default": "ask",
       "options": [
+        "ask",
         "default/low", "default/medium", "default/high", "default/xhigh", "default/max",
         "haiku/low", "haiku/medium", "haiku/high", "haiku/xhigh", "haiku/max",
         "sonnet/low", "sonnet/medium", "sonnet/high", "sonnet/xhigh", "sonnet/max",
@@ -62,9 +65,10 @@
     "fixSmall": {
       "type": "string",
       "title": "Review fix, small pass",
-      "description": "Model and effort for a fix pass of the small tier.",
-      "default": "default/medium",
+      "description": "Model and effort for a fix pass of the small tier. `ask`, the default, leaves the choice to the operator. Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin's recommendation there, medium effort, and any other value is used there in its place.",
+      "default": "ask",
       "options": [
+        "ask",
         "default/low", "default/medium", "default/high", "default/xhigh", "default/max",
         "haiku/low", "haiku/medium", "haiku/high", "haiku/xhigh", "haiku/max",
         "sonnet/low", "sonnet/medium", "sonnet/high", "sonnet/xhigh", "sonnet/max",
@@ -75,9 +79,10 @@
     "fixMedium": {
       "type": "string",
       "title": "Review fix, medium pass",
-      "description": "Model and effort for a fix pass of the medium tier.",
-      "default": "default/high",
+      "description": "Model and effort for a fix pass of the medium tier. `ask`, the default, leaves the choice to the operator. Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin's recommendation there, high effort, and any other value is used there in its place.",
+      "default": "ask",
       "options": [
+        "ask",
         "default/low", "default/medium", "default/high", "default/xhigh", "default/max",
         "haiku/low", "haiku/medium", "haiku/high", "haiku/xhigh", "haiku/max",
         "sonnet/low", "sonnet/medium", "sonnet/high", "sonnet/xhigh", "sonnet/max",
@@ -88,9 +93,10 @@
     "fixLarge": {
       "type": "string",
       "title": "Review fix, large pass",
-      "description": "Model and effort for a fix pass of the large tier.",
-      "default": "default/xhigh",
+      "description": "Model and effort for a fix pass of the large tier. `ask`, the default, leaves the choice to the operator. Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin's recommendation there, xhigh effort, and any other value is used there in its place.",
+      "default": "ask",
       "options": [
+        "ask",
         "default/low", "default/medium", "default/high", "default/xhigh", "default/max",
         "haiku/low", "haiku/medium", "haiku/high", "haiku/xhigh", "haiku/max",
         "sonnet/low", "sonnet/medium", "sonnet/high", "sonnet/xhigh", "sonnet/max",

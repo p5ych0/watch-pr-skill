@@ -106,8 +106,11 @@ rounds' findings with their replies; fix what names a defect this change introdu
 the rest. It is a cheap pre-read in the operator's own session, not a boundary, and a round
 is the expensive part of the loop. A round's edits run in a subagent by default, since
 making an answer the session has already decided is bounded work: the call's description
-starts `review-fix:` and the tier the session names for the pass, so the hooks module sets
-its model and effort as it does the cold read's, with both left unset on the calls. Here the
+starts `review-fix:` and the tier the session names for the pass, and its model and effort
+are chosen as `SKILL.md` § Choosing a subagent's model and effort says: the call is marked
+`(plugin pick)` where the operator trusts or takes the plugin's pick, so the hooks module
+sets them from the tier, or carries the `effort`, or the `model` and `effort`, the operator
+chose. Here the
 working tree's module runs only where the session loads the working tree as the plugin, as
 § Repo arming describes. The
 judgment calls, the commit, the thread replies and the round summary stay with the session
@@ -155,7 +158,7 @@ history; an accepted limit is in `docs/decisions/`.
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
 | `agents/cold-reviewer.md` | The cold reviewer: reads a branch against its base the way the reviewers will, before a round is bought. |
 | `hooks/hooks.json` | Names the one hooks module, beside the empty command-hook record a build without function hooks needs. |
-| `hooks/tiering.ts` | The hooks module: sets model and effort on a cold-reviewer run and a `review-fix:` pass from the size of the work, and gates nothing. |
+| `hooks/tiering.ts` | The hooks module: sets model and effort on a cold-reviewer run and a `review-fix:` pass marked `(plugin pick)`, from the size of the work, and gates nothing. |
 | `tests/tiering.test.ts` | The module's cases, run with `claude plugin test .`; the suite does not run them. |
 | `.claude-plugin/` | Plugin and marketplace manifests; `plugin.json` declares the module's options. |
 

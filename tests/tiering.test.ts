@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
+import { chooseFor, register } from '../hooks/tiering'
 
 const SHA = 'a'.repeat(40)
 
@@ -52,7 +53,7 @@ const bases = (staged: { git: string[][] }) =>
 const remote = (...names: string[]) => names.map(name => `refs/remotes/origin/${name}`)
 
 const review = (prompt = 'Base ref origin/main; there is no round summary yet.') =>
-  ({ tool: 'Agent', description: 'Cold read', prompt, subagent_type: 'cold-reviewer' }) as const
+  ({ tool: 'Agent', description: 'Cold read (plugin pick)', prompt, subagent_type: 'cold-reviewer' }) as const
 
 const fix = (description: string) =>
   ({ tool: 'Agent', description, prompt: 'a.sh:4 drops the status, and b.sh:9 does too.' }) as const
@@ -129,17 +130,19 @@ test('a merge base git fails to compute ends the sizing, where one it reports ab
   const staged = stage(on)
   staged.numstat = '70\t0\ta.sh\n'
   staged.broken = remote('main')
-  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
+  await $.tool.call(review())
   expect(bases(staged)).toEqual(remote('main'))
-  expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
+  expect(staged.seen).toStrictEqual([{ model: undefined, effort: undefined }])
+  expect(staged.logs).toEqual(['cold review left as called, its size could not be measured'])
 })
 
 test('a listing of the remote\'s refs that fails leaves the cold review as called', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '2\t0\ta.sh\n'
   staged.refs = undefined
-  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
-  expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
+  await $.tool.call(review())
+  expect(staged.seen).toStrictEqual([{ model: undefined, effort: undefined }])
+  expect(staged.logs).toEqual(['cold review left as called, its size could not be measured'])
   expect(bases(staged)).toEqual([])
 })
 
@@ -147,13 +150,17 @@ test('a listing of untracked files, or a diff, that fails leaves the cold review
   const staged = stage(on)
   staged.numstat = '2\t0\ta.sh\n'
   staged.untracked = undefined
-  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
+  await $.tool.call(review())
   staged.untracked = ''
   staged.diffFails = true
-  await $.tool.call({ ...review(), model: 'fable', effort: 'max' })
-  expect(staged.seen).toEqual([
-    { model: 'opus', effort: 'low' },
-    { model: 'fable', effort: 'max' },
+  await $.tool.call(review())
+  expect(staged.seen).toStrictEqual([
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
+  ])
+  expect(staged.logs).toEqual([
+    'cold review left as called, its size could not be measured',
+    'cold review left as called, its size could not be measured',
   ])
   expect(bases(staged)).toEqual(remote('main'))
 })
@@ -162,16 +169,17 @@ test('a tree holding untracked files leaves the cold review as called', async ($
   const staged = stage(on)
   staged.numstat = '2\t0\ta.sh\n'
   staged.untracked = 'notes/large.md\n'
-  await $.tool.call({ ...review(), model: 'opus', effort: 'low' })
-  expect(staged.seen).toEqual([{ model: 'opus', effort: 'low' }])
+  await $.tool.call(review())
+  expect(staged.seen).toStrictEqual([{ model: undefined, effort: undefined }])
+  expect(staged.logs).toEqual(['cold review left as called, its size could not be measured'])
   expect(bases(staged)).toEqual([])
 })
 
 test('a review fix takes the tier its description names, ahead of any count', async ($, on) => {
   const staged = stage(on)
-  await $.tool.call(fix('review-fix: small, 9 findings'))
-  await $.tool.call(fix('Review-Fix: MEDIUM'))
-  await $.tool.call(fix('review-fix:large, 1 finding'))
+  await $.tool.call(fix('review-fix: small, 9 findings (plugin pick)'))
+  await $.tool.call(fix('Review-Fix: MEDIUM (plugin pick)'))
+  await $.tool.call(fix('review-fix:large, 1 finding (plugin pick)'))
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'medium' },
     { model: undefined, effort: 'high' },
@@ -187,15 +195,15 @@ test('a review fix takes the tier its description names, ahead of any count', as
 
 test('a tier is read only where it comes first and is one of the three', async ($, on) => {
   const staged = stage(on)
-  await $.tool.call(fix('review-fix: 9 findings, small'))
-  await $.tool.call({ ...fix('review-fix: larger'), effort: 'low' })
-  await $.tool.call({ ...fix('review-fix: the small ones'), effort: 'max' })
-  await $.tool.call({ ...fix('review-fix: small-scale rewrite, 6 findings'), effort: 'high' })
-  expect(staged.seen).toEqual([
+  await $.tool.call(fix('review-fix: 9 findings, small (plugin pick)'))
+  await $.tool.call(fix('review-fix: larger (plugin pick)'))
+  await $.tool.call(fix('review-fix: the small ones (plugin pick)'))
+  await $.tool.call(fix('review-fix: small-scale rewrite, 6 findings (plugin pick)'))
+  expect(staged.seen).toStrictEqual([
     { model: undefined, effort: 'xhigh' },
-    { model: undefined, effort: 'low' },
-    { model: undefined, effort: 'max' },
-    { model: undefined, effort: 'high' },
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
   ])
   expect(staged.logs).toEqual([
     'review fix, 9 findings (large): xhigh effort',
@@ -207,9 +215,9 @@ test('a tier is read only where it comes first and is one of the three', async (
 
 test('a review fix is sized by the count its description states', async ($, on) => {
   const staged = stage(on)
-  await $.tool.call(fix('review-fix: 1 finding'))
-  await $.tool.call(fix('Review-Fix: 2 findings in pr-watch.sh'))
-  await $.tool.call(fix('review-fix:4'))
+  await $.tool.call(fix('review-fix: 1 finding (plugin pick)'))
+  await $.tool.call(fix('Review-Fix: 2 findings in pr-watch.sh (plugin pick)'))
+  await $.tool.call(fix('review-fix:4 (plugin pick)'))
   expect(staged.seen).toEqual([
     { model: undefined, effort: 'medium' },
     { model: undefined, effort: 'high' },
@@ -223,26 +231,95 @@ test('a review fix is sized by the count its description states', async ($, on) 
   expect(staged.git).toEqual([])
 })
 
-test('the shipped ladder sets the effort and leaves the model the caller set', async ($, on) => {
+test('a call that sets its own model or effort is left exactly as called, and runs no git', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '2\t0\ta.sh\n'
-  await $.tool.call({ ...review(), model: 'fable', effort: 'max' })
-  await $.tool.call({ ...fix('review-fix: 1 finding'), model: 'haiku', effort: 'low' })
-  expect(staged.seen).toEqual([
-    { model: 'fable', effort: 'medium' },
-    { model: 'haiku', effort: 'medium' },
+  await $.tool.call({ ...review(), model: 'fable' })
+  await $.tool.call({ ...fix('review-fix: 1 finding (plugin pick)'), effort: 'low' })
+  await $.tool.call({ ...review(), model: 'haiku', effort: 'max' })
+  expect(staged.seen).toStrictEqual([
+    { model: 'fable', effort: undefined },
+    { model: undefined, effort: 'low' },
+    { model: 'haiku', effort: 'max' },
   ])
+  expect(staged.git).toEqual([])
+  expect(staged.logs).toEqual([
+    'cold review left as called, the call sets its own model or effort',
+    'review fix left as called, the call sets its own model or effort',
+    'cold review left as called, the call sets its own model or effort',
+  ])
+})
+
+test('an unmarked cold review or fix pass is left as called, and runs no git', async ($, on) => {
+  const staged = stage(on)
+  staged.numstat = '2\t0\ta.sh\n'
+  await $.tool.call({ ...review(), description: 'Cold read' })
+  await $.tool.call(fix('review-fix: large, 2 findings'))
+  expect(staged.seen).toStrictEqual([
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
+  ])
+  expect(staged.git).toEqual([])
+  expect(staged.logs).toEqual([
+    'cold review left as called, not marked for a plugin pick',
+    'review fix left as called, not marked for a plugin pick',
+  ])
+})
+
+test('the mark counts only at the end of the description, in any case, before any trailing space', async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call(fix('review-fix: small, 1 finding (Plugin Pick)  '))
+  await $.tool.call(fix('review-fix: small (plugin pick), 1 finding'))
+  await $.tool.call(fix('review-fix: small, 1 finding (plugin picks)'))
+  expect(staged.seen).toStrictEqual([
+    { model: undefined, effort: 'medium' },
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
+  ])
+  expect(staged.logs).toEqual([
+    'review fix, tier named by the session (small): medium effort',
+    'review fix left as called, not marked for a plugin pick',
+    'review fix left as called, not marked for a plugin pick',
+  ])
+})
+
+test('a marked pass takes the recommendation at ask, and the configured rung otherwise', () => {
+  const recommended = { effort: 'xhigh' } as const
+  expect(chooseFor('ask', recommended)).toStrictEqual({ effort: 'xhigh' })
+  expect(chooseFor('sonnet/medium', recommended)).toStrictEqual({ model: 'sonnet', effort: 'medium' })
+  expect(chooseFor('default/high', recommended)).toStrictEqual({ effort: 'high' })
+  expect(chooseFor('gpt/medium', recommended)).toBeUndefined()
+  expect(chooseFor('sonnet/extreme', recommended)).toBeUndefined()
+})
+
+test('a marked pass whose rung holds a value no option offers is left as called', async () => {
+  // The kit reads such a stored value as the default, so the registrar is driven by hand.
+  let hook: ((...args: unknown[]) => Promise<unknown>) | undefined
+  const on = ((event: string, matcher: unknown, registered: typeof hook) => {
+    hook = registered
+  }) as unknown as On
+  register(on, { fixSmall: 'gpt/low', fixMedium: 'ask', fixLarge: 'ask', fixSmallFindings: 1, fixLargeFindings: 4 })
+  const logs: string[] = []
+  const seen: Seen[] = []
+  const engine = { plugin: { name: 'watch-pr-skill' }, ui: { log: (text: string) => void logs.push(text) } }
+  const pass = (e: Seen) => {
+    seen.push({ model: e.model, effort: e.effort })
+    return {}
+  }
+  await hook?.(engine, fix('review-fix: small, 1 finding (plugin pick)'), pass)
+  expect(seen).toStrictEqual([{ model: undefined, effort: undefined }])
+  expect(logs).toEqual(['watch-pr-skill: review fix, tier named by the session (small): left as called, no pick chosen'])
 })
 
 test('a call whose size cannot be measured goes through as called', async ($, on) => {
   const staged = stage(on)
-  await $.tool.call({ ...review(), model: 'fable', effort: 'xhigh' })
-  await $.tool.call({ ...fix('review-fix: round 2'), model: 'opus' })
-  await $.tool.call({ ...fix('review-fix: 0 findings'), effort: 'max' })
-  expect(staged.seen).toEqual([
-    { model: 'fable', effort: 'xhigh' },
-    { model: 'opus', effort: undefined },
-    { model: undefined, effort: 'max' },
+  await $.tool.call(review())
+  await $.tool.call(fix('review-fix: round 2 (plugin pick)'))
+  await $.tool.call(fix('review-fix: 0 findings (plugin pick)'))
+  expect(staged.seen).toStrictEqual([
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
   ])
   expect(staged.logs).toEqual([
     'cold review left as called, its size could not be measured',
@@ -270,16 +347,16 @@ test('a probe that does not run, or outlives its bound, ends the sizing and the 
     seen.push({ model: e.model, effort: e.effort })
     return { result: {} }
   })
-  await $.tool.call({ ...review(), effort: 'low' })
-  expect(seen).toEqual([{ model: undefined, effort: 'low' }])
+  await $.tool.call(review())
+  expect(seen).toStrictEqual([{ model: undefined, effort: undefined }])
   expect(probes.map(argv => argv.find(arg => arg === 'ls-files' || arg === 'for-each-ref'))).toEqual(['ls-files', 'for-each-ref'])
 })
 
 test('any other agent call, and a fork, is left alone and runs no git', async ($, on) => {
   const staged = stage(on)
   staged.numstat = '900\t900\ta.sh\n'
-  await $.tool.call({ tool: 'Agent', description: 'Find the review-fix: 9 helper', prompt: 'Where is a.sh:4 used?', model: 'haiku' })
-  await $.tool.call({ ...fix('review-fix: 9 findings'), subagent_type: 'fork' })
+  await $.tool.call({ tool: 'Agent', description: 'Find the review-fix: 9 helper (plugin pick)', prompt: 'Where is a.sh:4 used?', model: 'haiku' })
+  await $.tool.call({ ...fix('review-fix: 9 findings (plugin pick)'), subagent_type: 'fork' })
   expect(staged.seen).toEqual([
     { model: 'haiku', effort: undefined },
     { model: undefined, effort: undefined },
@@ -289,20 +366,52 @@ test('any other agent call, and a fork, is left alone and runs no git', async ($
 })
 
 test(
-  'a rung that names a model replaces the caller\'s, and the bounds come from the options',
+  'a rung that names a model sets it on a marked call, never over the call\'s own, and the bounds come from the options',
   { options: { reviewSmall: 'haiku/low', reviewSmallLines: 500, fixLarge: 'fable/max', fixLargeFindings: 2 } },
   async ($, on) => {
     const staged = stage(on)
     staged.numstat = '300\t100\ta.sh\n'
+    await $.tool.call(review())
+    await $.tool.call(fix('review-fix: 2 findings (plugin pick)'))
     await $.tool.call({ ...review(), model: 'opus' })
-    await $.tool.call(fix('review-fix: 2 findings'))
-    expect(staged.seen).toEqual([
+    expect(staged.seen).toStrictEqual([
       { model: 'haiku', effort: 'low' },
       { model: 'fable', effort: 'max' },
+      { model: 'opus', effort: undefined },
     ])
     expect(staged.logs).toEqual([
       'cold review, 400 changed lines in 1 file (small): haiku at low effort',
       'review fix, 2 findings (large): fable at max effort',
+      'cold review left as called, the call sets its own model or effort',
+    ])
+  },
+)
+
+test(
+  'a configured rung is ignored on an unmarked call, which runs no git, and applies to a marked one beside a rung at ask',
+  { options: { reviewSmall: 'haiku/low', fixLarge: 'fable/max' } },
+  async ($, on) => {
+    const staged = stage(on)
+    staged.numstat = '2\t0\ta.sh\n'
+    await $.tool.call({ ...review(), description: 'Cold read' })
+    await $.tool.call(fix('review-fix: 5 findings'))
+    expect(staged.git).toEqual([])
+    await $.tool.call(review())
+    await $.tool.call(fix('review-fix: 5 findings (plugin pick)'))
+    await $.tool.call(fix('review-fix: 1 finding (plugin pick)'))
+    expect(staged.seen).toStrictEqual([
+      { model: undefined, effort: undefined },
+      { model: undefined, effort: undefined },
+      { model: 'haiku', effort: 'low' },
+      { model: 'fable', effort: 'max' },
+      { model: undefined, effort: 'medium' },
+    ])
+    expect(staged.logs).toEqual([
+      'cold review left as called, not marked for a plugin pick',
+      'review fix left as called, not marked for a plugin pick',
+      'cold review, 2 changed lines in 1 file (small): haiku at low effort',
+      'review fix, 5 findings (large): fable at max effort',
+      'review fix, 1 finding (small): medium effort',
     ])
   },
 )
@@ -316,22 +425,25 @@ test(
       staged.numstat = numstat
       await $.tool.call(review())
     }
-    for (const count of [3, 4]) await $.tool.call(fix(`review-fix: ${count} findings`))
+    for (const count of [3, 4]) await $.tool.call(fix(`review-fix: ${count} findings (plugin pick)`))
     expect(staged.seen.map(seen => seen.effort)).toEqual(['medium', 'medium', 'xhigh', 'medium', 'xhigh'])
     expect(staged.logs.map(log => /\((\w+)\)/.exec(log)?.[1])).toEqual(['small', 'small', 'large', 'small', 'large'])
   },
 )
 
-test('no call is refused: sized, unsized or unrelated, each reaches the tool once', async ($, on) => {
+test('no call is refused: sized, unsized, unmarked, set by its caller or unrelated, each reaches the tool once', async ($, on) => {
   const staged = stage(on)
   const answers = []
   staged.numstat = '10\t0\ta.sh\n'
   answers.push(await $.tool.call(review()))
+  answers.push(await $.tool.call({ ...review(), description: 'Cold read' }))
+  answers.push(await $.tool.call({ ...review(), model: 'haiku' }))
   staged.numstat = undefined
   answers.push(await $.tool.call(review()))
+  answers.push(await $.tool.call(fix('review-fix: 1 finding (plugin pick)')))
+  answers.push(await $.tool.call(fix('review-fix: the findings of round 2 (plugin pick)')))
   answers.push(await $.tool.call(fix('review-fix: 1 finding')))
-  answers.push(await $.tool.call(fix('review-fix: the findings of round 2')))
   answers.push(await $.tool.call({ tool: 'Agent', description: 'Explore', prompt: 'Look around.' }))
-  expect(answers.map(answer => answer.deny)).toEqual([undefined, undefined, undefined, undefined, undefined])
-  expect(staged.seen.length).toBe(5)
+  expect(answers.map(answer => answer.deny)).toEqual(Array(8).fill(undefined))
+  expect(staged.seen.length).toBe(8)
 })

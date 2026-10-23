@@ -160,6 +160,11 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   step 1 asks, and in either mode the rule that applied is named on the PR; unattended,
   `SKILL.md`'s rule is kept. A change that lets a host rule lift what a helper proves or
   gates, or that takes the host rule unattended, is a blocking finding.
+- **A subagent's model and effort are the operator's to choose.** Every rung in
+  `.claude-plugin/plugin.json` ships `ask`, and the hooks module acts only on an Agent
+  call the session marked `(plugin pick)`. A rung default other than `ask`, or any pick
+  applied to an Agent call the session did not mark `(plugin pick)` or that sets its own
+  `model` or `effort`, is a finding.
 - **A guard where a removal would do is a finding.** A check is a name that can
   be shadowed, mis-parsed or forgotten; a removed dependency stays removed. The
   author is required to say **on the thread** which of the two they took and why;

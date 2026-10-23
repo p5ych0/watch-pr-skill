@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.15.0] — 2026-10-24
+
+- **A subagent's model and effort are the operator's choice, asked before each pass.** The
+  ladder in `plugin.json` gave every rung a default, `default/medium` for a small pass up
+  to `default/xhigh` for a large one, and the hooks module applied it to every cold read
+  and every `review-fix:` pass, over any effort the call itself set. So every install ran
+  the effort the plugin chose, which the operator never chose, and the log line naming the
+  pick came as the pass started, too late to change it. Every rung now ships `ask`, first
+  among its options. The module acts only on a call whose description ends `(plugin pick)`.
+  There it applies its recommendation, the session's model at `medium`, `high` or `xhigh`
+  effort by size, or a rung the operator set in its place. A rung an install saved, such as
+  the 2.14.x defaults `default/medium` up to `default/xhigh`, is now applied only to a pass
+  the session marks, so the old saved defaults no longer apply on their own. A call that
+  sets its own `model` or `effort` is left as made and not sized, and so is every unmarked
+  call, so no `git` runs for either. `SKILL.md`'s new § Choosing a subagent's model and
+  effort has an attended session stop before each cold read and each fix pass and ask in
+  chat, naming the pass and its size, a cold read's by `git diff --shortstat --no-renames`
+  as the module counts, with five options: the plugin's pick, the session's model at a
+  named effort, a lighter model at a named effort, trust the picks for this session, or
+  trust them always. Always is `WATCH_PR_TRUST_PICKS=1`, a new knob the operator adds under
+  `env` in their settings; the session gives the line and does not write it. Setup's ready
+  record now ends `picks=trusted` where that knob is exported and `picks=ask` otherwise,
+  after `mode=`, and the session reads the trust from there. The answer is enacted on the
+  call, as the mark or as `model` and `effort`. Trusted, the session asks nothing and marks
+  each pass; unattended and untrusted, it asks nothing and marks nothing, so the pass runs
+  on the session's model and effort, and that answer, unlike the other unattended ones, is
+  not recorded on the PR. The question is not a STOP: no continuation prompt or outside
+  note follows it, and the host project's rules are not compared again. A compaction
+  summary keeps whether the operator trusted the picks. Each rung's description in
+  `plugin.json` says any value applies only to a pass marked `(plugin pick)`. README's §
+  Subagent model and effort tables the picks and the alternatives with what each costs and
+  risks, and cites #389 and #393, where those alternatives are measured, rather than
+  changing a default. `AGENTS.md` makes a rung default other than `ask`, or any pick on an
+  unmarked call or over a call's own model or effort, a finding. The module's cases mark
+  every call that expects a pick, replace the case that held the old override, and add
+  cases for a call that sets its own model or effort, an unmarked pass, where the mark is
+  read, configured rungs on marked and unmarked calls, `chooseFor` alone, and a marked pass
+  whose rung holds a value no option offers, driven through the registrar by hand since the
+  kit reads such a stored value as the default. `test-hooks.sh` holds every rung's default
+  at `ask` and its description, and `test-pr-skill-contract.sh` pins the new section whole,
+  its place after step 5's hand-over, the sixth unattended answer, the knob in both exports
+  and the compaction entry; `test-pr-setup.sh` holds `picks=` unset, exported `1` and any
+  other value. Minor: a new stop and a new knob. Closes #407.
+
 ## [2.14.6] — 2026-10-23
 
 - **The cold read lists a non-ASCII name as the path, and names each file left unread.**

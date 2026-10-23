@@ -31,9 +31,10 @@ clean → 7 STOP, and on the operator's word the Copilot phase, which is 3–6 a
 
 With `WATCH_PR_AUTONOMOUS=1` exported the operator has made the decision stops in advance:
 each carries an **Unattended:** line naming its answer, taken without asking and recorded
-on the PR as the operator's word would be. A stop that exists because something could not
-be read, proved or told apart has no such line and is never answered by it. Setup says
-which mode this session runs in, as `mode=unattended` or `mode=attended` on its record.
+on the PR as the operator's word would be, the model-and-effort answer excepted. A stop
+that exists because something could not be read, proved or told apart has no such line and
+is never answered by it. Setup says which mode this session runs in, as `mode=unattended`
+or `mode=attended` on its record.
 
 ## How to work this loop
 
@@ -83,7 +84,7 @@ Once per session, from the checkout, on the PR's branch:
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 [ -x "$RB_SCRIPTS/pr-setup.sh" ] || { echo "ABORT: the plugin helper scripts were not found"; exit 1; }
-export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
+export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS WATCH_PR_TRUST_PICKS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
 case "${TMPDIR:-}" in /*) RB_SETUP_DIR="$TMPDIR/watch-pr-setup.$$.$RANDOM$RANDOM" ;; *) { mkdir -m 700 "$HOME/.watch-pr" 2>/dev/null || [ -d "$HOME/.watch-pr" ]; } || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup.$$.$RANDOM$RANDOM" ;; esac
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR" \
     || { [ $? -eq 2 ] && { mkdir -m 700 "$HOME/.watch-pr" 2>/dev/null || [ -d "$HOME/.watch-pr" ] || { echo "ABORT: setup failed; $HOME/.watch-pr could not be created"; exit 1; }; } && RB_SETUP_DIR="$HOME/.watch-pr/watch-pr-setup-2.$$.$RANDOM$RANDOM" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-setup.sh "$RB_SETUP_DIR"; } \
@@ -97,10 +98,11 @@ value assigned in the same command reaches the helpers, which are separate proce
 `pr-setup.sh` reads the origin through `pr-origin.sh`, refuses one that is not a GitHub
 network transport, writes it into `$RB_SETUP_DIR/origin` as data, and creates the four
 empty working files under `$RB_SETUP_DIR/work`; its record ends `mode=unattended` or
-`mode=attended`. An unset or relative `$TMPDIR` is not a parent; `~/.watch-pr` is, created
-mode 700 where missing, so what setup leaves stays out of `$HOME` itself. Status 2 from
-`pr-setup.sh`, or from the pin below, means the storage refused, and the one retry — under
-`~/.watch-pr`, or under a second leaf — is the bound
+`mode=attended`, then `picks=trusted` where `WATCH_PR_TRUST_PICKS=1` is exported and
+`picks=ask` otherwise. An unset or relative `$TMPDIR` is not a parent; `~/.watch-pr` is,
+created mode 700 where missing, so what setup leaves stays out of `$HOME` itself. Status 2
+from `pr-setup.sh`, or from the pin below, means the storage refused, and the one retry —
+under `~/.watch-pr`, or under a second leaf — is the bound
 `docs/decisions/2026-08-26-transport-candidate-in-argv.md` accepts a squat at; 1 is
 terminal. Nothing under `$RB_SETUP_DIR` is ever removed. Setup's last line,
 `RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…`, is what every later command starts from.
@@ -116,7 +118,7 @@ is proved before step 1.
 
 ```bash
 RB_SCRIPTS=… RB_SETUP_DIR=… REPO_DIR=…
-export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
+export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS WATCH_PR_TRUST_PICKS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS
 export REVIEW_BUS_REMOTE="$(<"$RB_SETUP_DIR/origin")"
 . "$RB_SCRIPTS/identitylib.sh" || { echo "ABORT: the identity parser could not be loaded"; exit 1; }
 [ -n "$REVIEW_BUS_REMOTE" ] && [[ $REVIEW_BUS_REMOTE != *$'\n'* ]] && rb_identity || { echo "ABORT: the origin read back is not a usable identity"; exit 1; }
@@ -169,6 +171,8 @@ of it costs a round:
 - each host rule that differs from this document's, and which of the two applies;
 - whether the operator has had step 5's note on a code graph, which is given once per
   session;
+- whether the operator has trusted the plugin's model picks, for this session or always
+  (setup's `picks=trusted`, or an e) answer);
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
@@ -228,11 +232,11 @@ review is on, before the PR is opened, since opening it queues a pass. The plugi
 project-level `cold-reviewer`, use that one. It reads the branch against the base the way
 Codex and Copilot will. Give it the base ref, the PR body and word that there is no round
 summary yet. Name the base as its `origin/…` ref, ahead of any other such ref the prompt
-carries, and leave `model` and `effort` unset on the call: where the CLI runs the plugin's
-hooks module, it sets them from the size of the change against the first such ref the
-checkout holds. Fix what it names as a defect this change introduced, handing the edits over
-as step 5 describes, committing, running 5a and pushing before the request, and file the
-rest as issues. It is a pre-read, not a gate:
+carries: where the CLI runs the plugin's hooks module, it sizes the change against the
+first such ref the checkout holds. Choose the call's model and effort as step 5's
+*Choosing a subagent's model and effort* says. Fix what it names as a defect this change
+introduced, handing the edits over as step 5 describes, committing, running 5a and pushing
+before the request, and file the rest as issues. It is a pre-read, not a gate:
 nothing refuses when it is skipped, and its findings are not a reviewer's.
 
 ## 2. Request the review — Codex first
@@ -367,9 +371,9 @@ make them yourself.
 
 - **Mark the call.** Start its description with `review-fix:`, then the tier of the pass,
   `small`, `medium` or `large`, then the number of findings, as in
-  `review-fix: large, 2 findings`. Leave `model` and `effort` unset: where the CLI runs the
-  plugin's hooks module, it sets them from the tier, and from the number where no tier is
-  named.
+  `review-fix: large, 2 findings`. Where the CLI runs the plugin's hooks module, it sizes the
+  pass by the tier, and by the number where no tier is named. Choose the call's model and
+  effort as *Choosing a subagent's model and effort* below says.
 - **Name the tier by the hardest finding in the pass.** `small` is an edit in one place that
   changes no behaviour: a wording, a rename, an added assertion. `large` is a fix that
   changes a contract or a design, or that reaches through code, tests and documents at once.
@@ -437,6 +441,45 @@ Then, in this order:
    back, so it follows the pushed, green head;
 6. **run `post`** — it re-proves that head, posts the summary and re-requests `$WHO`. The
    irreversible parts of a round come last.
+
+### Choosing a subagent's model and effort
+
+The plugin ships no model or effort pick: each rung of its ladder is `ask` until the
+operator sets it, and the hooks module acts only on a call marked for it. Before each cold
+read and each fix pass, settle what the subagent runs on. The question is not a STOP: no
+continuation prompt or note outside the checkout follows it, and answering it is not
+resuming after a stop, so the host project's rules are not compared again.
+
+**In an attended session where the operator has not trusted the plugin's picks**, stop
+before the pass and ask in chat. Name the pass and its size: a fix pass by its tier and its
+number of findings; a cold read by the lines it changes, which
+`git diff --shortstat --no-renames` against the merge base with the base ref reports,
+small up to 60 and large from 200 changed lines by default, bounds `/plugin configure` can
+move. Offer these, each with one line on what it costs or risks:
+
+- **a)** the plugin's pick for that size: the rung the operator configured, or where it is
+  left at `ask`, the session's model at `medium`, `high` or `xhigh` effort by size;
+  `/plugin configure watch-pr-skill` shows which;
+- **b)** the session's model at a named effort;
+- **c)** a lighter model at a named effort;
+- **d)** trust the plugin's picks for the rest of this session;
+- **e)** trust them always: give the operator the line to add under `env` in their
+  settings, `"WATCH_PR_TRUST_PICKS": "1"`, and do not write it. The answer also trusts the
+  rest of this session, since setup's record shows `picks=ask` until the next session.
+
+Enact the answer on the call. For a, d or e, end the description with ` (plugin pick)`, as
+in `review-fix: large, 2 findings (plugin pick)`, and leave `model` and `effort` unset:
+where the CLI runs the hooks module, it sets them from the size. For b, set `effort` only,
+which keeps the session's model; for c, set `model` and `effort`. The module leaves a call
+that sets either as it was made, and leaves a cold read on a tree holding untracked files
+unsized, so a) and a trusted pass run there as the session made the call.
+
+**Where the operator has trusted the picks**, for this session, or always, which setup's
+record shows as `picks=trusted`, ask nothing and mark the call.
+
+**Unattended:** where the operator has not trusted the picks, ask nothing and mark nothing.
+The pass runs on the session's model and effort. Unlike the other unattended answers, this
+one is not recorded on the PR.
 
 ### 5a. Self-check before the push
 

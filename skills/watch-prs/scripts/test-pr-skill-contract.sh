@@ -227,7 +227,9 @@ grep -qE '(^|[^a-z])(source|\.) "\$RB_SETUP_DIR' <<<"$fences" \
     && die "a setup handoff is sourced" || pass "…and no handoff file is sourced"
 has 'mode=unattended' && has 'mode=attended' \
     && pass "setup's record says which mode the session runs in" || die "the mode is not read off setup's record"
-export_line="$(grep -E '^export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS$' "$TMP/fence.1" || true)"
+has '`picks=trusted`' && has '`picks=ask`' \
+    && pass "…and whether the operator trusts the plugin's picks" || die "the trust in the picks is not read off setup's record"
+export_line="$(grep -E '^export REVIEW_ROUND_THRESHOLD REVIEW_MERGE_STRICT WATCH_PR_AUTONOMOUS WATCH_PR_TRUST_PICKS PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT PR_WATCH_INTERVAL PR_WATCH_TIMEOUT PR_WATCH_PROBE_TIMEOUT RB_SUITE_JOBS$' "$TMP/fence.1" || true)"
 _exl="$(grep -n '^export REVIEW_ROUND_THRESHOLD ' "$TMP/fence.1" | head -1 | cut -d: -f1 || true)"
 _stl="$(grep -n -F 'pr-setup.sh "$RB_SETUP_DIR"' "$TMP/fence.1" | head -1 | cut -d: -f1 || true)"
 { [ -n "$export_line" ] && [ -n "$_exl" ] && [ -n "$_stl" ] && [ "$_exl" -lt "$_stl" ]; } \
@@ -334,6 +336,8 @@ of it costs a round:
 - each host rule that differs from this document'\''s, and which of the two applies;
 - whether the operator has had step 5'\''s note on a code graph, which is given once per
   session;
+- whether the operator has trusted the plugin'\''s model picks, for this session or always
+  (setup'\''s `picks=trusted`, or an e) answer);
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
@@ -652,9 +656,12 @@ else
 fi
 
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
+hasf "each carries an **Unattended:** line naming its answer, taken without asking and recorded on the PR as the operator's word would be, the model-and-effort answer excepted." \
+    && pass "…and every unattended answer but the model-and-effort one is recorded on the PR" \
+    || die "the opening paragraph does not except the model-and-effort answer from the answers recorded on the PR"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
-{ [ "$_rc" -le 1 ] && [ "$_n" -eq 5 ]; } \
-    && pass "…and exactly five stops carry an unattended answer" || die "expected five unattended answers, found '$_n'"
+{ [ "$_rc" -le 1 ] && [ "$_n" -eq 6 ]; } \
+    && pass "…and exactly six stops carry an unattended answer" || die "expected six unattended answers, found '$_n'"
 section() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL"; }
 at() {
     local s; s="$(section "$1" "$2")" || { die "the $3 could not be read"; return 0; }
@@ -770,6 +777,56 @@ _gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
     && before '**Point it at a code graph' '**Read its diff and its report'; } \
     && pass "a fix pass is pointed at a code graph the checkout holds, the bullet pinned whole, before the report is read" \
     || die "the code-graph bullet is not the text the test pins, or does not come before the report is read"
+at "### Choosing a subagent's model and effort" '### 5a. ' 'model-and-effort question'
+s="$(section "### Choosing a subagent's model and effort" '### 5a. Self-check before the push')" || s=
+_phave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _phave=
+_pwant='The plugin ships no model or effort pick: each rung of its ladder is `ask` until the
+operator sets it, and the hooks module acts only on a call marked for it. Before each cold
+read and each fix pass, settle what the subagent runs on. The question is not a STOP: no
+continuation prompt or note outside the checkout follows it, and answering it is not
+resuming after a stop, so the host project'\''s rules are not compared again.
+
+**In an attended session where the operator has not trusted the plugin'\''s picks**, stop
+before the pass and ask in chat. Name the pass and its size: a fix pass by its tier and its
+number of findings; a cold read by the lines it changes, which
+`git diff --shortstat --no-renames` against the merge base with the base ref reports,
+small up to 60 and large from 200 changed lines by default, bounds `/plugin configure` can
+move. Offer these, each with one line on what it costs or risks:
+
+- **a)** the plugin'\''s pick for that size: the rung the operator configured, or where it is
+  left at `ask`, the session'\''s model at `medium`, `high` or `xhigh` effort by size;
+  `/plugin configure watch-pr-skill` shows which;
+- **b)** the session'\''s model at a named effort;
+- **c)** a lighter model at a named effort;
+- **d)** trust the plugin'\''s picks for the rest of this session;
+- **e)** trust them always: give the operator the line to add under `env` in their
+  settings, `"WATCH_PR_TRUST_PICKS": "1"`, and do not write it. The answer also trusts the
+  rest of this session, since setup'\''s record shows `picks=ask` until the next session.
+
+Enact the answer on the call. For a, d or e, end the description with ` (plugin pick)`, as
+in `review-fix: large, 2 findings (plugin pick)`, and leave `model` and `effort` unset:
+where the CLI runs the hooks module, it sets them from the size. For b, set `effort` only,
+which keeps the session'\''s model; for c, set `model` and `effort`. The module leaves a call
+that sets either as it was made, and leaves a cold read on a tree holding untracked files
+unsized, so a) and a trusted pass run there as the session made the call.
+
+**Where the operator has trusted the picks**, for this session, or always, which setup'\''s
+record shows as `picks=trusted`, ask nothing and mark the call.
+
+**Unattended:** where the operator has not trusted the picks, ask nothing and mark nothing.
+The pass runs on the session'\''s model and effort. Unlike the other unattended answers, this
+one is not recorded on the PR.
+'
+_pwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_pwant")" || _pwant=
+{ [ -n "$_phave" ] && [ -n "$_pwant" ] && [ "$_phave" = "$_pwant" ] \
+    && grep -qxF -- "### Choosing a subagent's model and effort" "$SKILL" \
+    && before '- **Read its diff and its report' "### Choosing a subagent's model and effort" \
+    && before "### Choosing a subagent's model and effort" '### 5a. Self-check before the push' \
+    && hasf "Choose the call's model and effort as step 5's *Choosing a subagent's model and effort* says." \
+    && hasf "Choose the call's model and effort as *Choosing a subagent's model and effort* below says." \
+    && ! has 'Leave `model` and `effort` unset' && ! hasf 'leave `model` and `effort` unset on the call'; } \
+    && pass "the model-and-effort question is pinned whole after step 5's hand-over, and the cold read and the fix pass both point at it" \
+    || die "the model-and-effort section is not the text the test pins, is misplaced, or the cold read or the fix pass still says to leave model and effort unset"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
@@ -815,6 +872,20 @@ if [ -f "$README" ]; then
     s="$(awk '$0 == "### The stops" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || s=
     grep -q '^[0-9][0-9]*\. \*\*A host rule that differs\.\*\*' <<<"$s" \
         && pass "README's list of the stops names the host-rules stop" || die "README's The stops does not name the host-rules stop"
+    _us="$(awk '$0 == "### Running unattended" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _us=
+    _ms="$(awk '$0 == "### Subagent model and effort" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _ms=
+    { grep -q "^[0-9][0-9]*\. \*\*A subagent's model and effort\.\*\*" <<<"$s" \
+        && grep -q "^- \*\*a subagent's model and effort\*\*: unless you trusted the plugin's picks, mark$" <<<"$_us" \
+        && grep -q '^| `WATCH_PR_TRUST_PICKS` | unset | `1` trusts' "$README" \
+        && grep -qxF '| `reviewSmall`, `reviewMedium`, `reviewLarge` | `ask`, `ask`, `ask` | model and effort for a marked cold review of each size |' <<<"$_ms" \
+        && grep -qxF '| `fixSmall`, `fixMedium`, `fixLarge` | `ask`, `ask`, `ask` | model and effort for a marked fix pass of each tier |' <<<"$_ms" \
+        && grep -qxF '{ "env": { "WATCH_PR_TRUST_PICKS": "1" } }' <<<"$_ms" \
+        && grep -qF '(plugin pick)' <<<"$_ms" && grep -qF 'measured in #389' <<<"$_ms" && grep -qF 'measured in #393' <<<"$_ms" && ! grep -qF 'under trial' <<<"$_ms"; } \
+        && pass "README names the model-and-effort stop and its unattended answer, the trust knob, every rung at ask, and the picks with #389 and #393" \
+        || die "README's account of the model-and-effort question, the trust knob or the rung defaults drifted"
+    grep -qF 'A rung default other than `ask`, or any pick applied to an Agent call the session did not mark `(plugin pick)` or that sets its own `model` or `effort`, is a finding.' <<<"$_af" \
+        && pass "…and AGENTS.md makes a shipped pick, or one over an unmarked or self-set call, a finding" \
+        || die "AGENTS.md does not hold the rung defaults and the mark to review"
     grep -q 'Review-Pause-Acknowledged' "$README" \
         && pass "README names the record markers a body may not carry" || die "README no longer names the markers"
     grep -q 'PR_WATCH_PROBE_TIMEOUT' "$README" \
