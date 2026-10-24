@@ -31,10 +31,10 @@ clean → 7 STOP, and on the operator's word the Copilot phase, which is 3–6 a
 
 With `WATCH_PR_AUTONOMOUS=1` exported the operator has made the decision stops in advance:
 each carries an **Unattended:** line naming its answer, taken without asking and recorded
-on the PR as the operator's word would be, the model-and-effort answer excepted. A stop
-that exists because something could not be read, proved or told apart has no such line and
-is never answered by it. Setup says which mode this session runs in, as `mode=unattended`
-or `mode=attended` on its record.
+on the PR as the operator's word would be, the model-and-effort answer and the answers
+before a review or a merge excepted. A stop that exists because something could not be
+read, proved or told apart has no such line and is never answered by it. Setup says which
+mode this session runs in, as `mode=unattended` or `mode=attended` on its record.
 
 ## How to work this loop
 
@@ -173,6 +173,7 @@ of it costs a round:
   session;
 - whether the operator has trusted the plugin's model picks, for this session or always
   (setup's `picks=trusted`, or an e) answer);
+- whether the operator has chosen to always use the flow, for this session or always;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
@@ -239,6 +240,9 @@ introduced, handing the edits over as step 5 describes, committing, running 5a a
 before the request, and file the rest as issues. It is a pre-read, not a gate:
 nothing refuses when it is skipped, and its findings are not a reviewer's.
 
+Where automatic review is on, ask step 2's question here, before the PR is opened, as
+step 5's *Asking before a review or a merge* says.
+
 ## 2. Request the review — Codex first
 
 The loop is phased: Codex reviews to a clean signoff, and only then is Copilot asked.
@@ -268,6 +272,9 @@ measurement the refusals above rest on.
 
 The nonce is generated fresh before every request and handed to both the writer and the
 watch, so a baseline left by an earlier round is refused rather than waited past.
+
+Ask as step 5's *Asking before a review or a merge* says: before the request, or, where
+automatic review is on, before the PR is opened.
 
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
@@ -466,13 +473,15 @@ move. Offer these, each with one line on what it costs or risks:
 - **e)** trust them always: give the operator the line to add under `env` in their
   settings, `"WATCH_PR_TRUST_PICKS": "1"`, and do not write it. The answer also trusts the
   rest of this session, since setup's record shows `picks=ask` until the next session.
+- **f)** always use the flow for the rest of this session, or **g)** always, as
+  *Asking before a review or a merge* below says.
 
-Enact the answer on the call. For a, d or e, end the description with ` (plugin pick)`, as
-in `review-fix: large, 2 findings (plugin pick)`, and leave `model` and `effort` unset:
-where the CLI runs the hooks module, it sets them from the size. For b, set `effort` only,
-which keeps the session's model; for c, set `model` and `effort`. The module leaves a call
-that sets either as it was made, and leaves a cold read on a tree holding untracked files
-unsized, so a) and a trusted pass run there as the session made the call.
+Enact the answer on the call. For a, d, e, f or g, end the description with
+` (plugin pick)`, as in `review-fix: large, 2 findings (plugin pick)`, and leave `model` and
+`effort` unset: where the CLI runs the hooks module, it sets them from the size. For b, set
+`effort` only, which keeps the session's model; for c, set `model` and `effort`. The module
+leaves a call that sets either as it was made, and leaves a cold read on a tree holding
+untracked files unsized, so a) and a trusted pass run there as the session made the call.
 
 **Where the operator has trusted the picks**, for this session, or always, which setup's
 record shows as `picks=trusted`, ask nothing and mark the call.
@@ -480,6 +489,58 @@ record shows as `picks=trusted`, ask nothing and mark the call.
 **Unattended:** where the operator has not trusted the picks, ask nothing and mark nothing.
 The pass runs on the session's model and effort. Unlike the other unattended answers, this
 one is not recorded on the PR.
+
+### Asking before a review or a merge
+
+In an attended session the operator sees each review request and the merge before it is
+made. Unless the operator has chosen to always use the flow, ask in chat at each of these
+points, and offer these, each with one line on what it costs or risks:
+
+- **before step 2's request**, or, where automatic review is on and the PR is not open yet,
+  before it is opened, since opening it queues a pass, as step 1 has the cold read do:
+  a) request it now; b) let me look at the change first, which waits for the operator's
+  word before the request; c) stop here: the branch, and the PR where one is open, stay as
+  they are. Where the operator has just chosen the fault-tolerance pass at the second menu
+  `close` prints, that answer is this one's a) for the pass's request: do not ask again
+  after the revocation;
+- **before each `gate`**, in a Codex round and in a Copilot round, after step 6's check,
+  since with automatic review on the push `gate` makes requests the next pass: a) close the
+  round: push, answer the threads and request the next pass; b) and c) as before step 2's
+  request. Where the operator has just answered continue at step 6's check-in, that answer
+  is this one's a): go on to `gate`;
+- **before the merge gate**, only where no question about merging has been answered since
+  the last review, at the Codex-clean stop, a menu `close` prints, a round check-in or this
+  one: a) merge now; b) wait, which waits for the operator's word; c) close the PR and
+  start over. Where the operator has just answered one, go straight to the gate.
+
+Nothing is asked before `open`: the Codex-clean stop already asks whether to open the
+Copilot phase, so choosing it there is the request, and Copilot's later passes are asked
+before each round's `gate`.
+
+These questions, the Codex-clean stop of step 7, the two menus `close` prints in step 8
+and the model-and-effort question each also offer to **always use the flow**, in two
+scopes:
+
+- **for the rest of this session**: from that answer on, take a) at each of these
+  questions, and the **Unattended:** answer at every other stop, and trust the plugin's
+  picks as a d) answer does;
+- **always**: give the operator the lines to add under `env` in their settings,
+  `"WATCH_PR_AUTONOMOUS": "1"` and `"WATCH_PR_TRUST_PICKS": "1"`, and write neither. The
+  answer also uses the flow for the rest of this session, since setup's record shows
+  `mode=attended` until the next session.
+
+The questions add choices and lift no gate, and always using the flow answers no refusal:
+a red CI run, a failed gate, a request that registered nothing and every other status the
+steps call a stop stay stops. A review question stays where its bullet puts it and is
+never folded into a model question that comes before a pass. Asking is not a STOP: no
+continuation prompt or note outside the checkout follows a question, and an answer that
+goes on is not resuming after a stop.
+An answer that stops the loop, b) or c) at any of them, is a STOP: the continuation prompt
+and the note outside the checkout follow it, and going on after it is resuming after a
+stop. As with the model-and-effort answer, no answer to them is recorded on the PR.
+
+**Unattended:** ask none of these: request now, close the round and request the next pass,
+and merge, as the steps already do.
 
 ### 5a. Self-check before the push
 
@@ -509,6 +570,8 @@ decided by what is irreversible: push, prove the checks, close afterwards; that 
 open threads and no summary, and the explicit request `post` makes supersedes it. A wasted
 pass is recoverable; a round closed on a red head is not. `pr-close-round.sh` takes
 `$AUTO_REVIEW` and holds both orders.
+
+After step 6's check and before `gate`, ask as *Asking before a review or a merge* above says.
 
 ```bash
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" "$PRIOR_FILE"
@@ -748,6 +811,8 @@ before confirming on the PR. `$CODEX_SHA` is the full 40-hex head Codex signed o
 the Copilot phase the head moves past it and Codex is deliberately not re-run, so that is
 what Codex's verdict is checked against. `$REVIEWERS` is `both` unless the operator chose
 otherwise at the Codex stop.
+
+Ask before the gate where step 5's *Asking before a review or a merge* says to.
 
 ```bash
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")

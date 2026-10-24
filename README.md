@@ -240,6 +240,24 @@ naming the PR, its branch, the rounds and the stop, so a later session knows
 where to resume; that session still runs setup and reads the phase from the PR.
 Neither carries the origin itself.
 
+In an attended session the session asks you in chat before each review request
+and before the merge, with one line on what each answer costs or risks. Before
+the opening Codex request, it offers to go ahead, to let you look at the change
+first, or to stop, leaving the branch and any open PR as they are; with
+automatic review on it asks before the PR is opened, since opening it queues a
+pass. It offers the same before it pushes a round's fixes and closes the round,
+unless you have just answered continue at the round check-in. Choosing the
+Copilot phase at the stop where Codex is clean is that phase's first request,
+and choosing the fault-tolerance pass where Copilot is clean is that pass's, so
+nothing more is asked before either. Before the merge gate, unless you have
+answered a question about merging since the last review, it offers to merge
+now, to wait, or to close the PR and start over. These questions, the stops
+where Codex or Copilot is clean, and the model-and-effort question also offer to
+**always use the flow**, which *Running unattended* describes. A question adds a
+choice and never lifts a gate, and your answer to one is not recorded on the PR.
+An answer that stops the loop is a stop like the others, and ends with a
+continuation prompt.
+
 When the conversation is compacted mid-loop, the session keeps what `SKILL.md`
 lists: the PR, the paths setup printed, the phase, the open findings and the next
 stop. It never keeps the origin itself, which can hold a credential.
@@ -384,6 +402,10 @@ The loop stops and asks at these points:
 7. **A subagent's model and effort.** Before each cold read and each fix pass,
    unless you trusted the plugin's picks, the session asks which model and
    effort the pass runs on. *Subagent model and effort* says what it offers.
+8. **A review request or the merge.** Before the opening Codex request, before
+   a round's fixes are pushed, and before the merge, unless you chose to always
+   use the flow or have just answered the same question at a stop, the session
+   asks whether to go ahead. *A session* above says what it offers.
 
 Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
 the head and, where the phase could read it, the time of the verdict it
@@ -400,6 +422,8 @@ stops instead of asking, recording each on the PR as it would your word:
 - **a subagent's model and effort**: unless you trusted the plugin's picks, mark
   nothing, so the pass runs on the session's model and effort; unlike the
   others, this answer is not recorded on the PR;
+- **a review request or the merge**: go ahead, as the loop does without the
+  question; this answer is not recorded on the PR either;
 - **the round check-in**: acknowledge and continue, so the record of a long loop
   stays on the PR;
 - **Codex is clean**: merge on that signoff alone if Codex approved the opening
@@ -413,6 +437,21 @@ It answers decisions, never readings: a review that is only replies, a limitatio
 it cannot test, an unavailable reviewer and every failed or unreadable gate still
 stop, and a session stopped there resumes from the records exactly as an attended
 one does. An unattended wait needs the `Monitor` permission above.
+
+**Always use the flow.** In an attended session, the questions before a review
+or a merge, the stops where Codex or Copilot is clean and the model-and-effort
+question each offer it. For the rest of the session it is the same as
+`WATCH_PR_AUTONOMOUS=1` plus `WATCH_PR_TRUST_PICKS=1`: the session takes the
+answers above without asking and marks every pass for the plugin's pick. It
+lasts until the session ends, and a compaction keeps it. Always is those two
+knobs: the session gives you the lines to add under `env` in your settings, and
+does not write them.
+
+```json
+{ "env": { "WATCH_PR_AUTONOMOUS": "1", "WATCH_PR_TRUST_PICKS": "1" } }
+```
+
+Either way, the session still stops wherever an unattended one does.
 
 ### The merge gate
 
@@ -474,8 +513,9 @@ not run it, and every pass runs as the session made the call.
 fix pass, the session stops and asks you in chat. It names the pass and its
 size, and offers the plugin's pick for that size, the session's model at an
 effort it names, a lighter model at an effort it names, trusting the plugin's
-picks for the rest of the session, or trusting them always, each with one line
-on what it costs or risks. A pass you give to the plugin's pick ends its
+picks for the rest of the session, trusting them always, or always using the
+flow, as *Running unattended* says, each with one line on what it costs or
+risks. A pass you give to the plugin's pick ends its
 description with `(plugin pick)`, and the module sets its model and effort. A
 pass you give a model or an effort carries it on the call, and the module leaves
 that call as it was made.
