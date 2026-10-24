@@ -215,10 +215,11 @@ checkout has one, and otherwise none. The loop adds no notes store of its own.
   STOP and after the merge, in the form those notes already use: what the PR set out to do,
   what changed, the rounds per reviewer, what was skipped with its issue number, and the
   stop it waits at or the merge.
-- **At each STOP**, end the message with a continuation prompt a later session can start
-  from: the PR and its branch, the round count per reviewer, and the stop it waits at. It
-  says where to resume and nothing more: the later session runs setup, compares the host's
-  rules again, and takes the phase and the signoffs from *Resuming after a stop*.
+- **At each STOP and after the merge**, end the message with a continuation prompt a later
+  session can start from: the PR and its branch, the round count per reviewer, and the stop
+  it waits at or the merge. It says where the loop stands and nothing more: the later
+  session runs setup, compares the host's rules again, and, after a stop, takes the phase
+  and the signoffs from *Resuming after a stop*.
 
 Neither a note nor the prompt carries the origin or `REVIEW_BUS_REMOTE`, which can hold a
 credential.
@@ -849,6 +850,14 @@ Ask before the gate where step 5's *Asking before a review or a merge* says to.
 ```bash
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 ```
+
+On 0, end the message with the continuation prompt *Where the host project keeps its
+notes* defines, naming the PR as merged, and suggest that the operator start the next PR in
+a new session: a session's context grows with every PR it drives, and each turn reads the
+whole of it again. The merged PR has nothing to resume: the prompt is for starting the next
+PR, so the later session does not run *Resuming after a stop* for this one, and going on
+after the prompt is not resuming after a stop. Nothing waits for an answer, so this is not
+a STOP. Unattended, say the same in your report; the loop for this PR ends there.
 
 If any gate fails, do **not** merge: post the reason on the PR and hand it back to the
 operator.

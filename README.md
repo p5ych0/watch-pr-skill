@@ -505,6 +505,13 @@ required approvals where no eligible approver exists, and bypass disallowed,
 that evaluation is atomic. If GitHub refuses, the merge does not happen and you
 decide.
 
+After the merge, the session ends its message with a continuation prompt that
+names the PR as merged, with nothing left to resume, and suggests that you start
+the next PR in a fresh session; unattended, it says the same in its report, and
+the loop for that PR ends there. Each turn reads the session's whole context
+again, and that context grows with every PR the session drives, so a fresh
+session per PR keeps each session's context, and so its usage, small.
+
 ## Configuration
 
 **Export** these in the shell you start the session from. The helpers run as

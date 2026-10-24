@@ -718,10 +718,11 @@ checkout has one, and otherwise none. The loop adds no notes store of its own.
   STOP and after the merge, in the form those notes already use: what the PR set out to do,
   what changed, the rounds per reviewer, what was skipped with its issue number, and the
   stop it waits at or the merge.
-- **At each STOP**, end the message with a continuation prompt a later session can start
-  from: the PR and its branch, the round count per reviewer, and the stop it waits at. It
-  says where to resume and nothing more: the later session runs setup, compares the host'\''s
-  rules again, and takes the phase and the signoffs from *Resuming after a stop*.
+- **At each STOP and after the merge**, end the message with a continuation prompt a later
+  session can start from: the PR and its branch, the round count per reviewer, and the stop
+  it waits at or the merge. It says where the loop stands and nothing more: the later
+  session runs setup, compares the host'\''s rules again, and, after a stop, takes the phase
+  and the signoffs from *Resuming after a stop*.
 
 Neither a note nor the prompt carries the origin or `REVIEW_BUS_REMOTE`, which can hold a
 credential.'
@@ -729,7 +730,7 @@ _nwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 { [ -n "$_nhave" ] && [ -n "$_nwant" ] && [ "$_nhave" = "$_nwant" ] \
     && before '### What a compaction summary keeps' '### Where the host project keeps its notes' \
     && before '### Where the host project keeps its notes' '## 1. State the task on the PR'; } \
-    && pass "the notes section is pinned whole: found before step 1 and on resuming, a tracked note in before the first request, a prompt that says only where to resume, no origin" \
+    && pass "the notes section is pinned whole: found before step 1 and on resuming, a tracked note in before the first request, a prompt at each stop and after the merge that says only where the loop stands, no origin" \
     || die "the notes section is misplaced or not the text the test pins"
 s="$(section '### Handing a task to an implementation pass' '## 1. ')" || s=
 { [ -n "$s" ] && [ "$(grep -c '^\*\*Unattended:\*\*' <<<"$s" || true)" -eq 0 ]; } \
@@ -999,6 +1000,40 @@ at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
 at '### Then: the gate' '## What this skill' 'merge gate'
+_mg="$(awk 'index($0, "On 0, end the message with the continuation prompt") == 1 { c = 1 } /^$/ { c = 0 } c' "$SKILL")" || _mg=
+_mghave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_mg")" || _mghave=
+_mgwant='On 0, end the message with the continuation prompt *Where the host project keeps its
+notes* defines, naming the PR as merged, and suggest that the operator start the next PR in
+a new session: a session'\''s context grows with every PR it drives, and each turn reads the
+whole of it again. The merged PR has nothing to resume: the prompt is for starting the next
+PR, so the later session does not run *Resuming after a stop* for this one, and going on
+after the prompt is not resuming after a stop. Nothing waits for an answer, so this is not
+a STOP. Unattended, say the same in your report; the loop for this PR ends there.'
+_mgwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_mgwant")" || _mgwant=
+{ [ -n "$_mghave" ] && [ -n "$_mgwant" ] && [ "$_mghave" = "$_mgwant" ] \
+    && asks_in '### Then: the gate' '## What this skill' 'On 0, end the message with the continuation prompt' \
+    && before '0 merged, and the head it names is on the base branch' 'On 0, end the message with the continuation prompt' \
+    && before 'pr-merge-gate.sh N' 'On 0, end the message with the continuation prompt'; } \
+    && pass "step 8 pins its merged paragraph whole, after the gate's status line and its fence" \
+    || die "step 8's merged paragraph is not the text the test pins, or is not in step 8 after the gate's status line and its fence"
+{ grep -qF 'the continuation prompt *Where the host project keeps its notes* defines' <<<"$_mghave" \
+    && grep -qF 'suggest that the operator start the next PR in a new session' <<<"$_mghave"; } \
+    && pass "…it names the notes section's continuation prompt and a new session for the next PR" \
+    || die "step 8's merged paragraph does not name the notes section's continuation prompt or a new session for the next PR"
+{ grep -qF 'naming the PR as merged' <<<"$_mghave" \
+    && grep -qF 'the later session does not run *Resuming after a stop* for this one, and going on after the prompt is not resuming after a stop.' <<<"$_mghave" \
+    && grep -qF 'Unattended, say the same in your report; the loop for this PR ends there.' <<<"$_mghave" \
+    && ! grep -qF 'go on' <<<"$_mghave"; } \
+    && pass "…names the PR as merged with nothing to resume, and unattended ends the loop for this PR there" \
+    || die "step 8's merged paragraph leaves the merged PR to be resumed, or goes on after it unattended"
+_nb="$(section '### Where the host project keeps its notes' '### Handing a task to an implementation pass')" || _nb=
+{ grep -qxF -- '- **At each STOP and after the merge**, end the message with a continuation prompt a later' <<<"$_nb" \
+    && grep -qF 'and, after a stop, takes the phase' <<<"$_nb"; } \
+    && pass "…and the notes section gives the continuation prompt after the merge too, with the resume recipe after a stop only" \
+    || die "the notes section does not give the continuation prompt after the merge, or sends a merged PR to the resume recipe"
+{ [ -n "$_mg" ] && ! grep -qF '**Unattended:**' <<<"$_mg"; } \
+    && pass "…and adds no unattended answer, since nothing waits on it" \
+    || die "step 8's merged paragraph is missing, or carries an unattended answer as though it were a stop"
 s="$(section '## 6. ' '## 7. ')" || s=
 grep -q 'PR_ROUND_PAUSE' <<<"$s" && grep -q 'left only replies' <<<"$s" && grep -q 'running it twice records two signoffs' <<<"$s" \
     && pass "…the check-in answer keys on the pause record, leaves gate's replies-only 3 a stop, and does not re-run record" \
@@ -1083,6 +1118,11 @@ if [ -f "$README" ]; then
         && grep -qF 'It shares the fix rungs, so a rung set for a fix pass applies to it too, though #389 measured fix passes only.' <<<"$_msf"; } \
         && pass "README hands a task to an implementation pass with its limits, steps a pass that cannot prove its change up one tier and sends an untested one to the limitation stop, lists a large one among the stops with a prompt naming the branch, and says it shares the fix rungs #389 measured on fix passes only" \
         || die "README's account of the implementation pass, its step up, its stop, or the fix rungs it shares drifted"
+    _mgs="$(awk '$0 == "### The merge gate" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _mgs=
+    _mgsf="$(tr '\n' ' ' <<<"$_mgs" | tr -s ' ')" || _mgsf=
+    grep -qF 'After the merge, the session ends its message with a continuation prompt that names the PR as merged, with nothing left to resume, and suggests that you start the next PR in a fresh session; unattended, it says the same in its report, and the loop for that PR ends there. Each turn reads the session'\''s whole context again, and that context grows with every PR the session drives, so a fresh session per PR keeps each session'\''s context, and so its usage, small.' <<<"$_mgsf" \
+        && pass "README's merge gate ends a merged PR with a continuation prompt and suggests a fresh session for the next, saying why" \
+        || die "README's merge gate does not end a merged PR with a continuation prompt, or does not suggest a fresh session for the next and say why"
     grep -q 'Review-Pause-Acknowledged' "$README" \
         && pass "README names the record markers a body may not carry" || die "README no longer names the markers"
     grep -q 'PR_WATCH_PROBE_TIMEOUT' "$README" \
