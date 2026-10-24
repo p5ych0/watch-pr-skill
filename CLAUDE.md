@@ -110,7 +110,8 @@ starts `review-fix:` and the tier the session names for the pass, and its model 
 are chosen as `SKILL.md` § Choosing a subagent's model and effort says: the call is marked
 `(plugin pick)` where the operator trusts or takes the plugin's pick, so the hooks module
 sets them from the tier, or carries the `effort`, or the `model` and `effort`, the operator
-chose. Here the
+chose. A task set in this checkout goes to an `implement:` pass the same way, its model and
+effort chosen as § Choosing says. Here the
 working tree's module runs only where the session loads the working tree as the plugin, as
 § Repo arming describes. The
 judgment calls, the commit, the thread replies and the round summary stay with the session
@@ -158,7 +159,7 @@ history; an accepted limit is in `docs/decisions/`.
 | `scripts/test-*.sh` | The suite, one file per helper and per library. |
 | `agents/cold-reviewer.md` | The cold reviewer: reads a branch against its base the way the reviewers will, before a round is bought. |
 | `hooks/hooks.json` | Names the one hooks module, beside the empty command-hook record a build without function hooks needs. |
-| `hooks/tiering.ts` | The hooks module: sets model and effort on a cold-reviewer run and a `review-fix:` pass marked `(plugin pick)`, from the size of the work, and gates nothing. |
+| `hooks/tiering.ts` | The hooks module: sets model and effort on a cold-reviewer run, a `review-fix:` pass and an `implement:` pass marked `(plugin pick)`, from the size of the work, and gates nothing. |
 | `tests/tiering.test.ts` | The module's cases, run with `claude plugin test .`; the suite does not run them. |
 | `.claude-plugin/` | Plugin and marketplace manifests; `plugin.json` declares the module's options. |
 
