@@ -58,6 +58,9 @@ const review = (prompt = 'Base ref origin/main; there is no round summary yet.')
 const fix = (description: string) =>
   ({ tool: 'Agent', description, prompt: 'a.sh:4 drops the status, and b.sh:9 does too.' }) as const
 
+const implement = (description: string) =>
+  ({ tool: 'Agent', description, prompt: 'The plan: a.sh takes a flag, and its fixture proves it.' }) as const
+
 test('a cold review is sized by the lines changed against the merge base', async ($, on) => {
   const staged = stage(on)
   const cases = [
@@ -228,6 +231,98 @@ test('a review fix is sized by the count its description states', async ($, on) 
     'review fix, 2 findings (medium): high effort',
     'review fix, 4 findings (large): xhigh effort',
   ])
+  expect(staged.git).toEqual([])
+})
+
+test('an implementation pass takes the tier its description names', async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call(implement('implement: small, one flag in a.sh (plugin pick)'))
+  await $.tool.call(implement('Implement: MEDIUM (plugin pick)'))
+  await $.tool.call(implement('implement:large, 1 finding (plugin pick)'))
+  expect(staged.seen).toEqual([
+    { model: undefined, effort: 'medium' },
+    { model: undefined, effort: 'high' },
+    { model: undefined, effort: 'xhigh' },
+  ])
+  expect(staged.logs).toEqual([
+    'implementation, tier named by the session (small): medium effort',
+    'implementation, tier named by the session (medium): high effort',
+    'implementation, tier named by the session (large): xhigh effort',
+  ])
+  expect(staged.git).toEqual([])
+})
+
+test(
+  'an implementation pass takes the fix rungs, not the cold review\'s',
+  { options: { reviewSmall: 'opus/max', reviewMedium: 'opus/max', reviewLarge: 'opus/max', fixSmall: 'haiku/low', fixMedium: 'sonnet/high', fixLarge: 'fable/max' } },
+  async ($, on) => {
+    const staged = stage(on)
+    await $.tool.call(implement('implement: small (plugin pick)'))
+    await $.tool.call(implement('implement: medium (plugin pick)'))
+    await $.tool.call(implement('implement: large (plugin pick)'))
+    expect(staged.seen).toStrictEqual([
+      { model: 'haiku', effort: 'low' },
+      { model: 'sonnet', effort: 'high' },
+      { model: 'fable', effort: 'max' },
+    ])
+    expect(staged.logs).toEqual([
+      'implementation, tier named by the session (small): haiku at low effort',
+      'implementation, tier named by the session (medium): sonnet at high effort',
+      'implementation, tier named by the session (large): fable at max effort',
+    ])
+  },
+)
+
+test('an implementation pass that names no tier, or only a count, is left as called', async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call(implement('implement: 3 findings (plugin pick)'))
+  await $.tool.call(implement('implement: 1 (plugin pick)'))
+  await $.tool.call(implement('implement: 2 files, small (plugin pick)'))
+  await $.tool.call(implement('implement: the parser (plugin pick)'))
+  await $.tool.call(implement('implement: small-scale rewrite (plugin pick)'))
+  await $.tool.call(implement('implement: (plugin pick)'))
+  expect(staged.seen).toStrictEqual(Array(6).fill({ model: undefined, effort: undefined }))
+  expect(staged.logs).toEqual(Array(6).fill('implementation left as called, its size could not be measured'))
+  expect(staged.git).toEqual([])
+})
+
+test('an unmarked implementation pass is left as called, and runs no git', { options: { fixLarge: 'fable/max' } }, async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call(implement('implement: large'))
+  await $.tool.call(implement('implement: small (plugin pick), the parser'))
+  expect(staged.seen).toStrictEqual([
+    { model: undefined, effort: undefined },
+    { model: undefined, effort: undefined },
+  ])
+  expect(staged.logs).toEqual([
+    'implementation left as called, not marked for a plugin pick',
+    'implementation left as called, not marked for a plugin pick',
+  ])
+  expect(staged.git).toEqual([])
+})
+
+test('an implementation pass that sets its own model or effort is left exactly as called', async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call({ ...implement('implement: large (plugin pick)'), model: 'opus' })
+  await $.tool.call({ ...implement('implement: small (plugin pick)'), effort: 'low' })
+  expect(staged.seen).toStrictEqual([
+    { model: 'opus', effort: undefined },
+    { model: undefined, effort: 'low' },
+  ])
+  expect(staged.logs).toEqual([
+    'implementation left as called, the call sets its own model or effort',
+    'implementation left as called, the call sets its own model or effort',
+  ])
+  expect(staged.git).toEqual([])
+})
+
+test('a description that only begins with the word, or a fork, is no implementation pass', async ($, on) => {
+  const staged = stage(on)
+  await $.tool.call(implement('Implement the parser: small (plugin pick)'))
+  await $.tool.call(implement('implementation: small (plugin pick)'))
+  await $.tool.call({ ...implement('implement: small (plugin pick)'), subagent_type: 'fork' })
+  expect(staged.seen).toStrictEqual(Array(3).fill({ model: undefined, effort: undefined }))
+  expect(staged.logs).toEqual([])
   expect(staged.git).toEqual([])
 })
 
@@ -443,7 +538,11 @@ test('no call is refused: sized, unsized, unmarked, set by its caller or unrelat
   answers.push(await $.tool.call(fix('review-fix: 1 finding (plugin pick)')))
   answers.push(await $.tool.call(fix('review-fix: the findings of round 2 (plugin pick)')))
   answers.push(await $.tool.call(fix('review-fix: 1 finding')))
+  answers.push(await $.tool.call(implement('implement: medium (plugin pick)')))
+  answers.push(await $.tool.call(implement('implement: 2 findings (plugin pick)')))
+  answers.push(await $.tool.call(implement('implement: large')))
+  answers.push(await $.tool.call({ ...implement('implement: small (plugin pick)'), model: 'haiku' }))
   answers.push(await $.tool.call({ tool: 'Agent', description: 'Explore', prompt: 'Look around.' }))
-  expect(answers.map(answer => answer.deny)).toEqual(Array(8).fill(undefined))
-  expect(staged.seen.length).toBe(8)
+  expect(answers.map(answer => answer.deny)).toEqual(Array(12).fill(undefined))
+  expect(staged.seen.length).toBe(12)
 })

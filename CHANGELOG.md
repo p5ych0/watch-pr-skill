@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.17.0] — 2026-10-24
+
+- **A task the operator sets is handed to an implementation pass sized to it.** The hooks
+  module sized only cold reads and `review-fix:` passes. So when the operator gave the
+  session a task, an issue to implement or a change to make, the session did the work itself
+  on its own model and effort, however small the task, and only the review rounds after it
+  were tiered. `SKILL.md`'s new § Handing a task to an implementation pass, placed before
+  step 1 and named in the loop line, has the session read the task, plan it and size it by
+  step 5's tiers, then hand the implementation to a subagent whose description starts
+  `implement:` and the tier. The pass gets the plan and its limits: the smallest change that
+  does the task, tests that fail without it where the project keeps tests, and nothing
+  committed, pushed, posted or resolved. It reports what it proved. The diff, the commit,
+  the self-check, the cold read, the PR and every judgment call stay with the session. A
+  pass that cannot prove its change, through a test that still fails with the change, a
+  surviving mutant or a report that it is stuck, is run once more at the next tier, small to
+  medium and medium to large, with the failed pass's report marked as quoted text, rather
+  than taken over by the session. A pass that could construct no mutation has made a change
+  that cannot be tested, and goes to the stop *Prove a fix can fail* already gives such a
+  change. Where a large pass cannot prove its change, it is a STOP: the session tells the
+  operator what failed, and since no PR exists yet, the continuation prompt names the branch
+  and the stop. That stop exists because a change could not be proved, so it has no
+  **Unattended:** answer, and an unattended session stops there too. § Choosing asks before
+  each implementation pass as before each cold read and fix pass, naming it by its tier, and
+  a compaction summary keeps the plan, the tier of the last implementation pass and what a
+  failed pass reported until its change is proved, so the step up survives a compaction. The
+  module sizes an `implement:` call by the tier its description names, on the `fix*` rungs,
+  and logs it as an implementation. One that names no tier, or only a count, is left as
+  called and logged as unsized, since a count states findings and fits only a fix pass, and
+  a description that only begins with the word is no implementation pass. The marked-only
+  rule holds for it as for the other two kinds, so `AGENTS.md` is unchanged. The three fix
+  rungs' titles and descriptions in `plugin.json` name an implementation pass too, and
+  `CLAUDE.md`'s § What ships names the marker. README's new § A task you set describes the
+  hand-over and the step up; § What it does, § The stops, § Running unattended and
+  § Subagent model and effort name the implementation pass, the last saying it shares the
+  fix rungs, which #389 measured on fix passes only. The module's cases add the three tiers
+  at the recommendation and at configured fix rungs beside configured review rungs, calls
+  with no tier or only a count, an unmarked call, one that sets its own model or effort, a
+  description that only begins with the word and a fork, and four `implement:` calls in the
+  case that no call is refused. `test-pr-skill-contract.sh` pins the new section whole and
+  its place between the notes section and step 1, that it carries no unattended answer, the
+  loop line, § Choosing, the compaction entry and the README text; `test-hooks.sh` holds the
+  `implement:` marker `SKILL.md` gives to the one the module reads. Minor: a new kind of
+  call the module sizes. Closes #409.
+
 ## [2.16.0] — 2026-10-24
 
 - **An attended session asks before each review request and before the merge.** The loop

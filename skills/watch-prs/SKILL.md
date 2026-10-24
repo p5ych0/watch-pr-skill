@@ -24,10 +24,11 @@ Codex here, create a Codex account and connect to github"* — that reply is the
 diagnostic, not a review. Per-repository behaviour (auto-review, trigger condition,
 exhaustive review, credit use) is set on the Codex **Code review** settings page.
 
-**The loop:** setup → 1 state the task → 2 request Codex → 3 wait → 4 read the findings →
-5 fix and close the round, with the check-in of 6 inside it → back to 3 until Codex is
-clean → 7 STOP, and on the operator's word the Copilot phase, which is 3–6 again with
-`$WHO` switched → 8 STOP, and on the operator's word the merge gate.
+**The loop:** setup → hand a task the operator set to an implementation pass → 1 state the
+task → 2 request Codex → 3 wait → 4 read the findings → 5 fix and close the round, with the
+check-in of 6 inside it → back to 3 until Codex is clean → 7 STOP, and on the operator's
+word the Copilot phase, which is 3–6 again with `$WHO` switched → 8 STOP, and on the
+operator's word the merge gate.
 
 With `WATCH_PR_AUTONOMOUS=1` exported the operator has made the decision stops in advance:
 each carries an **Unattended:** line naming its answer, taken without asking and recorded
@@ -174,6 +175,8 @@ of it costs a round:
 - whether the operator has trusted the plugin's model picks, for this session or always
   (setup's `picks=trusted`, or an e) answer);
 - whether the operator has chosen to always use the flow, for this session or always;
+- where the operator set a task, its plan, the tier of the last implementation pass and
+  what a failed pass reported, until the change it made is proved;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
@@ -219,6 +222,35 @@ checkout has one, and otherwise none. The loop adds no notes store of its own.
 
 Neither a note nor the prompt carries the origin or `REVIEW_BUS_REMOTE`, which can hold a
 credential.
+
+### Handing a task to an implementation pass
+
+Where the operator sets a task, an issue to implement or a change to make, read it and plan
+it before step 1: what changes, where, and what proves it. Then have a subagent make the
+change, where the harness has subagents and the operator has not said to make it yourself.
+
+- **Size the work as step 5 sizes a fix pass.** `small` is one edit in one place that
+  changes no behaviour. `large` is a change to a contract or a design, or one that reaches
+  through code, tests and documents at once. `medium` is the rest.
+- **Mark the call.** Start its description with `implement:`, then the tier, as in
+  `implement: medium`. Where the CLI runs the plugin's hooks module, it sizes the pass by
+  that tier on a fix pass's rungs, and leaves a call that names no tier as it was made: a
+  number states findings, which only a fix pass has. Choose the call's model and effort as
+  step 5's *Choosing a subagent's model and effort* says.
+- **Hand over the plan, and its limits.** The plan whole, and these limits: the smallest
+  change that does the task, tests that fail without it where the project keeps tests, and
+  nothing committed, pushed, posted or resolved. Have it report what it proved: for each
+  test, the mutation it ran and what failed, or that it could construct none.
+- **Keep the judgment.** Read its diff and its report before you commit. The commit, the
+  self-check of 5a, the cold read of step 1, the PR and every judgment call stay with you.
+- **One step up.** A pass that cannot prove its change, through a test that still fails
+  with the change, a mutant that survives or a report that it is stuck, is run once more at
+  the next tier: `small` to `medium`, `medium` to `large`. Give it the plan, the limits and
+  what the failed pass reported, marked as step 5's *Mark what was quoted* says. Do not
+  take the work over. A pass that reports it could construct no mutation has made a change
+  that cannot be tested: that is *Prove a fix can fail*'s stop, not a step up. Where a
+  `large` pass cannot prove its change, it is a STOP: tell the operator what failed. No PR
+  exists yet, so its continuation prompt names the branch and the stop.
 
 ## 1. State the task on the PR
 
@@ -453,16 +485,16 @@ Then, in this order:
 
 The plugin ships no model or effort pick: each rung of its ladder is `ask` until the
 operator sets it, and the hooks module acts only on a call marked for it. Before each cold
-read and each fix pass, settle what the subagent runs on. The question is not a STOP: no
-continuation prompt or note outside the checkout follows it, and answering it is not
-resuming after a stop, so the host project's rules are not compared again.
+read, implementation pass and fix pass, settle what the subagent runs on. The question is
+not a STOP: no continuation prompt or note outside the checkout follows it, and answering it
+is not resuming after a stop, so the host project's rules are not compared again.
 
 **In an attended session where the operator has not trusted the plugin's picks**, stop
-before the pass and ask in chat. Name the pass and its size: a fix pass by its tier and its
-number of findings; a cold read by the lines it changes, which
-`git diff --shortstat --no-renames` against the merge base with the base ref reports,
-small up to 60 and large from 200 changed lines by default, bounds `/plugin configure` can
-move. Offer these, each with one line on what it costs or risks:
+before the pass and ask in chat. Name the pass and its size: an implementation pass by its
+tier; a fix pass by its tier and its number of findings; a cold read by the lines it
+changes, which `git diff --shortstat --no-renames` against the merge base with the base ref
+reports, small up to 60 and large from 200 changed lines by default, bounds
+`/plugin configure` can move. Offer these, each with one line on what it costs or risks:
 
 - **a)** the plugin's pick for that size: the rung the operator configured, or where it is
   left at `ask`, the session's model at `medium`, `high` or `xhigh` effort by size;

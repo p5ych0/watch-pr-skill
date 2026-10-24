@@ -13,14 +13,15 @@ running between sessions.
 
 The plugin is a driver for the native GitHub reviewers. Your session:
 
-1. states the task on the PR and requests a Codex review;
-2. waits for the verdict without polling by hand;
-3. reads the findings, fixes what each one names and nothing else, replies on
+1. plans a task you set and hands the work to a subagent sized to it;
+2. states the task on the PR and requests a Codex review;
+3. waits for the verdict without polling by hand;
+4. reads the findings, fixes what each one names and nothing else, replies on
    every thread, resolves it, and requests the next pass;
-4. repeats until Codex is clean, then **stops and asks** whether to merge on that
+5. repeats until Codex is clean, then **stops and asks** whether to merge on that
    signoff alone or open the Copilot phase on the same head;
-5. runs the Copilot phase the same way, then **stops and asks** again;
-6. evaluates every merge gate immediately before merging, pinned to one commit.
+6. runs the Copilot phase the same way, then **stops and asks** again;
+7. evaluates every merge gate immediately before merging, pinned to one commit.
 
 | Reviewer | Identity | How it is asked |
 | --- | --- | --- |
@@ -262,6 +263,29 @@ When the conversation is compacted mid-loop, the session keeps what `SKILL.md`
 lists: the PR, the paths setup printed, the phase, the open findings and the next
 stop. It never keeps the origin itself, which can hold a credential.
 
+### A task you set
+
+Where you give the session a task, an issue to implement or a change to make, it
+reads the task, plans it, and sizes the work as it sizes a fix pass: small for
+one edit in one place that changes no behaviour, large for a change to a
+contract or a design or one that reaches through code, tests and documents at
+once, medium for the rest. It hands the plan to a subagent whose description
+starts `implement:` and the tier, with its limits: the smallest change that does
+the task, tests that fail without it where your project keeps tests, and nothing
+committed, pushed, posted or resolved. The subagent reports what it proved.
+*Subagent model and effort* below says how its model and effort are chosen. The
+session keeps the judgment: it reads the diff and the report, commits, runs the
+self-check and the cold read, and writes the PR.
+
+A pass that cannot prove its change, through a test that still fails with the
+change, a mutant that survives or a report that it is stuck, is run once more at
+the next tier, small to medium and medium to large, given what the failed pass
+reported. The session does not take the work over. A pass that could construct
+no mutation has made a change that cannot be tested, and that stops for you as a
+limitation it cannot test does. Where a large pass cannot prove its change, the
+session stops and tells you what failed, unattended as well; no PR exists yet,
+so its continuation prompt names the branch and the stop.
+
 ### The Codex phase
 
 The session posts the request, waits, and reads the findings. For each one it
@@ -399,13 +423,18 @@ The loop stops and asks at these points:
    posted as it stands, so the loop never writes a second one above it. A
    mention indented or inside a fence triggers the pass just the same, which is
    why a body carrying one needs no help from the loop.
-7. **A subagent's model and effort.** Before each cold read and each fix pass,
-   unless you trusted the plugin's picks, the session asks which model and
-   effort the pass runs on. *Subagent model and effort* says what it offers.
+7. **A subagent's model and effort.** Before each cold read, implementation pass
+   and fix pass, unless you trusted the plugin's picks, the session asks which
+   model and effort the pass runs on. *Subagent model and effort* says what it
+   offers.
 8. **A review request or the merge.** Before the opening Codex request, before
    a round's fixes are pushed, and before the merge, unless you chose to always
    use the flow or have just answered the same question at a stop, the session
    asks whether to go ahead. *A session* above says what it offers.
+9. **An implementation it cannot prove.** Where a large implementation pass
+   cannot prove its change, the session stops and tells you what failed. No PR
+   exists yet, so its continuation prompt names the branch and the stop.
+   *A task you set* says how it gets there.
 
 Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
 the head and, where the phase could read it, the time of the verdict it
@@ -433,10 +462,11 @@ stops instead of asking, recording each on the PR as it would your word:
   fault-tolerance pass and merge on its signoff, with no third Copilot phase over
   the pass's own fixes.
 
-It answers decisions, never readings: a review that is only replies, a limitation
-it cannot test, an unavailable reviewer and every failed or unreadable gate still
-stop, and a session stopped there resumes from the records exactly as an attended
-one does. An unattended wait needs the `Monitor` permission above.
+It answers decisions, never readings: a review that is only replies, a
+limitation it cannot test, a large implementation pass that cannot prove its
+change, an unavailable reviewer and every failed or unreadable gate still stop,
+and a session stopped there resumes from the records exactly as an attended one
+does. An unattended wait needs the `Monitor` permission above.
 
 **Always use the flow.** In an attended session, the questions before a review
 or a merge, the stops where Codex or Copilot is clean and the model-and-effort
@@ -485,7 +515,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed heads per reviewer between check-ins; `0` disables the pause |
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin`, so GitHub enforces branch protection itself |
 | `WATCH_PR_AUTONOMOUS` | unset | `1` takes the answers under *Running unattended* at the decision stops; every failure still stops |
-| `WATCH_PR_TRUST_PICKS` | unset | `1` trusts the plugin's model and effort picks in every session: the session asks nothing before a cold read or a fix pass and marks each for the plugin's pick, as *Subagent model and effort* says |
+| `WATCH_PR_TRUST_PICKS` | unset | `1` trusts the plugin's model and effort picks in every session: the session asks nothing before a cold read, an implementation pass or a fix pass and marks each for the plugin's pick, as *Subagent model and effort* says |
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks run |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
 | `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |
@@ -502,20 +532,21 @@ credit use are Codex account and repository settings.
 ### Subagent model and effort
 
 The plugin picks no model or effort for you. It ships one hooks module that can
-set the model and effort of two kinds of subagent, a cold review and a fix pass,
-from the size of the work, and it logs one line saying what it did. Every rung
-of its ladder ships as `ask`, and the module acts only on a pass the session
-marks `(plugin pick)`, so it applies nothing you did not choose. It needs a
-Claude Code build with function hooks, measured on 2.1.296; an older build does
-not run it, and every pass runs as the session made the call.
+set the model and effort of three kinds of subagent, a cold review, an
+implementation pass and a fix pass, from the size of the work, and it logs one
+line saying what it did. Every rung of its ladder ships as `ask`, and the module
+acts only on a pass the session marks `(plugin pick)`, so it applies nothing you
+did not choose. It needs a Claude Code build with function hooks, measured on
+2.1.296; an older build does not run it, and every pass runs as the session made
+the call.
 
-**The session asks.** In an attended session, before each cold read and each
-fix pass, the session stops and asks you in chat. It names the pass and its
-size, and offers the plugin's pick for that size, the session's model at an
-effort it names, a lighter model at an effort it names, trusting the plugin's
-picks for the rest of the session, trusting them always, or always using the
-flow, as *Running unattended* says, each with one line on what it costs or
-risks. A pass you give to the plugin's pick ends its
+**The session asks.** In an attended session, before each cold read,
+implementation pass and fix pass, the session stops and asks you in chat. It
+names the pass and its size, and offers the plugin's pick for that size, the
+session's model at an effort it names, a lighter model at an effort it names,
+trusting the plugin's picks for the rest of the session, trusting them always,
+or always using the flow, as *Running unattended* says, each with one line on
+what it costs or risks. A pass you give to the plugin's pick ends its
 description with `(plugin pick)`, and the module sets its model and effort. A
 pass you give a model or an effort carries it on the call, and the module leaves
 that call as it was made.
@@ -565,26 +596,35 @@ loop.
   hardest finding, since one finding can need a redesign. Where it names no
   tier, the number of findings it states decides, as in
   `review-fix: 3 findings`.
+- **An implementation pass** takes the tier the session names for it, on a fix
+  pass's rungs. The session plans a task you set and then has a subagent carry
+  it out, starting the subagent's description with `implement:` and the tier, as
+  in `implement: medium`. Where it names no tier, the module leaves the call as
+  made: a number states findings, which only a fix pass has. It shares the fix
+  rungs, so a rung set for a fix pass applies to it too, though #389 measured
+  fix passes only.
 
 A call the module cannot size goes through as the session made it: a checkout
 holding untracked files, which the reviewer reads and the measure does not
 count; a `git` that fails or runs past ten seconds; a fix pass that names no
-tier and states no number. So does every other subagent. Edits the session
-makes itself, which it does where you tell it to, are not subagent calls, so
-nothing sizes them. A call that sets its own model or effort is left as made
-and is not sized, and so is every call not marked `(plugin pick)`, whatever its
-rungs are set to, so no `git` runs for either.
+tier and states no number; an implementation pass that names no tier. So does
+every other subagent. Edits the session makes itself, which it does where you
+tell it to, are not subagent calls, so nothing sizes them. A call that sets its
+own model or effort is left as made and is not sized, and so is every call not
+marked `(plugin pick)`, whatever its rungs are set to, so no `git` runs for
+either.
 
-Each kind has three rungs. The install asks for them, and
-`/plugin configure watch-pr-skill` in a session, or `claude plugin configure
-watch-pr-skill` from a shell, shows and sets them afterwards:
+Each kind has three rungs, and an implementation pass takes a fix pass's. The
+install asks for them, and `/plugin configure watch-pr-skill` in a session, or
+`claude plugin configure watch-pr-skill` from a shell, shows and sets them
+afterwards:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `reviewSmall`, `reviewMedium`, `reviewLarge` | `ask`, `ask`, `ask` | model and effort for a marked cold review of each size |
 | `reviewSmallLines`, `reviewLargeLines` | `60`, `200` | small up to, and large from, this many changed lines |
-| `fixSmall`, `fixMedium`, `fixLarge` | `ask`, `ask`, `ask` | model and effort for a marked fix pass of each tier |
-| `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | where the session names no tier: small up to, and large from, this many findings |
+| `fixSmall`, `fixMedium`, `fixLarge` | `ask`, `ask`, `ask` | model and effort for a marked fix or implementation pass of each tier |
+| `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | where the session names a fix pass no tier: small up to, and large from, this many findings |
 
 The small bound is read first. Where a kind's two bounds overlap, a size at or
 under the small bound is small whatever the large bound says, and the medium
@@ -678,12 +718,11 @@ is fixed before the round is bought.
 
 Start a session here with `claude --plugin-dir .` from the checkout to run the
 working tree as the plugin, its skill, agent and hooks module, so the module
-under development is the one that sizes the cold reads and fix passes. Settings
-outside the checkout can change which copy a session runs. The checkout's
-settings name no plugin.
-`.claude/agents/cold-reviewer.md` links to `agents/cold-reviewer.md`, so that a
-session started without the flag still reads the branch's brief rather than an
-installed release's.
+under development is the one that sizes the cold reads, implementation passes
+and fix passes. Settings outside the checkout can change which copy a session
+runs. The checkout's settings name no plugin. `.claude/agents/cold-reviewer.md`
+links to `agents/cold-reviewer.md`, so that a session started without the flag
+still reads the branch's brief rather than an installed release's.
 
 CI runs the suite on Ubuntu with bash 5 and again on bash 3.2.57 with a
 mac-shaped `PATH`, so a construct newer than 3.2 or a GNU-only tool on a path the
