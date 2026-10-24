@@ -4,14 +4,16 @@
 **Status:** accepted
 **Decided by:** the repository operator, in session, on the measurements below
 **Raised in:** #365
+**Amended:** 2026-10-24, #415, so that its purpose names the implementation pass 2.17.0
+added, and the marked-only rule 2.15.0 set
 
 The plugin may ship one function-hooks module at its root, named by `hooks/hooks.json`. It
-exists to pick the model and effort of the loop's own subagents, the cold reviewer and a
-delegated fix pass, from the size of the work. It runs in the session of every operator who
-installs the plugin, which is what
-`docs/decisions/2026-09-07-authoring-tools-not-boundaries.md` ruled out when it said no hook
-installs. That rule was written about the checkout's hooks and still holds for them. This
-record is the one exception to it, and the exception's bounds.
+exists to pick the model and effort of the loop's own subagents, the cold reviewer, a
+delegated fix pass and an implementation pass, from the size of the work, on a call the
+session marks `(plugin pick)`. It runs in the session of every operator who installs the
+plugin, which is what `docs/decisions/2026-09-07-authoring-tools-not-boundaries.md` ruled
+out when it said no hook installs. That rule was written about the checkout's hooks and
+still holds for them. This record is the one exception to it, and the exception's bounds.
 
 ## What is accepted
 
@@ -21,10 +23,10 @@ record is the one exception to it, and the exception's bounds.
 - **It fails open.** The module rewrites two arguments of an Agent call, `model` and
   `effort`, and gates nothing: every proof, mutation and gate of the loop is a privileged
   helper's. A hook that throws is skipped and the call goes through as its caller made it,
-  and so does a call the module cannot size. Losing the module costs a subagent run at the
-  model and effort it would have had with no module, which is what every run cost before one
-  existed. A module that failed closed would stop a cold read on a fault that is not the
-  change's.
+  and so does a call the module cannot size, the session did not mark, or that sets its own
+  model or effort. Losing the module costs a subagent run at the model and effort it would
+  have had with no module, which is what every run cost before one existed. A module that
+  failed closed would stop a cold read on a fault that is not the change's.
 - **The API under it is early access.** Function hooks may change between releases of the
   CLI. A module that no longer loads is the fail-open case above, and the loop runs untiered.
 - **The suite pins its shape, not its behaviour.** The module is TypeScript run by the CLI's
