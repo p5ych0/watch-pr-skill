@@ -168,6 +168,11 @@ impact, and a concrete fix or test. Prefer no finding over speculation.
   call the session marked `(plugin pick)`. A rung default other than `ask`, or any pick
   applied to an Agent call the session did not mark `(plugin pick)` or that sets its own
   `model` or `effort`, is a finding.
+- **A question before a review or a merge adds a choice and lifts nothing.** In an
+  attended session `SKILL.md` asks before each review request and before the merge gate,
+  and offers to always use the flow, which takes the **Unattended:** answers. A question
+  this loop asks that lifts a helper's gate, or an "always use the flow" that skips a
+  helper's refusal, is a blocking finding.
 - **A guard where a removal would do is a finding.** A check is a name that can
   be shadowed, mis-parsed or forgotten; a removed dependency stays removed. The
   author is required to say **on the thread** which of the two they took and why;

@@ -338,6 +338,7 @@ of it costs a round:
   session;
 - whether the operator has trusted the plugin'\''s model picks, for this session or always
   (setup'\''s `picks=trusted`, or an e) answer);
+- whether the operator has chosen to always use the flow, for this session or always;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
@@ -656,12 +657,12 @@ else
 fi
 
 has 'WATCH_PR_AUTONOMOUS=1' && pass "the unattended switch is named" || die "WATCH_PR_AUTONOMOUS=1 is not named"
-hasf "each carries an **Unattended:** line naming its answer, taken without asking and recorded on the PR as the operator's word would be, the model-and-effort answer excepted." \
-    && pass "…and every unattended answer but the model-and-effort one is recorded on the PR" \
-    || die "the opening paragraph does not except the model-and-effort answer from the answers recorded on the PR"
+hasf "each carries an **Unattended:** line naming its answer, taken without asking and recorded on the PR as the operator's word would be, the model-and-effort answer and the answers before a review or a merge excepted." \
+    && pass "…and every unattended answer but the model-and-effort one and those before a review or a merge is recorded on the PR" \
+    || die "the opening paragraph does not except the model-and-effort answer and the answers before a review or a merge from the answers recorded on the PR"
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
-{ [ "$_rc" -le 1 ] && [ "$_n" -eq 6 ]; } \
-    && pass "…and exactly six stops carry an unattended answer" || die "expected six unattended answers, found '$_n'"
+{ [ "$_rc" -le 1 ] && [ "$_n" -eq 7 ]; } \
+    && pass "…and exactly seven stops carry an unattended answer" || die "expected seven unattended answers, found '$_n'"
 section() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL"; }
 at() {
     local s; s="$(section "$1" "$2")" || { die "the $3 could not be read"; return 0; }
@@ -777,8 +778,8 @@ _gwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
     && before '**Point it at a code graph' '**Read its diff and its report'; } \
     && pass "a fix pass is pointed at a code graph the checkout holds, the bullet pinned whole, before the report is read" \
     || die "the code-graph bullet is not the text the test pins, or does not come before the report is read"
-at "### Choosing a subagent's model and effort" '### 5a. ' 'model-and-effort question'
-s="$(section "### Choosing a subagent's model and effort" '### 5a. Self-check before the push')" || s=
+at "### Choosing a subagent's model and effort" '### Asking before a review or a merge' 'model-and-effort question'
+s="$(section "### Choosing a subagent's model and effort" '### Asking before a review or a merge')" || s=
 _phave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _phave=
 _pwant='The plugin ships no model or effort pick: each rung of its ladder is `ask` until the
 operator sets it, and the hooks module acts only on a call marked for it. Before each cold
@@ -802,13 +803,15 @@ move. Offer these, each with one line on what it costs or risks:
 - **e)** trust them always: give the operator the line to add under `env` in their
   settings, `"WATCH_PR_TRUST_PICKS": "1"`, and do not write it. The answer also trusts the
   rest of this session, since setup'\''s record shows `picks=ask` until the next session.
+- **f)** always use the flow for the rest of this session, or **g)** always, as
+  *Asking before a review or a merge* below says.
 
-Enact the answer on the call. For a, d or e, end the description with ` (plugin pick)`, as
-in `review-fix: large, 2 findings (plugin pick)`, and leave `model` and `effort` unset:
-where the CLI runs the hooks module, it sets them from the size. For b, set `effort` only,
-which keeps the session'\''s model; for c, set `model` and `effort`. The module leaves a call
-that sets either as it was made, and leaves a cold read on a tree holding untracked files
-unsized, so a) and a trusted pass run there as the session made the call.
+Enact the answer on the call. For a, d, e, f or g, end the description with
+` (plugin pick)`, as in `review-fix: large, 2 findings (plugin pick)`, and leave `model` and
+`effort` unset: where the CLI runs the hooks module, it sets them from the size. For b, set
+`effort` only, which keeps the session'\''s model; for c, set `model` and `effort`. The module
+leaves a call that sets either as it was made, and leaves a cold read on a tree holding
+untracked files unsized, so a) and a trusted pass run there as the session made the call.
 
 **Where the operator has trusted the picks**, for this session, or always, which setup'\''s
 record shows as `picks=trusted`, ask nothing and mark the call.
@@ -821,12 +824,131 @@ _pwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 { [ -n "$_phave" ] && [ -n "$_pwant" ] && [ "$_phave" = "$_pwant" ] \
     && grep -qxF -- "### Choosing a subagent's model and effort" "$SKILL" \
     && before '- **Read its diff and its report' "### Choosing a subagent's model and effort" \
-    && before "### Choosing a subagent's model and effort" '### 5a. Self-check before the push' \
+    && before "### Choosing a subagent's model and effort" '### Asking before a review or a merge' \
     && hasf "Choose the call's model and effort as step 5's *Choosing a subagent's model and effort* says." \
     && hasf "Choose the call's model and effort as *Choosing a subagent's model and effort* below says." \
     && ! has 'Leave `model` and `effort` unset' && ! hasf 'leave `model` and `effort` unset on the call'; } \
     && pass "the model-and-effort question is pinned whole after step 5's hand-over, and the cold read and the fix pass both point at it" \
     || die "the model-and-effort section is not the text the test pins, is misplaced, or the cold read or the fix pass still says to leave model and effort unset"
+at '### Asking before a review or a merge' '### 5a. ' 'questions before a review or a merge'
+s="$(section '### Asking before a review or a merge' '### 5a. Self-check before the push')" || s=
+_qhave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _qhave=
+_qwant='In an attended session the operator sees each review request and the merge before it is
+made. Unless the operator has chosen to always use the flow, ask in chat at each of these
+points, and offer these, each with one line on what it costs or risks:
+
+- **before step 2'\''s request**, or, where automatic review is on and the PR is not open yet,
+  before it is opened, since opening it queues a pass, as step 1 has the cold read do:
+  a) request it now; b) let me look at the change first, which waits for the operator'\''s
+  word before the request; c) stop here: the branch, and the PR where one is open, stay as
+  they are. Where the operator has just chosen the fault-tolerance pass at the second menu
+  `close` prints, that answer is this one'\''s a) for the pass'\''s request: do not ask again
+  after the revocation;
+- **before each `gate`**, in a Codex round and in a Copilot round, after step 6'\''s check,
+  since with automatic review on the push `gate` makes requests the next pass: a) close the
+  round: push, answer the threads and request the next pass; b) and c) as before step 2'\''s
+  request. Where the operator has just answered continue at step 6'\''s check-in, that answer
+  is this one'\''s a): go on to `gate`;
+- **before the merge gate**, only where no question about merging has been answered since
+  the last review, at the Codex-clean stop, a menu `close` prints, a round check-in or this
+  one: a) merge now; b) wait, which waits for the operator'\''s word; c) close the PR and
+  start over. Where the operator has just answered one, go straight to the gate.
+
+Nothing is asked before `open`: the Codex-clean stop already asks whether to open the
+Copilot phase, so choosing it there is the request, and Copilot'\''s later passes are asked
+before each round'\''s `gate`.
+
+These questions, the Codex-clean stop of step 7, the two menus `close` prints in step 8
+and the model-and-effort question each also offer to **always use the flow**, in two
+scopes:
+
+- **for the rest of this session**: from that answer on, take a) at each of these
+  questions, and the **Unattended:** answer at every other stop, and trust the plugin'\''s
+  picks as a d) answer does;
+- **always**: give the operator the lines to add under `env` in their settings,
+  `"WATCH_PR_AUTONOMOUS": "1"` and `"WATCH_PR_TRUST_PICKS": "1"`, and write neither. The
+  answer also uses the flow for the rest of this session, since setup'\''s record shows
+  `mode=attended` until the next session.
+
+The questions add choices and lift no gate, and always using the flow answers no refusal:
+a red CI run, a failed gate, a request that registered nothing and every other status the
+steps call a stop stay stops. A review question stays where its bullet puts it and is
+never folded into a model question that comes before a pass. Asking is not a STOP: no
+continuation prompt or note outside the checkout follows a question, and an answer that
+goes on is not resuming after a stop.
+An answer that stops the loop, b) or c) at any of them, is a STOP: the continuation prompt
+and the note outside the checkout follow it, and going on after it is resuming after a
+stop. As with the model-and-effort answer, no answer to them is recorded on the PR.
+
+**Unattended:** ask none of these: request now, close the round and request the next pass,
+and merge, as the steps already do.
+'
+_qwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_qwant")" || _qwant=
+{ [ -n "$_qhave" ] && [ -n "$_qwant" ] && [ "$_qhave" = "$_qwant" ] \
+    && grep -qxF -- '### Asking before a review or a merge' "$SKILL" \
+    && before "### Choosing a subagent's model and effort" '### Asking before a review or a merge' \
+    && before '### Asking before a review or a merge' '### 5a. Self-check before the push'; } \
+    && pass "the questions before a review or a merge, and always using the flow, are pinned whole after the model-and-effort question and before 5a" \
+    || die "the section asking before a review or a merge is not the text the test pins, or is not between the model-and-effort question and 5a"
+asks_in() {
+    local s f
+    s="$(section "$1" "$2")" || return 1
+    f="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || return 1
+    grep -qF -- "$3" <<<"$f"
+}
+{ asks_in '## 2. Request the review' '## 3. ' "Ask as step 5's *Asking before a review or a merge* says: before the request, or, where automatic review is on, before the PR is opened." \
+    && before "Ask as step 5's *Asking before a review or a merge* says: before the request" 'pr-request-review.sh N'; } \
+    && pass "…step 2 points at the question, ahead of its request or, with automatic review on, of the opening" \
+    || die "step 2 does not point at the question before a review, or points at it after the request"
+hasf 'or, where automatic review is on and the PR is not open yet, before it is opened, since opening it queues a pass, as step 1 has the cold read do' \
+    && pass "…with automatic review on, the question before the first request is asked before the PR is opened" \
+    || die "with automatic review on, the question before the first request is asked after opening the PR has queued a pass"
+hasf "Where the operator has just answered continue at step 6's check-in, that answer is this one's a): go on to \`gate\`;" \
+    && pass "…and a check-in answered continue is not followed by the question before gate" \
+    || die "the question before gate is asked again right after the operator answered continue at the check-in"
+{ asks_in '### The two stages, and what triggers the review' '### Write the summary' "After step 6's check and before \`gate\`, ask as *Asking before a review or a merge* above says." \
+    && before '**check the round boundary — step 6.**' "After step 6's check and before \`gate\`" \
+    && before "After step 6's check and before \`gate\`" 'pr-close-round.sh gate N'; } \
+    && pass "…step 5 points at it after the round boundary and ahead of the gate's push" \
+    || die "step 5 does not point at the question before gate, or points at it outside the round boundary and the gate's push"
+{ grep -qxF 'Ask, then stop, unless unattended. Only on the second answer:' "$SKILL" \
+    && before 'STOP — the next phase is the operator' 'Ask, then stop, unless unattended. Only on the second answer:' \
+    && before 'Ask, then stop, unless unattended. Only on the second answer:' 'pr-copilot-phase.sh open N' \
+    && hasf 'Nothing is asked before `open`: the Codex-clean stop already asks whether to open the Copilot phase, so choosing it there is the request' \
+    && ! hasf 'ask before `open`' && ! has '- **before `open`**'; } \
+    && pass "…step 7 asks nothing before open, since choosing the Copilot phase at its stop is the request" \
+    || die "step 7 asks a second question before open, or the section no longer says choosing the Copilot phase is its request"
+{ asks_in '## 1. State the task on the PR' '## 2. ' "Where automatic review is on, ask step 2's question here, before the PR is opened, as step 5's *Asking before a review or a merge* says." \
+    && before '**Before the first request, have the cold reviewer read the change**' "Where automatic review is on, ask step 2's question here" \
+    && before "Where automatic review is on, ask step 2's question here" '## 2. Request the review'; } \
+    && pass "…step 1 points at step 2's question for automatic review, after the cold read and before the PR is opened" \
+    || die "step 1 does not point at step 2's question where automatic review is on, or points at it outside step 1"
+hasf 'Where the operator has just chosen the fault-tolerance pass at the second menu `close` prints, that answer is this one'\''s a) for the pass'\''s request: do not ask again after the revocation;' \
+    && pass "…the fault-tolerance pass chosen at the menu is its request's answer, not followed by step 2's question" \
+    || die "step 2's question is asked again after the operator chose the fault-tolerance pass and the revocation was posted"
+hasf 'A review question stays where its bullet puts it and is never folded into a model question that comes before a pass.' \
+    && ! hasf 'ask both in one message' \
+    && pass "…a review question is never folded into a model question before a pass" \
+    || die "a review question may be folded into a model question that comes before a pass"
+hasf 'from that answer on, take a) at each of these questions, and the **Unattended:** answer at every other stop, and trust the plugin'\''s picks as a d) answer does;' \
+    && ! hasf 'take each **Unattended:** answer this document gives' \
+    && pass "…and always using the flow takes a) at these questions and each other stop's own unattended answer" \
+    || die "always using the flow does not take a) at these questions, or reads as overriding another stop's unattended answer"
+{ asks_in '### Then: the gate' '## What this skill' "Ask before the gate where step 5's *Asking before a review or a merge* says to." \
+    && before 'Ask before the gate where step 5' 'pr-merge-gate.sh N'; } \
+    && pass "…and step 8 points at it ahead of the merge gate" \
+    || die "step 8 does not point at the question before the merge gate, or points at it after the gate"
+hasf 'only where no question about merging has been answered since the last review, at the Codex-clean stop, a menu `close` prints, a round check-in or this one' \
+    && hasf 'Where the operator has just answered one, go straight to the gate.' \
+    && pass "…the merge question is not asked again after a merge answer since the last review" \
+    || die "the merge question is asked again right after the operator answered merge at a stop"
+hasf 'An answer that stops the loop, b) or c) at any of them, is a STOP: the continuation prompt and the note outside the checkout follow it, and going on after it is resuming after a stop.' \
+    && hasf 'As with the model-and-effort answer, no answer to them is recorded on the PR.' \
+    && pass "…and an answer that stops the loop is a STOP, with nothing recorded on the PR" \
+    || die "an answer that stops the loop is not a STOP, or an answer is recorded on the PR"
+grep -qF 'A question this loop asks that lifts a helper'\''s gate, or an "always use the flow" that skips a helper'\''s refusal, is a blocking finding.' <<<"$_af" \
+    && pass "…and AGENTS.md makes a question that lifts a gate, or an always-use-the-flow that skips a refusal, a blocking finding" \
+    || die "AGENTS.md does not make a question that lifts a gate, or an always-use-the-flow that skips a refusal, a blocking finding"
 at '## 6. ' '## 7. ' 'round check-in'
 at '**STOP — the next phase is the operator' '```bash' 'Codex-clean stop, before the Copilot phase is opened'
 at '**On the two-reviewer path, STOP.' '### Resuming after a stop' 'Copilot-clean stop'
@@ -886,6 +1008,24 @@ if [ -f "$README" ]; then
     grep -qF 'A rung default other than `ask`, or any pick applied to an Agent call the session did not mark `(plugin pick)` or that sets its own `model` or `effort`, is a finding.' <<<"$_af" \
         && pass "…and AGENTS.md makes a shipped pick, or one over an unmarked or self-set call, a finding" \
         || die "AGENTS.md does not hold the rung defaults and the mark to review"
+    _st="$(awk '$0 == "### The stops" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _st=
+    _as="$(awk '$0 == "## A session" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _as=
+    _asf="$(tr '\n' ' ' <<<"$_as" | tr -s ' ')" || _asf=
+    _usf="$(tr '\n' ' ' <<<"$_us" | tr -s ' ')" || _usf=
+    { grep -q '^[0-9][0-9]*\. \*\*A review request or the merge\.\*\*' <<<"$_st" \
+        && grep -qF 'In an attended session the session asks you in chat before each review request and before the merge' <<<"$_asf" \
+        && grep -qF 'with automatic review on it asks before the PR is opened, since opening it queues a pass.' <<<"$_asf" \
+        && grep -qF 'before it pushes a round'\''s fixes and closes the round, unless you have just answered continue at the round check-in.' <<<"$_asf" \
+        && grep -qF 'Before the merge gate, unless you have answered a question about merging since the last review' <<<"$_asf" \
+        && grep -qF 'Choosing the Copilot phase at the stop where Codex is clean is that phase'\''s first request, and choosing the fault-tolerance pass where Copilot is clean is that pass'\''s, so nothing more is asked before either.' <<<"$_asf" \
+        && ! grep -qF 'request Copilot now or not yet' <<<"$_asf" \
+        && grep -qF 'A question adds a choice and never lifts a gate, and your answer to one is not recorded on the PR.' <<<"$_asf" \
+        && grep -qF 'An answer that stops the loop is a stop like the others, and ends with a continuation prompt.' <<<"$_asf" \
+        && grep -q '^- \*\*a review request or the merge\*\*: go ahead' <<<"$_us" \
+        && grep -qF 'For the rest of the session it is the same as `WATCH_PR_AUTONOMOUS=1` plus `WATCH_PR_TRUST_PICKS=1`' <<<"$_usf" \
+        && grep -qxF '{ "env": { "WATCH_PR_AUTONOMOUS": "1", "WATCH_PR_TRUST_PICKS": "1" } }' <<<"$_us"; } \
+        && pass "README describes the questions before a review or a merge, lists them among the stops, and makes always using the flow WATCH_PR_AUTONOMOUS=1 plus WATCH_PR_TRUST_PICKS=1" \
+        || die "README's account of the questions before a review or a merge, or of always using the flow, drifted"
     grep -q 'Review-Pause-Acknowledged' "$README" \
         && pass "README names the record markers a body may not carry" || die "README no longer names the markers"
     grep -q 'PR_WATCH_PROBE_TIMEOUT' "$README" \

@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.16.0] — 2026-10-24
+
+- **An attended session asks before each review request and before the merge.** The loop
+  posted each Codex and Copilot request itself, the opening one and every re-request a
+  round's closing makes, so the operator saw a request only after it was posted, and had no
+  point at which to look at the change first. `SKILL.md`'s new § Asking before a review or
+  a merge has an attended session ask in chat at three points. Before step 2's request, or,
+  with automatic review on, before the PR is opened, since opening it queues a pass, which
+  is where step 1 already puts the cold read and now points at the question; choosing the
+  fault-tolerance pass at the second menu `close` prints is that pass's answer, so nothing
+  is asked after the revocation. Before each `gate`, after step 6's check, since with
+  automatic review on the push `gate` makes requests the next pass and a question after it
+  could hold nothing; a check-in just answered continue is that answer. Before the merge
+  gate, only where no question about merging has been answered since the last review, at
+  the Codex-clean stop, a menu `close` prints, a round check-in or this one, so the
+  operator is not asked to merge twice in a row. Nothing is asked before `open`: choosing
+  the Copilot phase at the Codex-clean stop is its first request, and Copilot's later
+  passes are asked before each round's `gate`. Each option comes with one line on what it
+  costs or risks: request now, look at the change first, or stop with the branch and any
+  open PR as they are, worded to read right before the PR is opened as after; close the
+  round by pushing, answering the threads and requesting the next pass, or the same two;
+  merge now, wait, or close the PR and start over. Steps 1, 2, 5 and 8 point at the section
+  in one sentence each. These questions, the Codex-clean stop, the two menus `close` prints
+  and the model-and-effort question each also offer to always use the flow. For the rest of
+  the session, the session then takes a) at each of these questions and the
+  **Unattended:** answer at every other stop, and trusts the plugin's picks; always, it
+  gives the operator `"WATCH_PR_AUTONOMOUS": "1"` and `"WATCH_PR_TRUST_PICKS": "1"` to add
+  under `env`, and writes neither. The questions add choices and lift no gate, and always
+  using the flow answers no refusal: a red CI run, a failed gate or a request that
+  registered nothing stays a stop. A review question stays where its bullet puts it and is
+  never folded into a model question that comes before a pass. Asking is not a STOP, but an
+  answer that stops the loop is one: the continuation prompt and the outside note follow
+  it, and going on after it is resuming after a stop. No answer is recorded on the PR,
+  which the opening paragraph now says beside the model-and-effort exception; unattended,
+  the session asks none and goes ahead as before. § Choosing a subagent's model and effort
+  offers the two answers as f) and g), and a compaction summary keeps whether the operator
+  chose to always use the flow. README's § A session describes the questions, § The stops
+  lists them, and § Running unattended says always using the flow is
+  `WATCH_PR_AUTONOMOUS=1` plus `WATCH_PR_TRUST_PICKS=1`. `AGENTS.md` makes a question that
+  lifts a helper's gate, or an "always use the flow" that skips a helper's refusal, a
+  blocking finding. `test-pr-skill-contract.sh` pins the new section whole and its place,
+  each pointer in its step and ahead of its helper, step 1's for automatic review,
+  `gate`'s after step 6's check, step 7 asking nothing before `open`, the fault-tolerance
+  and check-in answers standing for the question that follows them, the rule against a
+  second merge question, the always-use-the-flow line, the review question kept out of a
+  model question, the STOP an answer that stops the loop is, the seventh unattended
+  answer, the amended opening paragraph and § Choosing, the compaction entry, the README
+  text and the `AGENTS.md` rule. Minor: three new questions and a new answer. Closes #408.
+
 ## [2.15.0] — 2026-10-24
 
 - **A subagent's model and effort are the operator's choice, asked before each pass.** The
