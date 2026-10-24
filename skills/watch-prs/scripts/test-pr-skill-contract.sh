@@ -339,6 +339,8 @@ of it costs a round:
 - whether the operator has trusted the plugin'\''s model picks, for this session or always
   (setup'\''s `picks=trusted`, or an e) answer);
 - whether the operator has chosen to always use the flow, for this session or always;
+- where the operator set a task, its plan, the tier of the last implementation pass and
+  what a failed pass reported, until the change it made is proved;
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
@@ -663,13 +665,16 @@ hasf "each carries an **Unattended:** line naming its answer, taken without aski
 _rc=0; _n="$(grep -c '^\*\*Unattended:\*\*' "$SKILL")" || _rc=$?
 { [ "$_rc" -le 1 ] && [ "$_n" -eq 7 ]; } \
     && pass "…and exactly seven stops carry an unattended answer" || die "expected seven unattended answers, found '$_n'"
+hasf '**The loop:** setup → hand a task the operator set to an implementation pass → 1 state the task → 2 request Codex' \
+    && pass "…and the loop line hands a task the operator set to an implementation pass ahead of step 1" \
+    || die "the loop line does not hand a task the operator set to an implementation pass ahead of step 1"
 section() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 { c = 1; next } index($0, b) == 1 { c = 0 } c' "$SKILL"; }
 at() {
     local s; s="$(section "$1" "$2")" || { die "the $3 could not be read"; return 0; }
     [ "$(grep -c '^\*\*Unattended:\*\*' <<<"$s" || true)" -eq 1 ] \
         && pass "…one at the $3" || die "the $3 carries no unattended answer"
 }
-at "### When the host project's rules differ" '## 1. ' 'host-rules stop'
+at "### When the host project's rules differ" '### Where the host project keeps its notes' 'host-rules stop'
 s="$(section "### When the host project's rules differ" '#')" || s=
 sf="$(tr '\n' ' ' <<<"$s" | tr -s ' ')" || sf=
 { grep -q 'stop and ask the operator which applies' <<<"$s" && grep -q 'a new session asks again' <<<"$s" \
@@ -699,7 +704,7 @@ _hwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
 { [ -n "$_hhave" ] && [ "$_hhave" = "$_hwant" ]; } \
     && pass "…and the host-rules section is pinned whole, so no clause can be dropped or reworded" \
     || die "the host-rules section is not the text the test pins"
-s="$(section '### Where the host project keeps its notes' '## 1. ')" || s=
+s="$(section '### Where the host project keeps its notes' '### Handing a task to an implementation pass')" || s=
 _nhave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _nhave=
 _nwant='Before step 1, or before resuming after a stop, name where the host project keeps its
 durable notes, taking it from its `CLAUDE.md` and `AGENTS.md`: a changelog, decision
@@ -726,6 +731,47 @@ _nwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} E
     && before '### Where the host project keeps its notes' '## 1. State the task on the PR'; } \
     && pass "the notes section is pinned whole: found before step 1 and on resuming, a tracked note in before the first request, a prompt that says only where to resume, no origin" \
     || die "the notes section is misplaced or not the text the test pins"
+s="$(section '### Handing a task to an implementation pass' '## 1. ')" || s=
+{ [ -n "$s" ] && [ "$(grep -c '^\*\*Unattended:\*\*' <<<"$s" || true)" -eq 0 ]; } \
+    && pass "…and none at the implementation pass, whose only stop exists because a change could not be proved" \
+    || die "the implementation pass carries an unattended answer, though its only stop exists because a change could not be proved"
+_ihave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _ihave=
+_iwant='Where the operator sets a task, an issue to implement or a change to make, read it and plan
+it before step 1: what changes, where, and what proves it. Then have a subagent make the
+change, where the harness has subagents and the operator has not said to make it yourself.
+
+- **Size the work as step 5 sizes a fix pass.** `small` is one edit in one place that
+  changes no behaviour. `large` is a change to a contract or a design, or one that reaches
+  through code, tests and documents at once. `medium` is the rest.
+- **Mark the call.** Start its description with `implement:`, then the tier, as in
+  `implement: medium`. Where the CLI runs the plugin'\''s hooks module, it sizes the pass by
+  that tier on a fix pass'\''s rungs, and leaves a call that names no tier as it was made: a
+  number states findings, which only a fix pass has. Choose the call'\''s model and effort as
+  step 5'\''s *Choosing a subagent'\''s model and effort* says.
+- **Hand over the plan, and its limits.** The plan whole, and these limits: the smallest
+  change that does the task, tests that fail without it where the project keeps tests, and
+  nothing committed, pushed, posted or resolved. Have it report what it proved: for each
+  test, the mutation it ran and what failed, or that it could construct none.
+- **Keep the judgment.** Read its diff and its report before you commit. The commit, the
+  self-check of 5a, the cold read of step 1, the PR and every judgment call stay with you.
+- **One step up.** A pass that cannot prove its change, through a test that still fails
+  with the change, a mutant that survives or a report that it is stuck, is run once more at
+  the next tier: `small` to `medium`, `medium` to `large`. Give it the plan, the limits and
+  what the failed pass reported, marked as step 5'\''s *Mark what was quoted* says. Do not
+  take the work over. A pass that reports it could construct no mutation has made a change
+  that cannot be tested: that is *Prove a fix can fail*'\''s stop, not a step up. Where a
+  `large` pass cannot prove its change, it is a STOP: tell the operator what failed. No PR
+  exists yet, so its continuation prompt names the branch and the stop.
+'
+_iwant="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$_iwant")" || _iwant=
+{ [ -n "$_ihave" ] && [ -n "$_iwant" ] && [ "$_ihave" = "$_iwant" ] \
+    && grep -qxF -- '### Handing a task to an implementation pass' "$SKILL" \
+    && before '### Where the host project keeps its notes' '### Handing a task to an implementation pass' \
+    && before '### Handing a task to an implementation pass' '## 1. State the task on the PR' \
+    && grep -q '^- where the operator set a task, its plan, the tier of the last implementation pass and$' <<<"$_kept" \
+    && grep -q '^  what a failed pass reported, until the change it made is proved;$' <<<"$_kept"; } \
+    && pass "the implementation pass is pinned whole before step 1: sized by step 5's tiers, marked implement:, handed the plan and its limits, the judgment kept, one tier up with the failed report quoted, an untested change sent to the limitation stop, a large one a STOP naming the branch, the plan, tier and report kept across a compaction" \
+    || die "the implementation-pass section is not the text the test pins, is not between the notes section and step 1, or its plan, tier and failed report are not kept across a compaction"
 _rf="$(tr '\n' ' ' <"$README" | tr -s ' ')" || _rf=
 grep -qF 'Each stop ends with a continuation prompt naming the PR, its branch, the rounds and the stop, so a later session knows where to resume; that session still runs setup and reads the phase from the PR.' <<<"$_rf" \
     && pass "…and README names what the continuation prompt carries and that a later session still runs setup" \
@@ -783,16 +829,16 @@ s="$(section "### Choosing a subagent's model and effort" '### Asking before a r
 _phave="$(awk '{for (i = 1; i <= NF; i++) printf "%s%s", (n++ ? " " : ""), $i} END {print ""}' <<<"$s")" || _phave=
 _pwant='The plugin ships no model or effort pick: each rung of its ladder is `ask` until the
 operator sets it, and the hooks module acts only on a call marked for it. Before each cold
-read and each fix pass, settle what the subagent runs on. The question is not a STOP: no
-continuation prompt or note outside the checkout follows it, and answering it is not
-resuming after a stop, so the host project'\''s rules are not compared again.
+read, implementation pass and fix pass, settle what the subagent runs on. The question is
+not a STOP: no continuation prompt or note outside the checkout follows it, and answering it
+is not resuming after a stop, so the host project'\''s rules are not compared again.
 
 **In an attended session where the operator has not trusted the plugin'\''s picks**, stop
-before the pass and ask in chat. Name the pass and its size: a fix pass by its tier and its
-number of findings; a cold read by the lines it changes, which
-`git diff --shortstat --no-renames` against the merge base with the base ref reports,
-small up to 60 and large from 200 changed lines by default, bounds `/plugin configure` can
-move. Offer these, each with one line on what it costs or risks:
+before the pass and ask in chat. Name the pass and its size: an implementation pass by its
+tier; a fix pass by its tier and its number of findings; a cold read by the lines it
+changes, which `git diff --shortstat --no-renames` against the merge base with the base ref
+reports, small up to 60 and large from 200 changed lines by default, bounds
+`/plugin configure` can move. Offer these, each with one line on what it costs or risks:
 
 - **a)** the plugin'\''s pick for that size: the rung the operator configured, or where it is
   left at `ask`, the session'\''s model at `medium`, `high` or `xhigh` effort by size;
@@ -1000,7 +1046,7 @@ if [ -f "$README" ]; then
         && grep -q "^- \*\*a subagent's model and effort\*\*: unless you trusted the plugin's picks, mark$" <<<"$_us" \
         && grep -q '^| `WATCH_PR_TRUST_PICKS` | unset | `1` trusts' "$README" \
         && grep -qxF '| `reviewSmall`, `reviewMedium`, `reviewLarge` | `ask`, `ask`, `ask` | model and effort for a marked cold review of each size |' <<<"$_ms" \
-        && grep -qxF '| `fixSmall`, `fixMedium`, `fixLarge` | `ask`, `ask`, `ask` | model and effort for a marked fix pass of each tier |' <<<"$_ms" \
+        && grep -qxF '| `fixSmall`, `fixMedium`, `fixLarge` | `ask`, `ask`, `ask` | model and effort for a marked fix or implementation pass of each tier |' <<<"$_ms" \
         && grep -qxF '{ "env": { "WATCH_PR_TRUST_PICKS": "1" } }' <<<"$_ms" \
         && grep -qF '(plugin pick)' <<<"$_ms" && grep -qF 'measured in #389' <<<"$_ms" && grep -qF 'measured in #393' <<<"$_ms" && ! grep -qF 'under trial' <<<"$_ms"; } \
         && pass "README names the model-and-effort stop and its unattended answer, the trust knob, every rung at ask, and the picks with #389 and #393" \
@@ -1026,6 +1072,17 @@ if [ -f "$README" ]; then
         && grep -qxF '{ "env": { "WATCH_PR_AUTONOMOUS": "1", "WATCH_PR_TRUST_PICKS": "1" } }' <<<"$_us"; } \
         && pass "README describes the questions before a review or a merge, lists them among the stops, and makes always using the flow WATCH_PR_AUTONOMOUS=1 plus WATCH_PR_TRUST_PICKS=1" \
         || die "README's account of the questions before a review or a merge, or of always using the flow, drifted"
+    _ts="$(awk '$0 == "### A task you set" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _ts=
+    _tsf="$(tr '\n' ' ' <<<"$_ts" | tr -s ' ')" || _tsf=
+    _msf="$(tr '\n' ' ' <<<"$_ms" | tr -s ' ')" || _msf=
+    { grep -qF 'It hands the plan to a subagent whose description starts `implement:` and the tier, with its limits: the smallest change that does the task, tests that fail without it where your project keeps tests, and nothing committed, pushed, posted or resolved.' <<<"$_tsf" \
+        && grep -qF 'A pass that cannot prove its change, through a test that still fails with the change, a mutant that survives or a report that it is stuck, is run once more at the next tier, small to medium and medium to large, given what the failed pass reported. The session does not take the work over. A pass that could construct no mutation has made a change that cannot be tested, and that stops for you as a limitation it cannot test does. Where a large pass cannot prove its change, the session stops and tells you what failed, unattended as well; no PR exists yet, so its continuation prompt names the branch and the stop.' <<<"$_tsf" \
+        && _st9="$(awk '/^9\. \*\*An implementation it cannot prove\.\*\*/ { c = 1 } c && /^$/ { exit } c' <<<"$_st")" \
+        && grep -qF 'No PR exists yet, so its continuation prompt names the branch and the stop.' <<<"$(tr '\n' ' ' <<<"$_st9" | tr -s ' ')" \
+        && grep -qF -- '- **An implementation pass** takes the tier the session names for it, on a fix pass'\''s rungs.' <<<"$_msf" \
+        && grep -qF 'It shares the fix rungs, so a rung set for a fix pass applies to it too, though #389 measured fix passes only.' <<<"$_msf"; } \
+        && pass "README hands a task to an implementation pass with its limits, steps a pass that cannot prove its change up one tier and sends an untested one to the limitation stop, lists a large one among the stops with a prompt naming the branch, and says it shares the fix rungs #389 measured on fix passes only" \
+        || die "README's account of the implementation pass, its step up, its stop, or the fix rungs it shares drifted"
     grep -q 'Review-Pause-Acknowledged' "$README" \
         && pass "README names the record markers a body may not carry" || die "README no longer names the markers"
     grep -q 'PR_WATCH_PROBE_TIMEOUT' "$README" \

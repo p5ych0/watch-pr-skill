@@ -90,6 +90,10 @@ grep -qF '`review-fix:`' "$ROOT/skills/watch-prs/SKILL.md" && grep -qF '^review-
     && grep -qF '`small`, `medium` or `large`' "$ROOT/skills/watch-prs/SKILL.md" && grep -qF "['small', 'medium', 'large']" "$MODULE" \
     && pass "the marker and the tiers SKILL.md tells the session to write are the ones the module reads" \
     || die "SKILL.md and the module disagree on the review-fix: marker or on the three tiers, so a fix pass goes untiered"
+grep -qF 'Start its description with `implement:`, then the tier' "$ROOT/skills/watch-prs/SKILL.md" && grep -qF "/^implement:/i.test(description) ? 'implement'" "$MODULE" \
+    && grep -qF 'const PLANNED = /^implement:' "$MODULE" \
+    && pass "…and so is the implement: marker an implementation pass is written with" \
+    || die "SKILL.md and the module disagree on the implement: marker, so an implementation pass goes untiered"
 
 BRIEF="$ROOT/agents/cold-reviewer.md"
 front_ok() {

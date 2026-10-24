@@ -4,7 +4,7 @@ const MODELS = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 const TIERS = ['small', 'medium', 'large'] as const
 
-type Kind = 'review' | 'fix'
+type Kind = 'review' | 'fix' | 'implement'
 type Choice = { model?: (typeof MODELS)[number]; effort: (typeof EFFORTS)[number] }
 type Tier = (typeof TIERS)[number]
 type Size = { text: string } & ({ count: number } | { tier: Tier })
@@ -12,6 +12,8 @@ type Size = { text: string } & ({ count: number } | { tier: Tier })
 const PROBE_MS = 10_000
 const REMOTES = 'refs/remotes/'
 const STATED = /^review-fix:\s*(?:([a-z]+)|(\d+))(?![\w-])/i
+// A count states findings, and an implementation pass has none.
+const PLANNED = /^implement:\s*([a-z]+)(?![\w-])/i
 const MARKED = /\(plugin pick\)\s*$/i
 const RECOMMENDED: Record<Tier, Choice> = {
   small: { effort: 'medium' },
@@ -39,7 +41,8 @@ function kindOf(type: string | undefined, description: string): Kind | undefined
   // A fork inherits its parent's model and effort whatever the call says.
   if (type === 'fork') return undefined
   if (type === 'cold-reviewer' || type?.endsWith(':cold-reviewer')) return 'review'
-  return /^review-fix\b/i.test(description) ? 'fix' : undefined
+  if (/^review-fix\b/i.test(description)) return 'fix'
+  return /^implement:/i.test(description) ? 'implement' : undefined
 }
 
 async function git($: EngineInterface, args: readonly string[], emptyAt?: number): Promise<string | undefined> {
@@ -87,8 +90,8 @@ async function changed($: EngineInterface, prompt: string): Promise<Size | undef
   return undefined
 }
 
-function stated(description: string): Size | undefined {
-  const [, word, digits] = STATED.exec(description) ?? []
+function stated(kind: Kind, description: string): Size | undefined {
+  const [, word, digits] = (kind === 'implement' ? PLANNED : STATED).exec(description) ?? []
   const tier = word?.toLowerCase()
   if (isOneOf(TIERS, tier)) return { tier, text: 'tier named by the session' }
   const count = Number(digits)
@@ -96,6 +99,14 @@ function stated(description: string): Size | undefined {
 }
 
 export const register: Register = (on, options) => {
+  const fix = {
+    name: 'review fix',
+    smallMax: Number(options.fixSmallFindings),
+    largeMin: Number(options.fixLargeFindings),
+    small: options.fixSmall,
+    medium: options.fixMedium,
+    large: options.fixLarge,
+  }
   const ladder = {
     review: {
       name: 'cold review',
@@ -105,14 +116,8 @@ export const register: Register = (on, options) => {
       medium: options.reviewMedium,
       large: options.reviewLarge,
     },
-    fix: {
-      name: 'review fix',
-      smallMax: Number(options.fixSmallFindings),
-      largeMin: Number(options.fixLargeFindings),
-      small: options.fixSmall,
-      medium: options.fixMedium,
-      large: options.fixLarge,
-    },
+    fix,
+    implement: { ...fix, name: 'implementation' },
   }
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
@@ -130,7 +135,7 @@ export const register: Register = (on, options) => {
     }
 
     // A git that cannot run, or outlives its bound, ends the sizing: the next probe would wait as long.
-    const size = kind === 'review' ? await changed($, e.prompt).catch(() => undefined) : stated(e.description)
+    const size = kind === 'review' ? await changed($, e.prompt).catch(() => undefined) : stated(kind, e.description)
     if (size === undefined) {
       $.ui.log(`${$.plugin.name}: ${rung.name} left as called, its size could not be measured`)
       return next(e)
