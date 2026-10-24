@@ -23,10 +23,10 @@ still holds for them. This record is the one exception to it, and the exception'
 - **It fails open.** The module rewrites two arguments of an Agent call, `model` and
   `effort`, and gates nothing: every proof, mutation and gate of the loop is a privileged
   helper's. A hook that throws is skipped and the call goes through as its caller made it,
-  and so does a call the module cannot size or the session did not mark. Losing the module
-  costs a subagent run at the model and effort it would have had with no module, which is
-  what every run cost before one existed. A module that failed closed would stop a cold read
-  on a fault that is not the change's.
+  and so does a call the module cannot size, the session did not mark, or that sets its own
+  model or effort. Losing the module costs a subagent run at the model and effort it would
+  have had with no module, which is what every run cost before one existed. A module that
+  failed closed would stop a cold read on a fault that is not the change's.
 - **The API under it is early access.** Function hooks may change between releases of the
   CLI. A module that no longer loads is the fail-open case above, and the loop runs untiered.
 - **The suite pins its shape, not its behaviour.** The module is TypeScript run by the CLI's

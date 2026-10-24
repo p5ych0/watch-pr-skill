@@ -509,10 +509,11 @@ finding. The accepted records:
   inside the record, so a tree that holds neither the module nor its cases is not a
   finding. Where one ships, it runs in every installing session and rewrites `model` and
   `effort` on an Agent call, so it fails open: a hook that throws, a module a later CLI no
-  longer loads, a call it cannot size, a call the session did not mark, each leaves the call
-  as its caller made it, and a request that it fail closed is not a finding. The suite pins
-  its shape and cannot run it; its own cases run under `claude plugin test`. Removing any of
-  these bounds is a finding: `hooks/` holds `hooks.json` and the one module it names and
+  longer loads, a call it cannot size, a call the session did not mark or that sets its own
+  model or effort, each leaves the call as its caller made it, and a request that it fail
+  closed is not a finding. The suite pins its shape and cannot run it; its own cases run
+  under `claude plugin test`. Removing any of these bounds is a finding: `hooks/` holds
+  `hooks.json` and the one module it names and
   nothing else, none of them a link; `hooks.json` is exactly an empty `hooks` record and
   one `modules` entry, the empty record being what a CLI that predates function hooks
   validates; the module registers one hook, `tool.call` for `Agent`, names nothing under
