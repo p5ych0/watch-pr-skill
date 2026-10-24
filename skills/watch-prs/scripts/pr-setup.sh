@@ -85,5 +85,7 @@ _rb_back="$(cat "$RB_DIR/origin" 2>/dev/null)" || rb_setup_stop origin_write 2
 
 _mode=attended
 [ "${WATCH_PR_AUTONOMOUS:-}" = 1 ] && _mode=unattended
-echo "PR_SETUP status=ready origin=$RB_DIR/origin work=$RB_WORK_DIR mode=$_mode"
+_picks=ask
+[ "${WATCH_PR_TRUST_PICKS:-}" = 1 ] && _picks=trusted
+echo "PR_SETUP status=ready origin=$RB_DIR/origin work=$RB_WORK_DIR mode=$_mode picks=$_picks"
 exit 0

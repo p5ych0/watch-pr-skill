@@ -253,8 +253,8 @@ removing a dependency over guarding it. Where a finding does not hold, it says s
 on the thread with evidence rather than changing code to satisfy it. It decides
 each answer itself; the edits it hands to a subagent, unless you tell it to make
 them too, and it reads the result before committing. *Subagent model and effort*
-below says how that subagent is sized. Where your checkout holds a code graph
-built by `graphify` or `trail`, at `graphify-out/graph.json` or
+below says how that subagent's model and effort are chosen. Where your checkout
+holds a code graph built by `graphify` or `trail`, at `graphify-out/graph.json` or
 `graft/.graph/wiring.json` from its root, the session tells the subagent to
 query it for callers before it searches by hand, where the session's permissions
 already allow the command and, for `trail`, where the session's own directory is
@@ -381,6 +381,9 @@ The loop stops and asks at these points:
    posted as it stands, so the loop never writes a second one above it. A
    mention indented or inside a fence triggers the pass just the same, which is
    why a body carrying one needs no help from the loop.
+7. **A subagent's model and effort.** Before each cold read and each fix pass,
+   unless you trusted the plugin's picks, the session asks which model and
+   effort the pass runs on. *Subagent model and effort* says what it offers.
 
 Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
 the head and, where the phase could read it, the time of the verdict it
@@ -394,6 +397,9 @@ Export `WATCH_PR_AUTONOMOUS=1` and the session takes these answers at the decisi
 stops instead of asking, recording each on the PR as it would your word:
 
 - **a host rule that differs**: keep the skill's rule;
+- **a subagent's model and effort**: unless you trusted the plugin's picks, mark
+  nothing, so the pass runs on the session's model and effort; unlike the
+  others, this answer is not recorded on the PR;
 - **the round check-in**: acknowledge and continue, so the record of a long loop
   stays on the PR;
 - **Codex is clean**: merge on that signoff alone if Codex approved the opening
@@ -440,6 +446,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed heads per reviewer between check-ins; `0` disables the pause |
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin`, so GitHub enforces branch protection itself |
 | `WATCH_PR_AUTONOMOUS` | unset | `1` takes the answers under *Running unattended* at the decision stops; every failure still stops |
+| `WATCH_PR_TRUST_PICKS` | unset | `1` trusts the plugin's model and effort picks in every session: the session asks nothing before a cold read or a fix pass and marks each for the plugin's pick, as *Subagent model and effort* says |
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks run |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
 | `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |
@@ -455,10 +462,54 @@ credit use are Codex account and repository settings.
 
 ### Subagent model and effort
 
-The plugin ships one hooks module that sets the effort of two kinds of subagent
-from the size of the work, and logs one line saying what it picked. It needs a
+The plugin picks no model or effort for you. It ships one hooks module that can
+set the model and effort of two kinds of subagent, a cold review and a fix pass,
+from the size of the work, and it logs one line saying what it did. Every rung
+of its ladder ships as `ask`, and the module acts only on a pass the session
+marks `(plugin pick)`, so it applies nothing you did not choose. It needs a
 Claude Code build with function hooks, measured on 2.1.296; an older build does
-not run it and the loop runs as before.
+not run it, and every pass runs as the session made the call.
+
+**The session asks.** In an attended session, before each cold read and each
+fix pass, the session stops and asks you in chat. It names the pass and its
+size, and offers the plugin's pick for that size, the session's model at an
+effort it names, a lighter model at an effort it names, trusting the plugin's
+picks for the rest of the session, or trusting them always, each with one line
+on what it costs or risks. A pass you give to the plugin's pick ends its
+description with `(plugin pick)`, and the module sets its model and effort. A
+pass you give a model or an effort carries it on the call, and the module leaves
+that call as it was made.
+
+**Trusting the picks.** Trust for this session lasts until the session ends,
+and a compaction keeps it. Trust always is `WATCH_PR_TRUST_PICKS=1`: the session
+gives you the line to add under `env` in your settings, and does not write it.
+
+```json
+{ "env": { "WATCH_PR_TRUST_PICKS": "1" } }
+```
+
+With either, the session asks nothing and marks every pass for the plugin's
+pick.
+
+**Unattended.** With `WATCH_PR_AUTONOMOUS=1` the session asks nothing. Unless
+you trusted the picks, it marks nothing either, so each pass runs on the
+session's model and effort, whatever a rung is set to, and nothing about it is
+recorded on the PR.
+
+**What each choice costs and risks.** For a rung left at `ask`, the plugin's
+pick is the session's model at an effort the size sets. A defect a cold read or
+a fix pass misses costs a reviewer round, which is the expensive part of the
+loop.
+
+| Choice | What it costs | What it risks |
+| --- | --- | --- |
+| The pick for a small pass: the session's model at `medium` | the least of the three picks | a pass its tier undersells, such as one finding that needs a redesign, gets too little thought |
+| The pick for a medium pass: the session's model at `high` | more turns and tokens than `medium` | a medium pass that needed a large one's thought |
+| The pick for a large pass: the session's model at `xhigh` | the most of the three picks | spend with no measured gain over `high` |
+| `high` for a large pass | fewer turns and tokens per large pass | less thought where the work is hardest; measured in #393 |
+| `sonnet` for a small or a medium fix pass | less of the usage limit per token than a larger model | measured in #389; a fix pass carries out an answer the session decided, and a wrong edit costs a round |
+| The session's model at a lower effort | less than the pick | a missed defect, and the round it costs |
+| `haiku` | the least of any model | not measured on this loop |
 
 - **A cold review** is sized by the lines added and deleted against the merge
   base with the remote-tracking `origin/…` ref the session's prompt names
@@ -480,7 +531,9 @@ holding untracked files, which the reviewer reads and the measure does not
 count; a `git` that fails or runs past ten seconds; a fix pass that names no
 tier and states no number. So does every other subagent. Edits the session
 makes itself, which it does where you tell it to, are not subagent calls, so
-nothing sizes them.
+nothing sizes them. A call that sets its own model or effort is left as made
+and is not sized, and so is every call not marked `(plugin pick)`, whatever its
+rungs are set to, so no `git` runs for either.
 
 Each kind has three rungs. The install asks for them, and
 `/plugin configure watch-pr-skill` in a session, or `claude plugin configure
@@ -488,19 +541,23 @@ watch-pr-skill` from a shell, shows and sets them afterwards:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `reviewSmall`, `reviewMedium`, `reviewLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a cold review of each size |
+| `reviewSmall`, `reviewMedium`, `reviewLarge` | `ask`, `ask`, `ask` | model and effort for a marked cold review of each size |
 | `reviewSmallLines`, `reviewLargeLines` | `60`, `200` | small up to, and large from, this many changed lines |
-| `fixSmall`, `fixMedium`, `fixLarge` | `default/medium`, `default/high`, `default/xhigh` | model and effort for a fix pass of each tier |
+| `fixSmall`, `fixMedium`, `fixLarge` | `ask`, `ask`, `ask` | model and effort for a marked fix pass of each tier |
 | `fixSmallFindings`, `fixLargeFindings` | `1`, `4` | where the session names no tier: small up to, and large from, this many findings |
 
 The small bound is read first. Where a kind's two bounds overlap, a size at or
 under the small bound is small whatever the large bound says, and the medium
 rung is not used.
 
-A rung is `<model>/<effort>`. The model `default` leaves the call's model alone,
-so out of the box only the effort moves and no session is sent to a model its
-account lacks. Name `haiku`, `sonnet`, `opus` or `fable` to have the module pick
-the model too; it then replaces whatever the call asked for.
+A rung is `ask` or `<model>/<effort>`, and either applies only to a pass marked
+`(plugin pick)`, never to an unmarked one or one that sets its own model or
+effort. At `ask` the module applies its recommendation, the picks above. A rung
+you set takes the recommendation's place for that size, and so does a rung an
+earlier install saved, such as the 2.14 defaults `default/medium` up to
+`default/xhigh`: it no longer applies on its own. The model `default` leaves
+the call's model alone, so no pass is sent to a model its account lacks. Name
+`haiku`, `sonnet`, `opus` or `fable` to have the module pick the model too.
 
 ## Troubleshooting
 

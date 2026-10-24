@@ -112,8 +112,8 @@ dir_of() { local r="${1#*|}"; printf '%s' "${r%%|*}"; }
 out_of() { local r="${1#*|}"; printf '%s' "${r#*|}"; }
 
 # ── the ordinary run ───────────────────────────────────────────────────────
-# The switch is this fixture's subject, and an unattended session exports it into the suite.
-unset WATCH_PR_AUTONOMOUS
+# The switches are this fixture's subject, and an unattended or trusting session exports them into the suite.
+unset WATCH_PR_AUTONOMOUS WATCH_PR_TRUST_PICKS
 r="$(run --)"
 ok_dir="$(dir_of "$r")"
 { [ "$(rc_of "$r")" = 0 ] \
@@ -146,6 +146,20 @@ r_yes="$(WATCH_PR_AUTONOMOUS=yes run --)"
 case "$(out_of "$r_yes")" in
     *" mode=attended"*) pass "…and any other value is attended" ;;
     *) die "WATCH_PR_AUTONOMOUS=yes was not read as attended: '$r_yes'" ;;
+esac
+case "$(out_of "$r")" in
+    *" mode=attended picks=ask") pass "…and with the trust switch unset the record ends picks=ask" ;;
+    *) die "the ready record does not end picks=ask with the trust switch unset: '$r'" ;;
+esac
+r_tr="$(WATCH_PR_TRUST_PICKS=1 run --)"
+case "$(out_of "$r_tr")" in
+    *" mode=attended picks=trusted") pass "an exported WATCH_PR_TRUST_PICKS=1 gives picks=trusted" ;;
+    *) die "no picks=trusted with the trust switch exported: '$r_tr'" ;;
+esac
+r_try="$(WATCH_PR_TRUST_PICKS=yes run --)"
+case "$(out_of "$r_try")" in
+    *" picks=ask") pass "…and any other value leaves the picks to ask" ;;
+    *) die "WATCH_PR_TRUST_PICKS=yes was not read as ask: '$r_try'" ;;
 esac
 
 # ── what the driver gets back ──────────────────────────────────────────────
@@ -702,7 +716,7 @@ esac
 _od="$(mktemp -d "$TMP/od.XXXXXX")/dir"
 _out_only="$(cd "$REPO" && run_limited 25 /usr/bin/env bash -p "$SCRIPT" "$_od" 2>/dev/null)" || true
 case "$_out_only" in
-    "PR_SETUP status=ready origin=$_od/origin work=$_od/work mode=attended") pass "stdout carries the ready line and nothing else" ;;
+    "PR_SETUP status=ready origin=$_od/origin work=$_od/work mode=attended picks=ask") pass "stdout carries the ready line and nothing else" ;;
     *) die "stdout carried something other than the ready line: '$_out_only'" ;;
 esac
 _err_d="$(mktemp -d "$TMP/ed.XXXXXX")/dir"

@@ -12,6 +12,12 @@ type Size = { text: string } & ({ count: number } | { tier: Tier })
 const PROBE_MS = 10_000
 const REMOTES = 'refs/remotes/'
 const STATED = /^review-fix:\s*(?:([a-z]+)|(\d+))(?![\w-])/i
+const MARKED = /\(plugin pick\)\s*$/i
+const RECOMMENDED: Record<Tier, Choice> = {
+  small: { effort: 'medium' },
+  medium: { effort: 'high' },
+  large: { effort: 'xhigh' },
+}
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
@@ -23,6 +29,10 @@ function pickOf(value: unknown): Choice | undefined {
   if (!isOneOf(EFFORTS, effort)) return undefined
   if (model === 'default') return { effort }
   return isOneOf(MODELS, model) ? { model, effort } : undefined
+}
+
+export function chooseFor(configured: unknown, recommended: Choice): Choice | undefined {
+  return configured === 'ask' ? recommended : pickOf(configured)
 }
 
 function kindOf(type: string | undefined, description: string): Kind | undefined {
@@ -91,17 +101,17 @@ export const register: Register = (on, options) => {
       name: 'cold review',
       smallMax: Number(options.reviewSmallLines),
       largeMin: Number(options.reviewLargeLines),
-      small: pickOf(options.reviewSmall),
-      medium: pickOf(options.reviewMedium),
-      large: pickOf(options.reviewLarge),
+      small: options.reviewSmall,
+      medium: options.reviewMedium,
+      large: options.reviewLarge,
     },
     fix: {
       name: 'review fix',
       smallMax: Number(options.fixSmallFindings),
       largeMin: Number(options.fixLargeFindings),
-      small: pickOf(options.fixSmall),
-      medium: pickOf(options.fixMedium),
-      large: pickOf(options.fixLarge),
+      small: options.fixSmall,
+      medium: options.fixMedium,
+      large: options.fixLarge,
     },
   }
 
@@ -110,6 +120,15 @@ export const register: Register = (on, options) => {
     if (kind === undefined) return next(e)
 
     const rung = ladder[kind]
+    if (e.model !== undefined || e.effort !== undefined) {
+      $.ui.log(`${$.plugin.name}: ${rung.name} left as called, the call sets its own model or effort`)
+      return next(e)
+    }
+    if (!MARKED.test(e.description)) {
+      $.ui.log(`${$.plugin.name}: ${rung.name} left as called, not marked for a plugin pick`)
+      return next(e)
+    }
+
     // A git that cannot run, or outlives its bound, ends the sizing: the next probe would wait as long.
     const size = kind === 'review' ? await changed($, e.prompt).catch(() => undefined) : stated(e.description)
     if (size === undefined) {
@@ -119,8 +138,11 @@ export const register: Register = (on, options) => {
 
     const tier =
       'tier' in size ? size.tier : size.count <= rung.smallMax ? 'small' : size.count >= rung.largeMin ? 'large' : 'medium'
-    const pick = rung[tier]
-    if (pick === undefined) return next(e)
+    const pick = chooseFor(rung[tier], RECOMMENDED[tier])
+    if (pick === undefined) {
+      $.ui.log(`${$.plugin.name}: ${rung.name}, ${size.text} (${tier}): left as called, no pick chosen`)
+      return next(e)
+    }
 
     const chosen = pick.model === undefined ? `${pick.effort} effort` : `${pick.model} at ${pick.effort} effort`
     $.ui.log(`${$.plugin.name}: ${rung.name}, ${size.text} (${tier}): ${chosen}`)

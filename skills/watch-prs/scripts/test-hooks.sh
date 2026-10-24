@@ -76,9 +76,12 @@ MODULE="$ROOT/hooks/tiering.ts"
 MANIFEST="$ROOT/.claude-plugin/plugin.json"
 [ -f "$MODULE" ] && [ -f "$ROOT/tests/tiering.test.ts" ] && pass "the module README.md says the plugin ships is there, and so are its cases" \
     || die "hooks/tiering.ts or tests/tiering.test.ts is missing, and README.md says the plugin ships the module"
-jq -e '[.userConfig[] | select(.type == "string") | .default] | length > 0 and all(.[]; startswith("default/"))' "$MANIFEST" >/dev/null \
-    && pass "every rung's shipped default names no model, so no install is sent to one its account may lack" \
-    || die "a rung's default in plugin.json names a model, or the rungs could not be read"
+jq -e '[.userConfig[] | select(.type == "string")] | length > 0 and all(.[]; .default == "ask" and .options[0] == "ask")' "$MANIFEST" >/dev/null \
+    && pass "every rung ships ask as its default and its first option, so no install runs a pick its operator did not choose" \
+    || die "a rung in plugin.json ships a default other than ask, or does not offer ask first, or the rungs could not be read"
+jq -e '[.userConfig[] | select(.type == "string") | .description] | length > 0 and all(.[]; contains("Any value here applies only to a pass the session marks `(plugin pick)`: `ask` gives the plugin'\''s recommendation there"))' "$MANIFEST" >/dev/null \
+    && pass "…and every rung's description says any value applies only to a marked pass" \
+    || die "a rung's description in plugin.json does not say its value applies only to a pass marked (plugin pick)"
 read_keys="$(grep -o 'options\.[A-Za-z]*' "$MODULE" | LC_ALL=C sort -u)"
 conf_keys="$(jq -r '.userConfig | keys[] | "options." + .' "$MANIFEST" | LC_ALL=C sort -u)"
 [ -n "$conf_keys" ] && [ "$read_keys" = "$conf_keys" ] && pass "the module reads exactly the options plugin.json declares" \
