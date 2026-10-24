@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.17.1] — 2026-10-24
+
+- **A merged PR ends with a continuation prompt and a suggestion to start the next PR in a
+  new session.** After a merge, the session went on to the next PR in the same context, so
+  one session drove PR after PR in a context that grew with each, and every turn read the
+  whole of it again. Measured on a host over nine days, the main session's context reached
+  a median of 493K tokens and a 90th percentile of 865K, and its cache reads came to about
+  3.3 times those of all the loop's subagents together, a cost the plugin's subagent
+  tiering cannot reach. Step 8 of `SKILL.md` now has the session, on the merge gate's 0,
+  end its message with the continuation prompt § Where the host project keeps its notes
+  defines, naming the PR as merged, and suggest that the operator start the next PR in a
+  new session. The merged PR has nothing to resume, so the later session does not run
+  *Resuming after a stop* for it, and going on after the prompt is not resuming after a
+  stop. Nothing waits for an answer, so it is not a stop and adds no **Unattended:**
+  answer; unattended, the session says the same in its report, and the loop for that PR
+  ends there, since step 8 is the last step and an unattended session cannot start a new
+  one. The notes section's continuation prompt is given at each STOP and after the merge,
+  as its outside note already was, names the stop it waits at or the merge, and sends the
+  later session to *Resuming after a stop* only after a stop. README's § The merge gate
+  says a merged PR ends with a continuation prompt naming it merged, what an unattended
+  session does, and that a fresh session per PR keeps each session's context, and so its
+  usage, small. `test-pr-skill-contract.sh` pins the new paragraph whole, its place after
+  the gate's status line and its fence, the prompt and the new session it names, the
+  merged PR left unresumed and the loop's end unattended, the absence of an unattended
+  answer in it, the notes section with its new bullet, and the README text.
+  Closes #410.
+
 ## [2.17.0] — 2026-10-24
 
 - **A task the operator sets is handed to an implementation pass sized to it.** The hooks
