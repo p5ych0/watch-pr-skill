@@ -353,8 +353,9 @@ if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
         || { echo "ABORT: the PR head is $HEAD_AFTER, not the $HEAD_BEFORE just pushed."; exit 1; }
 fi
 
-# Only where the push moved the head, since a no-op push queues nothing and waiting would re-arm
-# forever; rc 4 pauses rather than aborts, since a decision is owed and nothing is wrong.
+# Only where the push moved the head, since a no-op push queues nothing and the watch would
+# wait on a pass never started; rc 4 pauses rather than aborts, since a decision is owed and
+# nothing is wrong.
 if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-watch.sh "$PR" "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
     case "$PUSHPASS_RC" in

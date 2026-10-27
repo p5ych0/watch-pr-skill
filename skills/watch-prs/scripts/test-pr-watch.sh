@@ -1255,7 +1255,7 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
 # `--timeout 0` made the pre-read clock report the ordinary timeout before the file was
 # opened at all, so a missing, malformed or NUL-carrying baseline came back as
 # `state=timeout` — which the driver RE-ARMS. A caller error was then indistinguishable
-# from a slow reviewer, forever. A bad argument is bad whatever the clock says.
+# from a slow reviewer. A bad argument is bad whatever the clock says.
 printf '\000' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 0 2>&1)"; rc=$?
@@ -1515,14 +1515,14 @@ done
 # `--timeout 18446744073709551616` is all digits, so the shape test accepted it
 # — and 2^64 wraps to exactly 0 inside `TIMEOUT - e`. `remaining_s` then reported
 # an immediate ordinary timeout on the very first poll, and the documented driver
-# re-arms an ordinary timeout, so an unreadable configuration became an endless
-# no-op loop that never once waited for a review.
+# re-arms an ordinary timeout and then requests again, so an unreadable
+# configuration became a loop that never once waited for a review.
 #
 # The observable consequence is what is asserted: given a sequence that never
 # reaches a terminal state, the watch must still be POLLING when the harness
 # limit fires, rather than having announced a timeout at once. The run is bounded
-# by `run_limited` because the fixed code falls back to a 3600s deadline — an
-# unbounded call here would hang the suite for an hour instead of failing it.
+# by `run_limited` because the fixed code falls back to a 600s deadline — an
+# unbounded call here would hang the suite for ten minutes instead of failing it.
 for huge in 18446744073709551616 340282366920938463463374607431768211456; do
     seq_set none
     out="$(run_limited 6 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
@@ -1535,6 +1535,24 @@ for huge in 18446744073709551616 340282366920938463463374607431768211456; do
     grep -q 'state=timeout' <<<"$out" \
         && die "…and it announced an immediate timeout from a wrapped deadline" \
         || pass "…and announced no timeout"
+done
+
+# ── an unset or malformed PR_WATCH_TIMEOUT waits ten minutes ──────────────
+# Two timeouts in a row on one request have the driver request Codex again, so
+# the default is what bounds the wait on a pass that hangs.
+for tv in "" abc; do
+    seq_set none
+    printf '1754000000\n' > "$TMP/now"
+    out="$(run_limited 60 env -u PR_WATCH_TIMEOUT ${tv:+"PR_WATCH_TIMEOUT=$tv"} \
+             PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+             SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
+    w="$(sed -n 's/^PR_REVIEW_WATCH .* state=timeout waited_s=\([0-9][0-9]*\)$/\1/p' <<<"$out")"
+    { [ "$rc" -eq 1 ] && [ -n "$w" ] && [ "$w" -ge 600 ] && [ "$w" -lt 630 ]; } \
+        && pass "PR_WATCH_TIMEOUT ${tv:-unset}: the watch times out after ten minutes (waited_s=$w)" \
+        || die "PR_WATCH_TIMEOUT ${tv:-unset}: rc=$rc waited_s='$w', not a ten-minute timeout: $out"
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
+        && die "…and it printed a READY line with no review on the head: $out" \
+        || pass "…and printed no READY line"
 done
 
 # ── a helper that answers within the deadline, but not instantly ───────────
@@ -1726,8 +1744,8 @@ done
 # 124 is the watchdog's OWN expiry code, returned before the child status is ever
 # read. A helper that exits 124 itself — wrapped in `timeout`, or simply failing
 # that way — was therefore reported as an ordinary timeout, status 1, which
-# `SKILL.md` re-arms indefinitely. A broken probe became "the review is still in
-# flight", forever.
+# `SKILL.md` re-arms and then requests again. A broken probe became "the review is
+# still in flight".
 mkstub "$TMP/rc124.sh" <<'SH'
 [ "$1" = "head" ] && exit 0
 exit 124

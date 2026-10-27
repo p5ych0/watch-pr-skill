@@ -34,7 +34,7 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"
 
 INTERVAL="${PR_WATCH_INTERVAL:-30}"
-TIMEOUT="${PR_WATCH_TIMEOUT:-3600}"
+TIMEOUT="${PR_WATCH_TIMEOUT:-600}"
 PROBE_TIMEOUT="${PR_WATCH_PROBE_TIMEOUT:-60}"
 PR=""
 WHO=""
@@ -79,13 +79,13 @@ esac
 # A bad value falls back to the default: a zero interval would spin, a leading zero is octal, and a
 # value beyond the integer range wraps inside the arithmetic below; a zero timeout is kept and expires at once.
 case "$INTERVAL" in 0|0*|*[!0-9]*|""|??????????*) INTERVAL=30 ;; esac
-case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
+case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=600 ;; esac
 case "$PROBE_TIMEOUT" in 0|0*|*[!0-9]*|""|??????????*) PROBE_TIMEOUT=60 ;; esac
 
 # `%q` folds newlines, so nothing a helper prints can forge a `PR_REVIEW_READY` line of its own.
 q() { printf '%q' "$1"; }
 
-# An unrecognised login would poll to the deadline and be re-armed as a slow reviewer, forever.
+# An unrecognised login would poll to the deadline and be re-armed as a slow reviewer.
 case "$WHO" in
     "$RB_CODEX_BOT"|"$RB_COPILOT_BOT") ;;
     *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$(q "$WHO") state=error reason=unknown_reviewer" >&2
@@ -140,7 +140,8 @@ probe() {
         return 124
     fi
     wait "$pid"; rc=$?
-    # The child's own 124 or 125 is unreadable, not a timeout: status 1 is re-armed indefinitely.
+    # The child's own 124 or 125 is unreadable, not a timeout: status 1 is re-armed and then
+    # requested again.
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 125 ]; then
         rm -f "$tmp" 2>/dev/null
         echo "PR_REVIEW_WATCH state=error reason=probe_unreadable child_rc=$rc" >&2

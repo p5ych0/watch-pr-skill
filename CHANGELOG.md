@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.17.2] — 2026-10-27
+
+- **A watch lasts ten minutes, and a reviewer that does not answer two in a row is
+  requested again.** `PR_WATCH_TIMEOUT` defaulted to 3600, so each watch ran the full 30
+  minutes the `Monitor` tool keeps one, and step 3 of `SKILL.md` re-armed the watch on
+  every timeout and forbade a re-request. A Codex pass stuck at `running`, or one that
+  ended without posting a review, was therefore waited on with no end, the watch re-armed
+  every half hour. `pr-watch.sh` now defaults to 600 seconds, and falls back to 600 for a
+  malformed value. Step 3 gains *A reviewer that does not answer*: the first timeout on a
+  request re-arms the same watch as before; the second in a row on the same request has
+  Codex requested again once, through step 2's fence with `AUTO_REVIEW=no`, a fresh nonce
+  and a short body naming the earlier request, without asking; and a Copilot pass that
+  times out twice, or a repeated Codex request that also times out twice, is a STOP. The
+  status table's `1` row points at the new paragraph for the second timeout, and a Monitor
+  the tool ends first counts as a `1` on the same request. § Asking before a review or a
+  merge says nothing is asked before the repeated request, and the compaction list keeps
+  how many `1`s in a row the current request has had and whether it already repeats one.
+  README's § Watching without prompts gives the ten-minute default and the repeated
+  request, § The stops lists the unanswered reviewer as stop 10, § Running unattended
+  keeps it a stop, and the knobs table gives `600`. `test-pr-watch.sh` pins the 600-second
+  deadline for an unset and for a malformed `PR_WATCH_TIMEOUT`, and
+  `test-pr-skill-contract.sh` pins the new paragraph's parts and its place in step 3, the
+  `1` row, the Monitor sentence, the asking section and the compaction list whole, and the
+  README text. Six comments in `pr-watch.sh`, `pr-close-round.sh` and `test-pr-watch.sh`
+  that said a timeout is re-armed forever now say it is re-armed and then requested again.
+  Closes #417.
+
 ## [2.17.1] — 2026-10-24
 
 - **A merged PR ends with a continuation prompt and a suggestion to start the next PR in a

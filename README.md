@@ -208,12 +208,15 @@ settings: granting a tool that runs background commands is each user's decision
 for their own checkout. An unattended session needs it: a wait that prompts is a
 stop.
 
-In Claude Code a watch lasts at most 30 minutes, the longest the `Monitor` tool
-keeps one, or `PR_WATCH_TIMEOUT` seconds where that is shorter. A review still
-in flight when it ends gets a new watch, armed without requesting another
-review, and with `Monitor` allowed as above without a prompt either, so a slow
-review shows a fresh watch at least every half hour. A `PR_WATCH_TIMEOUT` above
-1800 seconds, the default 3600 included, does not lengthen a watch there.
+In Claude Code a watch lasts `PR_WATCH_TIMEOUT` seconds, ten minutes by default,
+and at most 30 minutes, the longest the `Monitor` tool keeps one. A review still
+in flight when the first watch ends gets a second, armed without requesting
+another review, and with `Monitor` allowed as above without a prompt either.
+Where the second ends with no review too, the reviewer is taken to have hung or
+ended without posting. If it is Codex, the session requests it again once, with
+a short comment, and watches that request the same way. If it is Copilot, the
+session stops. A `PR_WATCH_TIMEOUT` above 1800 seconds does not lengthen a watch
+there.
 
 ## A session
 
@@ -435,6 +438,10 @@ The loop stops and asks at these points:
    cannot prove its change, the session stops and tells you what failed. No PR
    exists yet, so its continuation prompt names the branch and the stop.
    *A task you set* says how it gets there.
+10. **A reviewer that does not answer.** Where Codex was requested again after
+    two watches with no review and the new request also goes unanswered for two
+    watches, or where Copilot goes unanswered for two watches, the session stops
+    and tells you. No helper requests Copilot again within a round.
 
 Every signoff is a `**Review-Signoff:**` comment on the PR naming the reviewer,
 the head and, where the phase could read it, the time of the verdict it
@@ -464,9 +471,10 @@ stops instead of asking, recording each on the PR as it would your word:
 
 It answers decisions, never readings: a review that is only replies, a
 limitation it cannot test, a large implementation pass that cannot prove its
-change, an unavailable reviewer and every failed or unreadable gate still stop,
-and a session stopped there resumes from the records exactly as an attended one
-does. An unattended wait needs the `Monitor` permission above.
+change, an unavailable reviewer, a reviewer that does not answer and every
+failed or unreadable gate still stop, and a session stopped there resumes from
+the records exactly as an attended one does. An unattended wait needs the
+`Monitor` permission above.
 
 **Always use the flow.** In an attended session, the questions before a review
 or a merge, the stops where Codex or Copilot is clean and the model-and-effort
@@ -528,7 +536,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |
 | `PR_CI_PROBE_TIMEOUT` | `60` | bound on each `gh` call the check probe makes |
 | `PR_WATCH_INTERVAL` | `30` | seconds between polls while waiting for a verdict |
-| `PR_WATCH_TIMEOUT` | `3600` | how long to wait for a verdict before reporting a timeout |
+| `PR_WATCH_TIMEOUT` | `600` | how long one watch waits for a verdict before reporting a timeout; a second timeout in a row on the same request has Codex requested again, and stops the loop for Copilot |
 | `PR_WATCH_PROBE_TIMEOUT` | `60` | budget for each read the watch makes of the review state, one helper run of several `gh` calls; a read that stalls past it is retried afresh rather than run to the watch's timeout |
 | `RB_SUITE_JOBS` | `4` | how many test files the pre-push self-check runs at once (contributors) |
 | `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, `REVIEW_BUS_REPO` | derived from `origin` | override the repository identity (tests) |
