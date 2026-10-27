@@ -136,8 +136,23 @@ grep -qF '`timeout_ms`' <<<"$arming" && grep -qF '`1800000`' <<<"$arming" \
     && ! grep -q 'persistent' <<<"$arming" && ! grep -qF '3600000' <<<"$arming" \
     && pass "…the Monitor is armed at the deadline the tool keeps, with no parameter it refuses" \
     || die "the Monitor arming names a parameter the tool refuses or a deadline it does not keep"
-hasf 'A Monitor the tool ends at its deadline before the watch returns has no status: handle it as a `1`, re-arming the same watch without a new request.' \
+hasf 'A Monitor the tool ends at its deadline before the watch returns has no status: handle it as a `1` on the same request, as the table says.' \
     && pass "…and a Monitor that expires first is handled as a 1" || die "a Monitor that expires before the watch returns is not handled"
+has 'The second in a row: *A reviewer that does not answer* below.' \
+    && pass "…and the 1 row sends the second in a row to the unanswered-reviewer rule" \
+    || die "the watch table's 1 row does not name the second timeout on a request"
+hasf '**A reviewer that does not answer.** A watch lasts `PR_WATCH_TIMEOUT` seconds, 600 by default.' \
+    && hasf 'Two `1`s in a row on one request mean the pass hung or ended without posting a review.' \
+    && hasf 'step 2'\''s fence with `AUTO_REVIEW=no` whatever step 2 settled' \
+    && hasf 'and a fresh nonce.' \
+    && hasf 'Do not ask first: it repeats a request the operator has seen.' \
+    && hasf 'Where `$WHO` is Copilot, or where the repeated request also ends in two `1`s in a row, it is a STOP' \
+    && pass "…two 1s in a row on a request have Codex requested again once, by mention and a fresh nonce, unasked, and a Copilot pass or a repeat that also goes unanswered is a STOP" \
+    || die "the unanswered-reviewer rule is missing a part: the 600s default, the two 1s, the mention, the nonce, no question, or the STOP"
+before 'A Monitor the tool ends at its deadline' '**A reviewer that does not answer.**' \
+    && before '**A reviewer that does not answer.**' 'States: `none`' \
+    && pass "…and it sits in step 3, after the Monitor rule and before the states" \
+    || die "the unanswered-reviewer rule is not between the Monitor rule and the states"
 has 'STOP. Do not go to step 4' \
     && pass "…and a 4 is a stop" || die "a replies-only review is not a stop"
 hasf '3: the operator decides at a round boundary' \
@@ -344,6 +359,8 @@ of it costs a round:
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding'\''s thread and comment ids;
 - the cold read'\''s result: clean, or a finding not yet fixed or filed;
+- how many `1`s in a row the watch has returned on the current request, and whether that
+  request already repeats one;
 - the round count per reviewer, and which stop is next.
 
 It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude
@@ -903,7 +920,8 @@ points, and offer these, each with one line on what it costs or risks:
 
 Nothing is asked before `open`: the Codex-clean stop already asks whether to open the
 Copilot phase, so choosing it there is the request, and Copilot'\''s later passes are asked
-before each round'\''s `gate`.
+before each round'\''s `gate`. Nothing is asked before step 3'\''s repeated request either, since
+it repeats one already asked about.
 
 These questions, the Codex-clean stop of step 7, the two menus `close` prints in step 8
 and the model-and-effort question each also offer to **always use the flow**, in two
@@ -1129,6 +1147,15 @@ if [ -f "$README" ]; then
         && pass "README documents the watch's probe bound" || die "README lacks PR_WATCH_PROBE_TIMEOUT"
     grep -q 'Watching without prompts' "$README" \
         && pass "README explains the Monitor permission SKILL.md points at" || die "README's Monitor section is gone"
+    _wp="$(awk '$0 == "### Watching without prompts" { c = 1; next } c && /^(# |## |### )/ { exit } c' "$README")" || _wp=
+    _wpf="$(tr '\n' ' ' <<<"$_wp" | tr -s ' ')" || _wpf=
+    { grep -qF '| `PR_WATCH_TIMEOUT` | `600` |' "$README" \
+        && grep -qF 'ten minutes by default' <<<"$_wpf" \
+        && grep -qF 'the session requests Codex again once, with a short comment' <<<"$_wpf" \
+        && grep -q '^[0-9][0-9]*\. \*\*A reviewer that does not answer\.\*\*' <<<"$_st" \
+        && grep -qF 'an unavailable reviewer, a reviewer that does not answer and every failed or unreadable gate still stop' <<<"$_usf"; } \
+        && pass "README gives the watch's 600s default, has Codex requested again after two silent watches, lists the unanswered reviewer among the stops and keeps it a stop unattended" \
+        || die "README's account of the watch's default, the repeated Codex request, or the unanswered-reviewer stop drifted"
     _grflat="$(tr '\n' ' ' < "$README" | tr -s ' ')" || _grflat=
     grep -qF -- "Where your checkout holds a code graph built by \`graphify\` or \`trail\`, at \`graphify-out/graph.json\` or \`graft/.graph/wiring.json\` from its root, the session tells the subagent to query it for callers before it searches by hand, where the session's permissions already allow the command and, for \`trail\`, where the session's own directory is inside the checkout; where it holds neither, or holds one git shows as untracked, the session mentions once per session that one could cut the cost, its output ignored by git. The plugin installs neither." <<<"$_grflat" \
         && pass "…and README's code-graph passage is the text the test pins" \

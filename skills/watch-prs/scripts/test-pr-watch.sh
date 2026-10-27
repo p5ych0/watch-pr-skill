@@ -1521,8 +1521,8 @@ done
 # The observable consequence is what is asserted: given a sequence that never
 # reaches a terminal state, the watch must still be POLLING when the harness
 # limit fires, rather than having announced a timeout at once. The run is bounded
-# by `run_limited` because the fixed code falls back to a 3600s deadline — an
-# unbounded call here would hang the suite for an hour instead of failing it.
+# by `run_limited` because the fixed code falls back to a 600s deadline — an
+# unbounded call here would hang the suite for ten minutes instead of failing it.
 for huge in 18446744073709551616 340282366920938463463374607431768211456; do
     seq_set none
     out="$(run_limited 6 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
@@ -1535,6 +1535,24 @@ for huge in 18446744073709551616 340282366920938463463374607431768211456; do
     grep -q 'state=timeout' <<<"$out" \
         && die "…and it announced an immediate timeout from a wrapped deadline" \
         || pass "…and announced no timeout"
+done
+
+# ── an unset or malformed PR_WATCH_TIMEOUT waits ten minutes ──────────────
+# Two timeouts in a row on one request have the driver request Codex again, so
+# the default is what bounds the wait on a pass that hangs.
+for tv in "" abc; do
+    seq_set none
+    printf '1754000000\n' > "$TMP/now"
+    out="$(run_limited 60 env -u PR_WATCH_TIMEOUT ${tv:+"PR_WATCH_TIMEOUT=$tv"} \
+             PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+             SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
+    w="$(sed -n 's/^PR_REVIEW_WATCH .* state=timeout waited_s=\([0-9][0-9]*\)$/\1/p' <<<"$out")"
+    { [ "$rc" -eq 1 ] && [ -n "$w" ] && [ "$w" -ge 600 ] && [ "$w" -lt 630 ]; } \
+        && pass "PR_WATCH_TIMEOUT ${tv:-unset}: the watch times out after ten minutes (waited_s=$w)" \
+        || die "PR_WATCH_TIMEOUT ${tv:-unset}: rc=$rc waited_s='$w', not a ten-minute timeout: $out"
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
+        && die "…and it printed a READY line with no review on the head: $out" \
+        || pass "…and printed no READY line"
 done
 
 # ── a helper that answers within the deadline, but not instantly ───────────

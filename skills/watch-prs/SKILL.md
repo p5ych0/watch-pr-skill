@@ -180,6 +180,8 @@ of it costs a round:
 - each finding of the round with the reply it was answered with, until the cold read that
   follows those fixes has had them, and each open finding's thread and comment ids;
 - the cold read's result: clean, or a finding not yet fixed or filed;
+- how many `1`s in a row the watch has returned on the current request, and whether that
+  request already repeats one;
 - the round count per reviewer, and which stop is next.
 
 It never keeps the origin or `REVIEW_BUS_REMOTE`, which can hold a credential: the prelude
@@ -342,12 +344,22 @@ answers.
 | status | meaning | what to do |
 | --- | --- | --- |
 | `0` | terminal state reached, verdict on the last line | step 4 |
-| `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask. |
+| `1` | timed out — no verdict yet | the first on this request: **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask. The second in a row: *A reviewer that does not answer* below. |
 | `2` | the state could not be read | **fail closed** — never "no findings" |
 | `4` | the review carried comments and **every one was a reply** | **STOP. Do not go to step 4.** Nothing to list and not a signoff. Put the comment to the operator. |
 
 A Monitor the tool ends at its deadline before the watch returns has no status: handle it as
-a `1`, re-arming the same watch without a new request.
+a `1` on the same request, as the table says.
+
+**A reviewer that does not answer.** A watch lasts `PR_WATCH_TIMEOUT` seconds, 600 by
+default. Two `1`s in a row on one request mean the pass hung or ended without posting a
+review. Where `$WHO` is Codex, request it again once: step 2's fence with `AUTO_REVIEW=no`
+whatever step 2 settled, in that command alone, since only the mention starts a pass on a
+head already pushed, and a fresh nonce. Write a short body into `$REQUEST_FILE` that names the earlier request and
+says no review came. Then arm the watch on the new request with the `RB_NONCE` it printed.
+Do not ask first: it repeats a request the operator has seen. Where `$WHO` is Copilot, or
+where the repeated request also ends in two `1`s in a row, it is a STOP: tell the operator
+the reviewer did not answer, and do not request again.
 
 States: `none` no review on this head · `pending` a draft is open · `reviewed` a
 submitted APPROVED/COMMENTED review · `blocked` CHANGES_REQUESTED — findings, plus its
@@ -548,7 +560,8 @@ points, and offer these, each with one line on what it costs or risks:
 
 Nothing is asked before `open`: the Codex-clean stop already asks whether to open the
 Copilot phase, so choosing it there is the request, and Copilot's later passes are asked
-before each round's `gate`.
+before each round's `gate`. Nothing is asked before step 3's repeated request either, since
+it repeats one already asked about.
 
 These questions, the Codex-clean stop of step 7, the two menus `close` prints in step 8
 and the model-and-effort question each also offer to **always use the flow**, in two
