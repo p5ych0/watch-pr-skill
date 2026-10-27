@@ -23,7 +23,9 @@
   deadline for an unset and for a malformed `PR_WATCH_TIMEOUT`, and
   `test-pr-skill-contract.sh` pins the new paragraph's parts and its place in step 3, the
   `1` row, the Monitor sentence, the asking section and the compaction list whole, and the
-  README text. Closes #417.
+  README text. Six comments in `pr-watch.sh`, `pr-close-round.sh` and `test-pr-watch.sh`
+  that said a timeout is re-armed forever now say it is re-armed and then requested again.
+  Closes #417.
 
 ## [2.17.1] — 2026-10-24
 

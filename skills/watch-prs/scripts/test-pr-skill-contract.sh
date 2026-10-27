@@ -147,8 +147,9 @@ hasf '**A reviewer that does not answer.** A watch lasts `PR_WATCH_TIMEOUT` seco
     && hasf 'and a fresh nonce.' \
     && hasf 'Do not ask first: it repeats a request the operator has seen.' \
     && hasf 'Where `$WHO` is Copilot, or where the repeated request also ends in two `1`s in a row, it is a STOP' \
+    && hasf 'Where `$WHO` is Codex, first write a short body into `$REQUEST_FILE` that names the earlier request and says no review came. Then request it again once: step 2'\''s fence' \
     && pass "…two 1s in a row on a request have Codex requested again once, by mention and a fresh nonce, unasked, and a Copilot pass or a repeat that also goes unanswered is a STOP" \
-    || die "the unanswered-reviewer rule is missing a part: the 600s default, the two 1s, the mention, the nonce, no question, or the STOP"
+    || die "the unanswered-reviewer rule is missing a part: the 600s default, the two 1s, the mention, the nonce, no question, the STOP, or the body written before the request"
 before 'A Monitor the tool ends at its deadline' '**A reviewer that does not answer.**' \
     && before '**A reviewer that does not answer.**' 'States: `none`' \
     && pass "…and it sits in step 3, after the Monitor rule and before the states" \
@@ -1151,11 +1152,12 @@ if [ -f "$README" ]; then
     _wpf="$(tr '\n' ' ' <<<"$_wp" | tr -s ' ')" || _wpf=
     { grep -qF '| `PR_WATCH_TIMEOUT` | `600` |' "$README" \
         && grep -qF 'ten minutes by default' <<<"$_wpf" \
-        && grep -qF 'the session requests Codex again once, with a short comment' <<<"$_wpf" \
+        && grep -qF 'If it is Codex, the session requests it again once, with a short comment' <<<"$_wpf" \
+        && grep -qF 'If it is Copilot, the session stops.' <<<"$_wpf" \
         && grep -q '^[0-9][0-9]*\. \*\*A reviewer that does not answer\.\*\*' <<<"$_st" \
         && grep -qF 'an unavailable reviewer, a reviewer that does not answer and every failed or unreadable gate still stop' <<<"$_usf"; } \
-        && pass "README gives the watch's 600s default, has Codex requested again after two silent watches, lists the unanswered reviewer among the stops and keeps it a stop unattended" \
-        || die "README's account of the watch's default, the repeated Codex request, or the unanswered-reviewer stop drifted"
+        && pass "README gives the watch's 600s default, has Codex requested again after two silent watches and Copilot's silence a stop, lists the unanswered reviewer among the stops and keeps it a stop unattended" \
+        || die "README's account of the watch's default, the repeated Codex request, Copilot's silence as a stop, or the unanswered-reviewer stop drifted"
     _grflat="$(tr '\n' ' ' < "$README" | tr -s ' ')" || _grflat=
     grep -qF -- "Where your checkout holds a code graph built by \`graphify\` or \`trail\`, at \`graphify-out/graph.json\` or \`graft/.graph/wiring.json\` from its root, the session tells the subagent to query it for callers before it searches by hand, where the session's permissions already allow the command and, for \`trail\`, where the session's own directory is inside the checkout; where it holds neither, or holds one git shows as untracked, the session mentions once per session that one could cut the cost, its output ignored by git. The plugin installs neither." <<<"$_grflat" \
         && pass "…and README's code-graph passage is the text the test pins" \

@@ -213,9 +213,10 @@ and at most 30 minutes, the longest the `Monitor` tool keeps one. A review still
 in flight when the first watch ends gets a second, armed without requesting
 another review, and with `Monitor` allowed as above without a prompt either.
 Where the second ends with no review too, the reviewer is taken to have hung or
-ended without posting: the session requests Codex again once, with a short
-comment, and watches that request the same way. A `PR_WATCH_TIMEOUT` above 1800
-seconds does not lengthen a watch there.
+ended without posting. If it is Codex, the session requests it again once, with
+a short comment, and watches that request the same way. If it is Copilot, the
+session stops. A `PR_WATCH_TIMEOUT` above 1800 seconds does not lengthen a watch
+there.
 
 ## A session
 
@@ -535,7 +536,7 @@ separate processes, and a value merely assigned in your shell never reaches them
 | `PR_CI_GRACE` | `90` | how long a round-closing answer, green or no checks configured, must hold before it is believed, since a workflow registers a moment after the push |
 | `PR_CI_PROBE_TIMEOUT` | `60` | bound on each `gh` call the check probe makes |
 | `PR_WATCH_INTERVAL` | `30` | seconds between polls while waiting for a verdict |
-| `PR_WATCH_TIMEOUT` | `600` | how long one watch waits for a verdict before reporting a timeout; a second timeout on the same request has Codex requested again |
+| `PR_WATCH_TIMEOUT` | `600` | how long one watch waits for a verdict before reporting a timeout; a second timeout in a row on the same request has Codex requested again, and stops the loop for Copilot |
 | `PR_WATCH_PROBE_TIMEOUT` | `60` | budget for each read the watch makes of the review state, one helper run of several `gh` calls; a read that stalls past it is retried afresh rather than run to the watch's timeout |
 | `RB_SUITE_JOBS` | `4` | how many test files the pre-push self-check runs at once (contributors) |
 | `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, `REVIEW_BUS_REPO` | derived from `origin` | override the repository identity (tests) |

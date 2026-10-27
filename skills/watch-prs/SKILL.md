@@ -353,13 +353,13 @@ a `1` on the same request, as the table says.
 
 **A reviewer that does not answer.** A watch lasts `PR_WATCH_TIMEOUT` seconds, 600 by
 default. Two `1`s in a row on one request mean the pass hung or ended without posting a
-review. Where `$WHO` is Codex, request it again once: step 2's fence with `AUTO_REVIEW=no`
-whatever step 2 settled, in that command alone, since only the mention starts a pass on a
-head already pushed, and a fresh nonce. Write a short body into `$REQUEST_FILE` that names the earlier request and
-says no review came. Then arm the watch on the new request with the `RB_NONCE` it printed.
-Do not ask first: it repeats a request the operator has seen. Where `$WHO` is Copilot, or
-where the repeated request also ends in two `1`s in a row, it is a STOP: tell the operator
-the reviewer did not answer, and do not request again.
+review. Where `$WHO` is Codex, first write a short body into `$REQUEST_FILE` that names the
+earlier request and says no review came. Then request it again once: step 2's fence with
+`AUTO_REVIEW=no` whatever step 2 settled, in that command alone, since only the mention
+starts a pass on a head already pushed, and a fresh nonce. Then arm the watch on the new
+request with the `RB_NONCE` it printed. Do not ask first: it repeats a request the operator
+has seen. Where `$WHO` is Copilot, or where the repeated request also ends in two `1`s in a
+row, it is a STOP: tell the operator the reviewer did not answer, and do not request again.
 
 States: `none` no review on this head · `pending` a draft is open · `reviewed` a
 submitted APPROVED/COMMENTED review · `blocked` CHANGES_REQUESTED — findings, plus its

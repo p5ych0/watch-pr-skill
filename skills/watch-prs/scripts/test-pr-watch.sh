@@ -1255,7 +1255,7 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
 # `--timeout 0` made the pre-read clock report the ordinary timeout before the file was
 # opened at all, so a missing, malformed or NUL-carrying baseline came back as
 # `state=timeout` — which the driver RE-ARMS. A caller error was then indistinguishable
-# from a slow reviewer, forever. A bad argument is bad whatever the clock says.
+# from a slow reviewer. A bad argument is bad whatever the clock says.
 printf '\000' > "$_bl"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review-file "$_bl" --require-nonce 5551 --interval 1 --timeout 0 2>&1)"; rc=$?
@@ -1515,8 +1515,8 @@ done
 # `--timeout 18446744073709551616` is all digits, so the shape test accepted it
 # — and 2^64 wraps to exactly 0 inside `TIMEOUT - e`. `remaining_s` then reported
 # an immediate ordinary timeout on the very first poll, and the documented driver
-# re-arms an ordinary timeout, so an unreadable configuration became an endless
-# no-op loop that never once waited for a review.
+# re-arms an ordinary timeout and then requests again, so an unreadable
+# configuration became a loop that never once waited for a review.
 #
 # The observable consequence is what is asserted: given a sequence that never
 # reaches a terminal state, the watch must still be POLLING when the harness
@@ -1744,8 +1744,8 @@ done
 # 124 is the watchdog's OWN expiry code, returned before the child status is ever
 # read. A helper that exits 124 itself — wrapped in `timeout`, or simply failing
 # that way — was therefore reported as an ordinary timeout, status 1, which
-# `SKILL.md` re-arms indefinitely. A broken probe became "the review is still in
-# flight", forever.
+# `SKILL.md` re-arms and then requests again. A broken probe became "the review is
+# still in flight".
 mkstub "$TMP/rc124.sh" <<'SH'
 [ "$1" = "head" ] && exit 0
 exit 124
